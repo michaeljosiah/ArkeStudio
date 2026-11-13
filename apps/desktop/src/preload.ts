@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import type { PublicationBridge } from "@arke-studio/contracts";
+import type { PublicationBridge, ThemePreference } from "@arke-studio/contracts";
 
 /**
  * The typed preload bridge (SPEC-001 R-9): one object on `window.arke` exposing connect,
@@ -15,7 +15,6 @@ function argValue(name: string): string | null {
 
 // The session arrives over private startup IPC, never process arguments or the public bridge.
 const appVersion = argValue("arke-app-version") ?? "0.0.0";
-type ThemePreference = "system" | "light" | "dark";
 type ResolvedTheme = "light" | "dark";
 // Read the host's current theme before first paint on every load. Window arguments are fixed
 // at creation and would restore an old choice when the renderer reloads (issue 990).
@@ -59,6 +58,20 @@ type AttachTarget =
       durationSec: number;
       aspect: string;
       lens?: string;
+    }
+  /** A board's cut animatic the Stage rendered (issue 1824), filed against each member's staging. */
+  | {
+      kind: "stage-animatic";
+      worldId: string;
+      productionId: string;
+      sceneFile: string;
+      sceneId: string;
+      baseVersion: number;
+      members: string[];
+      stagings: Array<{ shotId: string; version: number; durationSec: number; lens: string }>;
+      durationSec: number;
+      aspect: string;
+      look?: "greybox" | "lit" | "plate";
     }
   | {
       kind: "conversation-action-stage-playblast-complete";
@@ -156,6 +169,8 @@ const bridge = {
   openDataFolder(): void {
     ipcRenderer.send("arke:open-data-folder");
   },
+  restartForSetup(): Promise<{ reason?: string }> { return ipcRenderer.invoke("arke:restart-for-setup"); },
+  chooseWorkspaceFolder(): Promise<{ reason?: string }> { return ipcRenderer.invoke("arke:choose-workspace-folder"); },
   quit(): void {
     ipcRenderer.send("arke:quit");
   },
@@ -323,7 +338,7 @@ const bridge = {
   },
 
   async finishStageExport(
-    target: Extract<AttachTarget, { kind: "stage-playblast" | "conversation-action-stage-playblast-complete" }>,
+    target: Extract<AttachTarget, { kind: "stage-playblast" | "stage-animatic" | "conversation-action-stage-playblast-complete" }>,
     jobId: string,
     openingFrame: Uint8Array,
     referenceFrames: Array<import("@arke-studio/contracts").StageReferenceFrame & { bytes: Uint8Array }>,
@@ -372,6 +387,18 @@ const bridge = {
    * uses. No filesystem path travels in either direction (SPEC-001 R-9); the answer is whether
    * it saved, whether the dialog was closed, or why not.
    */
+  async revealMedia(worldSlug: string, path: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const result = await ipcRenderer.invoke("arke:reveal-media", { worldSlug, path }).catch(() => null);
+    return result?.ok === true ? { ok: true } : { ok: false, reason: "That export is unavailable." };
+  },
+  async locateStoryPublication(editionId: string, file: string) {
+    const result = await ipcRenderer.invoke("arke:locate-story-publication", { editionId, file }).catch(() => null);
+    return result?.ok === true ? { ok: true as const } : result?.cancelled ? { ok: false as const, cancelled: true } : { ok: false as const, reason: "The file does not match this edition or could not be restored." };
+  },
+  async saveStoryPublication(editionId: string, file: string) {
+    const result = await ipcRenderer.invoke("arke:save-story-publication", { editionId, file }).catch(() => null);
+    return result?.ok === true ? { ok: true as const } : result?.cancelled ? { ok: false as const, cancelled: true } : { ok: false as const, reason: "The edition file could not be saved." };
+  },
   async saveMedia(
     worldSlug: string,
     path: string,

@@ -1,47 +1,92 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams } from "react-router";
-import { mainPhotoFor, DEFAULT_NARRATOR, freePlanAskCopy, freePlanNote, narratorLabelFor, audiobookDoorLine, audiobookRowLabel, formatMicroUsd, providerName, readerPlace, speechPricePrefix, type AudiobookPriceLine, type AudiobookRow, type ManifestModel } from "@arke-studio/contracts";
-import { HeldBar } from "../components/held-bar.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import {
+  CADENCE_NOTE_MAX,
+  PERFORMANCE_NOTE_MAX,
+  DEFAULT_NARRATOR,
+  SPEECH_TOKEN_ESTIMATE,
+  freePlanAskCopy,
+  freePlanNote,
+  formatMicroUsd,
+  characterLabels,
+  deriveCapabilityAvailability,
+  formatRunningTime,
+  localTranscriberAvailable,
+  mainPhotoFor,
+  bookPictureShapes,
+  narratorLabelFor,
+  providerName,
+  readerPlace,
+  chapterNumber,
+  speechPricePrefix,
+  type AudiobookCastMember,
+  type AudiobookDoor,
+  type AudiobookVoiceRow,
+  type AudiobookPriceLine,
+  type AudiobookRow,
+  type ManifestModel,
+  type ProductionBundle,
+  type WorldBundle,
+} from "@arke-studio/contracts";
+import { usePhone } from "../lib/media-query.js";
+import { mediaUrl } from "../lib/media.js";
 import { NarratorDialog } from "./audiobook-narrator.js";
-import { BookReadingPanel, BookRequests } from "./chapter-audiobook.js";
+import { CreditRow, CreditsSheet } from "./audiobook-credits.js";
+import { BookRequests, NoteRow, SpeakerNoteInput } from "./chapter-audiobook.js";
 import { EditorDialog } from "../components/editor-dialog.js";
-import { ChevronRight, Play, Speaker } from "../components/icons.js";
-import { Portrait, characterPortraitPath } from "../components/portrait.js";
+import { ChevronLeft, ChevronRight, More, PlaySolid, User, Waveform, X } from "../components/icons.js";
+import { Portrait } from "../components/portrait.js";
 import { EmptyState } from "../components/layout.js";
-import { ListenButton, listenLeads } from "../components/audiobook-player.js";
-import { ExportAudiobookButton } from "../components/audiobook-export.js";
+import { AudiobookPlayerView, bookHasTakes } from "../components/audiobook-player.js";
+import { keptPlace } from "../lib/audiobook-place.js";
+import { PicturesSheet } from "../components/audiobook-pictures-sheet.js";
+import { useDockHost } from "../components/player.js";
 import { RemoteVoiceUploadConfirmation } from "../components/remote-voice-upload-confirmation.js";
-import { Badge, Button, cx } from "../components/ui.js";
+import { Button, cx } from "../components/ui.js";
+import { productionPlate } from "../lib/production-plate.js";
 import { useProduction } from "../lib/selectors.js";
 import {
   dismissAudiobookBook,
   dismissAudiobookNote,
+  draftAudiobookSpeakerNotes,
   openAudiobook,
+  openAudiobookCredits,
   readAudiobookBook,
   requestVoiceCatalogue,
   setAudiobookReading,
+  setAudiobookReadingNote,
   stopAudiobookBook,
   subscribeVoiceUploadConfirmations,
+  useAudiobookAsks,
   useAudiobookBooks,
+  useAudiobookCredits,
   useAudiobookDoors,
   useAudiobookNotes,
   useAudiobookRuns,
-  useStore,
+  useStoreSelector, shallowEqual,
 } from "../lib/store.js";
 
 /**
- * The Audiobook door (design turn 146, SPEC-047 R-29): the Chapters door's shape, for the
- * reading. The title over the count and the running time; one primary, `Read the book · N
- * chapters · $X`; `Narrator · Cast` with the voices beside it — the narrator, each speaker with
- * the voice that reads them, `no voice · narrator` in warning; a 4px read bar; then a row a
- * chapter in order: number, title, version, its state or its running time, a chevron. A row
- * opens the chapter in its Audiobook view. Everything on it is the coordinator's answer to
- * `open-audiobook`, asked again whenever the book changes under it.
+ * The Audiobook page (design turn 199, SPEC-047): a show page, for listening. The world's key art
+ * as a backdrop under the title and one meta line; `Continue · Chapter 1 · 12:40` (or `Listen`),
+ * `Export`, `Read the book` while something is left to read, and ⋯; the cast as portraits; the
+ * chapters as episodes. What sets the reading up — the reading, the narrator, the speakers' voices
+ * and notes, the book note, the requests — is the Reading sheet behind ⋯, never the page. The
+ * rows, voices and price are the coordinator's answer to `open-audiobook`, asked again whenever the
+ * book changes under it (turn 146).
  */
 
-type DoorProduction = { chapters: readonly { id: string; order: number; title: string; version: number; bodyHash?: string; retired?: boolean; audiobook?: unknown }[]; audiobook?: { narrator?: { provider: string; voiceId: string } } };
-type DoorWorld = { sheets: readonly { id: string; voice?: { provider: string; voiceId: string } }[] };
+type DoorProduction = { chapters: readonly { id: string; order: number; title: string; version: number; status?: string; bodyHash?: string; retired?: boolean; audiobook?: unknown }[]; audiobook?: { narrator?: { provider: string; voiceId: string } } };
+type DoorWorld = { sheets: readonly { id: string; narration?: string; retired?: boolean; voice?: { provider: string; voiceId: string } }[] };
+
+/**
+ * Each chapter as the door reads it. Without the manuscript (the rail's ask) a save moves nothing:
+ * the rail asked the whole book prepared and priced after every autosave (issue 2782), and asks
+ * again only as chapters come, go or change status, or their takes and records move.
+ */
+const chapterSources = (production: DoorProduction | null, manuscript = true) => production?.chapters.map((c) => manuscript
+  ? [c.id, c.order, c.title, c.version, c.status ?? "", c.bodyHash ?? "", c.retired === true]
+  : [c.id, c.order, c.title, c.status ?? "", c.retired === true]);
 
 /**
  * What the door's answer depends on, as one string: asked again when it moves. The chapters'
@@ -55,26 +100,33 @@ type DoorWorld = { sheets: readonly { id: string; voice?: { provider: string; vo
  * (UI audit A1). The chapters' runs ending, the record's writes, the book's run and its note
  * move the rows too — not a block at a time while a chapter is read, when the rows read the
  * run's own counts (codex on PR 1187).
+ *
+ * And what the coordinator reads off the providers: whether this machine's transcriber answers,
+ * which decides the book's Requests row and the press's request count (design turn 185d), and
+ * whether each reader's engine can speak. The start-up probe answers after the page has opened,
+ * and a door asked before it stayed without Requests until something else moved this
+ * (2026-10-05). Only the answers, never a probe's time, or every tick would ask again.
  */
-export function useAudiobookDoorStamp(worldId: string | undefined, prodId: string | undefined, production: DoorProduction | null, world: DoorWorld | null): string {
-  const store = useStore();
+export function useAudiobookDoorStamp(worldId: string | undefined, prodId: string | undefined, production: DoorProduction | null, world: DoorWorld | null, manuscript = true): string {
+  const store = useStoreSelector(store => ({ state: store.state, voiceCatalogueHeld: store.voiceCatalogueHeld, audiobookBook: store.audiobookBook, audiobookNotes: store.audiobookNotes, audiobook: store.audiobook, audiobookRecords: store.audiobookRecords }), shallowEqual);
   const narrator = store.state?.app.narrator ?? null;
   const catalogue = store.voiceCatalogueHeld;
   const book = store.audiobookBook[prodId ?? ""];
   const note = store.audiobookNotes[prodId ?? ""];
+  const providers = store.state?.app.providers ?? [];
   if (production === null) return "";
   const prefix = `${worldId}/${prodId}/`;
   const sheets = world?.sheets ?? [];
-  const readers = new Set(
-    [narrator, production.audiobook?.narrator, DEFAULT_NARRATOR, ...sheets.map((sheet) => sheet.voice)]
-      .filter((reader) => reader !== null && reader !== undefined)
-      .map((reader) => `${reader.provider}\n${reader.voiceId}`),
-  );
+  const reading = [narrator, production.audiobook?.narrator, DEFAULT_NARRATOR, ...sheets.map((sheet) => sheet.voice)]
+    .filter((reader) => reader !== null && reader !== undefined);
+  const readers = new Set(reading.map((reader) => `${reader.provider}\n${reader.voiceId}`));
+  const engines = [...new Set(reading.map((reader) => reader.provider))].sort();
   return JSON.stringify([
     production.audiobook ?? null,
-    production.chapters.map((c) => [c.id, c.order, c.title, c.version, c.bodyHash ?? "", c.retired === true, c.audiobook ?? null]),
+    chapterSources(production, manuscript),
+    production.chapters.map((c) => c.audiobook ?? null),
     narrator,
-    sheets.map((sheet) => [sheet.id, sheet.voice ?? null]),
+    sheets.map((sheet) => [sheet.id, sheet.voice ?? null, sheet.narration ?? null, sheet.retired === true]),
     catalogue === null
       ? null
       : catalogue
@@ -85,25 +137,31 @@ export function useAudiobookDoorStamp(worldId: string | undefined, prodId: strin
     Object.entries(store.audiobookRecords).filter(([key]) => key.startsWith(prefix)).map(([, held]) => held.seq),
     book?.state ?? null,
     note?.seq ?? null,
+    // A fault silences the book's narrator with no catalogue change (issue 1661): the door says so
+    // only once it is asked again (codex on PR 1869).
+    providers.map((provider) => [provider.id, provider.fault, provider.faultKind ?? null]),
+    localTranscriberAvailable(providers),
+    engines.map((engine) => deriveCapabilityAvailability(providers.filter((status) => status.id === engine)).some((entry) => entry.capability === "voice-tts" && entry.available)),
   ]);
 }
 
 /**
  * The door asked for, by the rail and the page alike: both ask on the one stamp, so the store
  * sends one ask between them and holds a newer one until it is answered. Not asked while a
- * chapter is being read and a door is held — the rows read the run's counts; it is asked once
- * more as the run ends — and always when this window holds no door yet, as one that joins a
- * run going elsewhere does not (codex on PR 1187).
+ * chapter is being read and only its takes changed — the rows read the run's counts; changed
+ * manuscript asks at once, and the final takes ask as the run ends. Always asked when this
+ * window holds no door yet, as one that joins a run going elsewhere does not (codex on PR 1187).
  */
-export function useAudiobookDoorAsk(worldId: string | undefined, prodId: string | undefined, production: DoorProduction | null, world: DoorWorld | null, enabled = true): void {
-  const connection = useStore().connection;
-  const stamp = useAudiobookDoorStamp(worldId, prodId, production, world);
+export function useAudiobookDoorAsk(worldId: string | undefined, prodId: string | undefined, production: DoorProduction | null, world: DoorWorld | null, enabled = true, manuscript = true): void {
+  const connection = useStoreSelector(store => store.connection);
+  const stamp = useAudiobookDoorStamp(worldId, prodId, production, world, manuscript);
   const door = useAudiobookDoors()[prodId ?? ""]?.door ?? null;
   const chapterReading = useChapterReading(worldId, prodId);
+  const source = JSON.stringify([worldId, prodId, chapterSources(production, manuscript)]);
   useEffect(() => {
-    if (!enabled || !worldId || !prodId || production === null || connection !== "open" || (chapterReading && door !== null)) return;
-    openAudiobook(worldId, prodId, stamp);
-  }, [enabled, worldId, prodId, production === null, connection, chapterReading, door === null, stamp]);
+    if (!enabled || !worldId || !prodId || production === null || connection !== "open") return;
+    openAudiobook(worldId, prodId, stamp, { source, reading: chapterReading });
+  }, [enabled, worldId, prodId, production === null, connection, chapterReading, door === null, stamp, source]);
 }
 
 /**
@@ -129,68 +187,138 @@ export function useChapterReading(worldId: string | undefined, prodId: string | 
   return Object.entries(runs).some(([key, run]) => key.startsWith(`${worldId}/${prodId}/`) && run.state === "reading");
 }
 
+// ---- what the page says, as data ---------------------------------------------------------------
+
 /**
- * The voices row (R-12): who reads, in what, or why the narrator does instead. A chip goes to
- * where its voice is set (issue 1191) — the narrator's to Settings, a speaker's to their voice
- * page — and one with nowhere to go, the unattributed lines, is plain.
+ * A chapter's length (rule 3): the made takes' running time, and the rest estimated from the
+ * words at the narrator's rate. A chapter whose made takes are not all measured yet is
+ * estimated whole, from its words.
  */
-function VoiceChip({ name, voice, state, blocks, awaiting, to, onPress, performer, note, noteHeld, book, compactDetail }: {
-  name: string;
-  voice?: { label: string; provider: string; local: boolean };
-  state: string;
-  blocks: number;
-  awaiting?: number;
-  to?: string;
-  /** The narrator's chip opens the book's narrator (R-46) rather than going anywhere. */
-  onPress?: () => void;
-  /** A speaker the narrator performs under `performed` (R-44): their note, or plain. */
-  performer?: boolean;
-  note?: string;
-  noteHeld?: boolean;
-  /** The narrator is the book's own (R-46). */
-  book?: boolean;
-  compactDetail?: string;
-}) {
-  const navigate = useNavigate();
-  const warn = state === "no voice" || state === "voice unavailable" || noteHeld === true;
-  const what = performer
-    ? noteHeld
-      ? "note · not on this reader"
-      : (note ?? "")
-    : state === "recorded"
-      ? `recorded${awaiting !== undefined && awaiting > 0 ? ` · ${awaiting} awaiting` : ""}`
-      : state === "narrator"
-      ? `${book ? "this book" : "narrator"}${voice === undefined ? "" : ` · ${readerPlace(voice.provider, voice.local)}`}`
-      : state === "reads" && voice !== undefined
-        ? `${voice.label} · ${readerPlace(voice.provider, voice.local)}`
-        : `${state} · narrator`;
-  const inside = (
-    <>
-      {compactDetail !== undefined && <Speaker size={16} />}
-      <span className="fy-abdoor__voice-name">{name}</span>
-      <span className="fy-abdoor__voice-what fy-mono">
-        {/* A performer with no note is their count alone (design turn 192): "plain" named the
-            absence of a note in a word nobody had been taught. */}
-        {compactDetail ?? [what, `${blocks} block${blocks === 1 ? "" : "s"}`].filter((part) => part !== "").join(" · ")}
-      </span>
-    </>
-  );
-  const className = cx("fy-abdoor__voice", warn && "fy-abdoor__voice--warn");
-  if (onPress !== undefined)
-    return (
-      <button type="button" className={className} data-testid="audiobook-voice" data-state={state} onClick={onPress}>
-        {inside}
-      </button>
-    );
-  return to === undefined ? (
-    <span className={className} data-testid="audiobook-voice" data-state={state}>
-      {inside}
-    </span>
-  ) : (
-    <button type="button" className={className} data-testid="audiobook-voice" data-state={state} onClick={() => navigate(to)}>
-      {inside}
-    </button>
-  );
+export function chapterSeconds(row: Pick<AudiobookRow, "planned" | "total" | "made" | "seconds">, words: number): number {
+  if (row.planned) return 0;
+  const rate = SPEECH_TOKEN_ESTIMATE.wordsPerMinute / 60;
+  if (row.seconds === null || row.total === 0) return words / rate;
+  return row.seconds + (words * (row.total - row.made)) / row.total / rate;
+}
+
+/** `23 min`, or `1 h 12 m` from an hour (186's `6 h 12 m left`). */
+export function formatBookLength(seconds: number): string {
+  const minutes = Math.max(1, Math.round(seconds / 60));
+  if (minutes < 60) return `${minutes} min`;
+  return `${Math.floor(minutes / 60)} h ${minutes % 60} m`;
+}
+
+/**
+ * A chapter titled only with its number is named once (192): `Chapter 1`, else `2 · Untitled`. The
+ * number is `chapterNumber`'s (SPEC-047 R-2): a prologue has none and goes by its title alone.
+ */
+export function chapterHeading(row: Pick<AudiobookRow, "title">, number: number | null): string {
+  if (number === null) return row.title;
+  const own = /^chapter\s+0*(\d+)$/i.exec(row.title.trim());
+  if (own !== null && Number(own[1]) === number) return `Chapter ${number}`;
+  if (row.title.trim() === "" || row.title.trim().toLowerCase() === "untitled") return `Chapter ${number}`;
+  return `${number} · ${row.title}`;
+}
+
+/** The chapters a narrator of their own reads (R-195), by number and run: `Ch 9–16`, `Ch 1–8, 17`. */
+export function chapterSpans(ids: readonly string[], rows: readonly Pick<AudiobookRow, "chapterId" | "order">[]): string {
+  const numbers = ids.map((id) => rows.find((row) => row.chapterId === id)?.order).filter((n): n is number => n !== undefined).sort((a, b) => a - b);
+  const runs: string[] = [];
+  for (let at = 0; at < numbers.length; ) {
+    let end = at;
+    while (end + 1 < numbers.length && numbers[end + 1] === numbers[end]! + 1) end += 1;
+    runs.push(end === at ? `${numbers[at]}` : `${numbers[at]}–${numbers[end]}`);
+    at = end + 1;
+  }
+  return runs.length === 0 ? "Chapters" : `Ch ${runs.join(", ")}`;
+}
+
+/**
+ * One quiet word, only when the chapter is not simply ready (rule 7): `planned`, `not read`,
+ * `80 to read`, `reading…`; the cast's trouble under Cast by its first words. Nothing for a
+ * chapter read whole.
+ */
+export function chapterStateWord(row: AudiobookRow, reading: boolean): string | null {
+  if (reading) return "reading…";
+  if (row.planned) return "planned";
+  if (row.castTrouble !== undefined) return row.castTrouble.split(" · ")[0]!;
+  const left = row.stale + row.flagged + row.notMade;
+  if (row.made === 0 && left > 0) return "not read";
+  if (left > 0) return `${left} to read`;
+  if ((row.awaiting ?? 0) > 0) return `${row.awaiting} awaiting`;
+  return null;
+}
+
+/**
+ * The reading's one warning word (rule 5): under Cast, the speakers with no voice, else those
+ * whose voice cannot speak now, else the lines nobody is cast for — counted, never named on the
+ * page. Named row by row in the Reading sheet.
+ */
+export function readingWarning(door: Pick<AudiobookDoor, "reading" | "voices" | "unattributed"> | null): string | null {
+  if (door === null || door.reading !== "cast") return null;
+  const speakers = door.voices.slice(1);
+  const none = speakers.filter((voice) => voice.state === "no voice").length;
+  if (none > 0) return `${none} no voice`;
+  const unavailable = speakers.filter((voice) => voice.state === "voice unavailable").length;
+  if (unavailable > 0) return `${unavailable} unavailable`;
+  if (door.unattributed > 0) return `${door.unattributed} unattributed`;
+  return null;
+}
+
+/** A picture for a sheet: its main photo, else its first look. */
+function sheetPicture(world: WorldBundle | null, sheetId: string, prefer: "photo" | "look"): string | null {
+  const kit = world?.referenceKits.find((candidate) => candidate.sheetId === sheetId);
+  if (kit === undefined) return null;
+  const photo = mainPhotoFor(kit)?.file ?? null;
+  const look = kit.looks?.[0]?.file ?? null;
+  const file = prefer === "look" ? (look ?? photo) : (photo ?? look);
+  return file === null ? null : `references/${sheetId}/${file}`;
+}
+
+/**
+ * The narrator's picture (rule 6): a voice designed from a sheet — the sheet whose voice it is —
+ * shows that sheet's look, so the narrator and the character are not the same picture twice; a
+ * catalogue voice shows the backdrop.
+ */
+function narratorPicture(world: WorldBundle | null, door: AudiobookDoor, production: ProductionBundle, appNarrator: { provider: string; voiceId: string } | null, art: string | null): string | null {
+  const narrator = door.voices[0];
+  const reader = narrator?.book === true ? production.audiobook?.narrator : (appNarrator ?? DEFAULT_NARRATOR);
+  return readerPicture(world, narrator, reader, art);
+}
+
+function readerPicture(world: WorldBundle | null, row: AudiobookVoiceRow | undefined, reader: { provider: string; voiceId: string } | undefined, art: string | null): string | null {
+  // A narrator the coordinator stood another voice in for is that other voice: no sheet's look.
+  if (reader !== undefined && row?.voice?.provider === reader.provider) {
+    const sheet = world?.sheets.find((candidate) => candidate.voice?.provider === reader.provider && candidate.voice.voiceId === reader.voiceId);
+    if (sheet !== undefined) {
+      const picture = sheetPicture(world, sheet.id, "look");
+      if (picture !== null) return picture;
+    }
+  }
+  return art;
+}
+
+/**
+ * Who reads the book (SPEC-047 R-195): the book's narrator and each chapter narrator, in the order
+ * they first read, each with the chapters it reads. The book's narrator is left out only when
+ * every chapter has a narrator of its own.
+ */
+export function bookNarrators(door: Pick<AudiobookDoor, "voices" | "chapterNarrators" | "rows">): Array<{ row: AudiobookVoiceRow; chapters: string[]; book: boolean }> {
+  const own = door.chapterNarrators ?? [];
+  const taken = new Set(own.flatMap((row) => row.chapters ?? []));
+  const bookChapters = door.rows.filter((row) => !taken.has(row.chapterId)).map((row) => row.chapterId);
+  const first = (ids: readonly string[]) => Math.min(...ids.map((id) => door.rows.find((row) => row.chapterId === id)?.order ?? Infinity));
+  const book = door.voices[0];
+  return [
+    ...(book !== undefined && (bookChapters.length > 0 || own.length === 0) ? [{ row: book, chapters: bookChapters, book: true }] : []),
+    ...own.map((row) => ({ row, chapters: row.chapters ?? [], book: false })),
+  ].sort((a, b) => first(a.chapters) - first(b.chapters));
+}
+
+/** Names as a credit says them: `A`, `A and B`, `A, B and C`, each once. */
+export function namesCredit(names: readonly string[]): string {
+  const once = names.filter((name, at) => names.indexOf(name) === at);
+  return once.length > 1 ? `${once.slice(0, -1).join(", ")} and ${once.at(-1)}` : (once[0] ?? "");
 }
 
 function priceLineWords(line: AudiobookPriceLine, models: readonly ManifestModel[] | undefined): { who: string; how: string; cost: string; warn: boolean } {
@@ -204,12 +332,18 @@ function priceLineWords(line: AudiobookPriceLine, models: readonly ManifestModel
   return { who: line.label, how: `${line.narrator === true ? "narrator · " : ""}${readerPlace(line.provider, line.local)}`, cost, warn: false };
 }
 
+const READINGS = [
+  ["narrator", "Narrator"],
+  ["performed", "Performed"],
+  ["cast", "Cast"],
+] as const;
+
 export function AudiobookScreen() {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const { prodId, worldId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
-  const connection = useStore().connection;
+  const connection = useStoreSelector(store => store.connection);
   const held = useAudiobookDoors()[prodId ?? ""];
   const door = held?.door ?? null;
   const book = useAudiobookBooks()[prodId ?? ""];
@@ -219,21 +353,50 @@ export function AudiobookScreen() {
   useAudiobookDoorAsk(worldId, prodId, production, world);
   // The catalogue says who can speak now (turn 130's rule): asked for once the door is open,
   // and again as the engines come and go — the local runtime, the studio's ComfyUI — so a
-  // voice gone unavailable, or back, moves the voices row and the price (codex on PR 1187).
+  // voice gone unavailable, or back, moves the voices and the price (codex on PR 1187).
   // As they come and go, not as they are checked: each probe stamps its time, and asking the
   // catalogue on every probe asked every keyed vendor for its voices every few seconds.
-  const app = useStore().state?.app;
+  const app = useStoreSelector(store => store.state?.app);
   const engines = JSON.stringify([
     app?.runtime === null || app?.runtime === undefined ? null : { ...app.runtime, detectedAt: undefined },
     app?.comfyui === null || app?.comfyui === undefined ? null : { ...app.comfyui, checkedAt: undefined },
   ]);
-  // The book's narrator (R-46): opened from the narrator's chip.
-  const [narrating, setNarrating] = useState(false);
-  // The book's reading (design turn 184c): opened from a performed speaker's chip.
-  const [notesOpen, setNotesOpen] = useState(false);
   useEffect(() => {
     if (connection === "open") requestVoiceCatalogue(worldId);
   }, [connection, worldId, engines]);
+  // The book's narrator (R-46, 165c): from the ⋯ menu, the narrator's card and the sheet's row.
+  const [narrating, setNarrating] = useState(false);
+  // Reading (199e): everything that sets the reading up, in one sheet.
+  const [sheet, setSheet] = useState(false);
+  const [picturing, setPicturing] = useState(false);
+  const [menu, setMenu] = useState(false);
+  const [barMenu, setBarMenu] = useState(false);
+  // The player (186): `{}` opens the book where this device left it, a chapter starts there.
+  const [listening, setListening] = useState<{ chapterId?: string } | null>(null);
+  // The credits (design turn 252): asked for as the page opens, sent again after every change and
+  // every read of them; their sheet opens from either of their rows. Asked again on the door's own
+  // stamp too (codex on PR 2274): Narrated by drafts from the narrator's label and a credit is read
+  // by the book's narrator under its note, so a narrator or note changed elsewhere would otherwise
+  // leave the rows naming the old voice and calling stale takes made.
+  const [crediting, setCrediting] = useState(false);
+  const creditsByProduction = useAudiobookCredits();
+  const creditsAnswer = prodId === undefined ? undefined : creditsByProduction[prodId];
+  const credits = creditsAnswer?.credits ?? null;
+  const doorStamp = useAudiobookDoorStamp(worldId, prodId, production, world);
+  useEffect(() => {
+    if (connection === "open" && worldId !== undefined && prodId !== undefined) openAudiobookCredits(worldId, prodId);
+  }, [connection, worldId, prodId, doorStamp]);
+  // A phone's bar over the page once the hero has scrolled away (199f).
+  const [scrolled, setScrolled] = useState(false);
+  const dock = useRef<HTMLDivElement>(null);
+  const art = world?.keyArt ?? null;
+  const slug = world?.meta.slug;
+  const hasArt = art !== null && art !== "" && slug !== undefined;
+  const rows: AudiobookRow[] = door?.rows ?? [];
+  const place = worldId !== undefined && prodId !== undefined ? keptPlace(worldId, prodId) : null;
+  // The docked player's picture: the chapter this device is in, else the book's first, else the cover.
+  const dockFile = rows.find((row) => row.chapterId === place?.chapterId)?.picture ?? rows.find((row) => row.picture !== undefined)?.picture ?? (hasArt ? art : null);
+  useDockHost(dock, dockFile !== null && slug !== undefined ? mediaUrl(slug, dockFile) : null, () => setListening({}));
 
   // A cloned voice's recording leaving the machine (SPEC-022, SPEC-046): asked under the book's request, the answer kept for the price's answer and spent with the run (codex on PR 1180).
   const [upload, setUpload] = useState<{ destination: string; token: string; notice?: string } | null>(null);
@@ -272,35 +435,146 @@ export function AudiobookScreen() {
   };
 
   if (!worldId || !prodId || production === null) return null;
-  const rows: AudiobookRow[] = door?.rows ?? [];
-  const line = audiobookDoorLine(rows);
-  const totalBlocks = rows.reduce((sum, row) => sum + row.total, 0);
-  const madeBlocks = rows.reduce((sum, row) => sum + row.made, 0);
+  const title = production.meta.title;
+  const chapters = production.chapters.filter((chapter) => !chapter.retired);
   const reading = door?.reading ?? production.audiobook?.reading ?? "narrator";
   const readingNow = book?.state === "reading";
   const price = door?.price ?? null;
   // `up to` while every reader is priced by the character; a token reader's share is an
   // estimate the read can pass, so the whole figure is `~` (SPEC-049 R-6).
   const priceWord = speechPricePrefix(app?.manifest?.models, (price?.voices ?? []).map((voice) => voice.provider));
-  // The book's requests (design turn 185d): offered only where the coordinator says its reader can group here.
-  const requestsPanel = door?.requests !== undefined && worldId !== undefined && prodId !== undefined
-    ? {
-        worldId,
-        productionId: prodId,
-        setting: door.requests,
-        reader: door.voices[0]?.voice !== undefined ? providerName(door.voices[0].voice.provider) : "this reader",
-        ...(price?.requests !== undefined ? { counts: { requests: price.requests, perParagraph: price.perParagraph ?? price.cloudBlocks } } : {}),
-      }
-    : null;
-  const pad = (order: number) => String(order).padStart(2, "0");
-  // The page is the book's cover (design turn 190a): the world's key art, the title, and who reads it.
-  const title = production.meta.title;
-  const art = world?.keyArt ?? null;
-  const slug = world?.meta.slug;
-  const hasArt = art !== null && art !== "" && slug !== undefined;
-  const readers = door?.voices ?? [];
-  const faces = readers.filter((voice) => voice.sheet !== undefined && world?.referenceKits.some((kit) => kit.sheetId === voice.sheet && mainPhotoFor(kit) !== null)).slice(0, 3);
-  const credit = readers.length === 0 ? null : `Read by ${readers[0]!.name}${readers.length > 1 ? ` and ${readers.length - 1} more` : ""}`;
+  const cost = price === null || price.estimatedMicroUsd === 0 ? null : `${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}`;
+  const narratorName = door?.voices[0]?.name ?? null;
+  const narrators = door === null ? [] : bookNarrators(door);
+  // The book's own narrator cannot read now (issue 1661): the door once said `Performed · George`
+  // over a narrator a 402 had silenced. Read the book is held on it, and says why.
+  // A chapter's own narrator holds it the same way (R-195).
+  const narratorUnavailable = door?.voices[0]?.unavailable ?? door?.chapterNarrators?.find((row) => row.unavailable !== undefined)?.unavailable ?? null;
+  const warning = readingWarning(door);
+  const made = bookHasTakes(production);
+  const left = price !== null && price.chapters > 0;
+  const words = (chapterId: string) => chapters.find((chapter) => chapter.id === chapterId)?.words ?? 0;
+
+  // Each chapter as the page states it: a row whose run has ended reads as its run ended until
+  // the door answers again (codex on PR 1187) — every block not made was tried (R-16).
+  const shown = rows.map((row) => {
+    const run = runs[`${worldId}/${prodId}/${row.chapterId}`];
+    const settled = run !== undefined && run.state !== "reading" && run.state !== "priced" && run.made + run.flagged > 0 && !row.planned && row.castTrouble === undefined
+      ? { ...row, made: Math.min(row.total, row.made + run.made), stale: 0, flagged: run.flagged, notMade: Math.max(0, row.total - row.made - run.made - run.flagged) }
+      : row;
+    return { row: settled, reading: run?.state === "reading", run, seconds: chapterSeconds(row, words(row.chapterId)), estimated: row.seconds === null || row.made < row.total };
+  });
+  // Durations come from the last measured door, not optimistic run counts: a finished run
+  // can add takes before their lengths arrive (issue 1935).
+  const bookSeconds = rows.reduce((sum, row) => sum + chapterSeconds(row, words(row.chapterId)), 0);
+  const estimated = rows.some(row => !row.planned && (row.seconds === null || row.made < row.total));
+  const recordedSeconds = rows.reduce((sum, row) => sum + (row.planned ? 0 : row.seconds ?? 0), 0);
+  const unmeasured = rows.some(row => !row.planned && row.made > 0 && row.seconds === null);
+  const nextWork = shown.find(({ row }) => !row.planned && chapterStateWord(row, false) !== null)?.row;
+  const plannedChapters = rows.filter(row => row.planned).length;
+  // One meta line (rule 3): every chapter, planned ones included; the length; who reads it.
+  const meta = [
+    "Audiobook",
+    `${door === null ? chapters.length : rows.length} chapter${(door === null ? chapters.length : rows.length) === 1 ? "" : "s"}`,
+    ...(door !== null && bookSeconds > 0 && estimated ? [`~${formatBookLength(bookSeconds)} estimated total`] : []),
+    ...(recordedSeconds > 0 ? [`${unmeasured ? "at least " : ""}${formatBookLength(recordedSeconds)} recorded`] : []),
+    // Every narrator of the book, as the video credits them (R-195).
+    ...(narrators.length > 0 ? [`Read by ${namesCredit(narrators.map(({ row }) => row.name))}`] : narratorName !== null ? [`Read by ${narratorName}`] : []),
+  ].join(" · ");
+
+  // Continue (186's word and kept place) when this device holds a place in a chapter that plays.
+  const placeRow = place === null ? undefined : rows.find((row) => row.chapterId === place.chapterId && row.made > 0);
+  const listen = (chapterId?: string) => setListening(chapterId === undefined ? {} : { chapterId });
+  const openChapter = (chapterId: string) => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(chapterId)}?view=audiobook`);
+
+  const primary = made ? (
+    <button
+      type="button"
+      className="fy-abshow__btn fy-abshow__btn--pri"
+      disabled={connection !== "open"}
+      onClick={() => listen(placeRow?.chapterId)}
+      data-testid="audiobook-listen"
+    >
+      <PlaySolid size={16} />
+      {placeRow !== undefined && place !== null ? (
+        <>
+          Continue <em>· Chapter {placeRow.order} · {formatRunningTime(place.at)}</em>
+        </>
+      ) : (
+        "Listen"
+      )}
+    </button>
+  ) : null;
+  // Publish is a page of its own (design turn 276): every output of the book is there, the
+  // audiobook's files and the Arke Player package among them.
+  const exportPress = (
+    <button type="button" className="fy-abshow__btn" onClick={() => navigate(`/w/${worldId}/p/${prodId}/publish`)} data-testid="audiobook-export-open">
+      Publish
+    </button>
+  );
+  // Read the book's place (rule 4): the consent the vendor asks, the run while the book reads, or
+  // the press while something is left — absent, not disabled, when nothing is.
+  const readSlot: ReactNode = (() => {
+    if (upload !== null && book?.state !== "read") {
+      return (
+        <div className="fy-abshow__consent" style={{ flexBasis: "100%" }}>
+          <RemoteVoiceUploadConfirmation
+            destinationLabel={upload.destination}
+            destinationNotice={upload.notice}
+            onCancel={() => {
+              setUpload(null);
+              uploadAllowed.current = null;
+              dismissAudiobookBook(prodId);
+            }}
+            onConfirm={() => {
+              uploadAllowed.current = upload.token;
+              setUpload(null);
+              send({ voiceUploadConfirmedFor: upload.token });
+            }}
+          />
+        </div>
+      );
+    }
+    if (readingNow) {
+      return (
+        <span className="fy-abshow__run" data-testid="audiobook-run">
+          reading… {book.done} of {book.chapters}
+          <button type="button" className="fy-abshow__btn" onClick={() => stopAudiobookBook(worldId, prodId)}>
+            Stop
+          </button>
+        </span>
+      );
+    }
+    if (!left) return null;
+    return (
+      <button
+        type="button"
+        className={cx("fy-abshow__btn", !made && "fy-abshow__btn--pri", phone && made && "fy-abshow__btn--grow")}
+        disabled={connection !== "open" || book?.state === "priced" || narratorUnavailable !== null}
+        onClick={begin}
+        data-testid="read-book"
+      >
+        {!made && <PlaySolid size={16} />}
+        Read the book
+        {phone ? (cost !== null ? <em> · {cost}</em> : null) : <em> · {price.chapters} chapter{price.chapters === 1 ? "" : "s"}{cost !== null ? ` · ${cost}` : ""}</em>}
+        {narratorUnavailable !== null ? <span className="fy-abshow__w"> · {narratorUnavailable}</span> : !phone && warning !== null && <span className="fy-abshow__w"> · {warning}</span>}
+      </button>
+    );
+  })();
+  const menuItems = [
+    ...(chapters.length > 0 ? [{ label: "Audio Studio", data: [], warn: null, onPress: () => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(placeRow?.chapterId ?? chapters[0]!.id)}?view=audio-studio`), testId: "menu-audio-studio" }] : []),
+    { label: "Reading", data: [READINGS.find(([value]) => value === reading)![1]], warn: warning, onPress: () => setSheet(true), testId: "menu-reading" },
+    ...(narratorName !== null ? [{ label: "Narrator", data: [narratorName], warn: narratorUnavailable, onPress: () => setNarrating(true), testId: "menu-narrator" }] : []),
+    // The shapes the book's pictures are made in (design turn 235a), its data the shapes on.
+    { label: "Pictures", data: [bookPictureShapes(production.audiobook).map((shape) => (shape === "wide" ? "Wide" : "Tall")).join(" · ")], warn: null, onPress: () => setPicturing(true), testId: "menu-pictures" },
+    // A world with no art: its cover is made where the world's look is (190).
+    ...(!hasArt ? [{ label: "Make a cover", data: [], warn: null, onPress: () => navigate(`/w/${worldId}/art-direction`), testId: "menu-cover" }] : []),
+  ];
+  const more = <MoreMenu open={menu} onOpen={setMenu} dot={phone && (warning !== null || narratorUnavailable !== null)} items={menuItems} />;
+  // The presses in one wrapping row, never clipped (rule 2): desktop leads with the primary, then
+  // Export, then Read the book; a phone puts the primary full width under the thumb.
+  const presses = phone ? [primary, readSlot, exportPress, more] : [primary, exportPress, readSlot, more];
+
   const bookNote =
     book?.state === "stopped"
       ? "stopped · the takes made stand"
@@ -311,231 +585,196 @@ export function AudiobookScreen() {
             ? "1 chapter left to its row"
             : `${book.chaptersRefused} chapters left to their rows`
           : null;
-  const primary = (() => {
-    if (upload !== null && book?.state !== "read") {
-      return (
-        <RemoteVoiceUploadConfirmation
-          destinationLabel={upload.destination}
-          destinationNotice={upload.notice}
-          onCancel={() => {
-            setUpload(null);
-            uploadAllowed.current = null;
-            dismissAudiobookBook(prodId);
-          }}
-          onConfirm={() => {
-            uploadAllowed.current = upload.token;
-            setUpload(null);
-            send({ voiceUploadConfirmedFor: upload.token });
-          }}
-        />
-      );
-    }
-    if (readingNow) {
-      return (
-        <span className="fy-ab__control">
-          <span className="fy-mono">
-            reading… {book.done} of {book.chapters} chapter{book.chapters === 1 ? "" : "s"}
-          </span>
-          <Button variant="ghost" onClick={() => stopAudiobookBook(worldId, prodId)}>
-            Stop
-          </Button>
-        </span>
-      );
-    }
-    if (price === null || price.chapters === 0) return null;
-    // One primary in the head: once a block is made, Listen leads and the read of the rest stands back.
-    return (
-      <Button variant={listenLeads(production) ? "secondary" : "primary"} disabled={connection !== "open" || book?.state === "priced"} onClick={begin} data-testid="read-book">
-        {phone ? <><Play size={16} />Read the book</> : `Read the book · ${price.chapters} chapter${price.chapters === 1 ? "" : "s"}`}
-        {!phone && price.requests !== undefined ? ` · ${price.requests} request${price.requests === 1 ? "" : "s"}` : ""}
-        {price.estimatedMicroUsd > 0 ? ` · ${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}` : ""}
-      </Button>
-    );
-  })();
+
+  const cast: AudiobookCastMember[] = door?.cast ?? (door?.voices.slice(1).map((voice) => ({ ...(voice.sheet !== undefined ? { sheet: voice.sheet } : {}), name: voice.name })) ?? []);
+
   return (
-    <div className="fy-prodmain" data-screen="audiobook">
-      <section className="fy-abcover" aria-label="Audiobook" data-art={hasArt ? "true" : "false"}>
-        {hasArt && (
-          <span className="fy-abcover__bd" aria-hidden="true">
-            <Portrait worldSlug={slug} path={art} label="" radius={0} />
-          </span>
-        )}
-        <div className="fy-abcover__in">
-          <div className="fy-abcover__art" aria-hidden="true">
-            {hasArt && <Portrait worldSlug={slug} path={art} label={title} radius={4} />}
-            <span className="fy-abcover__title">{title}</span>
-          </div>
-          <div className="fy-abcover__txt">
-      <div className="fy-h1row">
-        <h1 className="fy-h1">{title}</h1>
-        {credit !== null && (
-          <span className="fy-abcover__credit" data-testid="audiobook-credit">
-            {faces.length > 0 && (
-              <span className="fy-abcover__faces" aria-hidden="true">
-                {faces.map((voice) => (
-                  <Portrait key={voice.sheet} worldSlug={slug} path={characterPortraitPath(world, voice.sheet!)} label={voice.name} radius={999} />
-                ))}
-              </span>
+    <div className="fy-prodmain fy-abshow" data-screen="audiobook">
+      <div
+        className="fy-abshow__page"
+        // Past the title, the bar takes over the back press and ⋯.
+        onScroll={phone ? (event) => setScrolled(event.currentTarget.scrollTop > 200) : undefined}
+      >
+        <section className={cx("fy-abshow__hero", !hasArt && "fy-abshow__hero--bare")} aria-label="Audiobook" data-art={hasArt ? "true" : "false"} data-testid="audiobook-hero">
+          {hasArt && (
+            <span className="fy-abshow__bd" aria-hidden="true">
+              <Portrait worldSlug={slug} path={art} label="" radius={0} />
+            </span>
+          )}
+          {phone && (
+            <button type="button" className="fy-abshow__ptop" aria-label="Back" onClick={() => navigate(`/w/${worldId}/p/${prodId}`)}>
+              <ChevronLeft size={20} stroke={1.9} />
+            </button>
+          )}
+          <div className="fy-abshow__wrap">
+            <h1 className="fy-abshow__title">{title}</h1>
+            <div className="fy-abshow__meta" data-testid="audiobook-line">{meta}</div>
+            <div className="fy-abshow__acts" data-testid="audiobook-presses">
+              {presses.map((press, index) => (press === null ? null : <Fragment key={index}>{press}</Fragment>))}
+            </div>
+            {plannedChapters > 0 && <div className="fy-abshow__note" data-testid="audiobook-planned">{plannedChapters} planned chapter{plannedChapters === 1 ? "" : "s"} excluded from book narration</div>}
+            {(bookNote !== null || note !== undefined) && (
+              <div className="fy-abshow__note" data-testid="audiobook-note">
+                {bookNote !== null && (
+                  <span className={cx(book?.state !== "read" && "fy-abshow__warn")}>
+                    {bookNote}
+                    <button type="button" aria-label="Put away" onClick={() => dismissAudiobookBook(prodId)}>
+                      ×
+                    </button>
+                  </span>
+                )}
+                {note !== undefined && (
+                  <span>
+                    {[...(note.held > 0 ? [`${note.held} held`] : []), ...(note.dropped > 0 ? [`${note.dropped} dropped`] : [])].join(" · ")} · {note.chapters} chapter{note.chapters === 1 ? "" : "s"}
+                    <button type="button" aria-label="Put away" onClick={() => dismissAudiobookNote(prodId)}>
+                      ×
+                    </button>
+                  </span>
+                )}
+              </div>
             )}
-            {credit}
-          </span>
-        )}
-        <span className="fy-h1row__meta" data-testid="audiobook-line">
-          {/* Nothing until the door lands: a phone sets this line as the eyebrow over the title,
-              where a lone "…" read as a stray mark rather than as waiting. */}
-          {door === null ? null : line.line}
-        </span>
-        <span className="fy-h1row__push" />
-        {/* The head's presses as one group (146a), so a narrow window moves them together. */}
-        <span className="fy-h1row__actions">
-          {/* Listen (design turn 186): the book as a listener hears it, the head's primary once a block anywhere is made. */}
-          <ListenButton worldId={worldId} production={production} />
-          {/* Export (design turn 186e): the book as the player; the sheet counts what is read whole. */}
-          <ExportAudiobookButton worldId={worldId} production={production} />
-          {!phone && primary}
-        </span>
-      </div>
           </div>
+        </section>
+        <div className="fy-abshow__wrap fy-abshow__body">
+          {narrators.length > 0 && (
+            <section aria-label="Cast">
+              <h2 className="fy-abshow__h">Cast</h2>
+              <CastRow>
+                {/* A narrator to a part (R-195) names its chapters, and opens the first of them, where it is chosen. */}
+                {narrators.map(({ row, chapters: reads, book: isBook }) => (
+                  <CastCard
+                    key={isBook ? "narrator" : `narrator:${reads[0] ?? row.name}`}
+                    name={row.name}
+                    role={narrators.length > 1 ? `Narrator · ${chapterSpans(reads, door!.rows)}` : "Narrator"}
+                    slug={slug}
+                    picture={isBook
+                      ? narratorPicture(world, door!, production, app?.narrator ?? null, hasArt ? art : null)
+                      : readerPicture(world, row, reads[0] === undefined ? undefined : production.audiobook?.chapterNarrators?.[reads[0]], hasArt ? art : null)}
+                    onPress={isBook ? () => setNarrating(true) : () => openChapter(reads[0]!)}
+                  />
+                ))}
+                {cast.map((member) => (
+                  <CastCard
+                    key={member.sheet ?? `:${member.name}`}
+                    name={member.name}
+                    slug={slug}
+                    picture={member.sheet === undefined ? null : sheetPicture(world, member.sheet, "photo")}
+                    {...(member.sheet !== undefined ? { onPress: () => navigate(`/w/${worldId}/cast/${encodeURIComponent(member.sheet!)}`) } : {})}
+                  />
+                ))}
+              </CastRow>
+            </section>
+          )}
+          <section className="fy-abshow__chapters" aria-label="Chapters">
+            <div className="fy-abshow__chapter-head">
+              <h2 className="fy-abshow__h">Chapters</h2>
+              {nextWork !== undefined && <button type="button" className="fy-abshow__next" onClick={() => openChapter(nextWork.chapterId)} data-testid="audiobook-next-work">Continue work · Chapter {nextWork.order}<ChevronRight size={16} /></button>}
+            </div>
+            {rows.length > 0 ? (
+              <div data-testid="audiobook-rows">
+                {credits !== null && <CreditRow which="opening" credit={credits.opening} slug={slug} art={hasArt ? art : null} plate={productionPlate(production.meta)} onOpen={() => setCrediting(true)} />}
+                {shown.map(({ row, reading: chapterReading, run, seconds, estimated: chapterEstimated }) => {
+                  const state = chapterReading && run !== undefined ? `reading… ${run.made} of ${run.toMake}` : chapterStateWord(row, false);
+                  const synopsis = chapters.find((chapter) => chapter.id === row.chapterId)?.synopsis;
+                  const playable = row.made > 0;
+                  // Against the made takes' time, which is what plays; where that is not measured, the
+                  // length the row says — the bar went missing beside "Continue · Chapter 1" when it was null.
+                  const heardOf = row.seconds !== null && row.seconds > 0 ? row.seconds : seconds;
+                  const heard = place !== null && place.chapterId === row.chapterId && heardOf > 0 ? Math.min(100, (place.at / heardOf) * 100) : null;
+                  const thumb = row.planned ? null : (row.picture ?? (hasArt ? art : null));
+                  const heading = chapterHeading(row, chapterNumber(production.chapters, row));
+                  return (
+                    <div key={row.chapterId} className="fy-abshow__ep" data-testid="audiobook-row" data-state={state ?? "ready"}>
+                      <button
+                        type="button"
+                        className="fy-abshow__ep-main"
+                        aria-label={playable ? `Play ${heading}` : `Open ${heading}`}
+                        onClick={() => (playable ? listen(row.chapterId) : openChapter(row.chapterId))}
+                      >
+                        {row.planned || thumb === null ? (
+                          <span className={cx("fy-abshow__th", row.planned && "fy-abshow__th--none")} aria-hidden="true">{row.planned ? row.order : <img className="fy-abshow__plate" src={productionPlate(production.meta)} alt="" />}</span>
+                        ) : (
+                          <span className="fy-abshow__th" aria-hidden="true">
+                            <Portrait worldSlug={slug} path={thumb} label="" radius={0} loading="lazy" />
+                            {playable && <span className="fy-abshow__pl"><span><PlaySolid size={20} /></span></span>}
+                            {heard !== null && <span className="fy-abshow__pb"><i style={{ width: `${heard}%` }} /></span>}
+                          </span>
+                        )}
+                        <span className="fy-abshow__tx">
+                          <span className="fy-abshow__nm">{heading}</span>
+                          <span className="fy-abshow__m">
+                            {seconds > 0 && <span className="fy-abshow__d">{formatBookLength(seconds)} {chapterEstimated ? "estimated" : "recorded"}</span>}
+                            {state !== null && <span className="fy-abshow__st" data-testid="audiobook-row-state">{state}</span>}
+                          </span>
+                        </span>
+                        {synopsis !== undefined && synopsis.trim() !== "" && <span className="fy-abshow__syn">{synopsis}</span>}
+                      </button>
+                      <button type="button" className="fy-abshow__go" aria-label={`Open ${heading}`} title="Open" onClick={() => openChapter(row.chapterId)} data-testid="audiobook-row-open">
+                        <ChevronRight size={16} stroke={1.9} />
+                      </button>
+                    </div>
+                  );
+                })}
+                {credits !== null && <CreditRow which="closing" credit={credits.closing} slug={slug} art={hasArt ? art : null} plate={productionPlate(production.meta)} onOpen={() => setCrediting(true)} />}
+              </div>
+            ) : (
+              <EmptyState title={door === null ? (held?.refused ?? "Opening…") : "No chapters yet"} />
+            )}
+          </section>
         </div>
-      </section>
-      {/* Held at the foot once the door lands; while it opens there is no count and no price to
-          hold, and "0 blocks · price unavailable" read as an answer. */}
-      {phone && door !== null && <HeldBar className="fy-abdoor-held"><span>{totalBlocks} blocks · {price === null ? "price unavailable" : price.estimatedMicroUsd === 0 ? "free" : `${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}`}</span>{primary}</HeldBar>}
-      <div className="fy-abdoor__voices" data-testid="audiobook-voices">
-        <nav className="fy-seg" aria-label="Reading">
-          <button type="button" className={cx("fy-seg__item", reading === "narrator" && "fy-seg__item--active")} disabled={running} onClick={() => setAudiobookReading(worldId, prodId, "narrator")}>
-            Narrator
-          </button>
-          <button type="button" className={cx("fy-seg__item", reading === "performed" && "fy-seg__item--active")} disabled={running} onClick={() => setAudiobookReading(worldId, prodId, "performed")}>
-            Performed
-          </button>
-          <button type="button" className={cx("fy-seg__item", reading === "cast" && "fy-seg__item--active")} disabled={running} onClick={() => setAudiobookReading(worldId, prodId, "cast")}>
-            Cast
-          </button>
-        </nav>
-        {(door?.voices ?? []).map((voice, index) => (
-          <VoiceChip
-            key={`${voice.sheet ?? ""}:${voice.name}`}
-            name={voice.name}
-            voice={voice.voice}
-            state={voice.state}
-            blocks={voice.blocks}
-            {...(phone && index === 0 && voice.state === "narrator" && voice.voice ? { compactDetail: `${readerPlace(voice.voice.provider, voice.voice.local)} · ${price === null ? "price unavailable" : price.estimatedMicroUsd === 0 ? "free" : `${priceWord}${formatMicroUsd(price.estimatedMicroUsd)}`}` } : {})}
-            {...(voice.awaiting !== undefined ? { awaiting: voice.awaiting } : {})}
-            {...(index > 0 && voice.state === "narrator" ? { performer: true } : {})}
-            {...(voice.note !== undefined ? { note: voice.note } : {})}
-            {...(voice.noteHeld === true ? { noteHeld: true } : {})}
-            {...(voice.book === true ? { book: true } : {})}
-            {...(index === 0 && voice.state === "narrator" ? { onPress: () => setNarrating(true) } : index > 0 && voice.state === "narrator" ? { onPress: () => setNotesOpen(true) } : {})}
-            to={voice.sheet !== undefined ? `/w/${worldId}/cast/${encodeURIComponent(voice.sheet)}/voice` : undefined}
-          />
-        ))}
-        {door !== null && door.unattributed > 0 && <VoiceChip name="unattributed" state="no voice" blocks={door.unattributed} />}
       </div>
-      {/* The book's reading (design turn 184c): the book note and each performed speaker's note, opened from a speaker's chip. */}
-      {notesOpen && door !== null && reading === "performed" && (
-        <BookReadingPanel
+      {phone && scrolled && (
+        <div className="fy-abshow__pbar" data-testid="audiobook-pbar">
+          <button type="button" aria-label="Back" onClick={() => navigate(`/w/${worldId}/p/${prodId}`)}>
+            <ChevronLeft size={20} stroke={1.9} />
+          </button>
+          <span>{title}</span>
+          <MoreMenu open={barMenu} onOpen={setBarMenu} dot={warning !== null} items={menuItems} bare />
+        </div>
+      )}
+      {/* The player's place in the page's flow (rule 9): it docks here, under the page's scroll. */}
+      <div ref={dock} className="fy-abshow__dock" />
+      {picturing && <PicturesSheet worldId={worldId} production={production} onClose={() => setPicturing(false)} />}
+      {sheet && (
+        <ReadingSheet
           worldId={worldId}
           productionId={prodId}
-          title={`Performed · ${door.voices[0]?.name ?? DEFAULT_NARRATOR.label}`}
-          bookNote={production.audiobook?.note}
-          speakers={door.voices.slice(1).filter((voice) => voice.state === "narrator").map((voice) => {
-            const key = voice.sheet ?? voice.name;
-            const source = production.audiobook?.noteSources?.[key];
-            return { key, name: voice.name, ...(voice.note !== undefined ? { note: voice.note } : {}), ...(source !== undefined ? { source } : {}) };
-          })}
-          onDone={() => setNotesOpen(false)}
-          {...(requestsPanel !== null ? { requests: requestsPanel } : {})}
+          production={production}
+          door={door}
+          reading={reading}
+          running={running}
+          onNarrator={() => setNarrating(true)}
+          {...(phone && world !== null ? { labels: characterLabels(world.sheets) } : {})}
+          onClose={() => setSheet(false)}
         />
       )}
-      {/* The book's requests (design turn 185d), where its reader can group; inside the book's reading when that is open. */}
-      {/* Under Performed the requests are a setting of the book's reading (185d) and wait inside
-          it; under a narrator's reading they are the one setting there is (design turn 192). */}
-      {requestsPanel !== null && reading !== "performed" && <BookRequests {...requestsPanel} />}
-      {narrating && door !== null && worldId !== undefined && prodId !== undefined && (
+      {crediting && credits !== null && (
+        <CreditsSheet
+          worldId={worldId}
+          productionId={prodId}
+          slug={slug}
+          credits={credits}
+          refused={creditsAnswer?.refused}
+          connected={connection === "open"}
+          onClose={() => setCrediting(false)}
+        />
+      )}
+      {narrating && door !== null && (
         <NarratorDialog
           worldId={worldId}
           productionId={prodId}
           narratorLabel={door.voices[0]?.name ?? DEFAULT_NARRATOR.label}
-          {...(production?.audiobook?.narrator !== undefined ? { bookNarrator: production.audiobook.narrator } : {})}
+          {...(production.audiobook?.narrator !== undefined ? { bookNarrator: production.audiobook.narrator } : {})}
           appLabel={narratorLabelFor(app?.narrator ?? null, world?.meta.worldId)}
           {...(app?.narrator ? { appProvider: app.narrator.provider } : {})}
           castProviders={door.voices.filter((voice) => voice.state === "reads" && voice.voice !== undefined).map((voice) => voice.voice!.provider)}
           trial={door.rows[0] !== undefined ? { chapterFile: door.rows[0].file, block: "title" } : null}
-          slug={world?.meta.slug}
-          data={line.line}
+          slug={slug}
+          data={meta}
           onClose={() => setNarrating(false)}
         />
       )}
-      {(bookNote !== null || note !== undefined) && (
-        <div className="fy-abdoor__note fy-mono" data-testid="audiobook-note">
-          {bookNote !== null && (
-            <span className={cx(book?.state !== "read" && "fy-ch__who-where--warn")}>
-              {bookNote}
-              <button type="button" className="fy-ab__cue-x" aria-label="Put away" onClick={() => dismissAudiobookBook(prodId)}>
-                ×
-              </button>
-            </span>
-          )}
-          {note !== undefined && (
-            <span>
-              {[...(note.held > 0 ? [`${note.held} held`] : []), ...(note.dropped > 0 ? [`${note.dropped} dropped`] : [])].join(" · ")} · {note.chapters} chapter{note.chapters === 1 ? "" : "s"}
-              <button type="button" className="fy-ab__cue-x" aria-label="Put away" onClick={() => dismissAudiobookNote(prodId)}>
-                ×
-              </button>
-            </span>
-          )}
-        </div>
-      )}
-      {/* The chapters as one strip (design turn 190a): each chapter as wide as it is long, solid where read, filled to its share where part read, hatched where not. */}
-      <div className="fy-ch__target fy-ch__target--page fy-abstrip" role="progressbar" aria-valuemin={0} aria-valuemax={Math.max(1, totalBlocks)} aria-valuenow={madeBlocks} data-testid="audiobook-bar">
-        {rows.length === 0 ? (
-          <span className="fy-abstrip__seg" style={{ flex: 1 }}>
-            <i style={{ width: "0%" }} />
-          </span>
-        ) : (
-          rows.map((row) => (
-            <span key={row.chapterId} className={cx("fy-abstrip__seg", row.planned && "fy-abstrip__seg--planned")} style={{ flex: Math.max(1, row.total) }} title={`${row.title} · ${audiobookRowLabel(row)}`}>
-              <i style={{ width: `${row.total === 0 ? 0 : Math.round((row.made / row.total) * 100)}%` }} />
-            </span>
-          ))
-        )}
-      </div>
-      {rows.length > 0 ? (
-        <div className="fy-ledger" data-testid="audiobook-rows">
-          {rows.map((row) => {
-            const run = runs[`${worldId}/${prodId}/${row.chapterId}`];
-            // A chapter the book has read while the door's answer is still the old one reads
-            // as its run ended (codex on PR 1187): every block not made was tried (R-16), so
-            // the made and the flagged are the row's plus the run's; the time waits for the door.
-            const ended = run !== undefined && run.state !== "reading" && run.state !== "priced" && run.made + run.flagged > 0 && !row.planned && row.castTrouble === undefined
-              ? { ...row, made: Math.min(row.total, row.made + run.made), stale: 0, flagged: run.flagged, notMade: Math.max(0, row.total - row.made - run.made - run.flagged), seconds: null }
-              : row;
-            const label = run?.state === "reading" ? `reading… ${run.made} of ${run.toMake}` : audiobookRowLabel(ended);
-            const warn = row.castTrouble !== undefined || (ended.flagged > 0 && run?.state !== "reading");
-            return (
-              <button
-                key={row.chapterId}
-                type="button"
-                className="fy-row"
-                data-testid="audiobook-row"
-                data-state={row.planned ? "planned" : label}
-                onClick={() => navigate(`/w/${worldId}/p/${prodId}/story/chapters/${encodeURIComponent(row.chapterId)}?view=audiobook`)}
-              >
-                <span className="fy-mono">{pad(row.order)}</span>
-                <span className="fy-row__name">{row.title}{phone && ` · v${row.version}`}</span>
-                <Badge tone="outline">v{row.version}</Badge>
-                <span className={cx("fy-row__meta", warn && "fy-ch__who-where--warn", row.planned && "fy-abdoor__planned")}>{label}</span>
-                <span className="fy-row__chev">
-                  <ChevronRight size={15} />
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      ) : (
-        <EmptyState title={door === null ? (held?.refused ?? "Opening…") : "No chapters yet"} />
-      )}
+      {listening !== null && <AudiobookPlayerView worldId={worldId} production={production} {...(listening.chapterId !== undefined ? { chapterId: listening.chapterId } : {})} onClose={() => setListening(null)} />}
       {book?.state === "priced" && book.price !== undefined && (
         <BookPriceSheet
           price={book.price}
@@ -544,6 +783,312 @@ export function AudiobookScreen() {
         />
       )}
     </div>
+  );
+}
+
+/** The ⋯ press and its menu (199d): each entry its label, its data and, for Reading, the warning word. */
+function MoreMenu({ open, onOpen, dot, items, bare = false }: {
+  open: boolean;
+  onOpen: (open: boolean) => void;
+  dot: boolean;
+  items: ReadonlyArray<{ label: string; data: readonly string[]; warn: string | null; onPress: () => void; testId: string }>;
+  /** The phone's bar draws the press plain, on the page's colours. */
+  bare?: boolean;
+}) {
+  const box = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: Event) => {
+      if (box.current !== null && !box.current.contains(event.target as Node)) onOpen(false);
+    };
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onOpen(false);
+    };
+    document.addEventListener("pointerdown", away);
+    document.addEventListener("keydown", key);
+    return () => {
+      document.removeEventListener("pointerdown", away);
+      document.removeEventListener("keydown", key);
+    };
+  }, [open, onOpen]);
+  return (
+    <span ref={box} className="fy-abshow__more">
+      <button
+        type="button"
+        className={cx(!bare && "fy-abshow__btn fy-abshow__btn--ic", !bare && open && "fy-abshow__btn--on")}
+        aria-label="More"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => onOpen(!open)}
+        data-testid={bare ? "audiobook-bar-more" : "audiobook-more"}
+      >
+        <More size={18} stroke={2.4} />
+        {dot && <i className="fy-abshow__dot" data-testid="audiobook-more-dot" />}
+      </button>
+      {open && (
+        <div className="fy-abshow__menu" role="menu" aria-label="More">
+          {items.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              role="menuitem"
+              data-testid={item.testId}
+              onClick={() => {
+                onOpen(false);
+                item.onPress();
+              }}
+            >
+              <span>{item.label}</span>
+              {item.data.map((value) => <em key={value}>{value}</em>)}
+              {item.warn !== null && <em className="fy-abshow__w">{item.warn}</em>}
+            </button>
+          ))}
+        </div>
+      )}
+    </span>
+  );
+}
+
+/** The cast's row: more cards than fit scroll sideways, with arrows on hover (rule 6). */
+function CastRow({ children }: { children: ReactNode }) {
+  const strip = useRef<HTMLDivElement>(null);
+  const step = (direction: 1 | -1) => {
+    const element = strip.current;
+    if (element !== null) element.scrollBy?.({ left: direction * element.clientWidth * 0.8, behavior: "smooth" });
+  };
+  return (
+    <div className="fy-abshow__castwrap">
+      <div ref={strip} className="fy-abshow__cast" data-testid="audiobook-cast">
+        {children}
+      </div>
+      <button type="button" className="fy-abshow__arrow fy-abshow__arrow--prev" aria-label="Earlier in the cast" tabIndex={-1} onClick={() => step(-1)}>
+        <ChevronLeft size={16} stroke={1.9} />
+      </button>
+      <button type="button" className="fy-abshow__arrow fy-abshow__arrow--next" aria-label="Later in the cast" tabIndex={-1} onClick={() => step(1)}>
+        <ChevronRight size={16} stroke={1.9} />
+      </button>
+    </div>
+  );
+}
+
+/** A portrait and a name, and nothing else (rule 6); the narrator's says so, with a voice mark. */
+function CastCard({ name, role, slug, picture, onPress }: { name: string; role?: string; slug: string | undefined; picture: string | null; onPress?: () => void }) {
+  return (
+    <button type="button" className={cx("fy-abshow__card", role !== undefined && "fy-abshow__card--narrator")} disabled={onPress === undefined} onClick={onPress} data-testid="audiobook-card">
+      <span className="fy-abshow__card-im">
+        {picture !== null ? <Portrait worldSlug={slug} path={picture} label="" radius={0} loading="lazy" /> : <span className="fy-abshow__ini" aria-hidden="true"><User size={30} stroke={1.5} /></span>}
+        {role !== undefined && (
+          <span className="fy-abshow__wv" aria-hidden="true">
+            <Waveform size={15} stroke={2} />
+          </span>
+        )}
+      </span>
+      <span className="fy-abshow__card-nm">{name}</span>
+      {role !== undefined && <span className="fy-abshow__card-rl">{role}</span>}
+    </button>
+  );
+}
+
+/**
+ * Reading (199e): exactly what the page used to hold, in 185d's row grammar — the reading, held
+ * while a run goes; the narrator, a row to 165c; a row a speaker, under Cast their voice or `no
+ * voice · narrator` in warning and under Performed their note (184c), each a press to their Voice
+ * page with their blocks as data; the lines nobody is cast for; the book note under every reading,
+ * since it is sent with every block; the requests where the reader groups (185d); Done.
+ */
+function ReadingSheet({ worldId, productionId, production, door, reading, running, labels, onNarrator, onClose }: {
+  worldId: string;
+  productionId: string;
+  production: ProductionBundle;
+  door: AudiobookDoor | null;
+  reading: "narrator" | "performed" | "cast";
+  running: boolean;
+  /** On a phone a character goes by their short name in a row (R-127), the full name on its tooltip. */
+  labels?: ReadonlyMap<string, { label: string; full: string }>;
+  onNarrator: () => void;
+  onClose: () => void;
+}) {
+  const navigate = useNavigate();
+  const connection = useStoreSelector(store => store.connection);
+  const held = connection !== "open" || running;
+  const shell = useRef<HTMLDivElement>(null);
+  const [askId, setAskId] = useState<string | null>(null);
+  const ask = useAudiobookAsks()[askId ?? ""];
+  useEffect(() => {
+    const element = shell.current;
+    if (!element) return;
+    const opener = element.ownerDocument.activeElement as HTMLElement | null;
+    element.focus();
+    return () => {
+      if (opener && opener.isConnected && typeof opener.focus === "function") opener.focus();
+    };
+  }, []);
+  const narrator = door?.voices[0];
+  const speakers = door?.voices.slice(1) ?? [];
+  const named = (voice: { sheet?: string; name: string }) => (voice.sheet !== undefined ? labels?.get(voice.sheet)?.label : undefined) ?? voice.name;
+  // The book rides along (design turn 200, R-168): the Voice tab then hears the narration on this book's narrator.
+  const voicePage = (sheet: string | undefined) => (sheet === undefined ? undefined : () => navigate(`/w/${worldId}/cast/${encodeURIComponent(sheet)}/voice?book=${encodeURIComponent(productionId)}`));
+  const blocks = (count: number) => `${count} block${count === 1 ? "" : "s"}`;
+  // Where a speaker's note comes from (design turn 200, R-167): the book's own, or their character's narration.
+  const noteSource = (key: string, note: string | undefined) => (production.audiobook?.notes?.[key] !== undefined ? "this book" : note !== undefined ? "character" : undefined);
+  const missing = reading === "performed" && speakers.some((voice) => voice.state === "narrator" && voice.note === undefined);
+  const requests = door?.requests !== undefined
+    ? {
+        worldId,
+        productionId,
+        setting: door.requests,
+        reader: door.voices[0]?.voice !== undefined ? providerName(door.voices[0].voice.provider) : "this reader",
+        ...(door.price.requests !== undefined ? { counts: { requests: door.price.requests, perParagraph: door.price.perParagraph ?? door.price.cloudBlocks } } : {}),
+      }
+    : null;
+  return (
+    <>
+      <div className="fy-abshow__scrim" onClick={onClose} aria-hidden="true" />
+      <div
+        ref={shell}
+        className="fy-abshow__sheet"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="audiobook-reading-title"
+        tabIndex={-1}
+        data-testid="reading-sheet"
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            onClose();
+          }
+        }}
+      >
+        <div className="fy-abshow__sheet-hd">
+          <h3 id="audiobook-reading-title">Reading</h3>
+          <button type="button" className="fy-abshow__x" aria-label="Close" onClick={onClose}>
+            <X size={15} stroke={1.9} />
+          </button>
+        </div>
+        <div className="fy-abshow__sheet-bdy">
+          <div className="fy-abshow__kv">
+            <b>Reading</b>
+            <nav className="fy-seg" aria-label="Reading">
+              {READINGS.map(([value, label]) => (
+                <button key={value} type="button" className={cx("fy-seg__item", reading === value && "fy-seg__item--active")} disabled={running} onClick={() => setAudiobookReading(worldId, productionId, value)}>
+                  {label}
+                </button>
+              ))}
+            </nav>
+          </div>
+          {narrator !== undefined && (
+            <button type="button" className="fy-abshow__sp fy-abshow__sp--key" data-testid="reading-narrator" onClick={onNarrator}>
+              <b>Narrator</b>
+              <span className="fy-abshow__v">
+                {narrator.name}
+                {narrator.voice !== undefined && <small>{[...(narrator.book === true ? ["this book"] : []), readerPlace(narrator.voice.provider, narrator.voice.local)].join(" · ")}</small>}
+                {narrator.unavailable !== undefined && <small className="fy-abshow__w" data-testid="reading-narrator-unavailable">{narrator.unavailable}</small>}
+              </span>
+              <span className="fy-abshow__mono">{blocks(narrator.blocks)}</span>
+              <span className="fy-abshow__c"><ChevronRight size={16} stroke={1.9} /></span>
+            </button>
+          )}
+          {/* The chapters read by a narrator of their own (R-195), set from the chapter. */}
+          {(door?.chapterNarrators ?? []).map((row) => (
+            <div key={`${row.voice?.provider ?? ""}/${row.name}`} className="fy-abshow__sp" data-testid="reading-chapter-narrator">
+              <b>{chapterSpans(row.chapters ?? [], door?.rows ?? [])}</b>
+              <span className="fy-abshow__v">
+                {row.name}
+                {row.voice !== undefined && <small>{readerPlace(row.voice.provider, row.voice.local)}</small>}
+                {row.unavailable !== undefined && <small className="fy-abshow__w">{row.unavailable}</small>}
+              </span>
+              <span className="fy-abshow__mono">{blocks(row.blocks)}</span>
+            </div>
+          ))}
+          {(speakers.length > 0 || (door?.unattributed ?? 0) > 0) && (
+            <>
+              <div className="fy-abshow__lbl">
+                <span>Speakers</span>
+                <span className="fy-abshow__mono">{speakers.length}</span>
+              </div>
+              <div className="fy-abshow__speakers" data-testid="reading-speakers">
+                {speakers.map((voice) => {
+                  const key = voice.sheet ?? voice.name;
+                  if (reading === "performed" && voice.state === "narrator") {
+                    const source = noteSource(key, voice.note);
+                    const speaker = { key, name: voice.name, ...(voice.note !== undefined ? { note: voice.note } : {}) };
+                    return (
+                      <div key={key} className="fy-abshow__sp" data-testid="audiobook-voice" data-state={voice.state}>
+                        <b title={voice.name}>{named(voice)}</b>
+                        <span className="fy-abshow__v">
+                          <SpeakerNoteInput worldId={worldId} productionId={productionId} speaker={speaker} disabled={held} />
+                          <small className={cx(voice.noteHeld === true && "fy-abshow__w")}>
+                            {voice.noteHeld === true ? "note · not on this reader" : `${voice.note?.length ?? 0} / ${PERFORMANCE_NOTE_MAX}${source === undefined ? "" : ` · ${source}`}`}
+                          </small>
+                        </span>
+                        <span className="fy-abshow__mono">{blocks(voice.blocks)}</span>
+                        {voice.sheet !== undefined ? (
+                          <button type="button" className="fy-abshow__c" aria-label={`Voice · ${voice.name}`} onClick={voicePage(voice.sheet)}>
+                            <ChevronRight size={16} stroke={1.9} />
+                          </button>
+                        ) : (
+                          <span className="fy-abshow__c" />
+                        )}
+                      </div>
+                    );
+                  }
+                  const warn = voice.state === "no voice" || voice.state === "voice unavailable";
+                  const value =
+                    voice.state === "reads" && voice.voice !== undefined
+                      ? voice.voice.label
+                      : voice.state === "recorded"
+                        ? `recorded${voice.awaiting !== undefined && voice.awaiting > 0 ? ` · ${voice.awaiting} awaiting` : ""}`
+                        : voice.state === "narrator"
+                          ? "narrator"
+                          : `${voice.state} · narrator`;
+                  const go = voicePage(voice.sheet);
+                  const inside = (
+                    <>
+                      <b title={voice.name}>{named(voice)}</b>
+                      <span className={cx("fy-abshow__v", warn && "fy-abshow__v--w")}>
+                        {value}
+                        {voice.state === "reads" && voice.voice !== undefined && <small>{readerPlace(voice.voice.provider, voice.voice.local)}</small>}
+                      </span>
+                      <span className="fy-abshow__mono">{blocks(voice.blocks)}</span>
+                      <span className="fy-abshow__c">{go !== undefined && <ChevronRight size={16} stroke={1.9} />}</span>
+                    </>
+                  );
+                  return go === undefined ? (
+                    <div key={key} className="fy-abshow__sp" data-testid="audiobook-voice" data-state={voice.state}>{inside}</div>
+                  ) : (
+                    <button key={key} type="button" className="fy-abshow__sp" data-testid="audiobook-voice" data-state={voice.state} onClick={go}>{inside}</button>
+                  );
+                })}
+                {door !== null && door.unattributed > 0 && reading !== "narrator" && (
+                  <div className="fy-abshow__sp" data-testid="audiobook-voice" data-state="unattributed">
+                    <b>unattributed</b>
+                    <span className="fy-abshow__v fy-abshow__v--w">{door.unattributed} line{door.unattributed === 1 ? "" : "s"} · narrator</span>
+                    <span className="fy-abshow__mono" />
+                    <span className="fy-abshow__c" />
+                  </div>
+                )}
+              </div>
+              {reading === "performed" && (
+                <div className="fy-abshow__draft">
+                  <Button variant="ghost" size="sm" disabled={!missing || held || ask?.state === "working"} data-testid="draft-from-sheets" onClick={() => setAskId(draftAudiobookSpeakerNotes(worldId, productionId))}>
+                    {ask?.state === "working" ? "drafting…" : "Draft from the sheets"}
+                  </Button>
+                  {ask?.state === "drafted" && <span>{ask.drafted} drafted</span>}
+                  {ask?.state === "refused" && <span className="fy-ch__who-where--warn">{ask.refused}</span>}
+                </div>
+              )}
+            </>
+          )}
+          <NoteRow label="Book note" value={production.audiobook?.note} max={CADENCE_NOTE_MAX} disabled={held} stacked area onCommit={(value) => setAudiobookReadingNote(worldId, productionId, value)} />
+          {requests !== null && <BookRequests {...requests} />}
+        </div>
+        <div className="fy-abshow__sheet-ft">
+          <Button variant="primary" size="sm" onClick={onClose} data-testid="reading-done">
+            Done
+          </Button>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -560,7 +1105,7 @@ function BookPriceSheet({ price, onClose, onConfirm }: {
   const vendors = [...new Set(price.voices.filter((line) => !line.local).map((line) => providerName(line.provider)))];
   // A book Google's free day cannot cover: the reads it needs against the day's, and how far it goes.
   const free = price.freePlan !== undefined ? freePlanAskCopy(price.freePlan) : null;
-  const models = useStore().state?.app.manifest?.models;
+  const models = useStoreSelector(store => store.state?.app.manifest?.models);
   return (
     <EditorDialog open title="Read the book" subtitle={`${price.chapters} chapter${price.chapters === 1 ? "" : "s"} · ${price.characters.toLocaleString()} characters · ${price.cloudBlocks} cloud line${price.cloudBlocks === 1 ? "" : "s"}`} onClose={onClose} width={460} labelledBy="read-book-title">
       <div className="fy-exsheet" data-testid="read-book-sheet">
@@ -579,13 +1124,14 @@ function BookPriceSheet({ price, onClose, onConfirm }: {
         {vendors.length > 0 && <div className="fy-ms__line">words and the voice to {vendors.join(", ")} · text in Activity</div>}
         {(price.notices ?? []).map((notice) => <div key={notice} className="fy-ms__line" data-testid="read-book-notice">{notice}</div>)}
         {free !== null && <div className="fy-ms__line fy-ch__who-where--warn" data-testid="read-book-free-plan">{free.line}</div>}
+        {price.groupingUnavailable && <div className="fy-ms__line" role="note"><b>Grouping unavailable</b><p>Local transcription is unavailable. Cancel and try Read again when it reconnects.</p></div>}
         {price.requests !== undefined && <div className="fy-ms__line" data-testid="read-book-requests">{price.requests} request{price.requests === 1 ? "" : "s"} · {price.perParagraph ?? price.cloudBlocks} per paragraph</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={onConfirm} data-testid="read-book-confirm">
-            {free !== null && price.estimatedMicroUsd === 0 ? free.confirm : price.requests !== undefined ? `Confirm · ${price.requests} request${price.requests === 1 ? "" : "s"} · ${speechPricePrefix(models, price.voices.map((line) => line.provider))}${formatMicroUsd(price.estimatedMicroUsd)}` : `Confirm ${price.characters.toLocaleString()} characters · ${speechPricePrefix(models, price.voices.map((line) => line.provider))}${formatMicroUsd(price.estimatedMicroUsd)}`}
+          <Button variant="primary" onClick={onConfirm} disabled={price.groupingUnavailable === true} data-testid="read-book-confirm">
+            {price.groupingUnavailable ? "Waiting for local transcription" : free !== null && price.estimatedMicroUsd === 0 ? free.confirm : price.requests !== undefined ? `Confirm · ${price.requests} request${price.requests === 1 ? "" : "s"} · ${speechPricePrefix(models, price.voices.map((line) => line.provider))}${formatMicroUsd(price.estimatedMicroUsd)}` : `Confirm ${price.characters.toLocaleString()} characters · ${speechPricePrefix(models, price.voices.map((line) => line.provider))}${formatMicroUsd(price.estimatedMicroUsd)}`}
           </Button>
         </div>
       </div>

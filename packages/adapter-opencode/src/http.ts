@@ -1,10 +1,3 @@
-/**
- * The OpenCode HTTP surface (SPEC-005). One place builds URLs, attaches the directory scope,
- * and extracts human-readable error detail. Adopted from Arke's adapter, including the
- * Windows fix: the `directory` parameter goes on the wire in forward-slash form, because
- * OpenCode ≥1.17.13 validates it with POSIX isAbsolute and 500s on `C:\…` while `C:/…` passes.
- */
-
 export class OpenCodeError extends Error {
   constructor(
     readonly method: string,
@@ -18,14 +11,13 @@ export class OpenCodeError extends Error {
   }
 }
 
-/** Bounded, human-readable reason from an OpenCode error body — v1's `{name, data.message}`
- * and v2's measured `{_tag, message}` envelope both. */
+/** Bounded, human-readable reason from an OpenCode v2 error body. */
 export function errorDetailFrom(bodyText: string): string | undefined {
   const text = bodyText.trim();
   if (!text) return undefined;
   try {
-    const parsed = JSON.parse(text) as { name?: string; _tag?: string; message?: string; data?: { message?: string } };
-    const parts = [parsed.name ?? parsed._tag, parsed.data?.message ?? parsed.message].filter(
+    const parsed = JSON.parse(text) as { _tag?: string; message?: string };
+    const parts = [parsed._tag, parsed.message].filter(
       (s): s is string => typeof s === "string" && s.length > 0,
     );
     if (parts.length > 0) return parts.join(": ").slice(0, 300);
@@ -33,79 +25,4 @@ export function errorDetailFrom(bodyText: string): string | undefined {
     /* not JSON */
   }
   return text.slice(0, 200);
-}
-
-export interface OpenCodeHttpOptions {
-  /** Resolved lazily so the adapter can outlive supervisor restarts on new ports. */
-  baseUrl: () => string;
-}
-
-export class OpenCodeHttp {
-  constructor(private readonly opts: OpenCodeHttpOptions) {}
-
-  url(path: string, directory?: string): string {
-    const u = new URL(path, this.opts.baseUrl());
-    if (directory !== undefined) {
-      u.searchParams.set("directory", directory.replaceAll("\\", "/"));
-    }
-    return u.toString();
-  }
-
-  async req<T>(
-    method: string,
-    path: string,
-    body?: unknown,
-    init?: { signal?: AbortSignal; directory?: string },
-  ): Promise<T> {
-    const res = await fetch(this.url(path, init?.directory), {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      ...(init?.signal ? { signal: init.signal } : {}),
-    });
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      throw new OpenCodeError(method, path, res.status, res.statusText, errorDetailFrom(errText));
-    }
-    const text = await res.text();
-    return (text ? JSON.parse(text) : undefined) as T;
-  }
-
-  /**
-   * Open the SSE stream. `/global/event` first, and the order is the whole point: all three
-   * endpoints accept the connection, so "first one that answers" silently picks a channel that
-   * carries almost nothing. Measured against OpenCode 1.18.10 over one turn — /global/event
-   * 35 KB with the deltas and the idle, /api/event 2.7 KB with a single update, /event a
-   * heartbeat and nothing else. A turn ran and the app never heard about it.
-   */
-  async openEventStream(signal?: AbortSignal): Promise<{ path: string; body: ReadableStream<Uint8Array> }> {
-    // Never dial port 0 — the supervisor has no child yet. Dialling anyway is how the app went
-    // deaf on every boot: /global/event was tried before the port existed and REJECTED, the
-    // child came up milliseconds later, and the loop fell through to /api/event on the real
-    // port — connected, heartbeating, and carrying nothing. A connection failure must retry
-    // the SAME channel, never downgrade it; only an HTTP answer saying "no such endpoint"
-    // (404) may move the loop on.
-    while (new URL(this.opts.baseUrl()).port === "0") {
-      if (signal?.aborted) throw new OpenCodeError("GET", "/global/event", 0, "aborted before the harness had a port");
-      await new Promise((r) => {
-        const t = setTimeout(r, 250);
-        (t as { unref?: () => void }).unref?.();
-      });
-    }
-    for (const path of ["/global/event", "/api/event", "/event"]) {
-      const res = await fetch(this.url(path), {
-        headers: { Accept: "text/event-stream" },
-        ...(signal ? { signal } : {}),
-      }).catch(() => null);
-      if (res?.ok && res.body) return { path, body: res.body };
-      // Connection failure (null) or a server error: this endpoint may still be the right one —
-      // fail the attempt and let the caller's backoff retry it, rather than sliding down to a
-      // channel that answers but starves.
-      if (res === null || res.status >= 500) {
-        throw new OpenCodeError("GET", path, res?.status ?? 0, "event stream unreachable — retry, do not downgrade");
-      }
-      // 404 and friends: genuinely absent on this server generation — try the next channel.
-    }
-    throw new OpenCodeError("GET", "/api/event", 0, "no event stream reachable");
-  }
 }

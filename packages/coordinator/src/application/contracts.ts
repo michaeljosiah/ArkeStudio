@@ -22,6 +22,12 @@ export interface DeliveryContent { kind: "world" | "proposal" | "job" | "artifac
 export type EngineDeliveredJob = Job & { deliveredArtifacts: Array<{ id: string; sha256: string }> };
 
 export interface EnginePolicy {
+  /**
+   * False for a policy that neither narrows a world nor keeps delivery receipts, as the trusted
+   * single-author one does: a world read then skips the copies and the whole-bundle hash made only
+   * for project and deliver, about 0.45 s a world open on a 13 MB world (issue 2793). Omitted is true.
+   */
+  readonly needsReceipts?: boolean;
   /** Must recheck current authority, including revocation, on each invocation. */
   authorise(context: EngineContext, action: EngineAction, resource: EngineResource): Promise<void>;
   /** Return only the caller's view. The input is a detached copy, not mutable engine state. */
@@ -40,6 +46,8 @@ export interface SheetProposalInput {
   sentence: string;
   production?: string;
   attendedSurface?: "sheet-list" | "production-cast";
+  /** A writing service will turn the sentence into prose; otherwise it is a manual sketch. */
+  requiresDraft?: boolean;
 }
 export interface IllustrationInput {
   sheetId: string;

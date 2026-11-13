@@ -77,13 +77,36 @@ describe("what a production's artifacts page shows", () => {
     const html = renderAt(`${P}/artifacts`);
 
     assert.ok(html.includes('data-screen="production-artifacts"'), "the page mounts inside the production");
-    assert.ok(html.includes("harbour-bells.wav") || html.includes("The Vigil"), "the world's shelf is here");
+    assert.ok(html.includes("From the world 1"), "the world's shelf is one press away");
     assert.ok(html.includes("verse-notes.md"), "what this production owns is here");
     assert.ok(html.includes("watch-tone.wav"), "and so is its recording");
     assert.ok(
       !html.includes("ledger-scratch.wav"),
       "another production's scoped material is absent — this is the rule R-13 exists for",
     );
+  });
+
+  it("opens a book on its own files and names a finished page (issue 2722)", () => {
+    __setStateForTest(withArtifacts(ARTIFACTS.map((a) => a.id === "ar_mine_notes" ? { ...a, kind: "image" as const, file: "saltlight-page-3-01m6tfc3yjcp56bajjy4aq.jpg" } : a)));
+    const html = renderAt(`${P}/artifacts`).replaceAll("<!-- -->", "");
+    assert.ok(!html.includes("harbour-bells.wav"), "the world's files wait behind their lens");
+    assert.ok(html.includes("Page 3"), "not its file name");
+    assert.ok(!html.includes(">saltlight-page-3-"), "the file keeps its name for downloads only");
+  });
+
+  it("names a picture a screen asked for by that screen's title (issue 2765)", () => {
+    const state = withArtifacts(ARTIFACTS.map((a) => a.id === "ar_mine_notes" ? { ...a, kind: "image" as const, file: "one-comic-book-panel-take-1.png",
+      generation: { source: "bench", sessionId: "sess_01J8F3K2QW9VZX4N7M0RTYB6HC", takeId: "tk_01J8F3K2QW9VZX4N7M0RTYB6HC", takeNumber: 1, brief: "One comic book panel, a single image", references: [], keyframes: [], provider: "codex", model: "codex-image", params: { kind: "image", count: 1 }, costMicroUsd: 0 } } as never : a));
+    state.world!.benchSessions = [{ id: "sess_01J8F3K2QW9VZX4N7M0RTYB6HC", title: "Page 4 · panel 2", mode: "image", updatedAt: "2026-06-11T10:00:00Z", takeCount: 1, runningCount: 0, failedCount: 0, waitingCount: 0, picture: true }] as never;
+    __setStateForTest(state);
+    const html = renderAt(`${P}/artifacts`);
+    assert.ok(html.includes("Page 4 · panel 2"));
+    assert.ok(!html.includes("One comic book panel"));
+  });
+
+  it("opens on everything when it has nothing of its own yet", () => {
+    __setStateForTest(withArtifacts(ARTIFACTS.filter((a) => a.production === undefined)));
+    assert.ok(renderAt(`${P}/artifacts`).includes("harbour-bells.wav") || renderAt(`${P}/artifacts`).includes("The Vigil"));
   });
 
   it("counts the two scopes apart in one grid, rather than banding them", () => {
@@ -144,13 +167,13 @@ describe("the rail row that used to leave the production", () => {
   });
 
   it("counts what its own page shows, not the world's shelf", () => {
-    // Three in scope for this production; a world-only count would say 1 and a page-blind
-    // count would say 4. The row and the page's All chip are the same number by construction.
+    // Two its own; the world's would make it 3, and a page-blind count 4. The row and the chip it
+    // lands on are the same number by construction.
     __setStateForTest(withArtifacts());
     const html = renderAt(`${P}/artifacts`);
     const row = html.slice(html.indexOf(`href="${P}/artifacts"`));
-    assert.ok(row.includes(">3</span>"), "the rail row says three");
-    assert.ok(html.includes("All 3"), "and so does the chip it lands on");
+    assert.ok(row.includes(">2</span>"), "the rail row says two");
+    assert.ok(html.includes("Only here 2"), "and so does the chip it lands on");
   });
 });
 
@@ -266,13 +289,14 @@ describe("the lenses, once the page is live", () => {
     const chipText = () =>
       [...host.querySelectorAll("button.fy-filterchip")].map((b) => b.textContent ?? "");
 
-    assert.ok(chipText().some((t) => t.startsWith("Made here 2")), "both, under All");
     const press = (label: string) =>
       [...host.querySelectorAll("button.fy-filterchip")].find((b) => b.textContent?.startsWith(label));
+    await act(async () => { (press("All") as HTMLElement).click(); });
+    assert.ok(chipText().some((t) => t.startsWith("Made in Arke 2")), "both, under All");
     await act(async () => { (press("Only here") as HTMLElement).click(); });
-    assert.ok(chipText().some((t) => t.startsWith("Made here 1")), "one, under Only here");
+    assert.ok(chipText().some((t) => t.startsWith("Made in Arke 1")), "one, under Only here");
     await act(async () => { (press("From the world") as HTMLElement).click(); });
-    assert.ok(chipText().some((t) => t.startsWith("Made here 1")), "and one under From the world");
+    assert.ok(chipText().some((t) => t.startsWith("Made in Arke 1")), "and one under From the world");
 
     await act(async () => { root.unmount(); });
     host.remove();

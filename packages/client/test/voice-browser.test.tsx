@@ -99,3 +99,30 @@ it("filters Gemini metadata and previews the exact selected model and voice", as
     assert.deepEqual([preview.provider, preview.model, preview.voiceId, preview.maxMicroUsd], ["google", GEMINI_TTS_MODELS[0], "BritishReader", 5000]);
   } finally { await act(async () => root.unmount()); host.remove(); __setBridgeForTest(null); }
 });
+
+
+it("refreshes explicitly and preserves an unavailable book narrator (#1752)", async () => {
+  const { chapterNarrator } = await import("../src/screens/chapter-audiobook.js");
+  const calen = { provider: "elevenlabs", model: "eleven_v4", voiceId: "S44KQ3oLFckbxgyKfold", label: "Calen Voss" };
+  const input = { bookNarrator: calen, stored: null, worldId: "01J8F3K2QW9VZX4N7M0RTYB6E3" };
+  assert.deepEqual(chapterNarrator({ ...input, catalogue: null }), calen);
+  assert.deepEqual(chapterNarrator({ ...input, catalogue: [] }), calen);
+  assert.deepEqual(chapterNarrator({ ...input, catalogue: [{ ...voices[0]!, ...calen, unavailableReason: "offline" }] }), calen);
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({ send: (json: string) => sent.push(JSON.parse(json)) } as unknown as ArkeBridge);
+  __setStateForTest(FIXTURE_STATE);
+  const host = dom.document.createElement("div"); dom.document.body.append(host); const root = createRoot(host); const view = dialogRoot(host);
+  try {
+    await act(async () => root.render(<VoicePickerDialog open use="narration" chosenId={calen.voiceId} chosenModel={calen.model} chosenProvider={calen.provider} onClose={() => {}} onPick={() => {}} />));
+    await act(async () => __applyEventForTest({ at: new Date().toISOString(), type: "voice.catalogue", voices: [] }));
+    const refresh = [...view.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === "Refresh catalogue")!;
+    await act(async () => refresh.click());
+    assert.deepEqual(sent.at(-1), { kind: "voice-catalogue", refresh: true });
+    assert.match(view.textContent ?? "", /Loading voices/);
+    assert.ok(refresh.disabled);
+    await act(async () => __applyEventForTest({ at: new Date().toISOString(), type: "voice.catalogue", voices: [{ ...voices[0]!, ...calen }] }));
+    assert.ok(view.querySelector('[aria-label="Select Calen Voss"]'));
+    assert.equal(refresh.disabled, false);
+    assert.equal(sent.some(m => m.kind === "catalogue-voice-preview"), false);
+  } finally { await act(async () => root.unmount()); host.remove(); __setBridgeForTest(null); }
+});

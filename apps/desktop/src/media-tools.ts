@@ -1,6 +1,6 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { createAudioMediaTools, type AudioMediaTools, type MediaProcessRunner } from "@arke-studio/coordinator";
+import { createAudioMediaTools, createAgentMediaTools, type AgentMediaTools, type AudioMediaTools, type MediaProcessRunner } from "@arke-studio/coordinator";
 
 /** Shared byte-bounded process boundary for audio and video QC. Completion follows close,
  * not exit: cleanup must not race a child whose output/file handles are still open. */
@@ -48,7 +48,8 @@ export function createMediaProcessRunner(paths: { ffmpeg: string; ffprobe: strin
   };
 }
 
-export function audioMediaOptions(ffmpeg: string | null, ffprobe: string | null): { audioMediaTools?: AudioMediaTools } {
+export function audioMediaOptions(ffmpeg: string | null, ffprobe: string | null): { audioMediaTools?: AudioMediaTools; agentMediaTools?: AgentMediaTools } {
   if (!ffmpeg || !ffprobe || !existsSync(ffmpeg) || !existsSync(ffprobe)) return {};
-  return { audioMediaTools: createAudioMediaTools(createMediaProcessRunner({ ffmpeg, ffprobe })) };
+  const runner = createMediaProcessRunner({ ffmpeg, ffprobe });
+  return { audioMediaTools: createAudioMediaTools(runner), agentMediaTools: createAgentMediaTools(runner) };
 }

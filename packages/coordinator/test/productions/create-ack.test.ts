@@ -36,7 +36,7 @@ async function harness(root?: string, worldDir?: string) {
     observeEvent: (event) => events.push(event),
   });
   const send = (msg: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+    coordinator.dispatch(msg);
   const results = () => events.filter((e): e is CreateResult => e.type === "production.create-result");
   return { ...made, provider, coordinator, events, send, results };
 }

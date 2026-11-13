@@ -11,6 +11,8 @@ import { foldConversation } from "../../src/world-chat/fold.js";
 import { checkpointPath } from "../../src/world-chat/checkpoint.js";
 import { ProductionSetupService } from "../../src/productions/setup.js";
 import { ProductionSetupConversationStore } from "../../src/productions/setup-store.js";
+import { readWorldMeta } from "../../src/world/scan.js";
+import { PRODUCTION_TARGET_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { productionSetupBrief } from "../../src/productions/setup-brief.js";
 import { guardProductionSetupAuthority } from "../../src/productions/setup-authority.js";
 import { handleProductionSetupCommand } from "../../src/productions/setup-command.js";
@@ -173,13 +175,18 @@ describe("setup turns share conversation durability but no world-mutation author
       defaults: { episodeSecondsMin: 30, episodeSecondsMax: 45 },
     }, episodes: [{ key: "one", title: "One", scenes: [] }] }));
     assert.equal((await h.runner.send(h.log, h.id, "Micro drama: episodes forty seconds each, min thirty, max forty-five.")).status, "completed");
-    const defaults = { episodeSecondsMin: 30, episodeSecondsMax: 45, hookWindowSec: 3, exportPreset: "social-1080x1920" };
+    // Becoming a micro drama seeds the global app's Target (SPEC-052 R-6); the stated bounds win.
+    const defaults = { episodeCount: 50, episodeSecondsMin: 30, episodeSecondsMax: 45, hookWindowSec: 3, exportPreset: "social-1080x1920" };
     assert.deepEqual((await h.view())!.productionSetup!.draft.defaults, defaults);
+    assert.equal((await h.view())!.productionSetup!.draft.target?.audience, "global-app");
     const review = await h.service.review(h.id, 2);
     assert.deepEqual(review.review!.plan.initialSeason!.defaults, defaults);
     const created = await h.service.create(h.id, 2, review.review!.id);
     const season = JSON.parse(await readFile(join(h.world.dir, "productions", created.productionId!, "season.json"), "utf8"));
     assert.deepEqual(season.defaults, defaults);
+    // The Target travels with the season it describes, past the builds that cannot read it.
+    assert.equal(season.target.audience, "global-app");
+    assert.equal((await readWorldMeta(h.world.dir)).schemaVersion, PRODUCTION_TARGET_SCHEMA_VERSION);
   });
 
   it("refuses a retry record that races with completed production creation", async () => {
@@ -282,6 +289,68 @@ describe("setup turns share conversation durability but no world-mutation author
     assert.ok(!reads.includes("foreign-guest"));
     assert.match(brief, /openQuestions/);
     assert.match(brief, /defaults\?:\{episodeSecondsMin\?,episodeSecondsMax\?,hookWindowSec\?,exportPreset\?\}/);
+    // A micro drama with film arc notes cannot be reviewed; the spine of Na love or Juju landed
+    // there and blocked Review until it was moved by hand (2026-10-09).
+    assert.match(brief, /arcNotes is a film's: a micro drama keeps its arcs as named arcs/);
     await assert.rejects(productionSetupBrief(bundle, draft, async () => ({ result: {}, receipt: { status: "complete" } }) as never, 100), /larger writing-model context/);
+  });
+
+  // Adapt from (design turn 205, SPEC-052 R-14): the story's chapters in order, built from the world,
+  // with the beats its audiobook named read through the lease for the chapters that have a record.
+  it("carries the story a setup adapts as a digest of its chapters and their named beats", async () => {
+    const h = await setup(() => reply());
+    const bundle = structuredClone(h.world.getBundle());
+    const story = bundle.productions.find(production => production.meta.id === "the-ledger-of-nights")!;
+    const ordered = [...story.chapters].filter(chapter => chapter.retired !== true).sort((a, b) => a.order - b.order);
+    (ordered[0] as { audiobook?: unknown }).audiobook = { stamp: "x" };
+    const draft = { ...(await h.service.resume(h.id)).draft, kind: "microdrama" as const, source: { productionId: "the-ledger-of-nights" } };
+    const beatReads: string[] = [];
+    const brief = await productionSetupBrief(bundle, draft, async (tool, args) => {
+      if (tool === "get_chapter") {
+        beatReads.push(`${String(args.chapterId)}:${String(args.section)}`);
+        return { result: { target: { kind: "chapters", id: "x" }, observedRevisionOrDigest: "d", total: 1, nextCursor: null, complete: true,
+          items: [{ chapterId: args.chapterId, title: "t", beats: [{ name: "The bell under the water", whose: "Maren", paragraph: 1 }] }] },
+          receipt: { id: newId("check"), runId: newId("run"), tool: "target-read", status: "complete", consulted: [], at: AT } } as never;
+      }
+      return { result: { id: args.id }, receipt: { id: newId("check"), runId: newId("run"), tool: "get-entry", status: "complete", consulted: [], at: AT } } as never;
+    }, 400_000);
+    assert.deepEqual(beatReads, [`${ordered[0]!.id}:beats`], "beats are read only where an audiobook record stands");
+    assert.ok(brief.includes(`adapted from “${story.meta.title}” (the-ledger-of-nights)`));
+    const at = ordered.map(chapter => brief.indexOf(`"id":"${chapter.id}"`));
+    assert.ok(at.every((index, i) => index > 0 && (i === 0 || index > at[i - 1]!)), "every chapter, in order");
+    assert.match(brief, /"beats":\["The bell under the water · Maren"\]/);
+    assert.match(brief, /get_chapter \{productionId: "the-ledger-of-nights", chapterId\}/);
+    assert.match(brief, /fields\.source is Adapt from/);
+    const gone = await productionSetupBrief(bundle, { ...draft, source: { productionId: "not-here" } }, async () =>
+      ({ result: {}, receipt: { status: "complete" } }) as never, 400_000);
+    assert.match(gone, /no longer in this world \(not-here\)/);
+  });
+
+  // A harness that reports no window is budgeted from a floor, and a world of long sheets with a
+  // whole-novel digest did not fit it (Na love or Juju, 2026-10-09). The brief steps down: compact
+  // world records first, then the draft as its outline, and refuses only when even that does not fit.
+  it("steps down to compact records and an outlined draft before refusing", async () => {
+    const h = await setup(() => reply());
+    const bundle = structuredClone(h.world.getBundle());
+    const character = bundle.sheets.find(sheet => sheet.type === "character")!;
+    const long = { ...character, sections: [{ heading: "Essence", body: "A long life. ".repeat(4_000) }] };
+    bundle.sheets = bundle.sheets.map(sheet => sheet.id === character.id ? long : sheet);
+    const read = async (tool: string, args: Record<string, unknown>) => ({
+      result: tool === "get_sheet" ? bundle.sheets.find(sheet => sheet.id === args.id) : { id: args.id, text: "canon" },
+      receipt: { id: newId("check"), runId: newId("run"), tool: tool === "get_sheet" ? "get-sheet" : "get-entry", status: "complete", consulted: [], at: AT },
+    }) as never;
+    const draft = (await h.service.resume(h.id)).draft;
+    const full = await productionSetupBrief(bundle, draft, read, 1_000_000);
+    assert.ok(full.includes("A long life. A long life."), "with room, the records go whole");
+    const compact = await productionSetupBrief(bundle, draft, read, 30_000);
+    assert.ok(compact.length <= 30_000);
+    assert.match(compact, /shown compactly/);
+    assert.match(compact, /read any in full with get_sheet/);
+    assert.ok(!compact.includes("A long life. ".repeat(40)), "the long sheet is cut to its start");
+    const outlined = { ...draft, scenes: Array.from({ length: 120 }, (_, i) => ({ key: `s-${i}`, title: `Scene ${i}`, synopsis: "What happens here. ".repeat(20) })) };
+    const outline = await productionSetupBrief(bundle, outlined, read, 30_000);
+    assert.match(outline, /shown as its outline/);
+    assert.ok(!outline.includes("What happens here."), "an outlined draft carries keys and titles");
+    assert.ok(outline.includes('"key":"s-119","title":"Scene 119"'));
   });
 });

@@ -1,4 +1,4 @@
-import { estimateSpeechMicroUsd, speechInputFits, voiceFormatForModel, type ManifestModel } from "@arke-studio/contracts";
+import { estimateSpeechMicroUsd, isDesignedVoiceTarget, resolveDesignedVoice, speechInputFits, voiceFormatForModel, type ManifestModel, type WorldDesignedVoice } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
 import { deriveRehearsalLines, productionShape, TableReadPlanSchema, normalizeSpeechText, legacyVoiceModel, providerModelId, voiceSourceFor,
   type ModelManifest, type Job, type ProviderStatus, type TableReadPlan } from "@arke-studio/contracts";
@@ -10,9 +10,24 @@ import { audioHash } from "./qc.js";
 import { readAudioBytes } from "./media-tools.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import type { EnqueueInput } from "../queue/dispatcher.js";
+import { deterministicUlid } from "../queue/deterministic-ulid.js";
 
 /** The voice a visual novel's narration is read in: the narrator the audiobook resolves (turn 174). */
 export interface TableReadNarrator { provider: string; model?: string; voiceId: string; label?: string }
+
+/**
+ * A narrator named by a designed voice's target (`designed:dv_…:1`), resolved from this world's
+ * own voices, for a caller with no app settings to read the narrator from: the Arke Player export
+ * script's `--narrator`. `model` is the Gemini model the narrator reads it in: the catalogue
+ * offers every designed voice under both, the narrator keeps the one chosen, and the cache is
+ * keyed by it, so a voice read in the other model than it was made in finds its prepared reads
+ * only when told which (codex on PR 2236). Without it, the model the voice was made in. Null when
+ * the world has no such voice; the caller refuses rather than ship narration as text.
+ */
+export function designedTableReadNarrator(designed: readonly WorldDesignedVoice[], target: string, model?: WorldDesignedVoice["model"]): TableReadNarrator | null {
+  const voice = isDesignedVoiceTarget(target) ? resolveDesignedVoice(designed, target) : undefined;
+  return voice === undefined ? null : { provider: voice.provider, model: model ?? voice.model, voiceId: target, label: voice.name };
+}
 
 /**
  * `narrator` is read only where the production plays as beats: a visual novel's table read is
@@ -105,7 +120,8 @@ export async function planTableRead(store: WorldStore, productionId: string, sce
   const totalEstimatedMicroUsd = items.reduce((sum, item) => sum + item.estimatedMicroUsd, 0);
   const confirmationToken = audioHash(Buffer.from(JSON.stringify({ worldId: store.worldId, productionId, sceneId, version: scene.version,
     manifestVersion: manifest.manifestVersion, generated: manifest.generated, items, bindings })));
-  cloud.forEach((job, index) => { job.idempotencyKey = `table-read/${confirmationToken}/${index}`; });
+  // The queue's journal takes only a ULID key; the same plan still derives the same keys.
+  cloud.forEach((job, index) => { job.idempotencyKey = deterministicUlid(`table-read/${confirmationToken}/${index}`); });
   return { plan: TableReadPlanSchema.parse({ productionId, sceneId, sceneVersion: scene.version, confirmationToken, totalEstimatedMicroUsd, items }), cloud, local, queued };
 }
 export async function prepareLocalTableRead(store: WorldStore, voice: VoiceService, inputs: readonly { file: string; spec: SpeechSpec }[]) {

@@ -1,7 +1,12 @@
 import {
   EDITOR_REQUEST_BOUNDS,
+  PRESETS,
+  TimelineOperationRefused,
+  defaultExportPreset,
   editorRequestStaleness,
+  genericEditorRequestRefusal,
   previewEditorRequest,
+  retainEditorRequestFile,
   migrateLegacyCut,
   resolveProductionArtifact,
   seedSpinePictureTimeline,
@@ -15,13 +20,16 @@ import {
   type ModelEditorRequest,
   type ProductionBundle,
   type ProductionTimeline,
+  type ProductionCardPreview,
   type TimelineSelectionChange,
   type WorldChatContext,
 } from "@arke-studio/contracts";
 import { applyTimelineCommand, refuseUnknownLibraryItems, refuseUnrenderablePlacements, TimelineCommandRefused } from "./timeline.js";
+import { refuseUnpaintableText } from "./editor-text-cache.js";
+import { refuseUnknownEffectAudioBindings, refuseUnsupportedEffectRender } from "./effect-bindings.js";
 import { applyTakeAcceptance } from "../takes/review.js";
 import type { WorldStore } from "../world/store.js";
-import { EditorRequestFileInvalid, readRequestFile, requestFileInput } from "./editor-request-file.js";
+import { EditorRequestFileInvalid, editorRequestHistoryPins, readRequestFile, requestFileInput } from "./editor-request-file.js";
 
 /**
  * Arke's editor requests on disk (SPEC-039 §1.7, §2.2; issue 684).
@@ -73,7 +81,7 @@ export function productionOfContext(context: WorldChatContext | undefined): stri
 }
 
 /** The fingerprint a first assembly is fenced by right now, or null when none can be derived. */
-export function currentSourceFingerprint(store: WorldStore, production: ProductionBundle): string | null {
+export function currentSourceFingerprint(store: Pick<WorldStore, "getBundle">, production: ProductionBundle): string | null {
   const spine = production.spine;
   if (spine === null) return storyTimelineFingerprint(production);
   const measured = store.getBundle().artifacts.find((artifact) => artifact.id === spine.trackArtifactId)?.mediaInfo?.durationSec ?? null;
@@ -86,7 +94,7 @@ export function currentSourceFingerprint(store: WorldStore, production: Producti
  * for a request — it is opened by the person's own choice — so an unopened spine refuses.
  */
 export function requestBase(
-  store: WorldStore,
+  store: Pick<WorldStore, "getBundle">,
   production: ProductionBundle,
 ): { timeline: ProductionTimeline; baseRevision: number | null; sourceFingerprint: string } {
   const state = production.timeline;
@@ -123,6 +131,7 @@ function previewAgainstProduction(
   production: ProductionBundle,
   request: ModelEditorRequest,
   now: string,
+  textFrom?: string,
 ) {
   const base = requestBase(store, production);
   const artifacts = store.getBundle().artifacts;
@@ -159,13 +168,26 @@ function previewAgainstProduction(
       },
     };
   }
-  return {
-    base,
-    preview: previewEditorRequest(base.timeline, request.commands, {
-      sourceLength: sourceLengthFramesFor(bounded, artifacts),
-      selections: selectionChanges,
-    }),
-  };
+  const preview = previewEditorRequest(base.timeline, request.commands, {
+    sourceLength: sourceLengthFramesFor(bounded, artifacts),
+    selections: selectionChanges,
+  });
+  if (!preview.ok) return { base, preview };
+  // Accept asks the painter about every word and look the batch brings in, at the size the film is
+  // delivered at, before it writes (SPEC-065 R-21). A request is asked the same here, by the same
+  // function at the same size, so a card is never staged that Accept would refuse, and the model
+  // is told why in the painter's own words (R-37). It lays out and paints nothing. On a cut with an
+  // effect, Accept builds the whole film's plan first, and the plan refuses a face that lacks the
+  // weight or slant in words of its own, so the same checks run here in Accept's order.
+  try {
+    refuseUnknownEffectAudioBindings(base.timeline, preview.timeline, bounded, artifacts);
+    refuseUnsupportedEffectRender(preview.timeline, bounded, artifacts);
+    refuseUnpaintableText(base.timeline, preview.timeline, PRESETS[defaultExportPreset(production.meta)], textFrom);
+  } catch (error) {
+    if (error instanceof TimelineOperationRefused) return { base, preview: { ok: false as const, reason: error.reason } };
+    throw error;
+  }
+  return { base, preview };
 }
 
 export function previewProductionEditorRequest(
@@ -177,6 +199,21 @@ export function previewProductionEditorRequest(
   const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
   if (!production) return { ok: false as const, reason: `production ${productionId} is not in this world` };
   return previewAgainstProduction(store, production, request, now).preview;
+}
+
+/** Frozen visual content shares the exact editor request compiler and take-selection algebra. */
+export function productionEditorCardPreview(store: WorldStore, productionId: string, request: ModelEditorRequest, now: string): Extract<ProductionCardPreview, { kind: "timeline" }> {
+  const production = store.getBundle().productions.find(p => p.meta.id === productionId);
+  if (!production) throw new Error("The production is unavailable.");
+  const { base, preview } = previewAgainstProduction(store, production, request, now);
+  if (!preview.ok) throw new Error("The timeline preview is unavailable.");
+  const afterSelections = { ...production.selections };
+  const entry = preview.timeline === base.timeline ? undefined : preview.timeline.history.undo.at(-1);
+  if (entry?.kind === "change") for (const selection of entry.selections) {
+    if (selection.after) afterSelections[selection.shotId] = selection.after; else delete afterSelections[selection.shotId];
+  }
+  return { kind: "timeline", before: base.timeline, after: preview.timeline, range: preview.digest.range,
+    beforeSelections: production.selections, afterSelections };
 }
 
 /**
@@ -198,6 +235,8 @@ export async function stageEditorRequests(
     /** Validate every request against the base and write nothing (round eight). */
     dryRun?: boolean;
     expectedTimeline?: { revision: number; hash: string };
+    /** Where the typeface files are looked for, as the painter reads them (`loadTextFaceFile`); tests only. */
+    textFrom?: string;
   },
 ): Promise<EditorRequest[]> {
   const productionId = productionOfContext(input.entryContext);
@@ -217,7 +256,7 @@ export async function stageEditorRequests(
       const cannot = (reason: string): never => {
         throw new EditorRequestRefused(`"${request.summary.slice(0, 80)}" cannot apply: ${reason}`);
       };
-      const { base, preview } = previewAgainstProduction(store, production, request, input.now);
+      const { base, preview } = previewAgainstProduction(store, production, request, input.now, input.textFrom);
       if (!preview.ok) cannot(preview.reason);
       /*
        * The same request twice is one record. A turn's corrective retry runs this again with
@@ -251,10 +290,10 @@ export async function stageEditorRequests(
       added.push(record);
     }
     if (added.length === 0 || dryRun) return dryRun ? [] : staged;
-    const next: EditorRequestFile = {
-      schemaVersion: 1,
-      requests: retainEditorRequests([...file.requests, ...added]),
-    };
+    const next: EditorRequestFile = retainEditorRequestFile({
+      ...file,
+      requests: [...file.requests, ...added],
+    }, { requestIds: editorRequestHistoryPins(production.timeline?.status === "ready" ? production.timeline.timeline : undefined) });
     await store.commitUnserialised({
       kind: "editor-request",
       source: "stage",
@@ -351,6 +390,13 @@ export async function decideEditorRequest(
   if (request.status !== "pending") throw new EditorRequestRefused(`request ${requestId} is already ${request.status}`);
   const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
   if (!production) throw new EditorRequestRefused(`production ${productionId} is not in this world`);
+
+  // All generic Accept entry points meet here. A card never acquires the separate effect
+  // review/release authority simply because its commands happen to validate (SPEC-053 R-36).
+  if (production.timeline?.status === "ready") {
+    const refusal = genericEditorRequestRefusal(production.timeline.timeline, request.commands);
+    if (refusal !== null) throw new EditorRequestRefused(refusal);
+  }
 
   const stale = editorRequestStaleness(request, production.timeline, currentSourceFingerprint(store, production));
   // Two Accepts can race past the status check above; the second must not mark the first's

@@ -97,7 +97,7 @@ for (const release of releases) {
   // The candidate injection is confined to this maintainer process. Neither the shipped
   // catalogue nor the user's adapter decision journal is changed by a test.
   const client = new ComfyUiClient(boundedFetch, () => endpoint, async () => ({ ok: true }),
-    undefined, gpu, async () => freemem() / 2 ** 20, () => "local", undefined, undefined, undefined, undefined,
+    undefined, () => "local", undefined, undefined,
     guard, adapterValidationCandidate);
   const started = Date.now();
   const before = { freeVramMb: await gpu(), freeRamMb: freemem() / 2 ** 20, totalRamMb: totalmem() / 2 ** 20 };
@@ -106,7 +106,6 @@ for (const release of releases) {
   let remoteId: string | undefined;
   try {
     await idle();
-    if (before.freeVramMb < (baseRecipe.hardware.minFreeVramMb ?? 0)) throw new Error("Free VRAM is below the base recipe admission floor");
     const imageReferences = [];
     if (recipeId === "comfyui-h3-reference-video") {
       const image = join(directory, "reference.png");

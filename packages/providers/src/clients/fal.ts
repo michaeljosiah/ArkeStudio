@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { ReferenceMediaBindingsSchema, CharacterAudioPlanSchema, characterAudioRoute, referenceAudioAsset } from "@arke-studio/contracts";
+import { ARTIFACT_RESULT_LIMITS, artifactResultReadLimit, artifactTransferLimits, ReferenceMediaBindingsSchema, CharacterAudioPlanSchema, characterAudioRoute, referenceAudioAsset } from "@arke-studio/contracts";
 import {
   PROVIDERS,
   durationLimitsFor,
@@ -8,6 +8,8 @@ import {
   type TaskMode,
 } from "@arke-studio/contracts";
 import { responseReason, jsonRequest, tryProbe } from "./http.js";
+import { readArtifactBody } from "./artifact-body.js";
+import { withArtifactTransfer } from "./artifact-transfer.js";
 // Generated beside the manifest rows, from the same fetch, so a model can never be offered
 // with no route behind it — the failure that used to read "no endpoint mapping" at dispatch,
 // long after the estimate had been shown and accepted.
@@ -18,6 +20,9 @@ import {
 } from "../fal-catalogue.generated.js";
 import {
   ProviderRequestRejectedError,
+  ProviderArtifactLimitError,
+  type ArtifactFetchOptions,
+  type ProviderCallContext,
   type FetchedArtifact,
   type FetchLike,
   type PollResult,
@@ -460,13 +465,19 @@ export class FalClient implements ProviderClient {
     return { state: "failed", error: `fal: unexpected status "${remote}"` };
   }
 
-  async fetchArtifacts(key: string, remoteId: string): Promise<FetchedArtifact[]> {
+  async fetchArtifacts(key: string, remoteId: string, _context?: ProviderCallContext, options?: ArtifactFetchOptions): Promise<FetchedArtifact[]> {
+    return withArtifactTransfer(options, (signal, limits) => this.fetchResult(key, remoteId, signal, limits));
+  }
+
+  private async fetchResult(key: string, remoteId: string, signal: AbortSignal, limits: ReturnType<typeof artifactTransferLimits>): Promise<FetchedArtifact[]> {
+    signal.throwIfAborted();
     const { endpoint, requestId } = this.split(remoteId);
     const { status, body } = await jsonRequest(
       this.fetchImpl,
       this.id,
       `${this.baseUrl}/${this.queueApp(endpoint)}/requests/${requestId}`,
-      { headers: this.headers(key) },
+      { headers: this.headers(key), signal },
+      ARTIFACT_RESULT_LIMITS.maxRemoteMetadataBytes,
     );
     if (status >= 400) throw new Error(`fal: ${responseReason(body) ?? "Result unavailable"} (HTTP ${status})`);
     const out: FetchedArtifact[] = [];
@@ -476,6 +487,7 @@ export class FalClient implements ProviderClient {
       audio?: { url?: string; content_type?: string };
     } | null;
     const urls: Array<{ url: string; contentType: string }> = [];
+    if (Array.isArray(payload?.images) && payload.images.length > limits.maxFiles) throw new ProviderArtifactLimitError();
     for (const img of payload?.images ?? []) {
       if (img.url) urls.push({ url: img.url, contentType: img.content_type ?? "application/octet-stream" });
     }
@@ -487,12 +499,21 @@ export class FalClient implements ProviderClient {
     if (payload?.audio?.url) {
       urls.push({ url: payload.audio.url, contentType: payload.audio.content_type ?? "audio/wav" });
     }
+    if (urls.length > limits.maxFiles) throw new ProviderArtifactLimitError();
+    let received = 0;
     for (const [i, item] of urls.entries()) {
-      const res = await this.fetchImpl(item.url);
-      const data = new Uint8Array(await res.arrayBuffer());
+      signal.throwIfAborted();
+      const res = await this.fetchImpl(item.url, { signal });
+      if (!res.ok) {
+        void res.body?.cancel().catch(() => {});
+        throw new Error(`fal: artifact retrieval failed (HTTP ${res.status})`);
+      }
+      const data = await readArtifactBody(res, artifactResultReadLimit(received, limits), signal);
+      received += data.byteLength;
       const ext = extensionFor(item.contentType);
       out.push({ name: `output-${i + 1}.${ext}`, contentType: item.contentType, data });
     }
+    signal.throwIfAborted();
     return out;
   }
 

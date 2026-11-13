@@ -4,6 +4,7 @@ import { ChapterAudiobookSchema } from "../src/audiobook.js";
 import {
   AudiobookLookSchema,
   PictureLookSchema,
+  chapterLookDisagreement,
   chooseLook,
   cutMoodClothing,
   editLook,
@@ -258,10 +259,10 @@ describe("a look's clothing line", () => {
     assert.equal(lookClothing({ prompt: "Grey wool coat. No jewellery." }), "Grey wool coat. No jewellery.".replace(" No jewellery.", ""), "a plain line keeps its sentences bar a bare negative");
   });
 
-  it("names a look by the first thing worn", () => {
-    assert.equal(lookName({ prompt: ADE }), "Unstructured soft cream…");
-    assert.equal(lookName({ prompt: TUNDE }), "Washed navy polo shirt with…");
-    assert.equal(lookName({ prompt: "Storm coat, hood up; two braids.", framing: "full-body" }), "Storm coat");
+  it("uses an authored name separately from the exact prompt, and a date for legacy looks", () => {
+    assert.equal(lookName({ prompt: "A long generation prompt.", name: "Storm coat" }), "Storm coat");
+    assert.match(lookName({ prompt: "A long generation prompt.", acceptedAt: AT }), /^Look · 3 Oct, /);
+    assert.equal(lookName({ prompt: "A long generation prompt." }), "Look");
   });
 });
 
@@ -283,8 +284,21 @@ describe("the Mood line (design turn 193, rule 9)", () => {
     assert.equal(pictureMood({ mood: { text: "Purple club light, warm gold, fine grain." } }, ART), "Purple club light, warm gold, fine grain.");
     const fallback = pictureMood({}, ART)!;
     assert.doesNotMatch(fallback, /agbada/);
-    assert.match(fallback, /^Lagos at night/);
+    assert.doesNotMatch(fallback, /night|streetlamps|generator-lit|lamp/i);
+    assert.match(fallback, /shot close and handheld/);
     assert.equal(pictureMood(null, undefined), undefined);
+  });
+
+  it("keeps materials on objects while still cutting named clothing (#1942)", () => {
+    assert.deepEqual(cutMoodClothing("Light on leather bindings, velvet chairs, silk curtains, linen covers."), {
+      text: "Light on leather bindings, velvet chairs, silk curtains, linen covers.", cut: 0,
+    });
+    assert.deepEqual(cutMoodClothing("Amber lamplight, a leather coat, a silk dress."), {
+      text: "Amber lamplight.", cut: 2,
+    });
+    assert.deepEqual(cutMoodClothing("Everyone dressed in leather. She is wearing silk. Cool light on the leather ledger."), {
+      text: "Cool light on the leather ledger.", cut: 2,
+    });
   });
 });
 describe("the frame word (design turn 193, rule 11)", () => {
@@ -306,5 +320,20 @@ describe("the frame word (design turn 193, rule 11)", () => {
       assert.equal(frameWord(frame), word, frame);
       assert.equal(lookViewFor(frame), view, frame);
     }
+  });
+
+  // Issue 1658: the Looks sheet flagged a carried look and Illustrate made the pictures anyway.
+  it("says where a chosen or carried look disagrees with the chapter, and only then", () => {
+    const conflict = { kind: "chapter" as const, part: "dress", a: "white linen", b: "mango orange" };
+    const look = { characters: {
+      ife: { name: "Ife", sheet: "ife", text: "mango-orange dress", lookId: "look-3", from: "chapters/03.md", reading: "white linen dress", conflicts: [conflict] },
+      ade: { name: "Ade", sheet: "ade", text: "sleeved shirt", lookId: "look-4" },
+      tunde: { name: "Tunde", sheet: "tunde", text: "suit", conflicts: [conflict] },
+    } } satisfies Pick<AudiobookLook, "characters">;
+    assert.deepEqual(chapterLookDisagreement(look, "ife"), [conflict]);
+    assert.deepEqual(chapterLookDisagreement(look, "ade"), [], "a look the chapter agrees with");
+    assert.deepEqual(chapterLookDisagreement(look, "tunde"), [], "no look rides: the main photo is not the chapter's choice");
+    assert.deepEqual(chapterLookDisagreement(look, "nobody"), []);
+    assert.deepEqual(chapterLookDisagreement(null, "ife"), []);
   });
 });

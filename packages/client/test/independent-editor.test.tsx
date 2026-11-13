@@ -27,7 +27,9 @@ function stateWithVideo(placed: boolean): ClientState {
 }
 async function mount(state: ClientState) {
   const sent: ClientMessage[] = [];
-  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json)); } });
+  const bridge = { appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json)); } };
+  Object.assign(window, { arke: bridge });
+  __setBridgeForTest(bridge);
   __setStateForTest(state);
   const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
   await act(async () => root.render(<MemoryRouter initialEntries={[`/w/${state.world!.meta.worldId}/p/${state.world!.productions[0]!.meta.id}/cut`]}>
@@ -37,14 +39,14 @@ async function mount(state: ClientState) {
     const found = [...container.querySelectorAll<HTMLButtonElement>("button"), ...document.querySelectorAll<HTMLButtonElement>('[role="menu"] button')].find(b => b.textContent?.trim() === text || b.getAttribute("aria-label") === text);
     assert.ok(found, text); return found;
   };
-  return { container, sent, button, async close() { await act(async () => root.unmount()); container.remove(); __setBridgeForTest(null); } };
+  return { container, sent, button, async close() { await act(async () => root.unmount()); container.remove(); Reflect.deleteProperty(window, "arke"); __setBridgeForTest(null); } };
 }
 it("distinguishes unavailable ownership from missing media and keeps the clip removable (#895)", async () => {
   const state = stateWithVideo(true);
   state.world!.artifacts[0]!.production = "another-production";
   const screen = await mount(state);
   try {
-    assert.match(screen.container.textContent!, /cl_holiday cites artifact .*belongs to another production/);
+    assert.match(screen.container.textContent!, /cites a file that belongs to another production/);
     assert.match(screen.container.textContent!, /Import the file into this production or remove this reference/);
     assert.doesNotMatch(screen.container.textContent!, /which this world does not have/);
     assert.match(screen.container.querySelector("[data-library-item^='artifact:']")!.textContent!, /belongs to another production/);

@@ -11,6 +11,7 @@ import type { EngineWorldRepository, EngineWorldSession } from "./contracts.js";
 import { engineHash } from "./operations.js";
 import { localProse } from "./local-prose.js";
 import { localWriting } from "./local-writing.js";
+import { savedStoryProposalPrecondition } from "../world-chat/actions.js";
 
 export interface LocalWorldRepositoryOptions {
   /** The composition, not each service, decides who closes the shared provider. */
@@ -36,7 +37,11 @@ function localSession(store: WorldStore, provider: WorldProvider, options: Local
     snapshot,
     propose: (input, expected) => createSheetFromSentence(store, gate, input, precondition(expected)),
     proposal: id => gate.readManifest(id),
-    accept: (id, opts) => gate.accept(id, { ...opts, precondition: precondition(opts.expectedRevision) }),
+    accept: async (id, opts) => {
+      const savedReview = await savedStoryProposalPrecondition(store, await gate.readManifest(id));
+      const revision = precondition(opts.expectedRevision);
+      return gate.accept(id, { ...opts, precondition: () => revision?.() ?? savedReview?.() ?? null });
+    },
     discard: (id, expected) => gate.discard(id, precondition(expected)),
     resolution: (proposal, outcome) => recordResolution(store, proposal, outcome, () => store.now()),
     illustrations: (input, expected) => store.gateOp(async () => {

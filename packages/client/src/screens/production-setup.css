@@ -6,6 +6,17 @@
 .fy-production-setup__panels { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(320px, 1fr); flex: 1; min-height: 0; border-top: 1px solid var(--line); }
 .fy-production-setup__conversation { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .fy-production-setup__log { min-height: 0; overflow: auto; flex: 1; padding: 20px 20px 20px 0; }
+/* Under Arke's plan (230c): Start the pilot, or Change the plan first. */
+.fy-production-setup__choices { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 0; }
+/* The narrator question's two samples (230c): side by side, each card the answer. */
+.fy-setup-samples { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; max-width: 620px; margin: 8px 0 0; }
+.fy-setup-sample { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 14px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.fy-setup-sample:hover:not(:disabled), .fy-setup-sample:focus-visible { border-color: var(--foreground); box-shadow: inset 0 0 0 1px var(--foreground); }
+.fy-setup-sample:disabled { cursor: default; opacity: 0.7; }
+.fy-setup-sample__head { font-weight: 600; }
+.fy-setup-sample__line { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 8px; line-height: 1.45; }
+.fy-setup-sample__line small { color: var(--muted-foreground); text-align: right; padding-top: 2px; }
+.fy-setup-sample__line--cue > span { color: var(--muted-foreground); }
 .fy-production-setup__welcome { padding: 32px 24px; max-width: 460px; line-height: 1.7; }
 .fy-production-setup__welcome h2 { font-weight: 500; font-size: 25px; }
 .fy-production-setup__composer { flex: none; padding: 12px 24px 0 0; }
@@ -16,8 +27,37 @@
 .fy-production-setup__outline li { margin-bottom: 12px; }
 .fy-production-setup__fields { border: 0; margin: 20px 0; padding: 0; display: grid; gap: 14px; min-width: 0; }
 .fy-production-setup__fields label { display: grid; gap: 6px; font-size: 12px; min-width: 0; }
-.fy-production-setup input, .fy-production-setup select { min-width: 0; padding: 9px; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+.fy-production-setup .ui-select__control { padding-right: var(--space-7); }
+.fy-production-setup input, .fy-production-setup select:not(.ui-select__control) { min-width: 0; padding: 9px; color: inherit; background: transparent; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
 .fy-production-setup__delivery { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+/* The Target (design turn 205): label, control, and what the row comes to at its end. */
+.fy-production-target { border: 1px solid var(--line); border-radius: 8px; padding: 4px 16px 8px; margin: 0 0 20px; }
+.fy-production-target h3 { margin: 12px 0 4px; font-size: 14px; font-weight: 600; }
+.fy-production-target__row { display: grid; grid-template-columns: 88px minmax(0, 1fr) minmax(64px, auto); gap: 12px; align-items: center; min-height: 44px; border-top: 1px solid var(--line); font-size: 13px; }
+.fy-production-target__row:first-of-type { border-top: 0; }
+/* The audience names its numbers in the option text, so it takes the whole row rather than clip them. */
+.fy-production-target__row > #target-audience { grid-column: 2 / -1; }
+.fy-production-target__row > label:first-child { color: var(--muted-foreground); }
+.fy-production-target__end { text-align: right; font-size: 12px; color: var(--muted-foreground); white-space: nowrap; }
+.fy-production-target__check { display: flex; align-items: center; gap: 6px; font-size: 12px; white-space: nowrap; }
+/* An audio drama's plan (design turn 230c): the Target card's frame, read as label and value. */
+.fy-ad-plan { border: 1px solid var(--line); border-radius: 8px; padding: 4px 16px 14px; margin: 0 0 20px; display: grid; gap: 10px; }
+.fy-ad-plan header { display: flex; align-items: baseline; gap: 8px; }
+.fy-ad-plan header h3 { margin: 12px 0 0; font-size: 14px; font-weight: 600; }
+.fy-ad-plan header small { color: var(--muted-foreground); font-size: 12px; }
+.fy-ad-plan__kv { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 8px 12px; margin: 0; font-size: 13px; }
+.fy-ad-plan__kv dt { color: var(--muted-foreground); }
+.fy-ad-plan__kv dd { margin: 0; overflow-wrap: anywhere; }
+.fy-ad-plan__fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.fy-ad-plan__fields label { display: grid; gap: 6px; font-size: 12px; min-width: 0; }
+.fy-ad-plan__fields label:last-child { grid-column: 1 / -1; }
+.fy-ad-plan__kept { display: grid; gap: 7px; border-top: 1px solid var(--line); padding-top: 10px; font-size: 13px; }
+.fy-ad-plan__kept > span { font-size: 12px; color: var(--muted-foreground); }
+.fy-ad-plan__secret { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.fy-ad-plan__secret > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fy-ad-plan__secret small, .fy-ad-plan__until { color: var(--muted-foreground); font-size: 12px; white-space: nowrap; }
+.fy-ad-plan__until { display: flex; align-items: center; gap: 6px; }
+.fy-ad-plan__until input { width: 56px; padding: 4px 6px; }
 .fy-production-setup__review, .fy-production-setup__problems { border: 1px solid var(--line); border-radius: 8px; padding: 0 16px 12px; margin-top: 24px; }
 .fy-production-setup__actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 24px 0; }
 .fy-production-setup__tabs { display: none; }

@@ -1,0 +1,60 @@
+{
+  "format": "arke-music",
+  "version": 1,
+  "kind": "soundtrack",
+  "tracks": [
+    {
+      "id": "the-drowned-verse",
+      "title": "The Drowned Verse",
+      "audio": "a-drowned-verse",
+      "duration": 238000,
+      "lyrics": {
+        "text": "Under the harbour the old bells turn,\nsalt in the ledger, the lamps that burn.\n\nHold the verse, hold it low,\ndown where the drowned ones go.",
+        "sections": [
+          {
+            "label": "Intro",
+            "at": 0
+          },
+          {
+            "label": "Verse",
+            "at": 14000
+          },
+          {
+            "label": "Chorus",
+            "at": 62000
+          },
+          {
+            "label": "Outro",
+            "at": 220000
+          }
+        ]
+      },
+      "heardIn": [
+        {
+          "production": "the-ledger-of-nights",
+          "chapter": "a-choir-underwater",
+          "at": 730000
+        }
+      ]
+    },
+    {
+      "id": "slack-water",
+      "title": "Slack Water",
+      "audio": "a-slack-water",
+      "duration": 185000
+    },
+    {
+      "id": "saltmouth-bells",
+      "title": "Saltmouth Bells",
+      "audio": "a-saltmouth-bells",
+      "duration": 222000,
+      "heardIn": [
+        {
+          "production": "the-ledger-of-nights",
+          "chapter": "saltmouth-bells",
+          "at": 41000
+        }
+      ]
+    }
+  ]
+}

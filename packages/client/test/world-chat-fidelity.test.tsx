@@ -156,8 +156,11 @@ function renderMediaConversation(): string {
 
 function renderActionConversation(
   family: "authored-diff" | "generation" | "take-review" = "authored-diff",
-  options: { status?: "pending" | "stale" | "queued" | "running" | "completed"; older?: boolean; cancellable?: boolean; delivered?: boolean; host?: boolean; blocked?: boolean } = {},
+  options: { authority?: "proposal-manager"; fields?: { label: string; before: string | null; after: string | null }[]; status?: "pending" | "stale" | "queued" | "running" | "completed"; older?: boolean; cancellable?: boolean; delivered?: boolean; host?: boolean; blocked?: boolean; actionKind?: string } = {},
 ): string {
+  // A world-scope generation card is a Bench generation: only that kind has a Bench session for
+  // its way to Bench to open (PR 1583). The others keep the kind the review cards always used.
+  const actionKind = options.actionKind ?? (options.host ? "world-chat-artifact-import" : family === "generation" ? "world-chat-bench-generation" : "rename-world");
   const state = stateWithConversation();
   const turnId = "turn_01J8F3K2QW9VZX4N7M0RTYB6HC";
   state.worldChat!.messages[0]!.turnId = turnId as never;
@@ -169,7 +172,7 @@ function renderActionConversation(
     worldId: FIXTURE_WORLD_ID,
     actorId: "local-user",
     scope: "world",
-    actionKind: options.host ? "world-chat-artifact-import" : "rename-world",
+    actionKind,
     authorityKind: "world-store",
     cardFamily: family,
     targets: [{ kind: "world", id: FIXTURE_WORLD_ID, label: "This world" }],
@@ -177,7 +180,7 @@ function renderActionConversation(
     baseObservations: [{ requirement: "world-metadata", target: FIXTURE_WORLD_ID, revisionOrDigest: "v1", complete: true }],
     dependencies: [],
     createdAt: "2026-08-06T10:00:01Z",
-    authority: { kind: "world-store", id: `world:${FIXTURE_WORLD_ID}` },
+    authority: options.authority === undefined ? { kind: "world-store", id: `world:${FIXTURE_WORLD_ID}` } : { kind: "proposal-manager", id: "pr_01J8F3K2QW9VZX4N7M0RTYB6HC" },
     authorityRevision: 1,
     previewDigest: `sha256:${"b".repeat(64)}`,
     shown: {
@@ -189,7 +192,7 @@ function renderActionConversation(
       body: family === "authored-diff"
         ? {
             family,
-            fields: [{ label: "Name", before: "Old name", after: "New name" }],
+            fields: options.fields ?? [{ label: "Name", before: "Old name", after: "New name" }],
             conflicts: [],
             openChoices: [],
           }
@@ -312,10 +315,36 @@ describe("conversation permission cards", () => {
     assert.ok(html.indexOf("That changes the line of inheritance") < html.indexOf("Rename this world"));
   });
 
+  it("keeps a lone chapter's title, and leaves a Bible section's name whole (codex on PRs 2741, 2749)", () => {
+    const lone = renderActionConversation("authored-diff", { authority: "proposal-manager", fields: [{ label: "Dated Tomorrow: Title", before: null, after: "Dated Tomorrow" }, { label: "Dated Tomorrow: Synopsis", before: null, after: "Morning comes." }] });
+    assert.match(lone, /<strong>Title<\/strong><span>Dated Tomorrow<\/span>/);
+    const bible = renderActionConversation("authored-diff", { fields: [{ label: "North: History", before: null, after: "Old." }, { label: "North: Trade", before: null, after: "Wool." }] });
+    assert.match(bible, /<strong>North: History<\/strong>/);
+    assert.doesNotMatch(bible, /fy-actioncard__change--new/);
+  });
+
+  it("shows a new record as what it says, not a diff against nothing (issue 2740)", () => {
+    const html = renderActionConversation("authored-diff", { authority: "proposal-manager", fields: [{ label: "The tenth key: Type", before: null, after: "lore" }, { label: "The tenth key: Retired", before: null, after: "No" },
+      { label: "The tenth key: Statement", before: null, after: "A brass key." }] });
+    assert.match(html, /fy-actioncard__change--new/);
+    assert.match(html, /<strong>Statement<\/strong><span>A brass key\.<\/span>/);
+    assert.doesNotMatch(html, /Not set|Retired|The tenth key:/);
+  });
+
+  it("shows a chapter plan as its chapters, not forty rows of filing (issue 2747)", () => {
+    const html = renderActionConversation("authored-diff", { authority: "proposal-manager", fields: ["Lost Property", "Daylight Hours"].flatMap((title, index) => [
+      { label: `${title}: Chapter ID`, before: null, after: title.toLowerCase().replace(" ", "-") }, { label: `${title}: Title`, before: null, after: title },
+      { label: `${title}: Status`, before: null, after: "planned" }, { label: `${title}: Order`, before: null, after: String(index + 1) },
+      { label: `${title}: Synopsis`, before: null, after: `What happens in ${title}.` }, { label: `${title}: Prose`, before: null, after: null }]) });
+    assert.match(html, /<h4>Lost Property<\/h4>/); assert.match(html, /<h4>Daylight Hours<\/h4>/);
+    assert.match(html, /<strong>Synopsis<\/strong><span>What happens in Lost Property\.<\/span>/);
+    assert.doesNotMatch(html, /Chapter ID|Not set|planned|Prose|lost-property/);
+  });
+
   it("renders generation intent as an approvable handoff without claiming a provider ran", () => {
     const html = renderActionConversation("generation").replaceAll("<!-- -->", "");
     assert.match(html, /Private prompt content/);
-    assert.match(html, /provider.*model.*1 output/s);
+    assert.match(html, /<strong>model<\/strong>/);
     assert.match(html, /Estimate unavailable/);
     assert.match(html, /<button[^>]*>Approve<\/button>/);
     assert.doesNotMatch(html, /This card type is not available in this version/);
@@ -330,6 +359,9 @@ describe("conversation permission cards", () => {
     }
     assert.doesNotMatch(renderActionConversation("generation", { status: "completed", cancellable: true }), bench, "nothing left to cancel");
     assert.doesNotMatch(renderActionConversation("generation", { status: "running" }), bench, "a provider that cannot cancel is not offered as if it could");
+    // A production take generation has no Bench session to open; its jobs cancel on the card.
+    assert.doesNotMatch(renderActionConversation("generation", { status: "running", cancellable: true, actionKind: "world-chat-production-take-generation" }), bench,
+      "only a Bench generation is sent to Bench");
   });
 
   it("gives a delivered generation result the platform's player, controls and all (SPEC-041 R-81)", () => {
@@ -338,8 +370,12 @@ describe("conversation permission cards", () => {
     const html = renderActionConversation("generation", { status: "completed", delivered: true });
     const receipt = html.slice(html.indexOf('class="fy-actioncard__receipt"'));
     assert.match(receipt, /1 video landed/);
-    assert.match(receipt, /<video class="fy-actioncard__media" controls=""/, "native controls on the result's video");
-    assert.match(receipt, /poster="[^"]*frame\.png"/);
+    // PR 1583 moved the result into the shared generation grid, which sizes it (and lifts the
+    // 280 px cap in the Studio canvas, SPEC-051 R-65); the platform's controls are what R-81 owes.
+    const video = receipt.match(/<video[^>]*clip\.mp4[^>]*>/)?.[0] ?? "";
+    assert.match(video, / controls=""/, "native controls on the result's video");
+    assert.match(video, /poster="[^"]*frame\.png"/);
+    assert.doesNotMatch(receipt, /fy-playbtn/, "and no house play button over it");
   });
 
   it("renders playable take evidence, destination, history, and rejection citation", () => {
@@ -347,7 +383,9 @@ describe("conversation permission cards", () => {
     // The house player, not the browser's chrome (issue 1010, U2): a poster and one drawn button.
     assert.match(html, /<video[^>]*poster="/);
     assert.doesNotMatch(html, /<video[^>]*controls=""/);
-    assert.match(html, /aria-label="Play Take tk_/);
+    // The review compares the frozen current selection with the candidate (PR 1583), so the
+    // take under review is named for its place in that comparison.
+    assert.match(html, /aria-label="Play Candidate tk_01J8F0000000000000000000B2"/);
     assert.match(html, /clip\.mp4/);
     assert.match(html, /Maren at the rail, listening/);
     assert.match(html, /tk_01J8A0000000000000000000A1/);

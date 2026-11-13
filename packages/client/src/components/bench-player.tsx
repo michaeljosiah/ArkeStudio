@@ -90,35 +90,56 @@ export function BenchPlayer({
           <PlaySolid size={22} />
         </button>
       )}
-      {!failed && (
-        <div className="fy-bench__transport" data-testid="bench-transport">
-          <button type="button" className="fy-bench__transportplay" aria-label={playing ? "Pause" : "Play"} onClick={toggle}>
-            {playing ? <PauseSolid size={11} /> : <PlaySolid size={11} />}
-          </button>
-          <span className="fy-bench__transporttime">{clock(elapsed)}</span>
-          <div
-            className="fy-bench__transporttrack"
-            role="slider"
-            aria-label="Position"
-            aria-valuemin={0}
-            aria-valuemax={Math.round(length)}
-            aria-valuenow={Math.round(elapsed)}
-            tabIndex={0}
-            onClick={(e) => {
-              const box = e.currentTarget.getBoundingClientRect();
-              seek((e.clientX - box.left) / box.width);
-            }}
-            onKeyDown={(e) => {
-              if (length === 0) return;
-              if (e.key === "ArrowRight") seek((elapsed + 1) / length);
-              if (e.key === "ArrowLeft") seek((elapsed - 1) / length);
-            }}
-          >
-            <span style={{ width: `${length > 0 ? (elapsed / length) * 100 : 0}%` }} />
-          </div>
-          <span className="fy-bench__transporttime fy-bench__transporttime--end">{clock(length)}</span>
-        </div>
-      )}
+      {!failed && <BenchTransport playing={playing} elapsed={elapsed} length={length} onToggle={toggle} onSeek={seek} />}
     </>
+  );
+}
+
+/**
+ * The bar at the clip's foot: play, the time, a track to seek on and the length. Its own piece so
+ * the compare view (design turn 273) drives its result with the same bar the player has.
+ */
+export function BenchTransport({
+  playing,
+  elapsed,
+  length,
+  onToggle,
+  onSeek,
+}: {
+  playing: boolean;
+  elapsed: number;
+  length: number;
+  onToggle: () => void;
+  /** A fraction of the length, 0–1. */
+  onSeek: (fraction: number) => void;
+}) {
+  return (
+    <div className="fy-bench__transport" data-testid="bench-transport">
+      <button type="button" className="fy-bench__transportplay" aria-label={playing ? "Pause" : "Play"} onClick={onToggle}>
+        {playing ? <PauseSolid size={11} /> : <PlaySolid size={11} />}
+      </button>
+      <span className="fy-bench__transporttime">{clock(elapsed)}</span>
+      <div
+        className="fy-bench__transporttrack"
+        role="slider"
+        aria-label="Position"
+        aria-valuemin={0}
+        aria-valuemax={Math.round(length)}
+        aria-valuenow={Math.round(elapsed)}
+        tabIndex={0}
+        onClick={(e) => {
+          const box = e.currentTarget.getBoundingClientRect();
+          onSeek((e.clientX - box.left) / box.width);
+        }}
+        onKeyDown={(e) => {
+          if (length === 0) return;
+          if (e.key === "ArrowRight") onSeek((elapsed + 1) / length);
+          if (e.key === "ArrowLeft") onSeek((elapsed - 1) / length);
+        }}
+      >
+        <span style={{ width: `${length > 0 ? (elapsed / length) * 100 : 0}%` }} />
+      </div>
+      <span className="fy-bench__transporttime fy-bench__transporttime--end">{clock(length)}</span>
+    </div>
   );
 }

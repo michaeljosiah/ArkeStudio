@@ -1,12 +1,20 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { VoiceConversation } from "../components/voice-conversation.js";
+import { VoiceBackgroundActivity } from "../components/voice-background-activity.js";
+import { GlobalWorldChatEntry } from "../components/global-chat.js";
+import { worldChatTextRefusal } from "@arke-studio/contracts";
+import { chatSurfaceForPage } from "../lib/global-chat.js";
+import { useClientRender } from "../components/production-studio-context.js";
+import { useConversationPresentation, useConversationState, useGlobalChat, useConversationNavigationGuard } from "../components/global-chat-context.js";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 import type { WorldBundle, WorldChatDeletionBlock, WorldChatSummary } from "@arke-studio/contracts";
 import { HeldBar } from "../components/held-bar.js";
 import { PageSheet } from "../components/page-sheet.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { FOLD_QUERY, useCompact, useMediaQuery, usePhone } from "../lib/media-query.js";
 import { relativeDate } from "../lib/format.js";
 import { useReadReplies } from "../components/read-replies.js";
 import { Composer } from "../components/composer.js";
+import { useConversationInputs } from "../components/conversation-inputs.js";
 import { ModelChip } from "../components/model-chip.js";
 import { FoundingProgressCard } from "../components/genesis-readiness.js";
 import { attachmentChipLabel, ConversationTranscript } from "../components/conversation.js";
@@ -102,6 +110,7 @@ const WHY_NOT_DELETABLE: Record<WorldChatDeletionBlock, string> = {
   "active-run": "a turn is still running",
   "wrap-up-in-flight": "it is being turned into proposals",
   "unresolved-proposals": "its proposals are still waiting",
+  "background-lookups": "its background lookups are still running",
   "pending-actions": "its actions are still waiting",
   "pending-inputs": "its messages are still waiting to send",
   "bench-references": "Bench still uses its attachment files",
@@ -155,10 +164,15 @@ function ConversationRow({
   onOpenMenu: (menu: RowMenu) => void;
   onCloseMenu: () => void;
 }) {
+  const global = useGlobalChat(), { state } = useStore();
   const waiting = whatItIsWaitingOn(row);
   return (
     <div className={cx("fy-chatnav__row", current && "fy-chatnav__row--on")}>
-      <Link to={`/w/${worldId}/chat/${row.id}`} className="fy-chatnav__item">
+      <Link to={`/w/${worldId}/chat/${row.id}`} className="fy-chatnav__item" onClick={event => {
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        const surface = chatSurfaceForPage(state, `/w/${worldId}/chat/${row.id}`);
+        if (global && surface) global.history(surface, false);
+      }}>
         <span className={cx("fy-chatnav__title", row.status === "closed" && "fy-chatnav__title--closed")}>
           {row.title}
         </span>
@@ -203,19 +217,21 @@ function ConversationRow({
  * the scrim that dismisses it to the width of the rail.
  */
 export function RowMenuPanel({
+  layer,
   worldId,
   row,
   menu,
   onOpenMenu,
   onCloseMenu,
 }: {
+  layer?: number;
   worldId: string;
   row: WorldChatSummary;
   menu: RowMenu;
   onOpenMenu: (menu: RowMenu) => void;
   onCloseMenu: () => void;
 }) {
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const panel = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const node = panel.current;
@@ -277,8 +293,8 @@ export function RowMenuPanel({
   </div>;
   if (compact) return <PageSheet open title={row.title} onClose={onCloseMenu}>{actions}</PageSheet>;
   return <BodyLayer>
-    <div className="fy-chatnav__scrim" onClick={onCloseMenu} />
-    <div ref={panel} className="fy-chatnav__menu" style={{ left: menu.x, top: menu.y }} role="menu">{actions}</div>
+    <div className="fy-chatnav__scrim" style={layer === undefined ? undefined : { zIndex: layer }} onClick={onCloseMenu} />
+    <div ref={panel} className="fy-chatnav__menu" style={{ left: menu.x, top: menu.y, ...(layer === undefined ? {} : { zIndex: layer + 1 }) }} role="menu">{actions}</div>
   </BodyLayer>;
 
 }
@@ -293,7 +309,7 @@ export function RowMenuPanel({
  * Put away it is 48px, and both its controls survive: starting a conversation is what the screen
  * is for and must not cost an expand first.
  */
-function HistoryRail({
+export function HistoryRail({
   worldId,
   live,
   archived,
@@ -459,23 +475,41 @@ type Opening =
 
 export function WorldChatScreen() {
   const { worldId, conversationId } = useParams();
+  const global = useGlobalChat(), client = useClientRender();
+  if (global && client && worldId) return <GlobalWorldChatEntry worldId={worldId} conversationId={conversationId} />;
+  return <WorldChatView />;
+}
+
+export function WorldChatView({ embedded }: { embedded?: { worldId: string; conversationId?: string; onConversationChange(id: string): void } }) {
+  const route = useParams(), presentation = useConversationPresentation();
+  const mediaNavigation = useConversationNavigationGuard();
+  const inPanel = presentation?.inPanel === true;
+  const worldId = embedded?.worldId ?? route.worldId, conversationId = embedded ? embedded.conversationId : route.conversationId;
+
   useOpenWorldGuard(worldId);
   const { state, connection } = useStore();
   const navigate = useNavigate();
-  const phone = useMediaQuery("(max-width: 599px)");
-  const fold = useMediaQuery("(min-width: 600px) and (max-width: 1099px)");
+  const location = useLocation();
+  const onChatPage = !embedded || location.pathname === `/w/${worldId}/chat` || location.pathname === `/w/${worldId}/chat/${conversationId}`;
+  const phone = usePhone();
+  const fold = useMediaQuery(FOLD_QUERY);
   const [understoodOpen, setUnderstoodOpen] = useState(false);
+  const [composerFocusRequest, setComposerFocusRequest] = useState(0);
+  const [notesVisible, setNotesVisible] = useState<boolean | null>(null);
+  const notesId = useId();
+  useEffect(() => { setNotesVisible(null); }, [conversationId]);
   useEffect(() => { setUnderstoodOpen(false); }, [phone, conversationId]);
-  const [draft, setDraft] = useState("");
+  const [voiceActive, setVoiceActive] = useState(false);
+  const [draft, setDraft] = useConversationState("draft", "");
   /**
-   * Chips taken off the composer, for this visit only.
+   * Chips taken off the composer, retained with this conversation's unsent state.
    *
    * Removing a chip means "stop referring to this", not "delete it" — the file stays in the
    * conversation and anything already said about it stays checkable (§13.1). Held locally rather
    * than durably because the store's unlink is scoped to a message, and these have not been sent
    * with one yet; the same local dismissal the canon composer uses.
    */
-  const [dismissed, setDismissed] = useState<string[]>([]);
+  const [dismissed, setDismissed] = useConversationState<ReadonlySet<string>>("omittedAttachments", new Set());
   /** Whether the history is shown. Kept for the visit, as the rail itself is. */
   const [historyOpen, setHistoryOpen] = useState(!fold);
   useEffect(() => { if (fold) setHistoryOpen(false); }, [fold, conversationId]);
@@ -485,7 +519,12 @@ export function WorldChatScreen() {
   const wrapUpRefusal = useWorldChatWrapUpRefusal(conversationId);
   const rippleNotice = useWorldChatRipples(conversationId);
   /** Set while a wrap-up is in flight, so the button cannot be pressed twice into the same log. */
-  const [wrappingUp, setWrappingUp] = useState(false);
+  const [wrappingUp, setWrappingUp] = useConversationState("wrappingUp", false);
+  // Saving the last point can empty the notes before its result arrives. Reveal that news
+  // even if notes were collapsed, so a ripple waiting for Dismiss cannot strand navigation.
+  useEffect(() => {
+    if (rippleNotice || (wrapUpRefusal && !wrappingUp)) setNotesVisible(true);
+  }, [rippleNotice, wrapUpRefusal, wrappingUp]);
   /**
    * Points with a decision in flight.
    *
@@ -494,17 +533,26 @@ export function WorldChatScreen() {
    * workspace comes back, which is the only thing that knows whether the point survived.
    */
   const [busyPoints, setBusyPoints] = useState<string[]>([]);
-  const mediaRequests = useRef(new Map<string, string>());
+  const mediaRequests = useRef(new Map<string, { candidateId: string; path: string }>());
   const [mediaRefusal, setMediaRefusal] = useState<string | null>(null);
   /** The act waiting on a conversation to exist, and what was open when it was asked for. */
-  const [opening, setOpening] = useState<{ act: Opening; wasOpen: string | null } | null>(null);
-  /** What a deferred attach would not take, since the composer's own call answered before it ran. */
-  const [deferredTrouble, setDeferredTrouble] = useState<readonly { name: string; reason: string }[]>([]);
+  const [opening, setOpening] = useConversationState<{ act: Opening; wasOpen: string | null; onAttached?: (refusals: readonly { name: string; reason: string }[]) => void } | null>("opening", null);
+  useLayoutEffect(() => { presentation?.owner.holdOpening(presentation.key, opening !== null); }, [presentation?.owner, presentation?.key, opening]);
+  /** Named refusals survive remounting while a first attachment waits for its conversation. */
+  const [deferredTrouble, setDeferredTrouble] = useConversationState<readonly { name: string; reason: string }[]>("worldAttachmentTrouble", []);
+  const checkText = (text: string) => {
+    const reason = worldChatTextRefusal(text);
+    setDeferredTrouble(previous => {
+      const rest = previous.filter(item => item.name !== "Message");
+      return reason ? [...rest, { name: "Message", reason }] : rest.length === previous.length ? previous : rest;
+    });
+    return reason === null;
+  };
 
   const world = state?.world;
   const row = world?.conversations.find((c) => c.id === conversationId);
   useEffect(() => {
-    if (row?.entryContext?.kind === "production-setup") {
+    if (!embedded && row?.entryContext?.kind === "production-setup") {
       void navigate(`/w/${worldId}/productions/setup/${row.id}`, { replace: true });
     }
   }, [row?.entryContext?.kind, row?.id, worldId, navigate]);
@@ -521,7 +569,7 @@ export function WorldChatScreen() {
   // world snapshot, because opening a world must not cost every conversation ever had.
   const workspace = state?.worldChat ?? null;
   const loaded = workspace && workspace.conversationId === conversationId ? workspace : null;
-  const readReplies = useReadReplies(loaded);
+  const readReplies = useReadReplies(loaded, voiceActive);
   // Gated on the run's own start so a label from the previous turn is not shown for this one.
   const progress = useWorldChatProgress(conversationId, loaded?.runStartedAt ?? null);
   const opened = workspace?.conversationId ?? null;
@@ -534,18 +582,18 @@ export function WorldChatScreen() {
   useEffect(
     () =>
       subscribeWorldChatMediaOpened((answer) => {
-        const candidateId = mediaRequests.current.get(answer.requestId);
-        if (!candidateId || answer.conversationId !== conversationId || answer.worldId !== worldId) return;
+        const request = mediaRequests.current.get(answer.requestId);
+        if (!request || answer.conversationId !== conversationId || answer.worldId !== worldId) return;
         mediaRequests.current.delete(answer.requestId);
-        setBusyPoints((points) => points.filter((id) => id !== candidateId));
+        setBusyPoints((points) => points.filter((id) => id !== request.candidateId));
         if (answer.sessionId) {
           setMediaRefusal(null);
-          void navigate(`/w/${worldId}/artifacts/bench/${answer.sessionId}`);
+          if (mediaNavigation.allows(request.path)) void navigate(`/w/${worldId}/artifacts/bench/${answer.sessionId}`);
         } else {
           setMediaRefusal(answer.reason ?? "The Bench could not be prepared.");
         }
       }),
-    [conversationId, navigate, worldId],
+    [conversationId, navigate, worldId, mediaNavigation.allows],
   );
 
   /**
@@ -564,35 +612,51 @@ export function WorldChatScreen() {
     if (!opening || !worldId) return;
     if (connection !== "open") {
       // Nothing was transmitted, or the answer went with the socket. The draft is still here.
+      const names = opening.act.kind === "files" ? opening.act.files.map(file => file.name) : opening.act.kind === "note" ? ["pasted-note.txt"] : [];
+      const refused = names.map(name => ({ name, reason: "The studio is disconnected. Attach or paste again after reconnecting." }));
+      setDeferredTrouble(refused); opening.onAttached?.(refused);
       setOpening(null);
       return;
     }
     if (!opened || opened === opening.wasOpen) return;
+    if (embedded && opened !== embedded.conversationId) return;
     const act = opening.act;
-    setOpening(null);
     if (act.kind === "say") {
-      sendWorldChat(worldId, opened, act.text);
+      if (!checkText(act.text)) { setOpening(null); return; }
+      if (sendWorldChat(worldId, opened, act.text) === null) return;
       setDraft("");
     } else if (act.kind === "pick") {
       worldChatAttachFiles(worldId, opened);
     } else if (act.kind === "files") {
-      void attachHostFiles(worldChatAttachTarget(worldId, opened), act.files).then(setDeferredTrouble);
+      void attachHostFiles(worldChatAttachTarget(worldId, opened), act.files).then(refusals => { setDeferredTrouble(refusals); opening.onAttached?.(refusals); });
     } else if (act.kind === "note") {
       void attachHostText(worldChatAttachTarget(worldId, opened), act.text, "pasted-note.txt").then(
-        setDeferredTrouble,
+        refusals => { setDeferredTrouble(refusals); opening.onAttached?.(refusals); },
       );
     }
-    navigate(`/w/${worldId}/chat/${opened}`, { replace: true });
+    setOpening(null);
+    if (embedded) embedded.onConversationChange(opened);
+    else navigate(`/w/${worldId}/chat/${opened}`, { replace: true });
   }, [opening, opened, worldId, connection, navigate]);
 
   /**
    * Start one. No title is asked for: nobody knows what a conversation is about before having
    * it, and the coordinator names it from the opening sentence anyway.
    */
-  const hold = (act: Opening) => {
-    if (!worldId || opening) return;
-    setOpening({ act, wasOpen: opened });
-    createWorldChat(worldId, "New conversation", crypto.randomUUID());
+  const hold = (act: Opening, onAttached?: (refusals: readonly { name: string; reason: string }[]) => void) => {
+    const refuse = (reason: string) => {
+      const names = act.kind === "files" ? act.files.map(file => file.name) : act.kind === "note" ? ["pasted-note.txt"] : [];
+      const refused = names.map(name => ({ name, reason })); setDeferredTrouble(refused); onAttached?.(refused);
+    };
+    if (!worldId || opening) { refuse("Wait for the conversation to finish starting, then attach or paste again."); return; }
+    setOpening({ act, wasOpen: opened, onAttached });
+    const requestId = (presentation ? presentation.owner.value<string | null>(presentation.key, "createRequestId", null) : null) ?? crypto.randomUUID();
+    presentation?.owner.trackCreateRequest(presentation.key, requestId);
+    if (!createWorldChat(worldId, "New conversation", requestId, presentation?.owner.getSnapshot().selected?.entry)) {
+      refuse("The studio is disconnected. Attach or paste again after reconnecting.");
+      setOpening(null);
+      presentation?.owner.deliverCreateResult({ worldId, requestId, detail: "The studio is disconnected. Your draft is retained." });
+    }
   };
 
   /*
@@ -624,7 +688,7 @@ export function WorldChatScreen() {
     }
     const requestId = openWorldChatMedia(worldId, conversationId, point.id, point.revision);
     if (!requestId) return;
-    mediaRequests.current.set(requestId, point.id);
+    mediaRequests.current.set(requestId, { candidateId: point.id, path: mediaNavigation.path });
     setBusyPoints((points) => [...points, point.id]);
     setMediaRefusal(null);
   };
@@ -643,10 +707,10 @@ export function WorldChatScreen() {
 
   const closed = loaded?.status === "closed";
   /** The attempt this window made, if any: an answer naming another one is somebody else's. */
-  const asked = useRef<string | null>(null);
+  const [asked, setAsked] = useConversationState<string | null>("wrapUpAsked", null);
   /** A mixed Accept all shows its landed ripples here before carrying its unanswered point away. */
-  const proposalsAfterNews = useRef(false);
-  const refusedMine = wrapUpRefusal !== null && wrapUpRefusal.requestId === asked.current;
+  const [proposalsAfterNews, setProposalsAfterNews] = useConversationState("proposalsAfterNews", false);
+  const refusedMine = wrapUpRefusal !== null && wrapUpRefusal.requestId === asked;
   /**
    * Go to the proposals once there are proposals to go to.
    *
@@ -661,12 +725,12 @@ export function WorldChatScreen() {
    * takes the answer with it, and leaving the button on "Writing them…" for the rest of the
    * session is the failure this whole change is about — but the coordinator may well have
    * finished, and the closed workspace that proves it arrives on the next connection. So the
-   * asking is remembered in a ref that no reconnection clears, and the button is freed meanwhile.
+   * asking is remembered with its conversation across remounting and reconnection.
    */
   useEffect(() => {
     if (!worldId) return;
-    if (asked.current && closed) {
-      asked.current = null;
+    if (asked && closed) {
+      setAsked(null);
       setWrappingUp(false);
       /*
        * Only when something is actually waiting.
@@ -677,17 +741,17 @@ export function WorldChatScreen() {
        * can answer — and that is worth going to, because it is the one thing this press could
        * not decide for them.
        */
-      if ((row?.openProposalCount ?? 0) > 0) {
-        if (rippleNotice) proposalsAfterNews.current = true;
+      if (onChatPage && (row?.openProposalCount ?? 0) > 0) {
+        if (rippleNotice) setProposalsAfterNews(true);
         else navigate(`/w/${worldId}/proposals`);
       }
-    } else if (proposalsAfterNews.current && !rippleNotice && (row?.openProposalCount ?? 0) > 0) {
-      proposalsAfterNews.current = false;
-      navigate(`/w/${worldId}/proposals`);
+    } else if (proposalsAfterNews && !rippleNotice && (row?.openProposalCount ?? 0) > 0) {
+      setProposalsAfterNews(false);
+      if (onChatPage) navigate(`/w/${worldId}/proposals`);
     } else if (wrappingUp && (refusedMine || connection !== "open")) {
       setWrappingUp(false);
     }
-  }, [wrappingUp, closed, refusedMine, connection, worldId, navigate, row?.openProposalCount, rippleNotice]);
+  }, [wrappingUp, asked, proposalsAfterNews, closed, refusedMine, connection, worldId, navigate, row?.openProposalCount, rippleNotice, onChatPage]);
 
   const rows = useMemo(
     () => [...(world?.conversations ?? [])].sort(byPendingConsequence),
@@ -698,6 +762,8 @@ export function WorldChatScreen() {
   // A conversation deleted in another window takes its menu with it rather than leaving one
   // standing over a row that is gone.
   const menuRow = menu ? rows.find((r) => r.id === menu.id) : undefined;
+  // Above the return: a hook skipped while the world loads changes the hook order once it arrives.
+  const inputs = useConversationInputs(worldId, loaded, setDraft);
 
   if (!world) return null;
   /**
@@ -713,6 +779,9 @@ export function WorldChatScreen() {
   const groups = groupBySubject(points);
   const openThreads = points.filter((p) => p.kind === "question");
   const carried = points.filter((p) => p.kind === "point" && p.settled).length;
+  const notesFeedback = rippleNotice ? "What changed elsewhere"
+    : wrapUpRefusal && !wrappingUp ? "Review needed"
+    : mediaRefusal ? "Media could not open" : null;
   const running = loaded?.runStatus === "running";
   const failure = loaded?.lastFailure;
   const starting = opening !== null;
@@ -722,7 +791,7 @@ export function WorldChatScreen() {
    * suggest otherwise (§13.2).
    */
   const chips = (loaded?.attachments ?? [])
-    .filter((a) => !dismissed.includes(a.id))
+    .filter((a) => !dismissed.has(a.id))
     .map((a) => ({
       id: a.id,
       file: attachmentChipLabel(a),
@@ -793,7 +862,7 @@ export function WorldChatScreen() {
         // goes when the conversation closes.
         const attempt = wrapUpWorldChat(worldId, conversationId!, loaded.seq);
         if (!attempt) return;
-        asked.current = attempt;
+        setAsked(attempt);
         setWrappingUp(true);
       }}
     >
@@ -822,7 +891,7 @@ export function WorldChatScreen() {
   // sheet's copy of every reply — the phone's only way to them — is gone.
   const rowMenu = menuRow && <RowMenuPanel worldId={worldId!} row={menuRow} menu={menu!}
     onOpenMenu={setMenu} onCloseMenu={() => setMenu(null)} />;
-  if (phone && !conversationId) return <div data-screen="world-chat" className="fy-chat__listpage">
+  if (phone && !conversationId && !inPanel) return <div data-screen="world-chat" className="fy-chat__listpage">
     <HistoryRail worldId={worldId!} live={live} archived={archived} currentId={undefined} phoneList open onToggle={() => {}}
       onNew={() => hold({ kind: "new" })} menu={menu} onOpenMenu={setMenu} onCloseMenu={() => setMenu(null)} />
     {starting && <div role="status">Starting…</div>}{rowMenu}
@@ -831,7 +900,7 @@ export function WorldChatScreen() {
   return (
     <div
       data-screen={conversationId ? "world-chat-conversation" : "world-chat"}
-      className="fy-chat__wrap"
+      className={cx("fy-chat__wrap", embedded && "fy-chat__wrap--embedded")}
     >
       <div className="fy-gate">
         {fold && historyOpen && <button className="fy-chatnav__drawer-scrim" aria-label="Close history" onClick={() => setHistoryOpen(false)} />}
@@ -842,7 +911,11 @@ export function WorldChatScreen() {
           currentId={conversationId}
           open={historyOpen}
           onToggle={() => setHistoryOpen((v) => !v)}
-          onNew={() => navigate(`/w/${worldId}/chat`)}
+          onNew={() => {
+            const surface = chatSurfaceForPage(state, `/w/${worldId}/chat`);
+            if (presentation && surface) presentation.owner.startNew(surface);
+            navigate(`/w/${worldId}/chat`);
+          }}
           menu={menu}
           onOpenMenu={setMenu}
           onCloseMenu={() => setMenu(null)}
@@ -875,6 +948,10 @@ export function WorldChatScreen() {
               <div className="fy-eyebrow-sm">WORLD CHAT</div>
               <h1 className="fy-story__h1">{row?.title ?? "New conversation"}</h1>
             </div>
+            {!inPanel && <Button variant="ghost" size="sm" aria-controls={notesId} aria-expanded={notesVisible ?? points.length > 0}
+              onClick={() => setNotesVisible(value => !(value ?? points.length > 0))}>
+              {(notesVisible ?? points.length > 0) ? "Hide notes" : `Show notes${points.length ? ` (${points.length})` : ""}`}
+            </Button>}
             {/* Beside the title rather than beneath it (41a): the head bottom-aligns the two so a
                 named subject reads as one line instead of a stack that grows. */}
             {row?.entryContext && row.entryContext.kind !== "world" && (
@@ -932,36 +1009,48 @@ export function WorldChatScreen() {
           </div>
 
           <HeldBar className="fy-chat__composer">
-            {phone && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setUnderstoodOpen(true)}>
-              <span><b>What I’ve understood <span>· {carried} of {points.length} ready</span></b><span>{[...groups.map(group => group.subject), ...(openThreads.length ? [`${openThreads.length} still open`] : [])].join(" · ") || "Nothing understood yet"}</span></span><ChevronUp size={18} />
+            {(phone || inPanel) && (points.length > 0 || notesFeedback) && <button type="button" className="fy-thread-peek" aria-haspopup="dialog" onClick={() => setUnderstoodOpen(true)}>
+              <span><b>{points.length > 0 ? <>What I’ve understood <span>· {carried} of {points.length} ready</span></> : notesFeedback}</b><span>{(notesFeedback && (points.length > 0 ? notesFeedback : "View details"))
+                ?? [...groups.map(group => group.subject), ...(openThreads.length ? [`${openThreads.length} still open`] : [])].join(" · ")}</span></span><ChevronUp size={18} />
             </button>}
+            {inputs.panel}
+            {worldId && conversationId && <VoiceBackgroundActivity worldId={worldId} conversationId={conversationId} operations={loaded?.voiceOperations ?? []} />}
             <Composer
               value={draft}
+              focusRequest={composerFocusRequest}
               onChange={setDraft}
               onSubmit={() => {
                 const text = draft.trim();
-                if (!text || !worldId || running || wrappingUp || starting) return;
+                if (!text || !worldId || wrappingUp || starting) return;
+                if (inputs.queueing) { inputs.sendNext({ text, attachmentIds: chips.map(c => c.id) }, draft); return; }
+                if (running) return;
+                if (!checkText(text)) return;
                 if (!conversationId) {
                   hold({ kind: "say", text });
                   return;
                 }
-                sendWorldChat(worldId, conversationId, text, chips.map((c) => c.id));
-                setDraft("");
+                if (sendWorldChat(worldId, conversationId, text, chips.map((c) => c.id)) !== null) setDraft("");
               }}
               placeholder={conversationId ? "Keep going…" : "Say something about this world…"}
-              busy={running || starting}
+              liveVoiceControl={worldId && conversationId ? <VoiceConversation
+                worldId={worldId} conversationId={conversationId} onActive={setVoiceActive} canStart={!running && !starting && !wrappingUp}
+                available={state?.app.voiceRuntime != null && "backend" in state.app.voiceRuntime && state.app.voiceRuntime.backend === "pipecat"}
+                model={state?.app.agents.find(agent => agent.name === "world-builder")?.model ?? "your selected conversation model"} /> : undefined}
+              busy={running || starting || voiceActive}
+              sendNext={inputs.queueing && !starting && !wrappingUp}
+              queuePaused={inputs.paused}
               busyLabel={starting ? "Starting…" : "Thinking…"}
               attachments={chips}
               refusals={[...refusals, ...deferredTrouble]}
               // Appended to whatever is already typed, never sent: speaking gets you to a draft,
               // and the draft is still corrected and sent by hand (SPEC-018 R-2, R-5).
-              onDictate={(text) => setDraft((prev) => (prev ? `${prev} ${text}` : text))}
+              onDictate={voiceActive ? undefined : (text) => setDraft((prev) => (prev ? `${prev} ${text}` : text))}
               readReplies={readReplies.composer}
               // World Chat's model is the chat agent's, chosen in Settings: the coordinator
               // refuses a named model outside a production (issue 1403) and there is no world-level
               // language choice to remember one in, so the chip says which model answers and
               // offers no menu.
-              modelControl={<ModelChip readOnly state={state} value={state?.app.agents.find((agent) => agent.name === "world-builder")?.model} set={false} onPick={() => {}} />}
+              modelControl={state?.app.agents.find(agent => agent.name === "world-builder")?.model ? <ModelChip readOnly state={state} value={state.app.agents.find(agent => agent.name === "world-builder")?.model} set={false} onPick={() => {}} /> : undefined}
               {...(worldId && !wrappingUp
                 ? {
                     onAttach: () => {
@@ -976,11 +1065,7 @@ export function WorldChatScreen() {
                       if (conversationId) {
                         return attachHostFiles(worldChatAttachTarget(worldId, conversationId), files);
                       }
-                      // Held until the conversation exists, so this call has no refusals to
-                      // report yet; the ones the deferred attach earns reach the composer
-                      // through `deferredTrouble`.
-                      hold({ kind: "files", files });
-                      return Promise.resolve([]);
+                      return new Promise<readonly { name: string; reason: string }[]>(resolve => hold({ kind: "files", files }, resolve));
                     },
                     onAttachText: (text: string) => {
                       if (conversationId) {
@@ -990,12 +1075,11 @@ export function WorldChatScreen() {
                           "pasted-note.txt",
                         );
                       }
-                      hold({ kind: "note", text });
-                      return Promise.resolve([]);
+                      return new Promise<readonly { name: string; reason: string }[]>(resolve => hold({ kind: "note", text }, resolve));
                     },
                   }
                 : {})}
-              onRemoveAttachment={(id) => setDismissed((prev) => [...prev, id])}
+              onRemoveAttachment={(id) => setDismissed((prev) => new Set([...prev, id]))}
               {...(worldId && conversationId
                 ? {
                     onPromoteAttachment: (attachmentId: string) =>
@@ -1021,7 +1105,7 @@ export function WorldChatScreen() {
           </HeldBar>
         </div>
 
-        {!phone && <div className="fy-gate__side">
+        {!phone && <div id={notesId} className="fy-gate__side" hidden={!(notesVisible ?? points.length > 0)}>
           <div className="fy-panel__head">
             <div className="fy-panel__headline">
               <div className="fy-panel__title">What I&rsquo;ve understood</div>
@@ -1033,10 +1117,13 @@ export function WorldChatScreen() {
           </div>
 
           {understoodBody}
-          {!fold && <div style={{ flex: 1, minHeight: 16 }} />}
           <div className="fy-chat__accept">{acceptAll}{decisionNotices}</div>
         </div>}
-        <PageSheet className="fy-understood-sheet" open={phone && understoodOpen} title="What I’ve understood" onClose={() => setUnderstoodOpen(false)} footer={<div className="fy-chat__acceptrow"><span>Writes {carried} to the world</span>{acceptAll}</div>}>
+        <PageSheet className="fy-understood-sheet" open={(phone || inPanel) && understoodOpen} title="What I’ve understood" onClose={() => {
+          setUnderstoodOpen(false);
+          // Dismissing the last result removes the opener. Return to the existing draft instead.
+          if (points.length === 0 && !notesFeedback) setComposerFocusRequest(value => value + 1);
+        }} footer={<div className="fy-chat__acceptrow"><span>Writes {carried} to the world</span>{acceptAll}</div>}>
           <div className="fy-panel__count">{carried} of {points.length} ready</div>
           {mediaRefusal && <div className="fy-panel__mediawhy" role="status">{mediaRefusal}</div>}
           {understoodBody}{decisionNotices}

@@ -1,3 +1,6 @@
+import "./components/production-spend.css";
+import "./components/manuscript-review.css";
+import "./components/prompt-tools.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { HashRouter } from "react-router";
@@ -7,6 +10,9 @@ import "@fontsource/geist-sans/600.css";
 import "@fontsource/geist-sans/700.css";
 // The launch screen wordmark only (--font-wordmark). Two weights, because the lockup is two
 // lines: the mark at 200 and the tagline at 300. Nothing else in the app uses this face.
+// The typefaces a graphic novel's placed words are set in (SPEC-064 R-38a).
+import "@fontsource/comic-neue/700.css";
+import "@fontsource/bangers/400.css";
 import "@fontsource/jost/200.css";
 import "@fontsource/jost/300.css";
 import "./theme/tokens/colors.css";
@@ -14,9 +20,12 @@ import "./theme/tokens/typography.css";
 import "./theme/tokens/spacing.css";
 import "./theme/tokens/effects.css";
 import "./theme/tokens/launch.css";
+import "./theme/tokens/comic-ink.css";
 import "./theme/globals.css";
 import "./screens/production-setup.css";
 import "./screens/publications.css";
+import "./screens/music.css";
+import "./screens/comic.css";
 // Component styles are gathered here (not in component modules) so the node test runner can
 // import the component graph without a CSS loader.
 import "./components/ui.css";
@@ -30,45 +39,83 @@ import "./domain/domain.css";
 import "./screens/screens.css";
 import "./screens/fidelity.css";
 import "./screens/launch.css";
+import "./screens/onboarding.css";
 import "./screens/home.css";
 import "./screens/world.css";
 import "./screens/character-pages.css";
+import "./components/character-narration.css";
 import "./screens/cast.css";
 import "./screens/art-direction.css";
 import "./screens/bible-canon.css";
 import "./screens/chat-artifacts.css";
 import "./screens/productions.css";
+import "./screens/publish.css";
+import "./screens/audio-drama.css";
 import "./screens/settings-adapters.css";
 import "./screens/scene-workspace/workspace.css";
 import "./screens/scene-workspace/shot-page.css";
 import "./screens/scene-workspace/responsive.css";
 import "./screens/generate-responsive.css";
 import "./screens/editor-responsive.css";
+import "./screens/editor-media-measurement.css";
+import "./screens/editor-effect-fields.css";
+import "./screens/editor-effect-inspector.css";
+import "./screens/editor-effect-area.css";
+import "./screens/editor-effect-curves.css";
+import "./screens/editor-effect-audio.css";
+import "./screens/editor-effect-library.css";
+import "./screens/editor-effect-tracks.css";
+import "./screens/editor-effect-shell.css";
+import "./screens/editor-effect-arrangement.css";
+import "./screens/editor-effect-review-bar.css";
+import "./screens/editor-transitions.css";
+import "./screens/editor-text-inspector.css";
+import "./components/editor-effect-proposal-card.css";
 import "./screens/develop-responsive.css";
 import "./screens/branch-map.css";
+import "./components/story-controls.css";
 import "./screens/season-responsive.css";
 import "./screens/chapter-responsive.css";
+import "./screens/chapter-audio-studio.css";
+// After chapter-responsive.css: the writing room lifts its caps (design turn 227).
+import "./screens/chapter-room.css";
 // After the screens' own sheets: design turn 192's re-dresses of rules they own.
 import "./screens/quiet.css";
+import "./components/production-card-body.css";
+import "./components/production-studio.css";
+import "./components/global-chat.css";
+import "./components/studio-assistant.css";
+import "./components/conversation-reply.css";
 // After fidelity.css: the panel re-dresses the provider-call inspector with a rule of equal
 // specificity, and the later sheet wins.
 import "./components/activity-panel.css";
+import "./components/system-panel.css";
+import "./components/audiobook-activity.css";
 import "./components/account-menu.css";
 import "./components/model-chip.css";
-import "./screens/audiobook-cover.css";
+import "./screens/audiobook-show.css";
+import "./components/audiobook-motion.css";
+import "./components/audiobook-words.css";
 import "./components/design-voice-dialog.css";
 import "./components/free-plan.css";
 import "./components/audiobook-look.css";
+import "./components/chapter-review.css";
 import "./components/audiobook-new-look.css";
+import "./components/saved-look-collection.css";
 import "./components/audiobook-suggest.css";
 import "./components/audiobook-picture-card.css";
+import "./components/audiobook-video.css";
+import "./components/story-export.css";
 import "./components/audiobook-illustrate.css";
 import { App } from "./App.js";
 import { initStore } from "./lib/store.js";
 import { isRemoteSession } from "./lib/remote-session.js";
 import { RemoteEntry } from "./components/remote-entry.js";
 import "./screens/remote-access.css";
+import "./screens/world-guide.css";
 import "./screens/settings-responsive.css";
+// Last: Arke's hinge half on a Fold7 (design turn 202) stands over the drawers' rules.
+import "./components/arke-half.css";
 import { initializeTheme } from "./lib/theme.js";
 
 /*
@@ -114,3 +161,6 @@ createRoot(document.getElementById("root")!).render(
     </HashRouter>
   </StrictMode>,
 );
+
+import "./components/story-publish.css";
+import "./components/creator-publishing.css";

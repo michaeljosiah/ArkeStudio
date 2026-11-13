@@ -11,6 +11,7 @@ import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../s
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+import { chatArtifactsFixture, CHAT_ID } from "./chat-artifacts-fixture.js";
 
 /**
  * The generation session (SPEC-036 R-23..R-25) is the Bench that design 142a draws, with the
@@ -328,8 +329,26 @@ async function apply(event: DomainEvent): Promise<void> {
   });
 }
 
-it("clears requested image dimensions when a world Bench switches to Codex", async () => {
+it("Keep names and sends the reviewed take while later results arrive", async () => {
   const { subject: _subject, ...session } = shotSession();
+  const later = { ...session.takes[0]!, id: "tk_01J8F3K2QW9VZX4N7M0RTYB6HP", n: 2 };
+  session.takes = [...session.takes, { ...later, status: "running", media: undefined }];
+  const bench = await openBench(session);
+  const brief = q(bench, '.fy-bench__brieftext');
+  await act(async () => __setStateForTest(stateWith({ ...session, takes: [session.takes[0]!, later] })));
+  assert.equal(q(bench, '.fy-bench__brieftext'), brief, "completion keeps the workspace mounted");
+  const keep = q(bench, '[data-testid="bench-keep"]');
+  assert.match(keep.textContent ?? "", /Keep take 1/);
+  await act(async () => keep.click());
+  const command = bench.sent.findLast(message => message.kind === "bench-keep");
+  assert.equal(command?.kind, "bench-keep");
+  if (command?.kind === "bench-keep") assert.equal(command.takeId, session.selectedTakeId);
+  assert.match(text(bench), /View latest/);
+});
+
+for (const scoped of [false, true]) it(`clears requested image size on Codex while retaining shot intent (${scoped})`, async () => {
+  const { subject, ...unscoped } = shotSession();
+  const session = scoped ? { ...unscoped, subject } : unscoped;
   session.composer.params = { kind: "image", count: 1, tier: "2K", aspect: "16:9" };
   const bench = await openBench(session, SESSION_ID, state => {
     state.app.manifest!.models.push({ ...IMAGE_MODEL, id: "codex-image", provider: "codex", displayName: "Codex Image",
@@ -344,7 +363,30 @@ it("clears requested image dimensions when a world Bench switches to Codex", asy
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
   const sent = bench.sent.findLast(message => message.kind === "bench-compose");
   assert.equal(sent?.kind, "bench-compose");
-  if (sent?.kind === "bench-compose") assert.deepEqual(sent.params, { kind: "image", count: 1 });
+  if (sent?.kind === "bench-compose") assert.deepEqual(sent.params, { kind: "image", count: 1, ...(scoped ? { aspect: "16:9" } : {}) });
+  assert.equal(select.querySelector('option[value="codex/codex-image"]')?.hasAttribute("disabled"), false);
+  if (scoped) assert.match(text(bench), /Composition · 16:9.*Image size chosen by provider/);
+});
+
+for (const currentAspect of ["16:9", "9:16"]) it(`previews the frozen provider-sized take crop after a ${currentAspect} rebuild without changing its source or dispatching`, async () => {
+  const session = shotSession();
+  if (session.subject?.kind === "shot") session.subject.aspect = currentAspect;
+  const selected = session.takes[0]!;
+  selected.request.provider = "codex"; selected.request.model = "codex-image";
+  const bench = await openBench(session, SESSION_ID, state => {
+    state.app.manifest!.models.push({ ...IMAGE_MODEL, id: "codex-image", provider: "codex",
+      limits: { providerSelectedSize: true }, pricing: { kind: "included-plan" } });
+  });
+  const image = q(bench, '.fy-bench__image'), source = image.getAttribute("src");
+  assert.equal(image.hasAttribute("data-crop"), false);
+  await pressLabelled(bench, "Preview 16:9 crop");
+  assert.equal(image.getAttribute("data-crop"), "true");
+  assert.match(image.getAttribute("style") ?? "", /--bench-crop-aspect:\s*1\.777/);
+  assert.equal(image.getAttribute("src"), source);
+  await pressLabelled(bench, "Full image");
+  assert.equal(image.hasAttribute("data-crop"), false);
+  assert.equal(bench.sent.some(m => m.kind === "bench-dispatch" || m.kind === "bench-accept"), false);
+  assert.match(text(bench), /composition 16:9/);
 });
 
 it("opens Arke from a world Bench and sends into that session's conversation without a production", async () => {
@@ -355,7 +397,7 @@ it("opens Arke from a world Bench and sends into that session's conversation wit
   const editor = dq(bench, '[role="textbox"]');
   const key = Object.keys(editor).find(name => name.startsWith("__reactProps$"))!;
   const props = (editor as unknown as Record<string, { onInput(event: { currentTarget: HTMLElement }): void }>)[key]!;
-  Object.defineProperty(editor, "innerText", { configurable: true, value: "A slow piano cue for the title" });
+  Object.defineProperty(editor, "innerText", { configurable: true, writable: true, value: "A slow piano cue for the title" });
   await act(async () => props.onInput({ currentTarget: editor }));
   await act(async () => dq(bench, '[aria-label="Send"]').click());
   const create = bench.sent.findLast(message => message.kind === "world-chat-create");
@@ -420,6 +462,22 @@ describe("voice references (design 142: an option chip, not a disclosure)", () =
 });
 
 describe("the generation session's chrome and frame (design 142a)", () => {
+  it("opens the shot Bench conversation from the shared Chat control without sending or selecting a take", async () => {
+    const bench = await openBench(shotSession(), SESSION_ID, state => {
+      const chat = chatArtifactsFixture();
+      state.world!.conversations = [{ ...chat.world!.conversations[0]!, entryContext: { kind: "bench", sessionId: SESSION_ID } }];
+      state.worldChat = chat.worldChat;
+    });
+    const panel = () => dom.document.querySelector('.fy-global-chat');
+    await act(async () => q(bench, '[data-global-chat-trigger]').click());
+    assert.equal(panel()?.querySelector('header h2')?.textContent, "Bench Chat");
+    assert.ok(bench.sent.some(message => message.kind === "world-chat-open" && message.conversationId === CHAT_ID));
+    assert.ok(!bench.sent.some(message => ["world-chat-send", "bench-select-take", "bench-dispatch"].includes(message.kind)));
+    await act(async () => (panel()!.querySelector('[aria-label="Close Chat"]') as HTMLElement).click());
+    await act(async () => q(bench, '[data-global-chat-trigger]').click());
+    assert.equal(panel()?.querySelector('header h2')?.textContent, "Bench Chat");
+  });
+
   it("names the subject on a pill at the right, says Bench on the left, and keeps the world bench's switcher off", async () => {
     const bench = await openBench(shotSession());
     assert.equal(q(bench, '[data-testid="bench-subject-pill"]').textContent, "Shot 12 · Maren at the rail");
@@ -514,11 +572,23 @@ describe("Image / Video (R-23; design 142a)", () => {
   it("the bin at the bar's end rebuilds the prompt and references from the shot", async () => {
     const bench = await openBench(shotSession());
     const bin = q(bench, '.fy-bench__composerbar [data-testid="bench-rebuild"]');
-    assert.match(bin.getAttribute("title") ?? "", /Clear the bench/);
+    assert.match(bin.getAttribute("title") ?? "", /Rebuild prompt and shot settings; keep manually attached references and takes/);
     await act(async () => bin.click());
     assert.equal(bench.sent.at(-1)?.kind, "bench-rebuild-subject");
     assert.doesNotMatch(bench.container.innerHTML, /fy-bench__eyebrow--refs/, "no PROMPT eyebrow to hold a link");
   });
+});
+
+it("shows frozen versus current timing and offers Rebuild before Generate can refuse it", async () => {
+  const bench = await openBench(shotSession("video"), SESSION_ID, state => {
+    const scene = state.world!.productions.find(p => p.meta.id === "saltlight")!.scenes.find(s => s.id === "sc_04")!;
+    const shot = orderedShots(scene).find(s => s.id === "sh_12")!;
+    shot.durationSec = 5;
+  });
+  assert.match(q(bench, '[data-testid="bench-timing-changed"]').textContent!, /Bench 4s · current 5s/);
+  assert.equal((q(bench, '[data-testid="bench-generate"]') as HTMLButtonElement).disabled, true);
+  await act(async () => q(bench, '[data-testid="bench-timing-changed"] button').click());
+  assert.equal(bench.sent.at(-1)?.kind, "bench-rebuild-subject");
 });
 
 describe("references (R-23; design 142a)", () => {
@@ -542,6 +612,40 @@ describe("references (R-23; design 142a)", () => {
     const add = q(bench, '[data-testid="bench-add-reference"]');
     assert.equal(add.textContent, "Reference");
     assert.ok(add.querySelector("svg"), "with the picture mark");
+  });
+});
+
+describe("Follow, for a staged clip (issue 1817; design 229h)", () => {
+  const staged = (): BenchSession => {
+    const session = shotSession("video");
+    const composer = session.composer as unknown as { params: Record<string, unknown>; brief: string; activeTokens: string[] };
+    composer.params = { ...composer.params, follow: "camera-action" };
+    // The playblast rides: a follow line for a video that does not is taken out (issue 1817).
+    composer.activeTokens = ["Image 1", "Video 1"];
+    composer.brief = "Maren listens at the rail.\n\n0.0–4.0 s · Medium on Maren, from the front, eye level, locked off.\nFollow @Video 1 precisely for camera position, movement, timing and blocking.";
+    return session;
+  };
+
+  it("is offered only when the Stage's playblast is attached, as a two-way choice", async () => {
+    const plain = await openBench(shotSession("video"));
+    assert.equal(plain.container.querySelector('[data-testid="bench-follow"]'), null, "no blockout, no Follow");
+    await act(async () => plain.root.unmount());
+    const bench = await openBench(staged());
+    const options = all(bench, '[data-testid="bench-follow"] [role="radio"]');
+    assert.deepEqual(options.map((option) => option.textContent), ["Camera + action", "Camera only"]);
+    assert.deepEqual(options.map((option) => option.getAttribute("aria-checked")), ["true", "false"]);
+    assert.equal(q(bench, ".fy-bench__followlabel").textContent, "follow");
+  });
+
+  it("rewrites the brief's closing line and records the choice", async () => {
+    const bench = await openBench(staged());
+    await act(async () => all(bench, '[data-testid="bench-follow"] [role="radio"]')[1]!.click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
+    const composed = bench.sent.filter((message): message is Extract<ClientMessage, { kind: "bench-compose" }> => message.kind === "bench-compose").at(-1);
+    assert.ok(composed, "the choice is composed");
+    assert.equal(composed.brief?.split("\n").at(-1), "Use @Video 1 only for camera position and movement. The figures in it are placeholders; do not copy their poses or body mechanics.");
+    assert.match(composed.brief ?? "", /^Maren listens at the rail\./, "the author's words are untouched");
+    assert.equal((composed.params as { follow?: string } | undefined)?.follow, "camera");
   });
 });
 

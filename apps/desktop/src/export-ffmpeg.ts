@@ -2,7 +2,8 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { createReadStream, existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { ffmpegFilterPath } from "@arke-studio/contracts";
-import type { FfmpegRunner } from "@arke-studio/coordinator";
+import { probeFfmpegGraphFileOption, type FfmpegRunner } from "@arke-studio/coordinator";
+import { createMediaProcessRunner } from "./media-tools.js";
 
 type SpawnLike = typeof nodeSpawn;
 type HashFile = (path: string) => Promise<string>;
@@ -10,8 +11,13 @@ type HashFile = (path: string) => Promise<string>;
 const FILTER_OPTIONS = new Set(["-filter_complex", "-vf", "-filter:v"]);
 const GEIST_REGULAR_SHA256 = "85a1c6b18a6b0a06dfe9fd4f6d6a5d4979f74ec861eaef4bc7868b5492b8a117";
 
-/** Only filter option values can require drawtext; input paths and metadata are ordinary argv. */
+/**
+ * Only filter option values can require drawtext; input paths and metadata are ordinary argv. A
+ * graph read from a file (`-/filter_complex`, the audiobook video's: a chapter's captions outrun
+ * a command line) cannot be read here, so it is taken to draw, and the font is proved first.
+ */
 export function usesDrawtext(args: readonly string[]): boolean {
+  if (args.includes("-/filter_complex") || args.includes("-filter_complex_script")) return true;
   return args.some((arg, index) => {
     const previous = args[index - 1];
     return (
@@ -51,6 +57,7 @@ export function createExportFfmpegRunner(
     onProgress: (percent: number) => void,
     signal: AbortSignal,
     slateProbe: boolean,
+    onSeconds?: (seconds: number) => void,
   ): Promise<void> => {
     if (signal.aborted) return Promise.reject(new Error("cancelled before start"));
     return new Promise((resolve, reject) => {
@@ -79,9 +86,12 @@ export function createExportFfmpegRunner(
       abort = () => child.kill("SIGKILL");
       signal.addEventListener("abort", abort, { once: true });
       child.stderr?.on("data", (chunk: Buffer) => {
-        const match = /time=(\d+):(\d+):(\d+)/.exec(chunk.toString());
+        const match = /time=(\d+):(\d+):(\d+(?:\.\d+)?)/.exec(chunk.toString());
         if (match) {
-          onProgress(Math.min(99, Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3])));
+          const seconds = Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3]);
+          onProgress(Math.min(99, Math.floor(seconds)));
+          // The same clock uncapped, for a caller that knows the length (design turn 197d).
+          onSeconds?.(seconds);
         }
       });
       child.on("error", (error) =>
@@ -91,7 +101,7 @@ export function createExportFfmpegRunner(
             : error,
         ),
       );
-      child.on("exit", (code) =>
+      child.on("close", (code) =>
         finish(
           code === 0
             ? undefined
@@ -192,13 +202,15 @@ export function createExportFfmpegRunner(
 
   return {
     slateFont,
-    run: async (args, onProgress, signal) => {
+    identity: async signal => { signal.throwIfAborted(); const value = await digest(ffmpeg); signal.throwIfAborted(); return "sha256:" + value; },
+    graphFileOption: signal => probeFfmpegGraphFileOption(createMediaProcessRunner({ ffmpeg, ffprobe: "" }, spawn), signal),
+    run: async (args, onProgress, signal, onSeconds) => {
       const drawsText = usesDrawtext(args);
       if (drawsText) {
         await verifyFontIdentity();
         await verifySlate(signal);
       }
-      await runProcess(args, onProgress, signal, false);
+      await runProcess(args, onProgress, signal, false, onSeconds);
     },
   };
 }

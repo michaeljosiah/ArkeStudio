@@ -95,7 +95,10 @@ still leaves enough information for this recovery on the next start.
 The installable web app remains a frontend to the PC; installation does not copy worlds to the
 phone or provide offline editing. The manifest is advertised only on the desktop-hosted remote
 page, not on the Electron file page or temporary development sessions. Neither the worker nor
-the gateway caches world data, media or credentials for offline use.
+the gateway caches world data, media or credentials for offline use. The browser keeps the
+app's own content-hashed files under `/assets/` for a year, gzipped where they are text; the
+page shell, `/remote/*` and every media route stay `no-store`, so a repeat open fetches only the
+shell and still needs the PC.
 
 If the PC or Tailscale is offline, an already open page retries. Worker preparation, session
 checks and WebSocket handshakes have ten-second deadlines so a stalled attempt cannot prevent
@@ -340,3 +343,26 @@ On **each** other device:
    back. Record whether Vite applied a hot update or automatically reloaded the whole page.
 5. Record the result and any exact error in #1305. A phone-sized window on the host is not a
    substitute for either device. Close the issue only when both device results are recorded.
+
+
+## Large worlds and slow connections
+
+The browser negotiates compact history with `hello.retainHistory`. Job summaries omit provider
+prompt/text/turn payloads; durable jobs are unchanged and Activity's Provider calls inspector
+still loads captured requests on demand. Voice-design audition text and all routing, grouping,
+recovery and cost metadata remain available. Ledger entries are never truncated: spend and
+free-credit calculations still use the complete ledger.
+
+A navigation snapshot can name `retainedHistory` (`jobs`, `ledger`) when those arrays have not
+changed since this connection's last snapshot. The client keeps its event-updated arrays. A
+hello or reconnect always resets that baseline and receives complete history; clients that do
+not negotiate this feature continue receiving full snapshots and full job records.
+
+Both transport and gateway use an ordered writer, allowing one in-flight send and at most
+32 MiB / 256 waiting frames. The gateway pauses its upstream while sending. Frames are never
+silently dropped or reordered. A queue overflow or a send stalled for 30 seconds records
+numeric delivery diagnostics and attempts a 1013 close, with a five-second forced-close bound.
+`remote.socket` closed lines include the last frame size, peak buffered bytes, sent count and
+local close reason. An `upstream-closed` line distinguishes coordinator-side closure. An empty
+1006 alone still does not prove overload: check the preceding diagnostic or investigate network
+loss/browser suspension. Logs contain no frame payloads or session credentials.

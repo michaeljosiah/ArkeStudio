@@ -34,6 +34,7 @@ export type { SemanticSceneCommand as SceneCommand } from "@arke-studio/contract
  * teaching every one of them about a wire shape.
  */
 export function sceneCommandFrom(wire: WireSceneCommand): SceneCommand {
+  if (wire.kind === "set-beat-line") return { ...wire, textDigest: sha256(wire.text) };
   if (wire.kind !== "edit-shot") return wire as SceneCommand;
   const change: Record<string, unknown> = { ...wire.change };
   for (const field of wire.clear ?? []) change[field] = undefined;
@@ -46,7 +47,8 @@ export function sceneCommandFrom(wire: WireSceneCommand): SceneCommand {
 
 /** The wire shape, structurally — the frame owns its schema; this is what reaches the command. */
 type WireSceneCommand =
-  | Exclude<SceneCommand, { kind: "edit-shot" }>
+  | Exclude<SceneCommand, { kind: "edit-shot" | "set-beat-line" }>
+  | Omit<Extract<SceneCommand, { kind: "set-beat-line" }>, "textDigest">
   | { kind: "edit-shot"; shotId: string; change: Partial<Omit<Shot, "id" | "number" | "staging">>; clear?: readonly string[] };
 
 /** A refusal that names what stands in the way, never a code (R-39, R-59). */

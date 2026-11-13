@@ -47,9 +47,9 @@ on exactly those.
 
 ## Relationships
 Trusted by Bray, who brings the family's warning-roll arrears to Perrin personally rather than
-deal with the wider Council. Was the auditor's junior the year Ines Half-Hitch filed her line
-about the ledger, and has kept a copy of it, framed, in a drawer, for reasons never explained to
-anyone who has asked.
+deal with the wider Council. Copied Ines Half-Hitch's 1974 audit line much later, while
+cataloguing the historic audit during Perrin's own career, and has kept the copy, framed, in a
+drawer, for reasons never explained to anyone who has asked.
 
 ## Wants
 The rota filled. The numbers right. Nobody under Perrin's watch going without a warning they

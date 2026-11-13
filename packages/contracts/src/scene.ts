@@ -1,6 +1,6 @@
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
 import { z } from "zod";
-import { ArtifactIdSchema, IsoDateTimeSchema, prefixedIdSchema, SceneIdSchema, Sha256Schema, ShotIdSchema, SlugSchema, TakeIdSchema } from "./ids.js";
+import { ArtifactIdSchema, IsoDateTimeSchema, prefixedIdSchema, SceneIdSchema, Sha256Schema, ShotIdSchema, SlugSchema, TakeIdSchema, WorldFilePathSchema } from "./ids.js";
 import { FullSha256Schema } from "./audio.js";
 import { PropIdSchema, PropStateIdSchema } from "./prop.js";
 
@@ -82,6 +82,28 @@ export type ShotFraming = z.infer<typeof ShotFramingSchema>;
  * Nothing here is required beyond identity: this is the read path, and a `.min()` on the key
  * list would delete a hand-edited scene from a world on disk.
  */
+/**
+ * A camera key in words (issue 1820, design turn 229a): who the frame is on, how big, from what
+ * angle and which side, through which lens. stage-framing.ts resolves them to p/l; the words are
+ * kept so a retime or a new lens resolves them again, and a hand edit that moves the key drops them.
+ */
+export const STAGE_FRAME_SIZES = ["extreme wide", "wide", "medium", "medium close-up", "close-up", "extreme close-up"] as const;
+export const StageFrameWordsSchema = z
+  .object({
+    subject: SlugSchema,
+    size: z.enum(STAGE_FRAME_SIZES),
+    angle: z.enum(["eye", "low", "high", "top"]),
+    side: z.enum(["front", "behind", "left", "right", "over"]),
+    /** Over whose shoulder, for side "over". */
+    over: SlugSchema.optional(),
+    /** The lens the framing is solved through; absent is the shot's. */
+    focalMm: z.number().finite().positive().max(1000).optional(),
+    /** The aspect it was solved at, so a retime solves it the same way. */
+    aspect: z.string().min(1).max(20).optional(),
+  })
+  .strict();
+export type StageFrameWords = z.infer<typeof StageFrameWordsSchema>;
+
 export const StagingKeySchema = z
   .object({
     /** Seconds from the shot's start. */
@@ -101,6 +123,7 @@ export const StagingKeySchema = z
     easeIn: z.number().min(0).max(1).optional().describe("Decelerating into a camera rest; ignored at passing keys."),
     /** Ease away from a camera rest; ignored at passing keys. */
     easeOut: z.number().min(0).max(1).optional().describe("Accelerating away from a camera rest; ignored at passing keys."),
+    frame: StageFrameWordsSchema.optional(),
   })
   .strict();
 export type StagingKey = z.infer<typeof StagingKeySchema>;
@@ -127,8 +150,129 @@ export const StagingFigureSchema = z
   });
 export type StagingFigure = z.infer<typeof StagingFigureSchema>;
 
+/**
+ * A set kit item (issue 1819, design turn 229e): one entry that expands into primitives
+ * (stage-kit.ts). Its x/z/y/w/h/d/rotation place and size the whole item; these fields say what
+ * it is and, for a room, which sides are open and where its doors and windows are.
+ */
+export const STAGE_KIT_KINDS = ["room", "doorway", "window", "stairs", "counter", "booth", "table", "armchair", "sofa", "bed", "planter", "tree", "lamp", "car", "street", "facade"] as const;
+type StageSide = "front" | "back" | "left" | "right";
+// The kit, the set, its light and the atmosphere are spelled out and annotated (TS7056): inferred,
+// they ride into every frame, event and card that carries a scene, and the engine's declaration
+// bundle refused the arke-actions registry as too long to serialize once the look grew them.
+export interface StageKit {
+  kind: (typeof STAGE_KIT_KINDS)[number];
+  open?: StageSide[] | undefined;
+  ceiling?: boolean | undefined;
+  openings?: Array<{ wall: StageSide; kind: "door" | "window" | "glass"; at: number; w: number; h: number; sill?: number | undefined }> | undefined;
+  seats?: number | undefined;
+  steps?: number | undefined;
+}
+export const StageKitSchema: z.ZodType<StageKit, z.ZodTypeDef, unknown> = z
+  .object({
+    kind: z.enum(STAGE_KIT_KINDS),
+    /** A room's sides with no wall, so the camera can stand outside it. */
+    open: z.array(z.enum(["front", "back", "left", "right"])).max(4).optional(),
+    ceiling: z.boolean().optional(),
+    /** Doors and windows cut into a room's walls; `at` is metres along the wall from its centre. */
+    openings: z
+      .array(
+        z.object({
+          wall: z.enum(["front", "back", "left", "right"]),
+          kind: z.enum(["door", "window", "glass"]),
+          at: z.number().finite(),
+          w: z.number().finite().positive().max(50),
+          h: z.number().finite().positive().max(50),
+          sill: z.number().finite().nonnegative().max(50).optional(),
+        }).strict(),
+      )
+      .max(12)
+      .optional(),
+    /** Chairs around a table. */
+    seats: z.number().int().min(0).max(12).optional(),
+    steps: z.number().int().min(2).max(40).optional(),
+  })
+  .strict();
+
+/**
+ * What a set or a kit part is made of, for the Lit look (issue 1825, design turn 229a/229e). The
+ * renderer owns how each one looks; the world records only the word.
+ */
+export const STAGE_MATERIALS = ["plaster", "concrete", "stone", "marble", "wood", "metal", "glass", "fabric", "leather", "foliage", "pot", "lamp", "screen", "neon", "road", "paint", "grass", "water"] as const;
+export const StageMaterialSchema = z.enum(STAGE_MATERIALS);
+export type StageMaterial = z.infer<typeof StageMaterialSchema>;
+const HexColourSchema = z.string().regex(/^#[0-9a-f]{6}$/i, "a colour is #rrggbb");
+
+/** A practical light on the set (issue 1825, design turn 229e): a lamp, a neon, a window, the sun. */
+export interface StageLight {
+  name: string;
+  kind: "point" | "spot" | "area" | "sun";
+  colour: string;
+  kelvin?: number | undefined;
+  strength: number;
+  reach?: number | undefined;
+  shadow?: boolean | undefined;
+  x: number;
+  y: number;
+  z: number;
+  aim?: string | [number, number, number] | undefined;
+}
+export const StageLightSchema: z.ZodType<StageLight, z.ZodTypeDef, unknown> = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    kind: z.enum(["point", "spot", "area", "sun"]),
+    colour: HexColourSchema,
+    /** Colour temperature the colour was chosen from, kept so the form can say it. */
+    kelvin: z.number().int().min(1000).max(20000).optional(),
+    strength: z.number().finite().min(0).max(500),
+    /** How far the light carries, metres; absent is unlimited. */
+    reach: z.number().finite().positive().max(500).optional(),
+    shadow: z.boolean().optional(),
+    x: z.number().finite(),
+    y: z.number().finite(),
+    z: z.number().finite(),
+    /** Where a spot, area light or the sun points; a set's name or a point. */
+    aim: z.union([z.string().min(1).max(80), z.tuple([z.number().finite(), z.number().finite(), z.number().finite()])]).optional(),
+  })
+  .strict();
+
+/** The scene's time, sky, haze and shading for the Lit look (issue 1825). */
+export interface SceneAtmosphere {
+  time?: "day" | "dusk" | "night" | "interior" | undefined;
+  sky?: "clear" | "overcast" | "night-city" | "studio" | undefined;
+  haze?: number | undefined;
+  shading?: "soft" | "off" | undefined;
+}
+export const SceneAtmosphereSchema: z.ZodType<SceneAtmosphere, z.ZodTypeDef, unknown> = z
+  .object({
+    time: z.enum(["day", "dusk", "night", "interior"]).optional(),
+    sky: z.enum(["clear", "overcast", "night-city", "studio"]).optional(),
+    haze: z.number().finite().min(0).max(0.2).optional(),
+    shading: z.enum(["soft", "off"]).optional(),
+  })
+  .strict();
+
 /** Set massing: a translucent box, named so the label reads on the floor. */
-export const StagingSetSchema = z
+export interface StagingSet {
+  name: string;
+  shape?: "box" | "sphere" | "cylinder" | "mesh" | undefined;
+  group?: string | undefined;
+  vertices?: Array<[number, number, number]> | undefined;
+  triangles?: number[] | undefined;
+  y?: number | undefined;
+  rotation?: [number, number, number] | undefined;
+  solid?: boolean | undefined;
+  kit?: StageKit | undefined;
+  material?: StageMaterial | undefined;
+  surfaces?: Record<string, StageMaterial> | undefined;
+  colour?: string | undefined;
+  x: number;
+  z: number;
+  w: number;
+  h: number;
+  d: number;
+}
+export const StagingSetSchema: z.ZodType<StagingSet, z.ZodTypeDef, unknown> = z
   .object({
     name: z.string().min(1),
     shape: z.enum(["box", "sphere", "cylinder", "mesh"]).optional(),
@@ -138,6 +282,12 @@ export const StagingSetSchema = z
     y: z.number().finite().optional(),
     rotation: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]).optional(),
     solid: z.boolean().optional(),
+    kit: StageKitSchema.optional(),
+    /** A plain set's material, or a kit item's default for parts its surfaces do not name (issue 1825). */
+    material: StageMaterialSchema.optional(),
+    /** A kit item's materials by part surface ("floor", "glass") or wall ("right wall"). */
+    surfaces: z.record(z.string().min(1).max(40), StageMaterialSchema).refine((value) => Object.keys(value).length <= 16, "at most 16 surfaces").optional(),
+    colour: HexColourSchema.optional(),
     x: z.number(),
     z: z.number(),
     w: z.number(),
@@ -145,7 +295,38 @@ export const StagingSetSchema = z
     d: z.number(),
   })
   .strict();
-export type StagingSet = z.infer<typeof StagingSetSchema>;
+
+/**
+ * The location plate (issue 1818, design turn 229c): a picture of the empty place the set is
+ * built from. The build reads it as the authority on layout, matches one shot's opening camera
+ * to it, and it can ride to the generator as the first image so the blockout and the location
+ * reference agree about where the door is. A world file (a location sheet's picture) or an
+ * artifact, pinned by hash so a replaced picture reads as a different plate.
+ */
+export const ScenePlateSchema = z
+  .object({
+    source: z.discriminatedUnion("source", [
+      z.object({ source: z.literal("artifact"), artifactId: ArtifactIdSchema, hash: Sha256Schema }).strict(),
+      z.object({ source: z.literal("world-file"), path: WorldFilePathSchema, hash: Sha256Schema }).strict(),
+    ]),
+    /** What the place is called on the Stage and in the prompt ("Lobby"). */
+    label: z.string().trim().min(1).max(80),
+    /** The shot whose opening camera the plate was taken from. */
+    shotId: ShotIdSchema.optional(),
+    /** Where the plate's camera stood, as the build estimated it; the plate form edits lens and horizon. */
+    camera: z
+      .object({
+        p: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]),
+        l: z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]),
+        focalMm: z.number().finite().positive().max(1000),
+      })
+      .strict()
+      .optional(),
+    /** Absent rides: the plate goes to the generator as Image 1. */
+    rides: z.boolean().optional(),
+  })
+  .strict();
+export type ScenePlate = z.infer<typeof ScenePlateSchema>;
 
 /** Cast marks and set massing shared by every camera that covers this scene action. */
 export const SceneBlockingSchema = z
@@ -153,6 +334,9 @@ export const SceneBlockingSchema = z
     version: z.number().int().min(1),
     cast: z.array(StagingFigureSchema),
     sets: z.array(StagingSetSchema),
+    plate: ScenePlateSchema.optional(),
+    lights: z.array(StageLightSchema).max(24).optional(),
+    atmosphere: SceneAtmosphereSchema.optional(),
   })
   .strict();
 export type SceneBlocking = z.infer<typeof SceneBlockingSchema>;
@@ -163,6 +347,27 @@ export type StageRig = z.infer<typeof StageRigSchema>;
 export const StageGaitSchema = z.enum(["walk", "jog", "run"]);
 export type StageGait = z.infer<typeof StageGaitSchema>;
 
+/**
+ * What a figure is doing at a mark (issue 1821, design turn 229d). Stand, sit and lie are the
+ * postures the Stage always had; the rest are the actions scripts ask for. The jointed figure
+ * draws each by name; Greybox's capsules fall back to the nearest of the three.
+ */
+export const STAGE_POSES = ["stand", "sit", "lie", "lean-on", "reach", "point", "wipe", "crouch", "stumble", "fall", "arms-crossed", "phone", "carry", "hands-on-hips"] as const;
+export const StagePoseSchema = z.enum(STAGE_POSES);
+export type StagePose = z.infer<typeof StagePoseSchema>;
+
+/** A hand put on someone or something at a mark: the figure's arm reaches it by IK. */
+export const StageContactSchema = z
+  .object({
+    side: z.enum(["left", "right", "both"]),
+    /** A cast sheet or a set's name. */
+    on: z.string().min(1).max(80),
+    /** Which part of a figure; a set is touched on its top. */
+    part: z.enum(["left shoulder", "right shoulder", "head", "hand", "waist"]).optional(),
+  })
+  .strict();
+export type StageContact = z.infer<typeof StageContactSchema>;
+
 export const StagePerformanceKeySchema = z.object({
   t: z.number().finite().nonnegative(), x: z.number().finite(), z: z.number().finite(),
   gait: StageGaitSchema.optional(),
@@ -170,7 +375,10 @@ export const StagePerformanceKeySchema = z.object({
   easeOut: z.number().min(0).max(.5).optional(),
   hold: z.number().finite().nonnegative().optional(),
   y: z.number().finite().optional(), facing: z.number().finite().optional(),
-  pose: z.enum(["stand", "sit", "lie"]).optional(),
+  pose: StagePoseSchema.optional(),
+  hand: StageContactSchema.optional(),
+  /** Who or what the figure looks at: a cast sheet or a set's name. */
+  look: z.string().min(1).max(80).optional(),
 }).strict();
 export type StagePerformanceKey = z.infer<typeof StagePerformanceKeySchema>;
 export const StagePerformanceSchema = z.object({
@@ -250,10 +458,19 @@ export const ShotStagingSchema = z
         rig: StageRigSchema.optional(),
         seed: z.number().int().min(0).optional(),
         rigIntensity: z.number().min(0).max(2).optional(),
+        /** The look the playblast was exported in (issue 1825); absent is Greybox, as every older one was. */
+        look: z.enum(["greybox", "lit", "plate"]).optional(),
         /** Absent on legacy shot-owned pins; inherited pins name the shared block they depict. */
         blocking: z.discriminatedUnion("owner", [
           z.object({ owner: z.literal("scene"), version: z.number().int().min(1).nullable() }).strict(),
-          z.object({ owner: z.literal("shot") }).strict(),
+          z.object({
+            owner: z.literal("shot"),
+            /**
+             * A Lit or Plate playblast of a shot's own marks still shows the scene's lights,
+             * atmosphere and plate: the scene blocking version it was drawn under (issue 1825).
+             */
+            sceneVersion: z.number().int().min(1).nullable().optional(),
+          }).strict(),
         ]).optional(),
       })
       .strict()
@@ -356,7 +573,10 @@ export const ShotSchema = z
      */
     beat: z
       .object({
-        /** `voice`: when its voice ends; `tap`: when the reader moves on; `hold`: after `holdSec`. */
+        /**
+         * `voice`: after the line — its voice, or its reading time; `hold`: after `holdSec`.
+         * `tap` is still read — never tightened away — and plays as `voice` (turn 246).
+         */
         advance: z.enum(["voice", "tap", "hold"]).optional(),
         holdSec: z.number().positive().max(60).optional(),
         /** A slow push into the picture, a drift across it, or a still picture. */
@@ -534,6 +754,34 @@ export const SceneBaseShape = {
         merges: z.array(ShotIdSchema),
         prompts: z
           .array(z.object({ members: z.array(ShotIdSchema).min(1), text: z.string().min(1) }).strict())
+          .optional(),
+        /**
+         * A board's cut animatic (issue 1824, design turn 229g): its shots' cameras cut together over
+         * the scene's shared action, filed and pinned like a playblast, keyed by the exact member
+         * set as a board prompt is. Stale when any member's staging, length, lens or the aspect moved.
+         */
+        animatics: z
+          .array(
+            z
+              .object({
+                members: z.array(ShotIdSchema).min(2),
+                artifactId: ArtifactIdSchema,
+                openingFrameArtifactId: ArtifactIdSchema.optional(),
+                sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+                /** Each member's staging as it was recorded, so staleness reads without a hash. */
+                stagings: z.array(z.object({ shotId: ShotIdSchema, version: z.number().int().min(1), durationSec: z.number().positive(), lens: z.string() }).strict()).min(2),
+                /**
+                 * The scene blocking the board was drawn over: every blocking edit (marks, sets, the
+                 * plate, lights and atmosphere) moves its version without touching a shot's staging.
+                 */
+                blockingVersion: z.number().int().min(1).nullable(),
+                evaluatorVersion: z.number().int().positive(),
+                durationSec: z.number().positive(),
+                aspect: z.string().min(1),
+                look: z.enum(["greybox", "lit", "plate"]).optional(),
+              })
+              .strict(),
+          )
           .optional(),
       })
       .strict()

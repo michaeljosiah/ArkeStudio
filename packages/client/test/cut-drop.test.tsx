@@ -78,7 +78,9 @@ function lanesState(): ClientState {
 
 async function mount(state: ClientState): Promise<Mounted> {
   const sent: Mounted["sent"] = [];
-  __setBridgeForTest(bridge(sent));
+  const host = bridge(sent);
+  Object.assign(window, { arke: host });
+  __setBridgeForTest(host);
   __setStateForTest(state);
   const production = state.world!.productions[0]!;
   const container = document.createElement("div");
@@ -146,6 +148,7 @@ const still = () => new File(["bytes"], "plate.png", { type: "image/png" });
 const uploads = (screen: Mounted) => screen.sent.filter((message): message is Upload & { sourcePaths: string[] } => message.kind === "upload-artifacts");
 
 afterEach(() => {
+  Reflect.deleteProperty(window, "arke");
   __setBridgeForTest(null);
   document.body.replaceChildren();
 });

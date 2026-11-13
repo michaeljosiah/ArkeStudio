@@ -98,6 +98,16 @@ export function lookKey(who: { sheet?: string | undefined; name: string }): stri
 export const lookByAuthor = (line: { by?: "author" | undefined }): boolean => line.by === "author";
 
 /**
+ * Where the look chosen or carried for this chapter disagrees with the chapter's own words, as
+ * its Looks sheet shows them (issue 1658): a picture that rides that look would dress the person
+ * against the prose, so a proposal holds it rather than making it.
+ */
+export function chapterLookDisagreement(look: Pick<AudiobookLook, "characters"> | null | undefined, key: string): readonly LookConflict[] {
+  const line = look?.characters[key];
+  return line?.lookId === undefined ? [] : (line.conflicts ?? []).filter((conflict) => conflict.kind === "chapter");
+}
+
+/**
  * Which image of a look rides (design turn 193, R-118): the full-body image, or the close view
  * (head and shoulders). The frame decides — never both.
  */
@@ -162,6 +172,43 @@ export type PictureLookPick = z.infer<typeof PictureLookPickSchema>;
 /** A kit look's own clothing line, for the one-picture override: the look and its words, or undefined where it is gone. */
 export type LookLibrary = (key: string, lookId: string) => { text: string } | undefined;
 
+/**
+ * The main photo chosen for one picture alone (design turn 193d, the Main photo tile under Only
+ * this picture; SPEC-047 R-146): kept where a kit look's id would be, on a picture's stamp and on a
+ * block's pending looks. No kit look is ever named this — a kit look's id is the take's.
+ */
+export const MAIN_PHOTO_LOOK = "main-photo";
+
+/**
+ * The looks chosen for one block's picture alone (design turn 193d, SPEC-047 R-115, R-146): by
+ * person (their look key), a kit look's id or `MAIN_PHOTO_LOOK`. Held on the chapter's record
+ * under the block until the picture is made with them, then stamped on it (`looks[key].only`).
+ */
+export type PictureOwnLooks = Record<string, string>;
+export const PictureOwnLooksSchema: z.ZodType<PictureOwnLooks, z.ZodTypeDef, unknown> = z
+  .record(z.string().min(1).max(120), z.string().min(1).max(120))
+  .refine((looks) => Object.keys(looks).length <= LOOK_CHARACTERS_MAX, { message: `at most ${LOOK_CHARACTERS_MAX} people` });
+
+/**
+ * The looks a block's next picture is made with for itself (R-146): those the author chose for it
+ * and not yet made (`pending`, the record's), else those its picture was made with alone — so
+ * Make again keeps a one-picture look without its being chosen again. A pending entry, even an
+ * empty one, stands over the picture's own: `{}` is a picture put back to the chapter's choices.
+ */
+export function pictureOwnLooks(pending: PictureOwnLooks | undefined, made: PictureLook | undefined): PictureOwnLooks {
+  if (pending !== undefined) return { ...pending };
+  const own: PictureOwnLooks = {};
+  for (const [key, pick] of Object.entries(made?.looks ?? {})) if (pick.only === true) own[key] = pick.lookId;
+  return own;
+}
+
+/** Looks chosen for one picture as `lookLinesFor` takes them: each one `only`, its view not yet known (the frame decides). */
+export function ownLookPicks(own: Readonly<PictureOwnLooks> | undefined): Record<string, PictureLookPick> {
+  const picks: Record<string, PictureLookPick> = {};
+  for (const [key, lookId] of Object.entries(own ?? {})) picks[key] = { lookId, view: lookId === MAIN_PHOTO_LOOK ? "close" : "full", only: true };
+  return picks;
+}
+
 export interface PictureLookLine {
   label: string;
   key: string | null;
@@ -169,6 +216,8 @@ export interface PictureLookLine {
   /** The kit look the line comes from, and which of its images rides: absent where the main photo rides. */
   lookId?: string;
   view?: LookView;
+  /** The main photo chosen for this picture alone (R-146): the words are the chapter's reading, and they never mark it. */
+  main?: true;
 }
 
 /**
@@ -177,7 +226,9 @@ export interface PictureLookLine {
  *
  * `picks` are the looks chosen for one picture alone (R-115): that person's words are the chosen
  * look's own line, from `library`, not the chapter's. A look the library no longer holds leaves
- * the chapter's line, marked, so the picture reads as changed.
+ * the chapter's line, marked, so the picture reads as changed. The main photo chosen for one
+ * picture (R-146) has no line of its own: its words are what the chapter's prose says they wear
+ * (the reading kept beside a chosen look, else the chapter's line).
  */
 export function lookLinesFor(
   look: AudiobookLook | null | undefined,
@@ -185,12 +236,18 @@ export function lookLinesFor(
   picks?: Readonly<Record<string, PictureLookPick>>,
   library?: LookLibrary,
 ): PictureLookLine[] {
-  if (look === null || look === undefined) return [];
+  // A chapter whose look was never read still has the looks chosen for one picture: those are the picture's own.
+  if ((look === null || look === undefined) && !Object.values(picks ?? {}).some((pick) => pick.only === true)) return [];
   const lines: PictureLookLine[] = [];
-  if (look.place !== undefined) lines.push({ label: "Place", key: null, text: look.place.text });
+  if (look?.place !== undefined) lines.push({ label: "Place", key: null, text: look.place.text });
   for (const key of who) {
-    const line = look.characters[key];
+    const line = look?.characters[key];
     const pick = picks?.[key];
+    if (pick?.only === true && pick.lookId === MAIN_PHOTO_LOOK) {
+      if (line === undefined) continue;
+      lines.push({ label: line.name, key, text: line.reading ?? line.text, main: true });
+      continue;
+    }
     if (pick?.only === true) {
       // The override's words are the look's own; the chapter's line is not in this picture at all.
       const own = library?.(key, pick.lookId);
@@ -208,11 +265,13 @@ export function lookLinesFor(
  * each person rode with (R-112). A picture stores it with who was in it, and is marked `look
  * changed` when the lines for those same people now say something else — one character's coat
  * changed does not mark another character's pictures. A line with no look hashes as it did in 191,
- * so a picture made before looks existed is not marked by their arrival alone.
+ * so a picture made before looks existed is not marked by their arrival alone. The main photo
+ * chosen for one picture hashes as itself alone (R-146): the chapter's choosing or unchoosing a
+ * look moves the words beside it, and that change is the chapter's, not this picture's.
  */
-export function lookDigest(lines: ReadonlyArray<{ key: string | null; text: string; lookId?: string | undefined; view?: string | undefined }>): string {
+export function lookDigest(lines: ReadonlyArray<{ key: string | null; text: string; lookId?: string | undefined; view?: string | undefined; main?: true | undefined }>): string {
   return textDigest(
-    `look-v1:${JSON.stringify(lines.map((line) => (line.lookId === undefined ? [line.key, line.text.replace(/\s+/g, " ").trim()] : [line.key, line.text.replace(/\s+/g, " ").trim(), line.lookId, line.view ?? "full"])))}`,
+    `look-v1:${JSON.stringify(lines.map((line) => (line.main === true ? [line.key, MAIN_PHOTO_LOOK] : line.lookId === undefined ? [line.key, line.text.replace(/\s+/g, " ").trim()] : [line.key, line.text.replace(/\s+/g, " ").trim(), line.lookId, line.view ?? "full"])))}`,
   );
 }
 
@@ -228,6 +287,10 @@ export const PictureLookSchema = z
   })
   .strict();
 export type PictureLook = z.infer<typeof PictureLookSchema>;
+
+/** An explicit review of this retained picture against the current look; never its generation stamp. */
+export const PictureLookReviewSchema = z.object({ hash: z.string().min(1), at: IsoDateTimeSchema }).strict();
+export type PictureLookReview = z.infer<typeof PictureLookReviewSchema>;
 
 /**
  * The look to stamp on a picture made now, from the chapter's look and the people in it. `picks`
@@ -256,9 +319,10 @@ export function pictureLookFor(
  * chosen for one picture alone is marked only by a change to that look's own line (R-115): the
  * chapter changing its choice does not reach it.
  */
-export function pictureLookChanged(made: PictureLook | undefined, look: AudiobookLook | null | undefined, library?: LookLibrary): boolean {
+export function pictureLookChanged(made: PictureLook | undefined, look: AudiobookLook | null | undefined, library?: LookLibrary, review?: PictureLookReview): boolean {
   if (made === undefined) return false;
-  return lookDigest(lookLinesFor(look, made.who, made.looks, library)) !== made.hash;
+  const current = lookDigest(lookLinesFor(look, made.who, made.looks, library));
+  return current !== made.hash && current !== review?.hash;
 }
 
 /**
@@ -278,9 +342,12 @@ export function lookNeedsChoiceBoundary(record: { look?: AudiobookLook | undefin
 /**
  * Words for what someone wears, how their hair is done, or what they have on them: the things a
  * Mood line never names (design turn 193, rule 9; SPEC-047 R-117). Clothing belongs to the look.
+ * Materials alone do not name clothing: leather may describe a ledger and velvet a chair.
+ * A named garment or an explicit wearing phrase still counts ("wearing leather"); this
+ * vocabulary does not otherwise validate fabrics.
  */
 export const GARMENT_WORDS =
-  /\b(agbada|kaftans?|caftans?|buba|iro|sokoto|gele|aso[- ]oke|ankara|lace(?:[- ]trimmed)?|embroider(?:y|ed)|wrappers?|headwraps?|head[- ]?ties?|dress(?:es)?|gowns?|shirts?|blouses?|polos?|t-shirts?|jackets?|coats?|overcoats?|greatcoats?|oilskins?|cloaks?|capes?|robes?|uniforms?|trousers|jeans|shorts|skirts?|jumpers?|sweaters?|hoodies?|hoods?|scarf|scarves|veils?|hats?|caps?|berets?|boots?|shoes?|sandals?|high heels|trainers|sneakers|slippers|neckties?|bow[- ]ties?|gloves?|aprons?|sleeves?|collars?|silk|satin|velvet|linen|denim|leather|braids?|braided|cornrows|dreadlocks|locs|afro|wigs?|weaves?|ponytails?|hairstyles?|earrings?|hoops?|bangles?|bracelets?|necklaces?|pendants?|jewell?ery|brooch(?:es)?|wristwatch(?:es)?|clutch(?:es)?|handbags?|purses?)\b/i;
+  /\b(agbada|kaftans?|caftans?|buba|iro|sokoto|gele|wrappers?|headwraps?|head[- ]?ties?|dress(?:es)?|gowns?|shirts?|blouses?|polos?|t-shirts?|jackets?|coats?|overcoats?|greatcoats?|oilskins?|cloaks?|capes?|robes?|uniforms?|trousers|jeans|shorts|skirts?|jumpers?|sweaters?|hoodies?|hoods?|scarf|scarves|veils?|hats?|caps?|berets?|boots?|shoes?|sandals?|high heels|trainers|sneakers|slippers|neckties?|bow[- ]ties?|gloves?|aprons?|sleeves?|collars?|braids?|braided|cornrows|dreadlocks|locs|afro|wigs?|weaves?|ponytails?|hairstyles?|earrings?|hoops?|bangles?|bracelets?|necklaces?|pendants?|jewell?ery|brooch(?:es)?|wristwatch(?:es)?|clutch(?:es)?|handbags?|purses?|(?<=\b(?:wears?|wearing|wore|dressed in|clad in|clothed in)\s+)(?:silk|satin|velvet|linen|denim|leather|lace|ankara|aso[- ]oke))\b/i;
 
 /**
  * A Mood line with every clause that names a garment, a hairstyle or an ornament cut out (rule 9):
@@ -290,6 +357,17 @@ export const GARMENT_WORDS =
  * sentence stays; returns the line and how many clauses went.
  */
 export function cutMoodClothing(text: string): { text: string; cut: number } {
+  return cutMoodClauses(text, GARMENT_WORDS);
+}
+
+/** These are scene facts, not reusable visual treatment. This is a bounded vocabulary check. */
+export const SCENE_MOOD_WORDS = /\b((?:street|oil|gas)?lamp(?:s|light)?|candle(?:s|light)?|fire(?:light)?|flames?|smoke|sunrise|sunset|dawn|dusk|midnight|night(?:time)?|day(?:time)?|sunlight|moonlight|torchlight|generator[- ]lit|morning|afternoon|evening|overcast|rain(?:ing)?|snow(?:ing)?|fog|injur(?:y|ies|ed)|wound(?:s|ed)?|bandag(?:e[sd]?|ing)|blood(?:y)?|bleeding|weapons?|guns?|rifles?|swords?)\b/i;
+
+export function cutMoodScene(text: string): { text: string; cut: number } {
+  return cutMoodClauses(text, new RegExp(`${GARMENT_WORDS.source}|${SCENE_MOOD_WORDS.source}`, "i"));
+}
+
+function cutMoodClauses(text: string, excluded: RegExp): { text: string; cut: number } {
   let cut = 0;
   const sentences = text.replace(/\s+/g, " ").trim().split(/(?<=[.!?])\s+/);
   const kept = sentences.flatMap((sentence) => {
@@ -297,7 +375,7 @@ export function cutMoodClothing(text: string): { text: string; cut: number } {
     const body = end === "" ? sentence : sentence.slice(0, -1);
     const clauses = body.split(/\s*(?:[,;:]|\s[—–-]\s)\s*/).filter((clause) => clause.trim() !== "");
     const left = clauses.filter((clause) => {
-      if (!GARMENT_WORDS.test(clause)) return true;
+      if (!excluded.test(clause)) return true;
       cut += 1;
       return false;
     });
@@ -314,9 +392,9 @@ export function cutMoodClothing(text: string): { text: string; cut: number } {
  */
 export function pictureMood(look: Pick<AudiobookLook, "mood"> | null | undefined, art: string | null | undefined): string | undefined {
   const own = look?.mood?.text.trim();
-  if (own !== undefined && own !== "") return own;
+  if (own !== undefined && own !== "") return look?.mood?.by === "author" ? own : cutMoodScene(own).text || undefined;
   if (art === null || art === undefined) return undefined;
-  const { text } = cutMoodClothing(art);
+  const { text } = cutMoodScene(art);
   if (text === "") return undefined;
   return text.length <= LOOK_LINE_MAX ? text : `${text.slice(0, LOOK_LINE_MAX - 1).replace(/\s+\S*$/, "")}…`;
 }
@@ -472,6 +550,29 @@ export function chooseLook(
       },
     },
   };
+}
+
+/** The exact unresolved line the author reviewed before choosing a sheet. */
+export function lookCharacterHash(line: LookCharacter): string {
+  return textDigest(JSON.stringify([line.name, line.sheet ?? null, line.text, line.blocks ?? [], line.by ?? null, line.lookId ?? null, line.from ?? null, line.reading ?? null, line.conflicts ?? []]));
+}
+
+/** Link one existing chapter line without rewriting its words, evidence or saved pictures. */
+export function linkLookCharacter(held: AudiobookLook | null | undefined, input: {
+  key: string; expectedName: string; expectedHash: string; sheet: { id: string; name: string };
+}, at: string): AudiobookLook {
+  const line = held?.characters[input.key];
+  if (held === null || held === undefined || line === undefined || line.name !== input.expectedName || lookCharacterHash(line) !== input.expectedHash) {
+    throw new Error("This character line changed. Review it again before linking.");
+  }
+  if (line.sheet !== undefined) throw new Error("This character line already has an identity. Review the chapter's current links.");
+  if (input.key !== input.sheet.id && held.characters[input.sheet.id] !== undefined) {
+    throw new Error(input.sheet.name + " already has a line in this chapter. Review those two lines before linking.");
+  }
+  const characters = { ...held.characters };
+  delete characters[input.key];
+  characters[input.sheet.id] = { ...line, sheet: input.sheet.id, by: "author" };
+  return { ...held, at, characters };
 }
 
 /** What the author changes on the sheet: the place, the mood, or one character's line (a new character takes a name). */

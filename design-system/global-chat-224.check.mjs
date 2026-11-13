@@ -1,0 +1,95 @@
+// Browser checks for the isolated design; no application acceptance claim.
+import fs from 'node:fs';
+import path from 'node:path';
+import {spawn} from 'node:child_process';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+const here=path.dirname(fileURLToPath(import.meta.url));
+const out=path.resolve(here,'../.dev/global-chat-design');fs.mkdirSync(out,{recursive:true});
+const profile=fs.mkdtempSync(path.join(out,'chrome-'));
+const chrome=process.env.CHROME||'C:/Program Files/Google/Chrome/Application/chrome.exe';
+if(!fs.existsSync(chrome))throw Error('Set CHROME to a Chromium executable');
+const proc=spawn(chrome,['--headless=new','--disable-gpu','--no-first-run','--allow-file-access-from-files','--remote-debugging-port=0',`--user-data-dir=${profile}`,'about:blank'],{stdio:'ignore',windowsHide:true});
+const delay=ms=>new Promise(r=>setTimeout(r,ms));
+const report={checks:[],frames:[],errors:[]};let ws;
+try{
+ let target;
+ for(let i=0;i<80&&!target;i++){try{const port=fs.readFileSync(path.join(profile,'DevToolsActivePort'),'utf8').split('\n')[0];target=(await(await fetch(`http://127.0.0.1:${port}/json/list`)).json()).find(t=>t.type==='page')?.webSocketDebuggerUrl;}catch{}if(!target)await delay(150);}
+ if(!target)throw Error('Browser not ready');
+ ws=new WebSocket(target);await new Promise((r,j)=>{ws.onopen=r;ws.onerror=j;});
+ let id=0;const pending=new Map();
+ ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.method==='Runtime.exceptionThrown')report.errors.push(m.params.exceptionDetails.exception?.description||m.params.exceptionDetails.text);if(m.id&&pending.has(m.id)){const {r,j}=pending.get(m.id);pending.delete(m.id);m.error?j(Error(JSON.stringify(m.error))):r(m.result);}};
+ const send=(method,params={})=>new Promise((r,j)=>{const n=++id;pending.set(n,{r,j});ws.send(JSON.stringify({id:n,method,params}));});
+ const evaluate=async expression=>{const r=await send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(r.exceptionDetails)throw Error(r.exceptionDetails.exception?.description||r.exceptionDetails.text);return r.result.value;};
+ const check=async(label,expression)=>{const result=await evaluate(expression);report.checks.push({label,result});if(!result)throw Error('Design check failed: '+label);};
+ const click=action=>evaluate(`document.querySelector('#chat-prototype [data-act="${action}"]').click()`);
+ const demo=name=>evaluate(`document.querySelector('[data-demo="${name}"]').click()`);
+ const capture=async(selector,name)=>{const box=await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:'center'});const b=e.getBoundingClientRect();return {x:b.x+scrollX,y:b.y+scrollY,width:b.width,height:b.height};})()`);const r=await send('Page.captureScreenshot',{format:'png',captureBeyondViewport:true,clip:{...box,scale:1}});fs.writeFileSync(path.join(out,name+'.png'),Buffer.from(r.data,'base64'));};
+ await send('Page.enable');await send('Runtime.enable');await send('Emulation.setFocusEmulationEnabled',{enabled:true});
+ await send('Emulation.setDeviceMetricsOverride',{width:1500,height:1100,deviceScaleFactor:1,mobile:false});
+ await send('Page.navigate',{url:pathToFileURL(process.env.ARKE_CHAT_DESIGN_FILE||path.join(here,'global-chat-224.review.html')).href});
+ for(let i=0;i<60;i++){if(await evaluate('typeof globalChatDesignState==="function"').catch(()=>false))break;await delay(100);}
+ await evaluate('document.fonts.ready');
+ await check('Fourteen HTML drawings','document.querySelectorAll("#drawings .gc224").length===14');
+ await check('Images decoded','[...document.images].every(i=>i.complete&&i.naturalWidth>0)');
+ await check('Geist loaded','[...document.fonts].some(f=>f.family.includes("Geist")&&f.status==="loaded")');
+ const drawingGeometry=await evaluate(`(()=>[...document.querySelectorAll('#drawings .gc224')].filter(root=>root.querySelector('.gc224-composer-box')).map(root=>{const scale=root.getBoundingClientRect().width/root.clientWidth,c=root.querySelector('.gc224-composer-box'),editor=c.querySelector('.gc224-editor'),bar=c.querySelector('.gc224-composer-bar'),b=bar.getBoundingClientRect(),e=editor.getBoundingClientRect(),controls=[...bar.querySelectorAll('button,[role=note]')].filter(x=>x.getBoundingClientRect().width>0),top=Math.min(...controls.map(x=>x.getBoundingClientRect().top)),bottom=Math.max(...controls.map(x=>x.getBoundingClientRect().bottom));const icons=[...c.querySelectorAll('.gc224-attach,.gc224-mic,.gc224-send')].map(x=>{const r=x.getBoundingClientRect(),i=x.querySelector('svg').getBoundingClientRect();return {dx:Math.abs((r.left+r.right-i.left-i.right)/2)/scale,dy:Math.abs((r.top+r.bottom-i.top-i.bottom)/2)/scale};});return {frame:root.dataset.screenLabel,gap:(top-e.bottom)/scale,bottomGap:(b.bottom-bottom)/scale,icons};}))()`);
+ report.drawingGeometry=drawingGeometry;for(const g of drawingGeometry)if(g.gap<7.4||g.bottomGap<7.4||g.icons.some(i=>i.dx>.6||i.dy>.6))throw Error('Master drawing composer spacing '+JSON.stringify(g));
+ for(const frame of await evaluate('[...document.querySelectorAll(".review-frame")].map(e=>e.id)')){const measured=await evaluate(`(()=>{const e=document.querySelector('#${frame} .gc224');return {id:${JSON.stringify(frame)},width:e.clientWidth,overflow:e.scrollWidth-e.clientWidth};})()`);report.frames.push(measured);if(measured.overflow>1){await capture('#'+frame+' .gc224','overflow-'+frame);const diagnostic=await evaluate(`(()=>{const e=document.querySelector('#${frame} .gc224'),right=e.getBoundingClientRect().right;return [...e.querySelectorAll('*')].filter(x=>x.getBoundingClientRect().right>right+1).slice(0,12).map(x=>({tag:x.tagName,cls:x.className,right:x.getBoundingClientRect().right,width:x.getBoundingClientRect().width,text:x.textContent.slice(0,80)}));})()`);throw Error('Frame overflow '+frame+' '+JSON.stringify(diagnostic));}await capture('#'+frame+' .gc224',frame);}
+ await demo('reset');await click('toggle');
+ await check('World model display retains its read-only rule','!!document.querySelector("#chat-prototype .fy-mchip__btn--fixed")&&!document.querySelector("#chat-prototype [data-act=model]")');
+ await check('Opens World Chat and focuses composer','globalChatDesignState().chat==="world"&&document.activeElement.matches("[data-draft]")');
+ await evaluate('(()=>{const e=document.querySelector("#chat-prototype [data-draft]");e.innerText="A retained world draft";e.dispatchEvent(new Event("input",{bubbles:true}));})()');
+ await click('production');await check('Navigation retains world conversation and draft','globalChatDesignState().chat==="world"&&globalChatDesignState().drafts.world==="A retained world draft"&&!!document.querySelector("#chat-prototype [data-act=adopt]")');
+ await click('adopt');await check('Explicit switch opens Builder Chat','globalChatDesignState().chat==="production"&&document.querySelector("#chat-prototype .gc224-panel-head p").textContent==="Builder Chat"');
+ await click('history');await click('resume-world');await check('World draft survives return','document.querySelector("#chat-prototype [data-draft]").innerText==="A retained world draft"');
+ await click('send');await check('Send captures visible conversation','globalChatDesignState().messages.world[0]==="A retained world draft"&&!globalChatDesignState().messages.production');
+ await click('settings');await click('dismiss-overlay');await check('Settings preserves the conversation','globalChatDesignState().chat==="world"&&globalChatDesignState().open');
+ await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+ await check('Escape closes and returns focus','!globalChatDesignState().open&&document.activeElement.matches("[data-chat-trigger]")');
+ await click('toggle');await check('Opening closed Chat follows current page','globalChatDesignState().chat==="production"');
+ await demo('running');await check('Work continues while hidden','globalChatDesignState().running.world&&!globalChatDesignState().open&&!!document.querySelector("#chat-prototype [data-chat-trigger] .gc224-dot")');
+ await demo('world-change');await check('World switch disables previous composer','document.querySelector("#chat-prototype [data-draft]").getAttribute("aria-disabled")==="true"&&document.querySelector("#chat-prototype [data-act=send]").disabled');
+ await check('World-switch action receives keyboard focus','document.activeElement.dataset.act==="adopt"');
+ await click('adopt');await check('Explicit new-world conversation preserves old draft','globalChatDesignState().chat==="other"&&globalChatDesignState().drafts.world==="Continue with Maren."');
+ await demo('no-world');await check('No-world composer disabled','document.querySelector("#chat-prototype [data-draft]").getAttribute("aria-disabled")==="true"');await check('No-world action receives keyboard focus','document.activeElement.dataset.act==="world"&&!!document.activeElement.closest(".gc224-panel")');await click('world');await check('Opening world enables its chat','globalChatDesignState().chat==="world"&&document.querySelector("#chat-prototype [data-draft]").getAttribute("aria-disabled")==="false"');
+
+ await demo('builder');
+ await check('Shared composer has upload and dictation controls','!!document.querySelector("#chat-prototype [data-act=attach]")&&!!document.querySelector("#chat-prototype [data-act=dictate]")&&!!document.querySelector("#chat-prototype [data-act=model]")&&!!document.querySelector("#chat-prototype [data-act=read-replies]")');
+ await check('An empty draft cannot send','document.querySelector("#chat-prototype [data-act=send]").disabled');
+ await click('attach');await click('sample-image');
+ await check('Upload example adds a chip without sending','globalChatDesignState().attachments.production[0].name==="harbour.png"&&!globalChatDesignState().messages.production');
+ await click('attach');await click('sample-document');
+ await check('Document readability is visible','document.querySelector("#chat-prototype .gc224-file-strip").textContent.includes("text only")');
+ await click('world');await check('Navigation retains attachment ownership','globalChatDesignState().chat==="production"&&globalChatDesignState().attachments.production.length===2');
+ await click('adopt');await check('New conversation has its own attachments','!globalChatDesignState().attachments.world');
+ await click('history');await click('resume-production');
+ await evaluate('document.querySelector("#chat-prototype [data-act^=remove-]").click()');
+ await check('Stop referring to removes the selected chip','globalChatDesignState().attachments.production.length===1&&globalChatDesignState().attachments.production[0].name==="shot-notes.pdf"');
+ await evaluate('document.querySelector("#chat-prototype [data-act^=file-]").click()');
+ await check('Filing is an explicit action','globalChatDesignState().attachments.production[0].promoted===true');
+ await click('attach');await click('sample-refusal');await check('Attachment refusals name the reason','document.querySelector("#chat-prototype .gc224-file-refusal").textContent.includes("File exceeds the allowed size")');
+ await evaluate('document.querySelector("#chat-prototype [data-act^=refusal-]").click()');await check('Refusal can be dismissed','!document.querySelector("#chat-prototype .gc224-file-refusal")');
+ await evaluate('(()=>{const data=new DataTransfer();data.items.add(new File(["example"],"pasted.png",{type:"image/png"}));document.querySelector("#chat-prototype [data-draft]").dispatchEvent(new ClipboardEvent("paste",{bubbles:true,cancelable:true,clipboardData:data}));})()');
+ await check('Pasted files use attachment chips','globalChatDesignState().attachments.production.some(a=>a.name==="pasted.png")');
+ await evaluate('(()=>{const data=new DataTransfer();data.items.add(new File(["example"],"dropped.png",{type:"image/png"}));document.querySelector("#chat-prototype [data-composer]").dispatchEvent(new DragEvent("drop",{bubbles:true,cancelable:true,dataTransfer:data}));})()');
+ await check('Dropped files use attachment chips','globalChatDesignState().attachments.production.some(a=>a.name==="dropped.png")');
+ await demo('builder');await click('shot');await click('adopt');await check('Shot dock retains upload and dictation without inventing a model chip','!!document.querySelector("#chat-prototype [data-act=attach]")&&!!document.querySelector("#chat-prototype [data-act=dictate]")&&!document.querySelector("#chat-prototype .gc224-model-chip")');
+ await demo('dictation');await click('dictate');
+ await check('Dictation stops current playback, retains Read replies preference and names Listening','globalChatDesignState().voice.phase==="listening"&&!globalChatDesignState().replyPlaying&&globalChatDesignState().readReplies&&document.querySelector("#chat-prototype [role=status]").textContent.includes("Listening")');
+ await check('Starting dictation preserves typed words and does not send','globalChatDesignState().drafts.production==="Keep Maren by the water."&&!globalChatDesignState().messages.production');
+ await click('shot');await check('Capture remains with the original conversation','globalChatDesignState().chat==="production"&&globalChatDesignState().voice.chat==="production"&&document.querySelector("#chat-prototype [data-act=adopt]").disabled');
+ await click('dictate');await check('Transcription has a distinct state','globalChatDesignState().voice.phase==="transcribing"&&document.querySelector("#chat-prototype [role=status]").textContent.includes("Transcribing locally")');
+ await click('finish-dictation');await check('Dictated text appends to editable draft without sending','globalChatDesignState().drafts.production==="Keep Maren by the water. Bring out the first light on the water."&&!globalChatDesignState().messages.production&&document.querySelector("#chat-prototype [data-draft]").getAttribute("contenteditable")==="plaintext-only"');
+ await click('send');await check('Only explicit Send delivers the dictated draft','globalChatDesignState().messages.production.length===1&&!globalChatDesignState().messages.shot');
+ await demo('dictation');await click('dictate');await click('close');await check('Closing stops microphone capture','!globalChatDesignState().open&&globalChatDesignState().voice.phase==="transcribing"');
+ await click('toggle');await click('finish-dictation');await check('Closed-panel transcription returns to its original draft','globalChatDesignState().drafts.production.includes("Bring out the first light")&&!globalChatDesignState().messages.production');
+ await demo('mic-unavailable');await evaluate('document.querySelector("#chat-prototype [data-act=dictate]").focus()');
+ await check('Unavailable dictation remains focusable with a reason','document.activeElement.dataset.act==="dictate"&&document.activeElement.getAttribute("aria-disabled")==="true"&&!document.activeElement.disabled&&document.querySelector("#chat-prototype .gc224-mic-tip").textContent.includes("local transcription model" )');
+ await check('Typing and attachment stay available when dictation is off','document.querySelector("#chat-prototype [data-draft]").getAttribute("contenteditable")==="plaintext-only"&&!document.querySelector("#chat-prototype [data-act=attach]").disabled');
+ for(const width of [984,390,320]){await send('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:width<600});await delay(100);await demo('attachments');await check(width+' no page overflow','document.documentElement.scrollWidth<=innerWidth+1');await check(width+' no chat overflow','(()=>{const e=document.querySelector("#chat-prototype .gc224");return e.scrollWidth<=e.clientWidth+1;})()');await capture('#chat-prototype','prototype-'+width);if(width<600){await check(width+' phone sheet','!!document.querySelector("#chat-prototype .gc224-phone [role=dialog]")');await check(width+' reachable 44px controls','[...document.querySelectorAll("#chat-prototype .gc224-panel-head>button,#chat-prototype [data-act=send],#chat-prototype [data-act=attach],#chat-prototype [data-act=dictate]")].every(e=>e.getBoundingClientRect().height>=44)');await evaluate('document.querySelector("#chat-prototype [data-act=send]").focus()');await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Tab',code:'Tab',windowsVirtualKeyCode:9});await check(width+' phone focus stays in sheet','document.activeElement.dataset.act==="history"');}}
+ await demo('theme');await check('Dark theme switches','document.documentElement.classList.contains("dark")');await capture('#chat-prototype','prototype-dark-phone');
+ if(report.errors.length)throw Error(report.errors.join('\n'));
+ await send('Emulation.setDeviceMetricsOverride',{width:1500,height:1100,deviceScaleFactor:1,mobile:false});await delay(100);await evaluate('document.documentElement.classList.remove("dark");sizeFrames();');
+ await capture('#frame-225j .gc224-compose','composer-uploads');await capture('#frame-225k .gc224-compose','composer-dictation');await demo('attachments');await click('dictate');await capture('#chat-prototype .gc224-compose','composer-review');
+ console.log(`${report.checks.length} design interaction/layout checks and fourteen drawings passed`);
+}finally{fs.writeFileSync(path.join(out,'report.json'),JSON.stringify(report,null,2));ws?.close();proc.kill();}

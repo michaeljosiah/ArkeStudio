@@ -1,0 +1,399 @@
+{
+  "note": "SPEC-058 R-81: every complete route through the document, depth first in authored order, as contracts' storyRoutes walks it with SPEC-063's evaluator. Replaying a route's choices from the facts' defaults must give each step exactly: the scene entered; every declared fact and its value; the open choices in authored order; the closed choices that carry unavailable, in authored order, each with unavailable.label or else its own label, and the reason (a closed choice without one is hidden); and the indices of the scene's clips or beats that play, ascending. The ending is the variant resolved at the last scene, or the ending itself, variant and text null, when it has none. complete is false only when a route was stopped at bound, and then that route's ending is null.",
+  "document": "lantern-road.json",
+  "complete": true,
+  "bound": null,
+  "routes": [
+    {
+      "choices": [
+        "ch_buy",
+        "ch_ford",
+        "ch_part"
+      ],
+      "steps": [
+        {
+          "scene": "sc_market",
+          "facts": {
+            "lantern": false,
+            "company": "mara"
+          },
+          "open": [
+            "ch_buy",
+            "ch_walk"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1,
+            2
+          ]
+        },
+        {
+          "scene": "sc_road",
+          "facts": {
+            "lantern": true,
+            "company": "mara"
+          },
+          "open": [
+            "ch_ford",
+            "ch_bridge"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_ford",
+          "facts": {
+            "lantern": true,
+            "company": "mara"
+          },
+          "open": [
+            "ch_part",
+            "ch_together"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_home",
+          "facts": {
+            "lantern": true,
+            "company": "alone"
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_home",
+        "variant": "ev_alone",
+        "title": "The last lamp",
+        "text": "You walk the last mile alone."
+      }
+    },
+    {
+      "choices": [
+        "ch_buy",
+        "ch_ford",
+        "ch_together"
+      ],
+      "steps": [
+        {
+          "scene": "sc_market",
+          "facts": {
+            "lantern": false,
+            "company": "mara"
+          },
+          "open": [
+            "ch_buy",
+            "ch_walk"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1,
+            2
+          ]
+        },
+        {
+          "scene": "sc_road",
+          "facts": {
+            "lantern": true,
+            "company": "mara"
+          },
+          "open": [
+            "ch_ford",
+            "ch_bridge"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_ford",
+          "facts": {
+            "lantern": true,
+            "company": "mara"
+          },
+          "open": [
+            "ch_part",
+            "ch_together"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_home",
+          "facts": {
+            "lantern": true,
+            "company": "mara"
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_home",
+        "variant": "ev_together",
+        "title": "Together",
+        "text": "Mara sets the lantern on the sill."
+      }
+    },
+    {
+      "choices": [
+        "ch_buy",
+        "ch_bridge",
+        "ch_cross"
+      ],
+      "steps": [
+        {
+          "scene": "sc_market",
+          "facts": {
+            "lantern": false,
+            "company": "mara"
+          },
+          "open": [
+            "ch_buy",
+            "ch_walk"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1,
+            2
+          ]
+        },
+        {
+          "scene": "sc_road",
+          "facts": {
+            "lantern": true,
+            "company": "mara"
+          },
+          "open": [
+            "ch_ford",
+            "ch_bridge"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_bridge",
+          "facts": {
+            "lantern": true,
+            "company": "mara"
+          },
+          "open": [
+            "ch_cross"
+          ],
+          "closed": [],
+          "play": [
+            0
+          ]
+        },
+        {
+          "scene": "sc_home",
+          "facts": {
+            "lantern": true,
+            "company": "mara"
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_home",
+        "variant": "ev_together",
+        "title": "Together",
+        "text": "Mara sets the lantern on the sill."
+      }
+    },
+    {
+      "choices": [
+        "ch_walk",
+        "ch_ford",
+        "ch_part"
+      ],
+      "steps": [
+        {
+          "scene": "sc_market",
+          "facts": {
+            "lantern": false,
+            "company": "mara"
+          },
+          "open": [
+            "ch_buy",
+            "ch_walk"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1,
+            2
+          ]
+        },
+        {
+          "scene": "sc_road",
+          "facts": {
+            "lantern": false,
+            "company": "mara"
+          },
+          "open": [
+            "ch_ford"
+          ],
+          "closed": [
+            {
+              "id": "ch_bridge",
+              "label": "Take the old bridge",
+              "reason": "Too dark to find it"
+            }
+          ],
+          "play": [
+            0,
+            2
+          ]
+        },
+        {
+          "scene": "sc_ford",
+          "facts": {
+            "lantern": false,
+            "company": "mara"
+          },
+          "open": [
+            "ch_part",
+            "ch_together"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_home",
+          "facts": {
+            "lantern": false,
+            "company": "alone"
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_home",
+        "variant": "ev_alone",
+        "title": "The last lamp",
+        "text": "You walk the last mile alone."
+      }
+    },
+    {
+      "choices": [
+        "ch_walk",
+        "ch_ford",
+        "ch_together"
+      ],
+      "steps": [
+        {
+          "scene": "sc_market",
+          "facts": {
+            "lantern": false,
+            "company": "mara"
+          },
+          "open": [
+            "ch_buy",
+            "ch_walk"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1,
+            2
+          ]
+        },
+        {
+          "scene": "sc_road",
+          "facts": {
+            "lantern": false,
+            "company": "mara"
+          },
+          "open": [
+            "ch_ford"
+          ],
+          "closed": [
+            {
+              "id": "ch_bridge",
+              "label": "Take the old bridge",
+              "reason": "Too dark to find it"
+            }
+          ],
+          "play": [
+            0,
+            2
+          ]
+        },
+        {
+          "scene": "sc_ford",
+          "facts": {
+            "lantern": false,
+            "company": "mara"
+          },
+          "open": [
+            "ch_part",
+            "ch_together"
+          ],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        },
+        {
+          "scene": "sc_home",
+          "facts": {
+            "lantern": false,
+            "company": "mara"
+          },
+          "open": [],
+          "closed": [],
+          "play": [
+            0,
+            1
+          ]
+        }
+      ],
+      "ending": {
+        "scene": "sc_home",
+        "variant": "ev_together",
+        "title": "Together",
+        "text": "Mara sets the lantern on the sill."
+      }
+    }
+  ]
+}

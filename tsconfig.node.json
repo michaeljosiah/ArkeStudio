@@ -1,0 +1,28 @@
+{
+  // Every Node workspace in one program (issue 2812). Checked one workspace at a time, each of
+  // eleven programs re-checked the contracts source it imports: 356 s in CI. One program checks
+  // each file once. The client is its own program (DOM, JSX, bundler resolution), run beside it
+  // by scripts/typecheck.mjs. Keep this list in step with each workspace's own `include`.
+  "extends": "./tsconfig.base.json",
+  "include": [
+    "packages/adapter-claude/src/**/*.ts",
+    "packages/adapter-claude/test/**/*.ts",
+    "packages/adapter-codex/src/**/*.ts",
+    "packages/adapter-codex/test/**/*.ts",
+    "packages/adapter-opencode/src/**/*.ts",
+    "packages/adapter-opencode/test/**/*.ts",
+    "packages/confined-tools/src/**/*.ts",
+    "packages/confined-tools/test/**/*.ts",
+    "packages/contracts/src/**/*.ts",
+    "packages/contracts/test/**/*.ts",
+    "packages/coordinator/src/**/*.ts",
+    "packages/coordinator/test/**/*.ts",
+    "packages/engine/src/**/*.ts",
+    "packages/providers/src/**/*.ts",
+    "packages/providers/test/**/*.ts",
+    "packages/voice/src/**/*.ts",
+    "packages/voice/test/**/*.ts",
+    "apps/desktop/src/**/*.ts",
+    "apps/desktop/test/**/*.ts"
+  ]
+}

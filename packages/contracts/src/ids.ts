@@ -67,6 +67,7 @@ export const ID_PREFIXES = {
   candidateGroup: "grp",
   chatAttachment: "wca",
   chatEvent: "wce",
+  voiceBackground: "vop",
   /** One durable permission boundary proposed by Arke (SPEC-041 R-11). */
   conversationAction: "act",
   /** One in-place proposal edit, as recorded in its draft journal (#70 §11.4.1). */
@@ -181,3 +182,13 @@ export const IsoDateSchema = z
     /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?)?$/,
     "expected an ISO date",
   );
+
+/** A world-relative file path: forward slashes, no drive, never climbing out (moved from bench.ts for the Stage plate, issue 1818). */
+export const WorldFilePathSchema = z
+  .string()
+  .min(1)
+  .max(400)
+  .refine((value) => !value.startsWith("/"), "a world path is relative")
+  .refine((value) => !value.includes("\\"), "a world path uses forward slashes")
+  .refine((value) => !/^[a-zA-Z]:/.test(value), "a world path carries no drive letter")
+  .refine((value) => !value.split("/").includes(".."), "a world path cannot climb out of the world");

@@ -1,0 +1,165 @@
+/* The audiobook's Export sheet and its video (design turn 197): ported from the master's t197
+   block, size for size. The master lays these out content-box — a 32-high press is 34 with its
+   border, a 44-high row 57 — so they are content-box here too, against the app's border-box.
+   The picture frames stand on the media plate tokens, as the player's do. */
+.fy-abv-sheet, .fy-abv-sheet *, .fy-abv-psheet, .fy-abv-psheet *, .fy-abv-row, .fy-abv-row * { box-sizing: content-box; }
+
+.fy-editordialog__panel.fy-abv-sheet { border-radius: 16px; background: var(--popover, var(--background)); box-shadow: var(--shadow-lg); padding: 20px 22px; gap: 12px; overflow: auto; font: var(--type-body); color: var(--foreground); }
+.fy-abv-sheet h3 { margin: 0; font: var(--type-ui); font-weight: 600; font-size: var(--text-md); }
+.fy-abv-sheet .fy-abv-sub { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); margin-top: -8px; }
+
+/* The chapter's export is an overlay on its current work (turn 209). Native containment keeps
+   the underlying block panel inert and restores its focus when the export closes. */
+.fy-page-sheet.fy-abv-modal { inset: 24px; margin: auto; width: min(766px, calc(100% - 48px)); height: fit-content; max-height: calc(100dvh - 48px); border: 1px solid var(--border); border-radius: 16px; background: var(--popover, var(--background)); box-shadow: var(--shadow-lg); }
+.fy-abv-modal::backdrop { background: color-mix(in srgb, var(--neutral-950) 32%, transparent); }
+.fy-abv-modal > .fy-page-sheet__grab { display: none; }
+.fy-abv-modal > .fy-page-sheet__body { padding: 0; gap: 0; min-height: 0; overflow: auto; }
+.fy-abv-modal > .fy-page-sheet__head { flex: none; padding: 16px 22px; }
+.fy-abv-modal > .fy-page-sheet__foot { display: block; flex: none; padding: 16px 22px; }
+.fy-abv-export-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.fy-abv-export-foot > .fy-abv-foot { flex: 1; }
+.fy-abv-modal .fy-abv-sheet { display: flex; flex-direction: column; gap: 12px; padding: 20px 22px; font: var(--type-body); }
+.fy-abv-scope { flex-wrap: wrap; }
+.fy-abv-scope-title { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; color: var(--foreground); font-weight: 600; }
+.fy-abv-scope-notice { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; font: var(--type-body); overflow-wrap: anywhere; }
+.fy-abv-scope-notice > span { color: var(--muted-foreground); }
+.fy-abv-scope-notice .fy-abv-btn { white-space: normal; height: auto; min-height: 32px; }
+.fy-page-sheet.fy-abv-modal--phone { inset: auto 0 0; width: 100%; max-height: calc(100dvh - 48px); margin: 0; border-radius: 22px 22px 0 0; }
+.fy-abv-modal--phone > .fy-page-sheet__head { padding: 14px 16px; }
+.fy-abv-modal--phone > .fy-page-sheet__foot { padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px)); }
+.fy-abv-modal--phone .fy-abv-export-foot { flex-direction: column; align-items: stretch; }
+.fy-abv-modal--phone .fy-abv-foot > .pri { flex: 1; justify-content: center; }
+.fy-abv-modal--phone .fy-abv-psheet { position: static; min-height: 0; max-height: none; border: 0; box-shadow: none; overflow: visible; }
+.fy-abv-modal--phone .fy-abv-scope > b { width: 100%; }
+.fy-abv-modal--phone .fy-abv-scope .fy-abv-seg { flex: 1; }
+.fy-abv-modal--phone .fy-abv-scope .fy-abv-seg button { flex: 1; justify-content: center; padding-inline: 8px; }
+.fy-abv-modal--phone .fy-abv-scope-title { flex-basis: 100%; }
+.fy-abv-modal--phone .fy-abv-scope-notice .fy-abv-btn { min-height: 44px; }
+.fy-abv-modal .fy-abv-opt, .fy-abv-modal .fy-abv-est { flex-wrap: wrap; }
+.fy-abv-modal .fy-abv-seg { max-width: 100%; flex-wrap: wrap; }
+.fy-abv-modal .fy-abv-kind, .fy-abv-modal .fy-abv-kind > div { min-width: 0; overflow-wrap: anywhere; }
+.fy-abv-modal .fy-abv-btn { height: auto; min-height: 32px; white-space: normal; }
+.fy-abv-modal--phone .fy-abv-opt > b { width: auto; flex-basis: 100%; }
+.fy-abv-modal--phone .fy-abv-btn, .fy-abv-modal--phone .fy-abv-seg button, .fy-abv-modal--phone .fy-abv-chk { min-height: 44px; height: auto; white-space: normal; }
+
+/* Four kinds since turn 233 (Arke Player beside the player, chapter files and video), two a row. */
+.fy-abv-kinds { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 10px; }
+.fy-abv-kind { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: none; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.fy-abv-kind:disabled { cursor: default; opacity: .5; }
+.fy-abv-kind.on { border-color: var(--foreground); }
+.fy-abv-kind .r { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--neutral-400); flex: none; margin-top: 1px; }
+.fy-abv-kind.on .r { border-color: var(--foreground); background: radial-gradient(circle, var(--foreground) 0 4px, transparent 4.5px); }
+.fy-abv-kind b { display: block; font-weight: 600; font-size: var(--text-sm); }
+.fy-abv-kind span:not(.r) { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+
+.fy-abv-opts { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.fy-abv-opt { display: flex; align-items: center; gap: 14px; min-height: 44px; padding: 6px 14px; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+.fy-abv-opt:first-child { border-top: 0; }
+.fy-abv-opt > b { width: 96px; flex: none; font-weight: 500; color: var(--muted-foreground); }
+.fy-abv-opt .grow { flex: 1; }
+.fy-abv-opt i { font-style: normal; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+.fy-abv-seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.fy-abv-seg button { height: 28px; padding: 0 11px; display: inline-flex; align-items: center; font: var(--type-label); color: var(--muted-foreground); white-space: nowrap; background: none; border: 0; cursor: pointer; }
+.fy-abv-seg button.on { background: var(--secondary); color: var(--foreground); font-weight: 600; }
+.fy-abv-seg button:disabled { cursor: default; }
+.fy-abv-seg:has(button:disabled) { opacity: .5; }
+
+.fy-abv-chk { display: inline-flex; align-items: center; gap: 7px; font-size: var(--text-sm); white-space: nowrap; background: none; border: 0; padding: 0; color: inherit; font-family: inherit; cursor: pointer; }
+.fy-abv-box { width: 15px; height: 15px; border-radius: 4px; border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; flex: none; color: var(--background); }
+.fy-abv-box.on { background: var(--foreground); border-color: transparent; }
+.fy-abv-box svg { width: 11px; height: 11px; }
+
+.fy-abv-est { display: flex; align-items: center; gap: 12px; font-size: var(--text-sm); }
+.fy-abv-est > b { font-weight: 600; }
+.fy-abv-est .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+
+/* Turn 233: the Arke Player package's edition, the package made, its SHA-256, and a phone's
+   Download and Share. */
+.fy-abv-field { height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; display: inline-flex; align-items: center; font: var(--type-label); min-width: 150px; }
+.fy-abv-made { display: flex; flex-direction: column; gap: 12px; }
+.fy-abv-made .fy-abv-file > div { min-width: 0; overflow-wrap: anywhere; }
+.fy-abv-sha { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--secondary); }
+.fy-abv-sha b { font-weight: 500; color: var(--muted-foreground); font-size: var(--text-sm); flex: none; }
+.fy-abv-sha code { flex: 1; min-width: 0; font: var(--type-mono); font-size: var(--text-2xs); overflow-wrap: anywhere; color: var(--foreground); }
+.fy-abv-acts { display: flex; gap: 6px; }
+.fy-abv-modal--phone .fy-abv-acts .fy-abv-btn { flex: 1; min-height: 44px; justify-content: center; }
+.fy-abv-btn { height: 32px; padding: 0 13px; border: 1px solid var(--border); border-radius: 8px; display: inline-flex; align-items: center; gap: 7px; font: var(--type-label); background: var(--background); color: var(--foreground); white-space: nowrap; cursor: pointer; }
+.fy-abv-btn.pri { background: var(--foreground); color: var(--background); border-color: transparent; font-weight: 600; }
+.fy-abv-btn:disabled { cursor: default; opacity: .5; }
+.fy-abv-btn svg { width: 13px; height: 13px; }
+.fy-abv-foot { display: flex; align-items: center; gap: 8px; }
+.fy-abv-foot .grow { flex: 1; }
+/* Release (design turn 236d, 236e): the chapters a part may hold, each ticked or saying how far it
+   is read, the author's schedule, and the world's releases in order once a part is made. */
+.fy-abv-opt--top { align-items: flex-start; padding-top: 10px; padding-bottom: 10px; }
+.fy-abv-chs { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.fy-abv-ch { display: flex; align-items: center; gap: 10px; min-height: 30px; cursor: pointer; }
+.fy-abv-ch input { margin: 0; flex: none; accent-color: var(--foreground); }
+.fy-abv-ch .t { font-size: var(--text-sm); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-abv-ch.no { cursor: default; }
+.fy-abv-ch.no .t { color: var(--muted-foreground); }
+.fy-abv-ch i { margin-left: auto; }
+.fy-abv-sched { display: inline-flex; gap: 8px; flex-wrap: wrap; }
+.fy-abv-sched .fy-abv-field { min-width: 120px; gap: 6px; background: transparent; color: var(--foreground); }
+.fy-abv-sched select.fy-abv-field { height: 28px; min-height: 0; padding: 0 8px; line-height: normal; }
+.fy-abv-sched input { border: 0; background: transparent; color: inherit; font: inherit; min-width: 0; }
+.fy-abv-rel { display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 6px 14px; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+.fy-abv-rel:first-child { border-top: 0; }
+.fy-abv-rel .d { width: 96px; flex: none; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-abv-rel .k { width: 64px; flex: none; font-weight: 500; }
+.fy-abv-rel .w { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fy-abv-rel .grow { flex: 1; }
+.fy-abv-rel .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-abv-rel.now { background: color-mix(in srgb, var(--foreground) 4%, transparent); }
+.fy-abv-warn { font: var(--type-mono); font-size: var(--text-2xs); color: var(--destructive, var(--muted-foreground)); }
+
+/* A frame of the video, as it will render. */
+.fy-abv-vid { position: relative; overflow: hidden; background: var(--media-overlay-bg); border-radius: 10px; flex: none; color: var(--media-overlay-fg); }
+.fy-abv-vid img { position: absolute; display: block; max-width: none; }
+.fy-abv-vid img.fill { inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.fy-abv-vid .scr { position: absolute; left: 0; right: 0; bottom: 0; height: 42%; background: linear-gradient(to top, color-mix(in srgb, var(--media-overlay-bg) 72%, transparent), transparent); }
+.fy-abv-vid .cap { position: absolute; left: 8%; right: 8%; text-align: center; font-family: var(--font-sans); font-weight: 600; line-height: 1.3; text-shadow: 0 1px 3px color-mix(in srgb, var(--media-overlay-bg) 60%, transparent); }
+.fy-abv-vid .card { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center; background: color-mix(in srgb, var(--media-overlay-bg) 45%, transparent); }
+.fy-abv-vid .card b { font-family: var(--font-sans); font-weight: 600; letter-spacing: -.01em; }
+.fy-abv-vid img.blur { inset: -30px; width: calc(100% + 60px); height: calc(100% + 60px); object-fit: cover; filter: blur(18px) brightness(.6); }
+.fy-abv-focus { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%; border: 2px solid var(--media-overlay-fg); box-shadow: 0 0 0 1px color-mix(in srgb, var(--media-overlay-bg) 50%, transparent); pointer-events: none; }
+.fy-abv-focus::after { content: ""; position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; background: var(--media-overlay-fg); }
+/* The crops the file takes, drawn on the whole picture: the shape being rendered lit, the other outlined. Border-box, so the frame drawn is the crop. */
+.fy-abv-crop { position: absolute; box-sizing: border-box; border: 2px solid var(--media-overlay-fg); box-shadow: 0 0 0 2000px color-mix(in srgb, var(--media-overlay-bg) 45%, transparent); pointer-events: none; }
+.fy-abv-crop.alt { border: 1px dashed var(--media-overlay-fg); box-shadow: none; }
+.fy-abv-drag { cursor: crosshair; touch-action: none; }
+.fy-abv-scrub { display: flex; align-items: center; gap: 10px; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-abv-scrub .bar { flex: 1; height: 4px; border-radius: 2px; background: var(--secondary); position: relative; cursor: pointer; }
+.fy-abv-scrub .bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--foreground); }
+.fy-abv-scrub .bar u { position: absolute; top: -3px; width: 2px; height: 10px; background: var(--neutral-400); }
+.fy-abv-note { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-abv-thumb { display: flex; flex-direction: column; gap: 4px; background: none; border: 0; padding: 0; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.fy-abv-thumb .fy-abv-vid { width: 96px; height: 54px; border-radius: 6px; }
+.fy-abv-thumb.on .fy-abv-vid { outline: 2px solid var(--foreground); outline-offset: 2px; }
+
+/* The finished files (197e). */
+.fy-abv-file { display: grid; grid-template-columns: 96px 1fr auto; gap: 12px; align-items: center; padding: 9px 0; border-top: 1px solid var(--border); font-size: var(--text-sm); }
+.fy-abv-file img, .fy-abv-file .ph { width: 96px; height: 54px; object-fit: cover; border-radius: 6px; display: block; background: var(--media-overlay-bg); }
+.fy-abv-file .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-abv-acts { display: flex; gap: 6px; }
+
+/* Activity's row while a video renders (197d), and once it has (197f). */
+.fy-abv-row { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 7px; font-size: var(--text-sm); }
+.fy-abv-row .t { display: flex; align-items: baseline; gap: 8px; }
+.fy-abv-row .t b { font-weight: 600; flex: 1; min-width: 0; }
+.fy-abv-row .m { font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-abv-row .fy-abv-btn { height: 26px; }
+.fy-abv-prog { height: 4px; border-radius: 2px; background: var(--secondary); overflow: hidden; }
+.fy-abv-prog i { display: block; height: 100%; background: var(--foreground); }
+
+/* On a phone (197f): a sheet from the foot, one column, 44-high presses. */
+.fy-abv-psheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 61; min-height: min(694px, calc(100dvh - 80px)); max-height: calc(100dvh - 80px); overflow: auto; border-top: 1px solid var(--border); border-radius: 22px 22px 0 0; background: var(--popover, var(--background)); box-shadow: 0 -12px 40px color-mix(in srgb, var(--foreground) 16%, transparent); padding: 10px 16px calc(16px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; gap: 12px; box-sizing: border-box; font: var(--type-body); color: var(--foreground); }
+.fy-abv-psheet:focus { outline: none; }
+.fy-abv-psheet h3 { margin: 0; font: var(--type-ui); font-weight: 600; }
+.fy-abv-psheet .fy-abv-opt > b { width: 72px; }
+.fy-abv-psheet .fy-abv-est { flex-direction: column; align-items: flex-start; gap: 2px; }
+.fy-abv-psheet .fy-abv-btn.pri { height: 44px; justify-content: center; }
+/* Inside the panel's body, which carries its own gutter, the row keeps 197d's height and drops its own sides. */
+.fy-ap__body .fy-abv-row { padding: 12px 0; }
+.fy-activity-phone .fy-abv-row .fy-abv-btn { height: 36px; }

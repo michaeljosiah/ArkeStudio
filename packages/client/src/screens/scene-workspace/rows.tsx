@@ -1,4 +1,5 @@
-import { useMediaQuery } from "../../lib/media-query.js";
+import { ProductionSpend } from "../../components/production-spend.js";
+import { useCompact, usePhone } from "../../lib/media-query.js";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -112,6 +113,8 @@ export function StoryboardRows({
   onPlanVideo,
   onRenderBoard,
   beats,
+  reviewMarks,
+  reviewShots,
 }: {
   layout?: "list" | "grid";
   scene: SceneRecord;
@@ -147,6 +150,8 @@ export function StoryboardRows({
   onRenderBoard: (memberShotIds: string[]) => void;
   /** Present when the production plays as beats (turn 174): each row reads as a beat. */
   beats?: BeatsView;
+  reviewMarks?: ReadonlyMap<string, string>;
+  reviewShots?: ReadonlyMap<string, { framing: string; cast: readonly string[] }>;
 }) {
   const shots = orderedShots(scene);
   const lineFindings = useMemo(() => stageLineCrossings(scene, aspect), [scene, aspect]);
@@ -237,7 +242,7 @@ export function StoryboardRows({
                 })
               }
             >
-              Add first shot
+              {beats === undefined ? "Add first shot" : "Add first beat"}
             </Button>
           </div>
         </div>
@@ -273,7 +278,9 @@ export function StoryboardRows({
             ? null
             : finalizationRetryJobId(frameRun, runState.stepIndex, jobs);
           return (
-            <li key={shot.id} className="fy-swrow" data-testid={`workspace-row-${shot.id}`}>
+            <li key={shot.id} className="fy-swrow" data-testid={`workspace-row-${shot.id}`} data-review-change={newShotIds.has(shot.id) ? "inserted" : reviewMarks?.get(shot.id) ? "changed" : undefined}>
+              {reviewMarks?.get(shot.id) && <div className="fy-production-preview__mark">{reviewMarks.get(shot.id)}</div>}
+              {reviewShots && <div className="fy-production-preview__shotmeta"><span>{reviewShots.get(shot.id)?.framing}</span>{reviewShots.get(shot.id)?.cast.map(name => <span className="fy-swchip" key={name}>{name}</span>)}</div>}
               {showBoards && board !== undefined ? (
                 <BoardBand
                   board={board}
@@ -396,7 +403,7 @@ export function StoryboardRows({
             }
           >
             <span className="fy-swaddshot__ring" aria-hidden="true"><Plus size={12} /></span>
-            Add shot
+            {beats === undefined ? "Add shot" : "Add beat"}
           </button>
         </li>
       </ol>
@@ -829,9 +836,9 @@ function Row({
   nextShotId: string | null;
   beat?: RowBeat;
 }) {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   const failureBelow = phone && runState !== null && (["failed", "missing", "needs-reconciliation"].includes(runState.status) || runState.failureClass === "provider-fault" || runState.failureClass === "offline");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const band = useRef<HTMLDivElement | null>(null);
   const menuTrigger = useRef<HTMLButtonElement | null>(null);
   const menuPanel = useRef<HTMLDivElement | null>(null);
@@ -1322,9 +1329,10 @@ function Row({
             </div>
           ) : null}
         </div>
-        {beat === undefined ? null : <BeatLines beats={beat.lines} sheets={sheets} voices={beat.voices} />}
+        {beat === undefined ? null : <BeatLines story={{ worldId, production, scene }} beats={beat.lines} sheets={sheets} voices={beat.voices} />}
         <section className="fy-swrow__descwrap">
           {scriptEditor}
+          <ProductionSpend production={production} shotId={shot.id} compact />
         </section>
       </div>
       {rowActions}
@@ -1483,7 +1491,7 @@ function FrameState({
   onRetry: (() => boolean) | null;
   onRetryFinalization: (() => void) | null;
 }) {
-  const phone = useMediaQuery("(max-width: 599px)");
+  const phone = usePhone();
   if (state.status === "queued" || state.status === "not-enqueued" || state.status === "submitting") {
     const held = state.failureClass === "provider-fault" || state.failureClass === "offline";
     return <div className="fy-swrow__run" data-state={held ? "failed" : "queued"}>{held ? failureCopy(state) : phone ? "Queued" : "queued"}</div>;

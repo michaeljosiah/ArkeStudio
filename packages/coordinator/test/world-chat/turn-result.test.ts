@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { z } from "zod";
 import {
   newId,
   WORLD_CHAT_SHAPE_EXAMPLES,
   WorldChatPreparedActionSchema,
   type CandidateChecks,
+  type CandidateGroup,
   type CandidateId,
   type CandidateTombstone,
   type ConversationId,
@@ -18,10 +20,13 @@ import {
   type WorldChatTurnResult,
 } from "@arke-studio/contracts";
 import { payloadDigest, structuralKey, suppressedByTombstone } from "../../src/world-chat/identity.js";
-import { contentHash } from "../../src/world-chat/observations.js";
+import { contentHash, canonObservation } from "../../src/world-chat/observations.js";
+import { conversationCandidateFence } from "../../src/world-chat/target-reads.js";
 import {
   correctiveMessage,
   parseTurnResult,
+  personLine,
+  preparationProblem,
   validateTurnResult,
   type ValidateInput,
 } from "../../src/world-chat/turn-result.js";
@@ -143,6 +148,84 @@ function turn(result: Partial<WorldChatTurnResult>): string {
   return JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [], ...result });
 }
 
+function draftRead(candidate: WorldChangeCandidate, groups: CandidateGroup[] = []): WorldChatCheckReceipt {
+  return { id: newId("check"), runId: newId("run"), tool: "target-read", status: "complete", consulted: [],
+    target: { requirement: "conversation-candidate", id: `${candidate.conversationId}:${candidate.id}` },
+    observedRevisionOrDigest: conversationCandidateFence(candidate, groups), complete: true, nextCursor: null, at: AT };
+}
+
+it("settles retained sheet drafts by identity without losing sections, metadata or original intent", async () => {
+  for (const type of ["location", "character", "faction"] as const) {
+    const input = await baseInput();
+    const candidate: ModelCandidateDraft = { classification: "sheet.create", title: `Retained ${type}`, rationale: "Keep the authored draft.", settledness: "tentative",
+      evidence: intentEvidence(input.message, "Her aunt raised her"), checkReceiptIds: [], draft: { type, name: `Retained ${type}`, role: "Keeper", billing: "Supporting", region: "Harbour", canonRules: [], links: [],
+        sections: [{ heading: "Look", body: "A complete first paragraph.\n\nA complete second paragraph." }, { heading: "Sound", body: "The unaltered sound." }] } };
+    const created = validateTurnResult({ ...input, raw: turn({ candidateOperations: [{ op: "create", temporaryId: "draft", candidate }] }) });
+    assert.equal(created.ok, true); if (!created.ok) throw new Error("create refused");
+    const retained = created.turn.candidates[0]!;
+    const revision = validateTurnResult({ ...input, existing: [retained], receiptsThisRun: [draftRead(retained)], raw: turn({ candidateOperations: [{ op: "update", candidateId: retained.id, expectedRevision: retained.revision, candidate: { ...candidate, settledness: "settled" } }] }) });
+    assert.equal(revision.ok, true); if (!revision.ok) throw new Error("update refused");
+    assert.equal(revision.turn.candidates.length, 1);
+    const updated = revision.turn.candidates[0]!;
+    assert.equal(updated.id, retained.id); assert.equal(updated.revision, retained.revision + 1);
+    assert.equal(updated.settledness, "settled"); assert.deepEqual(updated.draft, retained.draft);
+    assert.deepEqual(updated.evidence, retained.evidence); assert.deepEqual(updated.sourceMessageIds, retained.sourceMessageIds);
+  }
+});
+
+it("requires an exact complete current-run read for every retained replacement route", async () => {
+  const input = await baseInput(), candidate = canonCreateDraft(input.message);
+  const created = validateTurnResult({ ...input, raw: turn({ candidateOperations: [{ op: "create", temporaryId: "draft", candidate }] }) });
+  assert.ok(created.ok);
+  const retained = created.turn.candidates[0]!;
+  const group: CandidateGroup = { id: newId("grp"), conversationId: input.conversationId, revision: 1, title: "Related drafts", rationale: "Together", members: [{ candidateId: retained.id, revision: retained.revision }], atomic: true, status: "live" };
+  const groups = [group], receipt = draftRead(retained, groups);
+  const operations: WorldChatTurnResult["candidateOperations"] = [
+    { op: "update", candidateId: retained.id, expectedRevision: retained.revision, candidate },
+    { op: "create", temporaryId: "again", candidate },
+    { op: "split", candidateId: retained.id, expectedRevision: retained.revision, replacements: [candidate, candidate] },
+  ];
+  for (const op of operations) {
+    const current = { ...input, groups, existing: [retained], raw: turn({ candidateOperations: [op] }), receiptsThisRun: [receipt] };
+    assert.ok(validateTurnResult(current).ok, op.op);
+    for (const receipts of [[], [{ ...receipt, complete: false, nextCursor: "more" }], [{ ...receipt, status: "empty" as const }],
+      [{ ...receipt, target: { requirement: "conversation-candidate" as const, id: `${input.conversationId}:${newId("cand")}` } }],
+      [{ ...receipt, target: { requirement: "conversation-candidate" as const, id: `${newId("cv")}:${retained.id}` } }],
+      [draftRead({ ...retained, revision: retained.revision + 1 }, groups)], [draftRead(retained, [{ ...group, revision: 2 }])],
+      [draftRead({ ...retained, rationale: "Changed since reading" }, groups)]]) {
+      const refused = validateTurnResult({ ...current, receiptsThisRun: receipts });
+      assert.ok(!refused.ok && refused.problems.some(p => p.code === "candidate-read-required"), op.op);
+    }
+    const foreign = validateTurnResult({ ...current, conversationId: newId("cv") });
+    assert.ok(!foreign.ok && foreign.problems.some(p => p.code === "candidate-read-required"));
+  }
+});
+
+it("preserves exact historical world evidence without treating it as a fresh check", async () => {
+  const input = await baseInput(), candidate = canonCreateDraft(input.message), entry = input.evidenceSources.bundle.canon[0]!;
+  const evidence = { kind: "world" as const, ...canonObservation(entry, input.evidenceSources.bundle.meta.canonRevision), field: "title", quote: entry.title, purpose: "supports" as const };
+  candidate.evidence.push(evidence);
+  const created = validateTurnResult({ ...input, raw: turn({ candidateOperations: [{ op: "create", temporaryId: "draft", candidate }] }) });
+  assert.ok(created.ok);
+  const retained = created.turn.candidates[0]!, changed = structuredClone(input.evidenceSources.bundle);
+  changed.meta.canonRevision++;
+  changed.canon[0]!.title = "A later accepted title";
+  const current = { ...input, existing: [retained], receiptsThisRun: [draftRead(retained)], evidenceSources: { ...input.evidenceSources, bundle: changed },
+    checksFor: () => ({ ...completeChecks(), basedOnCanonRevision: changed.meta.canonRevision }) };
+  const raw = (draft: ModelCandidateDraft) => turn({ candidateOperations: [{ op: "update", candidateId: retained.id, expectedRevision: retained.revision, candidate: draft }] });
+  const updated = validateTurnResult({ ...current, raw: raw(candidate) });
+  assert.ok(updated.ok);
+  assert.deepEqual(updated.turn.candidates[0]!.evidence, retained.evidence);
+  assert.equal(updated.turn.candidates[0]!.checks.basedOnCanonRevision, changed.meta.canonRevision);
+  assert.deepEqual(updated.turn.candidates[0]!.checks.targetReads, []);
+  const edited = structuredClone(candidate);
+  edited.evidence[1] = { ...evidence, quote: "An invented historical quotation" };
+  const refused = validateTurnResult({ ...current, raw: raw(edited) });
+  assert.ok(!refused.ok && refused.problems.some(p => p.code === "world-version-moved"));
+  const fresh = validateTurnResult({ ...current, existing: [], raw: turn({ candidateOperations: [{ op: "create", temporaryId: "new", candidate }] }) });
+  assert.ok(!fresh.ok && fresh.problems.some(p => p.code === "world-version-moved"));
+});
+
 describe("parsing a turn result", () => {
   it("accepts a suggestion only in a production thread with this run's complete readiness read", async () => {
     const receipt: WorldChatCheckReceipt = { id:newId("check"),runId:newId("run"),tool:"target-read",status:"complete",consulted:[],
@@ -159,7 +242,7 @@ describe("parsing a turn result", () => {
   });
   it("uses the production bounds while preserving the ordinary transport ceiling", () => {
     const raw = turn({ actions: Array.from({ length: 24 }, () => WORLD_CHAT_SHAPE_EXAMPLES.worldActions["production-scene-command"]),
-      editorRequests: Array.from({ length: 6 }, () => ({ summary: "Move the close-up", commands: [{ kind: "move-to-order", clipId: "cl_sh-3", index: 0 }] })) });
+      editorRequests: Array.from({ length: 2 }, () => ({ summary: "Move the close-up", commands: [{ kind: "move-to-order", clipId: "cl_sh-3", index: 0 }] })) });
     assert.equal(parseTurnResult(raw, true).ok, true);
     assert.equal(parseTurnResult(raw).ok, false);
   });
@@ -223,6 +306,53 @@ describe("parsing a turn result", () => {
     assert.equal(parsed.ok, false);
   });
 
+  it("directs misplaced executable kinds to actions without rewriting the result (#1924)", () => {
+    const draft = { classification: "production-chapter", title: "Chapter plan", rationale: "Requested plan", settledness: "settled", evidence: [], checkReceiptIds: [] };
+    for (const operation of [
+      { op: "create", temporaryId: "t1", candidate: draft },
+      { op: "split", candidateId: newId("cand"), expectedRevision: 1, replacements: [draft, draft] },
+    ]) {
+      const parsed = parseTurnResult(JSON.stringify({ reply: "Plan prepared", candidateOperations: [operation], groupOperations: [] }), true);
+      assert.equal(parsed.ok, false, "wrong placement is still rejected");
+      if (!parsed.ok) {
+        const correction = correctiveMessage(parsed.problems);
+        assert.match(correction, /production-chapter is an action kind/);
+        assert.match(correction, /actions with kind/);
+        assert.match(correction, /describe_action/);
+        assert.match(correction, /Keep the requested change/);
+        assert.ok(parsed.problems.every(p => p.safeMessage.length <= 300));
+      }
+    }
+    const corrected = parseTurnResult(turn({ actions: [WORLD_CHAT_SHAPE_EXAMPLES.worldActions["production-chapter"]] }), true);
+    assert.ok(corrected.ok, "the same operation uses its existing typed action schema");
+    const unknown = parseTurnResult(JSON.stringify({ reply: "Plan prepared", candidateOperations: [{ op: "create", temporaryId: "t1", candidate: { ...draft, classification: "untrusted source text" } }], groupOperations: [] }), true);
+    assert.equal(unknown.ok, false);
+    if (!unknown.ok) {
+      assert.match(correctiveMessage(unknown.problems), /must be one of/);
+      assert.ok(!correctiveMessage(unknown.problems).includes("untrusted source text"));
+    }
+  });
+
+  it("does not redirect misplaced kinds to actions in restricted turns (#1924 review)", async () => {
+    const raw = JSON.stringify({ reply: "Plan prepared", candidateOperations: [{
+      op: "create", temporaryId: "t1", candidate: { classification: "production-chapter" },
+    }], groupOperations: [] });
+    const input = await baseInput({ raw });
+    for (const scope of [{ draftOnly: true }, { revise: "required" as const }, { revise: "only" as const }]) {
+      const result = validateTurnResult({ ...input, ...scope });
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.doesNotMatch(correctiveMessage(result.problems), /Put it in actions/);
+    }
+  });
+
+  it("does not redirect execution-blocked kinds to actions (#1924 review)", () => {
+    const parsed = parseTurnResult(JSON.stringify({ reply: "Prepared", candidateOperations: [{
+      op: "create", temporaryId: "t1", candidate: { classification: "voice-audition" },
+    }], groupOperations: [] }));
+    assert.equal(parsed.ok, false);
+    if (!parsed.ok) assert.doesNotMatch(correctiveMessage(parsed.problems), /Put it in actions/);
+  });
+
   it("refuses more operations than one turn may carry", () => {
     const op = {
       op: "create",
@@ -233,6 +363,54 @@ describe("parsing a turn result", () => {
       JSON.stringify({ reply: "hi", candidateOperations: Array.from({ length: 13 }, () => op), groupOperations: [] }),
     );
     assert.equal(parsed.ok, false);
+  });
+
+  it("retains a full chapter reply beyond the display part without requesting a shorter rewrite (#1927)", () => {
+    const reply = "She lays her hand on his arm. ".repeat(1_000);
+    const action = { kind: "production-chapter", productionId: "the-ledger-of-nights", change: { operation: "edit", chapterId: "warning-slip", changes: { body: reply } }, checkReceiptIds: [newId("check")] };
+    const parsed = parseTurnResult(JSON.stringify({ reply, candidateOperations: [], groupOperations: [], actions: [action] }));
+    assert.ok(parsed.ok);
+    assert.equal(parsed.value.reply, reply);
+    assert.deepEqual(parsed.value.actions, [action], "the complete chapter proposal survives with the reply");
+    const invalid = parseTurnResult(JSON.stringify({ reply, candidateOperations: [{ op: "invalid" }], groupOperations: [] }));
+    assert.equal(invalid.ok, false, "long prose never licenses partial salvage of an invalid result");
+  });
+
+  it("keeps a hard retention bound beyond normal chapter lengths", () => {
+    const reply = "She lays her hand on his arm. ".repeat(8_000);
+    const parsed = parseTurnResult(JSON.stringify({ reply, candidateOperations: [], groupOperations: [] }));
+    assert.equal(parsed.ok, false);
+    const tooLong = parsed.ok === false ? parsed.problems.find((p) => p.code === "reply-too-long") : undefined;
+    assert.ok(tooLong, "the length gets its own code, not the generic schema one");
+    assert.match(tooLong.safeMessage, new RegExp(`this one was ${reply.length}`));
+    assert.match(tooLong.safeMessage, /under 25000 words/);
+    assert.ok(!tooLong.safeMessage.includes("hand on his arm"), "the reply's words are not echoed back");
+    assert.match(correctiveMessage(parsed.ok === false ? parsed.problems : []), /under 25000 words/);
+    assert.match(personLine(parsed.ok === false ? parsed.problems : []), /ran longer than one reply can be/);
+  });
+
+  it("passes preparation's own reason to the retry and the person (2026-10-07)", () => {
+    const stale = preparationProblem(new Error("The complete chapters read is no longer current."));
+    assert.equal(stale.code, "action-preparation");
+    assert.match(stale.safeMessage, /could not be prepared: The complete chapters read is no longer current\. If a read is missing/);
+    assert.match(correctiveMessage([stale]), /read it again and return the complete result with the change/);
+    assert.equal(personLine([stale]), "The requested change could not be prepared: The complete chapters read is no longer current");
+    const shape = z.object({ title: z.string().max(3) }).safeParse({ title: "The seventh bell" });
+    assert.ok(!shape.success);
+    const refused = preparationProblem(shape.error);
+    assert.match(refused.safeMessage, /title allows at most 3 characters/);
+    assert.ok(!refused.safeMessage.includes("seventh bell"), "a refused value is not echoed");
+    assert.match(preparationProblem("thrown string").safeMessage, /^The requested change could not be prepared\. If a read/);
+  });
+
+  it("keeps the complete missing-read list in the bounded corrective prompt (#1911)", () => {
+    const reason = ["chapters", "story", "sheets", "canon"].map(read =>
+      `A production-chapter action requires the complete current ${read} read for the-ledger-of-nights.`).join(" ");
+    assert.ok(reason.length > 300);
+    const correction = correctiveMessage([preparationProblem(new Error(reason))]);
+    for (const read of ["chapters", "story", "sheets", "canon"]) assert.ok(correction.includes(`${read} read`));
+    assert.match(correction, /read it again and return the complete result/);
+    assert.ok(correctiveMessage(Array.from({ length: 20 }, () => preparationProblem(new Error("x".repeat(20_000))))).length <= 4_000);
   });
 
   it("names the fields at fault without echoing their values", () => {
@@ -278,7 +456,7 @@ describe("accepting a turn", () => {
     corrected.draft = { ...corrected.draft, statement: "Maren Kest was raised by her great-aunt." } as never;
 
     const outcome = validateTurnResult({
-      ...(await baseInput({ messages: [first.message], existing: [existing] })),
+      ...(await baseInput({ conversationId: existing.conversationId, messages: [first.message], existing: [existing], receiptsThisRun: [draftRead(existing)] })),
       raw: turn({
         candidateOperations: [
           { op: "update", candidateId: existing.id, expectedRevision: 1, candidate: corrected },
@@ -303,7 +481,7 @@ describe("accepting a turn", () => {
     const existing = created.turn.candidates[0]!;
 
     const outcome = validateTurnResult({
-      ...(await baseInput({ messages: [input.message], existing: [existing] })),
+      ...(await baseInput({ conversationId: existing.conversationId, messages: [input.message], existing: [existing], receiptsThisRun: [draftRead(existing)] })),
       raw: turn({ candidateOperations: [{ op: "create", temporaryId: "t2", candidate: canonCreateDraft(input.message) }] }),
     });
 
@@ -345,6 +523,42 @@ describe("accepting a turn", () => {
 });
 
 describe("rejecting a turn", () => {
+  it("identifies each bad quotation without returning source text, and preserves the independent work (#1912)", async () => {
+    const input = await baseInput();
+    const good = canonCreateDraft(input.message);
+    const bad = canonCreateDraft(input.message);
+    bad.evidence = [{ kind: "message", messageId: input.message.id, quote: "private invented quotation", start: 0, end: 26, purpose: "intent" }];
+    const operations = [good, bad, bad].map((candidate, i) => ({ op: "create" as const, temporaryId: `t${i}`, candidate }));
+    const refused = validateTurnResult({ ...input, raw: turn({ candidateOperations: operations }) });
+    assert.equal(refused.ok, false);
+    if (refused.ok) return;
+    assert.deepEqual(refused.problems.map(p => p.path), ["candidateOperations.1.candidate.evidence.0", "candidateOperations.2.candidate.evidence.0"]);
+    const correction = correctiveMessage(refused.problems);
+    for (const path of refused.problems.map(p => p.path!)) assert.ok(correction.includes(path));
+    assert.match(correction, /Keep valid independent records/);
+    assert.match(correction, /Never split an atomic group/);
+    assert.match(correction, /copy an exact quotation/);
+    assert.doesNotMatch(correction, /private invented quotation|Her aunt/);
+    assert.doesNotMatch(personLine(refused.problems), /candidateOperations/);
+    const repaired = validateTurnResult({ ...input, raw: turn({ candidateOperations: operations.map(op => ({ ...op, candidate: good })) }) });
+    assert.ok(repaired.ok);
+    assert.equal(repaired.turn.candidates.length, 3);
+  });
+
+  it("gives the link shape instead of a union error, and still refuses malformed links (#1912)", async () => {
+    const input = await baseInput();
+    const draft = canonCreateDraft(input.message);
+    const raw = (links: unknown[]) => JSON.stringify({ reply: "Noted.", candidateOperations: [{ op: "create", temporaryId: "t1", candidate: { ...draft, draft: { ...draft.draft, links } } }], groupOperations: [] });
+    const refused = parseTurnResult(raw(["private location name"]));
+    assert.equal(refused.ok, false);
+    if (refused.ok) return;
+    const correction = correctiveMessage(refused.problems);
+    assert.match(correction, /candidateOperations.0.candidate.draft.links.0 must be a typed link/);
+    assert.match(correction, /kind:"sheet",sheetId/);
+    assert.doesNotMatch(correction, /private location name/);
+    assert.ok(parseTurnResult(raw([{ kind: "sheet", sheetId: "maren-kest" }])).ok);
+  });
+
   it("rejects everything when one piece of evidence does not verify", async () => {
     const input = await baseInput();
     const good = canonCreateDraft(input.message);
@@ -482,7 +696,17 @@ describe("rejecting a turn", () => {
       }),
     });
     assert.equal(outcome.ok, false);
-    if (!outcome.ok) assert.ok(outcome.problems.some((p) => p.code === "immutable-candidate"));
+    if (!outcome.ok) {
+      assert.ok(outcome.problems.some((p) => p.code === "immutable-candidate" && p.path === "candidateOperations.0"));
+      assert.match(correctiveMessage(outcome.problems), /fresh create operation/);
+      assert.match(correctiveMessage(outcome.problems), /use sheet.edit if the sheet already exists/);
+    }
+    const fresh = validateTurnResult({ ...input, existing: [accepted], raw: turn({ candidateOperations: [
+      { op: "create", temporaryId: "fresh", candidate: canonCreateDraft(input.message) },
+    ] }) });
+    assert.ok(fresh.ok);
+    assert.notEqual(fresh.turn.candidates[0]!.id, accepted.id);
+    assert.equal(accepted.revision, 1);
   });
 
   it("names every fault at once, because there is only one corrective turn", async () => {
@@ -654,7 +878,7 @@ describe("splitting a proposition", () => {
 
     const bells = canonCreateDraft(input.message, "the bells only ring at slack water");
     const outcome = validateTurnResult({
-      ...(await baseInput({ messages: [input.message], existing: [existing] })),
+      ...(await baseInput({ conversationId: existing.conversationId, messages: [input.message], existing: [existing], receiptsThisRun: [draftRead(existing)] })),
       raw: turn({
         candidateOperations: [
           {
@@ -860,6 +1084,38 @@ describe("a question asked for its answer (issue 1295)", () => {
     const open = validateTurnResult({ ...(await baseInput()), raw: JSON.stringify({ reply: "x", actions: [{ op: "edit" }] }) });
     assert.equal(open.ok, false);
     if (!open.ok) assert.ok(open.problems.every((p) => p.code === "schema"));
+  });
+
+  it("holds the page's rewrite to a revision on its first answer, and not after (issue 1827)", async () => {
+    // What GPT-5.4 returned to the selection menu's Tighten: the new wording in the reply, nothing staged.
+    const prose = turn({ reply: "Best clean option: “The first time it happened, Ade was driving on the Ibadan expressway.”" });
+    const first = validateTurnResult({ ...(await baseInput({ productionThread: true, revise: "required" })), raw: prose });
+    assert.equal(first.ok, false);
+    if (!first.ok) {
+      assert.deepEqual(first.problems.map((p) => p.code), ["revise"]);
+      assert.match(first.problems[0]!.safeMessage, /"find": the selected words exactly as quoted, "with": your revision, "paragraph": the paragraph the ask named/);
+    }
+    const revision = JSON.stringify({
+      reply: "Cut the loose “it”.",
+      candidateOperations: [],
+      groupOperations: [],
+      actions: [{ kind: "production-chapter", productionId: "saltlight", change: { operation: "edit", chapterId: "neap", changes: { passage: { find: "a", with: "b", paragraph: 2 } } }, checkReceiptIds: ["check_01J8F3K2QW9VZX4N7M0RTYB6H5"] }],
+    });
+    const revised = validateTurnResult({ ...(await baseInput({ productionThread: true, revise: "required" })), raw: revision });
+    assert.ok(revised.ok || !revised.problems.some((p) => p.code === "revise"), "a revision answers it, whatever else is checked");
+    // One revision, not two alternatives: the page tags only the first to arrive (codex on PR 1830).
+    const twice = JSON.parse(revision) as { actions: unknown[] };
+    twice.actions.push(twice.actions[0]);
+    const two = validateTurnResult({ ...(await baseInput({ productionThread: true, revise: "required" })), raw: JSON.stringify(twice) });
+    assert.equal(two.ok, false);
+    if (!two.ok) assert.ok(two.problems.some((p) => p.code === "revise-only"), JSON.stringify(two.problems));
+    // The corrective answer is free to say why it could not be revised…
+    assert.equal(validateTurnResult({ ...(await baseInput({ productionThread: true, revise: "only" })), raw: prose }).ok, true);
+    // …but stages nothing else, or the page would wait on a revision that is not coming (codex on PR 1830).
+    const input = await baseInput({ productionThread: true, revise: "only" });
+    const other = validateTurnResult({ ...input, raw: turn({ candidateOperations: [{ op: "create", temporaryId: "t1", candidate: canonCreateDraft(input.message) }] }) });
+    assert.equal(other.ok, false);
+    if (!other.ok) assert.ok(other.problems.some((p) => p.code === "revise-only"));
   });
 
   it("tells every corrective turn that a question needs no action at all", () => {

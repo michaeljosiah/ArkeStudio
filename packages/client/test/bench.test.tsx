@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
+import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import type { BenchSession, ClientState, ManifestModel } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
@@ -11,6 +11,8 @@ import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { ReferencePickerBody, type PickerSource } from "../src/components/reference-picker.js";
 import { BenchBrief } from "../src/components/bench-brief.js";
 import type { MentionOption } from "../src/lib/bench-mention.js";
+import * as contracts from "@arke-studio/contracts";
+import * as client from "../src/lib/poster.js";
 
 /**
  * The bench (issue 305): the screen restores a session — strip, references, brief, selection —
@@ -102,6 +104,51 @@ function renderAt(path: string, state: ClientState): string {
 }
 
 describe("the bench screen (issue 305 §3)", () => {
+  for (const alternative of [false, true]) {
+    it(`keeps the saved local model and measured reason while offline${alternative ? " with a cloud alternative" : " without another model"}`, () => {
+      const state = stateWithBench();
+      const local: ManifestModel = { ...IMAGE_MODEL, id: "local-h3", provider: "comfyui", capability: "video", displayName: "Local · H3 Reference Video", pricing: { kind: "unmetered" } };
+      const cloud: ManifestModel = { ...local, id: "cloud-video", provider: "fal", displayName: "Cloud Video" };
+      state.app.manifest = { ...state.app.manifest!, models: alternative ? [local, cloud] : [local] };
+      state.app.comfyui = {
+        engine: { source: "user-path", state: "unreachable", locality: "local", location: "ComfyUI", version: "0.38.1", instanceId: null, detail: null, detected: [] },
+        recipes: [{ recipeId: local.id, recipeVersion: 1, displayName: local.displayName, capability: "video", state: "disabled", reason: "The local engine is stopped. Start it in Settings." }],
+        checkedAt: "2026-10-21T12:00:00.000Z",
+      };
+      state.bench!.session!.composer = { ...state.bench!.session!.composer, mode: "video", provider: "comfyui", model: local.id, params: { kind: "video", durationSec: 15, aspect: "16:9", sound: true } };
+      const before = JSON.stringify(state.bench);
+      const { document } = parseHTML(`<html><body>${renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, state)}</body></html>`);
+      const select = document.querySelector('select[aria-label="Model"]');
+      assert.equal(select?.querySelector('option[selected]')?.getAttribute('value'), "comfyui/local-h3");
+      assert.match(select?.querySelector('option[selected]')?.textContent ?? "", /H3 Reference Video/);
+      assert.match(document.querySelector('[data-testid="bench-model-unavailable"]')?.textContent ?? "", /engine is stopped/);
+      assert.equal(document.querySelector('[data-testid="bench-generate"]')?.hasAttribute('disabled'), true);
+      assert.match(document.body.textContent, /TAKE 1/);
+      assert.equal(JSON.stringify(state.bench), before, "availability does not change the saved composer or take");
+    });
+  }
+
+  it("names a saved model missing from the current manifest instead of implying no selection", () => {
+    const state = stateWithBench();
+    state.app.manifest = { ...state.app.manifest!, models: [] };
+    const { document } = parseHTML(`<html><body>${renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, state)}</body></html>`);
+    assert.equal(document.querySelector('select[aria-label="Model"] option[selected]')?.getAttribute('value'), "fal/test-image");
+    assert.match(document.querySelector('[data-testid="bench-model-unavailable"]')?.textContent ?? "", /no longer listed/);
+    assert.equal(document.querySelector('[data-testid="bench-generate"]')?.hasAttribute('disabled'), true);
+  });
+
+  it("keeps a long standalone session name whole for reading and hover (#1971)", () => {
+    const state = stateWithBench();
+    const title = "The harbour records — " + "unbroken_reference_".repeat(12);
+    state.bench!.session!.title = title;
+    const { document } = parseHTML(`<html><body>${renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, state)}</body></html>`);
+    const button = document.querySelector("button.fy-bench__session");
+    assert.equal(button?.textContent, title);
+    assert.equal(button?.getAttribute("title"), title);
+    assert.equal(button?.getAttribute("aria-expanded"), "false");
+    assert.equal(button?.hasAttribute("disabled"), false);
+  });
+
   it("keeps included-plan funding visible on a saved image take", () => {
     const state = stateWithBench();
     state.bench!.session!.takes[0]!.cost = { estimatedMicroUsd: 0, actualMicroUsd: 0, actualSource: "included-plan" };
@@ -113,7 +160,7 @@ describe("the bench screen (issue 305 §3)", () => {
     assert.match(html, /class="fy-app" data-screen="bench"/);
     assert.match(html, /role="status"/);
     assert.match(html, /Opening the bench/);
-    assert.match(html, />Artifacts<\/button>/);
+    assert.match(html, /class="fy-titlebar__back-label">Artifacts<\/span>/);
   });
 
   it("restores the session whole: title, brief, token, numbered take, selection", () => {
@@ -123,7 +170,7 @@ describe("the bench screen (issue 305 §3)", () => {
     assert.match(html, /Image 1/);
     assert.match(html, /data-testid="strip-take"/);
     assert.match(html, /TAKE 1/); // the wall names the selected take by its number
-    assert.match(html, /Keep · file as artifact/);
+    assert.match(html.replaceAll("<!-- -->", ""), /Keep take 1 · artifact/);
     // A take has no name but its number, and that is the name it saves under (issue 478). The
     // save is a sibling of the picture, and nothing about it files, discards or selects the take.
     assert.match(html, /aria-label="Download Take 1\.png"/, "the selected take offers a copy under its number");
@@ -301,11 +348,38 @@ describe("a reference picked from a character (issue 505)", () => {
   });
 });
 
+describe("durable references in a standalone session (reopened issue 505)", () => {
+  for (const path of ["artifacts/standalone-plate.png", "references/new-location/interior.png"]) it(`resolves ${path} from the saved registry after reopening`, () => {
+    const state = stateWithBench(), session = state.bench!.session!;
+    session.tokenRegistry = [{ token: "Image 1", kind: "image", label: "Harbour interior", detail: "accepted view", source: { source: "world-file", path, hash: "sha256:cafebabe" } }];
+    session.takes[0]!.request.references = [{ token: "Image 1", kind: "image", source: session.tokenRegistry[0]!.source }];
+    const before = JSON.stringify(session);
+    for (const restored of [state, structuredClone(state)]) {
+      const { document } = parseHTML(`<html><body>${renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, restored)}</body></html>`);
+      const image = document.querySelector('.fy-bench__reftile img');
+      assert.ok(image?.getAttribute('src')?.includes(path));
+      assert.equal(document.querySelector('.fy-bench__refname')?.textContent, "Harbour interior · accepted view");
+      assert.equal(document.querySelector('.fy-bench__takestate')?.textContent, undefined);
+      assert.match(document.body.textContent, /TAKE 1/);
+      assert.equal(JSON.stringify(restored.bench!.session), before, "display never changes the frozen request or composer");
+    }
+  });
+
+  for (const source of [{ source: "artifact" as const, artifactId: "ar_missing", hash: "sha256:deadbeef" }, { source: "take" as const, takeId: "tk_missing", hash: "sha256:deadbeef" }]) it(`keeps an unavailable ${source.source} reference missing`, () => {
+    const state = stateWithBench();
+    state.bench!.session!.tokenRegistry = [{ token: "Image 1", kind: "image", label: "Unavailable view", source }];
+    const { document } = parseHTML(`<html><body>${renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts/bench/${SESSION_ID}`, state)}</body></html>`);
+    assert.equal(document.querySelector('.fy-bench__reftile img'), null);
+    assert.equal(document.querySelector('.fy-bench__takestate')?.textContent, "missing");
+    assert.match(document.querySelector('.fy-bench__refname')?.textContent ?? "", /Unavailable view/);
+  });
+});
+
 describe("the Artifacts door (issue 305 §2)", () => {
   it("carries Generate, and the made-here count appears only when a bench artifact exists", () => {
     const plain = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts`, FIXTURE_STATE);
     assert.match(plain, /data-testid="artifacts-generate"/);
-    assert.doesNotMatch(plain, /Made here/);
+    assert.doesNotMatch(plain, /Made in Arke/);
 
     const state = stateWithBench();
     const withMade = {
@@ -342,8 +416,8 @@ describe("the Artifacts door (issue 305 §2)", () => {
       },
     };
     const html = renderAt(`/w/${FIXTURE_WORLD_ID}/artifacts`, withMade);
-    assert.match(html, /Made here 1/);
-    assert.match(html, /1 made here/);
+    assert.match(html, /Made in Arke 1/);
+    assert.match(html, /1 made in Arke/);
   });
 });
 
@@ -827,18 +901,15 @@ describe("the strip shows a video take's first frame", () => {
 });
 
 describe("the poster convention", () => {
-  it("is spelled the same on both sides of the wire", () => {
-    // The coordinator writes the file and the client asks for it. Two regexes in two packages
-    // that must agree: a video kind added to one and not the other is a silently blank tile.
-    const client = readFileSync(new URL("../src/lib/poster.ts", import.meta.url), "utf8");
-    const server = readFileSync(
-      new URL("../../coordinator/src/takes/poster.ts", import.meta.url),
-      "utf8",
-    );
-    const extensions = (source: string) => /\/\\.\(([a-z0-9|]+)\)\$\/i/.exec(source)?.[1];
-    assert.equal(extensions(client), extensions(server), "the same video extensions");
-    assert.ok(extensions(client), "and both were actually found");
-    for (const source of [client, server]) assert.match(source, /"frame\.png"/);
+  it("is contracts' one rule, the same the coordinator writes by (issue 2815)", () => {
+    // The coordinator writes the file and the client asks for it. The rule was two regexes in
+    // two packages kept equal by reading both sources; it is one function now, shared.
+    assert.equal(client.posterNameFor, contracts.posterNameFor);
+    assert.equal(client.isVideoMedia, contracts.isVideoMedia);
+    assert.equal(client.POSTER_NAME, "frame.png");
+    for (const clip of ["take.mp4", "take.webm", "take.MOV", "take.m4v"]) assert.equal(client.posterNameFor(clip), "frame.png");
+    assert.equal(client.posterNameFor("still.png"), "still.png", "a still is its own picture");
+    assert.equal(client.posterize("takes/tk_1/clip.mp4"), "takes/tk_1/frame.png");
   });
 });
 

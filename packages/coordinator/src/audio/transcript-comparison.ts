@@ -1,11 +1,15 @@
 import { AudioTranscriptComparisonSchema, FullSha256Schema, type AudioTranscriptComparison } from "@arke-studio/contracts";
 import { audioHash } from "./qc.js";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import type { WorldStore } from "../world/store.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { audioWorldPath } from "./storage.js";
 
 export const AUDIO_TEXT_NORMALIZATION_VERSION = 1;
+export interface AudioTranscriberIdentity { id: string; version: string }
+export interface AudioTranscriber extends AudioTranscriberIdentity {
+  transcribe: (bytes: Uint8Array, contentType: string, signal?: AbortSignal) => Promise<string>;
+}
 /** NFKC + whitespace only: punctuation/case differences remain reviewable, never rewritten. */
 const normalize = (text: string) => text.normalize("NFKC").trim().replace(/\s+/gu, " ");
 export function transcriptCacheKey(audio: string, text: string, transcriber: { id: string; version: string }): string {
@@ -47,31 +51,56 @@ export function compareAudioTranscript(input: { audioHash: string; authoredText:
     result: authored === observed ? "exact" : "mismatch", differences, boundaryAlignment: "unavailable" });
 }
 
-/** The existing local VoiceService.transcribe can supply this seam. Never use a cloud
- * provider here; caller-owned text/voice identity is deliberately absent from the QC cache. */
+/** Reading a cache never invokes recognition. Unavailable entries remain evidence, not hits
+ * that prevent an explicit retry. Old or malformed entries simply remain unchecked. */
+export async function readAudioTranscriptCache(store: WorldStore, input: {
+  expectedHash: string; authoredText: string; transcriber: AudioTranscriberIdentity;
+}): Promise<AudioTranscriptComparison | null> {
+  const key = transcriptCacheKey(input.expectedHash, input.authoredText, input.transcriber);
+  const path = await audioWorldPath(store.dir, `.cache/audio-transcripts/${key}`).catch(() => null);
+  if (path === null) return null;
+  const size = (await stat(path).catch(() => null))?.size;
+  if (size === undefined || size > 256_000) return null;
+  const cached = await readFile(path, "utf8").then(text => text.length > 256_000 ? null : AudioTranscriptComparisonSchema.parse(JSON.parse(text))).catch(() => null);
+  if (cached?.audioHash !== input.expectedHash || cached.targetTextHash !== audioHash(Buffer.from(input.authoredText))) return null;
+  if (cached.status === "compared" && (cached.transcriber.id !== input.transcriber.id || cached.transcriber.version !== input.transcriber.version ||
+    cached.transcriber.normalizationVersion !== AUDIO_TEXT_NORMALIZATION_VERSION)) return null;
+  return cached;
+}
+
+/** The existing local VoiceService.transcribe supplies this seam. Inference runs outside the
+ * world gate; only the checked result is written under ownership, after caller freshness. */
 export async function cachedAudioTranscript(store: WorldStore, input: {
   bytes: Uint8Array; expectedHash: string; authoredText: string;
-  transcriber: { id: string; version: string; transcribe: (bytes: Uint8Array, contentType: string) => Promise<string> } | null;
+  transcriber: AudioTranscriber | null;
+  signal?: AbortSignal;
+  beforeWrite?: () => Promise<void>;
 }): Promise<AudioTranscriptComparison> {
+  const signal = input.signal ? AbortSignal.any([input.signal, store.closingSignal]) : store.closingSignal;
+  signal.throwIfAborted();
   if (audioHash(input.bytes) !== input.expectedHash) throw new Error("audio-source-changed");
   const transcriber = input.transcriber ?? { id: "not-configured", version: "1" };
   if (!input.transcriber || !input.authoredText.trim()) return compareAudioTranscript({ audioHash: input.expectedHash,
     authoredText: input.authoredText, transcriber });
-  return store.gateOp(async () => {
+  const cached = await readAudioTranscriptCache(store, { ...input, transcriber });
+  if (cached?.status === "compared") { signal.throwIfAborted(); await input.beforeWrite?.(); return cached; }
+  let comparison: AudioTranscriptComparison;
+  try {
+    const observedText = await input.transcriber.transcribe(input.bytes, "audio/wav", signal);
+    signal.throwIfAborted();
+    if (typeof observedText !== "string" || observedText.length > 100_000) throw new Error("audio-text-too-large");
+    comparison = compareAudioTranscript({ audioHash: input.expectedHash, authoredText: input.authoredText, transcriber, observedText });
+  } catch {
+    signal.throwIfAborted();
+    comparison = compareAudioTranscript({ audioHash: input.expectedHash, authoredText: input.authoredText, transcriber, unavailableReason: "stt-failed" });
+  }
+  await store.derivedWrite(async () => {
+    signal.throwIfAborted();
+    await input.beforeWrite?.();
+    signal.throwIfAborted();
     const key = transcriptCacheKey(input.expectedHash, input.authoredText, transcriber);
     const path = await audioWorldPath(store.dir, `.cache/audio-transcripts/${key}`, true);
-    const cached = await readFile(path, "utf8").then(text => AudioTranscriptComparisonSchema.parse(JSON.parse(text))).catch(() => null);
-    const targetTextHash = audioHash(Buffer.from(input.authoredText));
-    if (cached?.status === "compared" && cached.audioHash === input.expectedHash && cached.targetTextHash === targetTextHash &&
-      cached.transcriber.id === transcriber.id && cached.transcriber.version === transcriber.version &&
-      cached.transcriber.normalizationVersion === AUDIO_TEXT_NORMALIZATION_VERSION) return cached;
-    let observedText: string;
-    try { observedText = await input.transcriber!.transcribe(input.bytes, "audio/wav"); }
-    catch { return compareAudioTranscript({ audioHash: input.expectedHash, authoredText: input.authoredText,
-      transcriber, unavailableReason: "stt-failed" }); }
-    if (store.closingSignal.aborted) throw new Error("audio-cancelled");
-    const comparison = compareAudioTranscript({ audioHash: input.expectedHash, authoredText: input.authoredText, transcriber, observedText });
     await atomicWriteFile(path, JSON.stringify(comparison));
-    return comparison;
   });
+  return comparison;
 }

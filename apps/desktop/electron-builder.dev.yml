@@ -1,0 +1,13 @@
+# Keep the production runtime/resource/licence checks, with a distinct installed identity.
+extends: ./electron-builder.yml
+appId: studio.arke.app.dev
+productName: Arke Studio Dev
+publish: null
+directories:
+  output: release-dev
+extraFiles:
+  - from: config/aonik-dev.json
+    to: resources/aonik-publishing.json
+nsis:
+  artifactName: ArkeStudioDev-Setup-${version}-${arch}.${ext}
+  include: installer-dev.nsh

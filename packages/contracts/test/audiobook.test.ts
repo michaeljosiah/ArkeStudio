@@ -16,6 +16,8 @@ import {
   audiobookDirectionHash,
   audiobookDoorLine,
   audiobookHeading,
+  chapterNumber,
+  publishedChapterTitle,
   audiobookRowLabel,
   audiobookTextHash,
   AudiobookDoorSchema,
@@ -65,8 +67,44 @@ describe("audiobook blocks (R-2)", () => {
   it("reads a chapter titled only by its number once (turn 188)", () => {
     assert.equal(audiobookHeading(1, "Chapter 1"), "Chapter 1");
     assert.equal(audiobookHeading(1, " chapter 1 "), "Chapter 1");
-    assert.equal(audiobookHeading(1, "Chapter 12"), "Chapter 1 · Chapter 12");
+    assert.equal(audiobookHeading(2, "Untitled"), "Chapter 2");
+    assert.equal(publishedChapterTitle(2, " untitled "), "Chapter 2");
+    assert.equal(publishedChapterTitle(2, "Neap"), "Neap");
     assert.equal(audiobookHeading(3, "Neap"), "Chapter 3 · Neap");
+  });
+
+  it("counts the chapters without a prologue, an interlude or an epilogue (amendment of 2026-11-11)", () => {
+    const book = [{ order: 1, title: "Prologue — The Lagoon" }, { order: 2, title: "Gold on Gold" }, { order: 3, title: "Suya at Midnight" },
+      { order: 4, title: "Interlude" }, { order: 5, title: "Untitled" }, { order: 6, title: "Epilogue" }];
+    assert.deepEqual(book.map((chapter) => chapterNumber(book, chapter)), [null, 1, 2, null, 3, null]);
+    assert.equal(audiobookHeading(chapterNumber(book, book[0]!), book[0]!.title), "Prologue — The Lagoon");
+    assert.equal(audiobookHeading(chapterNumber(book, book[1]!), book[1]!.title), "Chapter 1 · Gold on Gold");
+    assert.equal(audiobookHeading(chapterNumber(book, book[4]!), book[4]!.title), "Chapter 3");
+    assert.equal(publishedChapterTitle(chapterNumber(book, book[4]!), book[4]!.title), "Chapter 3");
+    assert.equal(publishedChapterTitle(null, "Prologue"), "Prologue");
+    // A foreword and a prologue both stand before Chapter 1.
+    const fronted = [{ order: 1, title: "Foreword" }, { order: 2, title: " prologue " }, { order: 3, title: "Neap" }];
+    assert.equal(chapterNumber(fronted, fronted[2]!), 1);
+    // A book with none is numbered by place, as before; a word that only starts like one is a title.
+    const plain = [{ order: 1, title: "Neap" }, { order: 2, title: "Prologues and Endings" }, { order: 3, title: "Chapter 3" }];
+    assert.deepEqual(plain.map((chapter) => chapterNumber(plain, chapter)), [1, 2, 3]);
+    assert.equal(audiobookHeading(chapterNumber(plain, plain[2]!), plain[2]!.title), "Chapter 3");
+  });
+
+  it("reads a title that names its own place alone, never two numbers", () => {
+    assert.equal(audiobookHeading(4, "Chapter 3 — Nightfall Breach"), "Chapter 3 — Nightfall Breach");
+    assert.equal(audiobookHeading(1, " Prologue — Whispers from the Void "), "Prologue — Whispers from the Void");
+    assert.equal(audiobookHeading(46, "Epilogue"), "Epilogue");
+    assert.equal(audiobookHeading(1, "Chapter 12"), "Chapter 12");
+    assert.equal(audiobookHeading(5, "Chapter IV: The Ford"), "Chapter IV: The Ford");
+    assert.equal(audiobookHeading(22, "Chapter Twenty-One"), "Chapter Twenty-One");
+    assert.equal(audiobookHeading(2, "INTERLUDE"), "INTERLUDE");
+    // A title that only starts with such a word keeps the door's number.
+    assert.equal(audiobookHeading(2, "Chapters of Ash"), "Chapter 2 · Chapters of Ash");
+    assert.equal(audiobookHeading(2, "Chapter and Verse"), "Chapter 2 · Chapter and Verse");
+    assert.equal(audiobookHeading(2, "Chapter Mid"), "Chapter 2 · Chapter Mid");
+    assert.equal(audiobookHeading(3, "Prologues end"), "Chapter 3 · Prologues end");
+    assert.equal(audiobookHeading(3, "The Prologue"), "Chapter 3 · The Prologue");
   });
 
   it("puts the title first, keys blocks by paragraph and split, and drops a scene break", () => {

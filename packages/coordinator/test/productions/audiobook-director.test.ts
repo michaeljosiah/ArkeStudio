@@ -12,17 +12,20 @@ import {
   type ManifestModel,
   type VoiceCandidate,
 } from "@arke-studio/contracts";
-import { geminiSpeechModel } from "@arke-studio/providers";
+import { SHIPPED_MANIFEST, geminiSpeechModel } from "@arke-studio/providers";
 import { Coordinator } from "../../src/coordinator.js";
 import { devCipher } from "../../src/credentials/dev-cipher.js";
 import {
   DIRECTION_CONTEXT_BOUNDS,
   acceptDirections,
+  directChapter,
+  draftSpeakerNotes,
   directionPromptFor,
   renderDirectionContext,
   spokenAt,
   verifyDirections,
   type DirectableBlock,
+  type DirectionBlockInput,
   type DirectionDeriver,
   type DirectionDeriverInput,
   type SpeakerNotesDeriver,
@@ -30,6 +33,7 @@ import {
 import { prepareChapter } from "../../src/productions/audiobook-run.js";
 import type { VoicesDeriver } from "../../src/productions/voices.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
+import { MarkdownFile } from "../../src/world/text-files.js";
 import type { WorldStore } from "../../src/world/store.js";
 import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 import { FakeProvider } from "../queue/fake-provider.js";
@@ -188,7 +192,7 @@ async function withDirector(
     },
   });
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   if (input.cloud) {
     // The queue runs only on a started coordinator, and a started one is stopped, or its
     // transport holds the file open past every timeout.
@@ -208,6 +212,8 @@ async function withDirector(
 
 const bookPath = (worldDir: string) => join(worldDir, "productions", LEDGER, ".audiobook", "book.json");
 const readBook = async (worldDir: string) => AudiobookBookSchema.parse(JSON.parse(await readFile(bookPath(worldDir), "utf8")));
+/** A character's narration as their sheet holds it (design turn 200, R-165). */
+const readNarration = async (worldDir: string, sheet: string) => MarkdownFile.parse(await readFile(join(worldDir, "characters", `${sheet}.md`), "utf8")).data["narration"] as string | undefined;
 const recordPath = (worldDir: string) => join(worldDir, "productions", LEDGER, ".audiobook", "chapters", "01-neap.json");
 const schemaOf = async (worldDir: string) => (JSON.parse(await readFile(join(worldDir, "world.json"), "utf8")) as { schemaVersion: number }).schemaVersion;
 const withPlan = (synopsis: string) => async (worldDir: string) => {
@@ -299,6 +305,13 @@ describe("the director reads the book (design turn 184, SPEC-047 R-51)", () => {
     ));
 });
 
+/** A pass as the prompt is asked it: narration read by Gemini, unless a block says otherwise. */
+const passOf = (blocks: Array<Partial<DirectionBlockInput> & { key: string }>): DirectionDeriverInput => ({
+  title: "Neap",
+  pass: { index: 1, of: 1 },
+  blocks: blocks.map((block) => ({ text: "The tide came in.", reader: "Kore · Gemini", deliveries: ["measured", "warm"], note: "instruction", pause: true, breath: true, emphasis: true, sounds: [], markers: true, speed: null, ...block })),
+});
+
 describe("the director writes turn 181's direction (R-52)", () => {
   const narration: DirectableBlock = { key: "p0.0", text: "Ade laughed until his chest hurt. “The goat was in the boot,” he said.", reader: { provider: "google", model: GEMINI.id, voiceId: "Kore" }, model: GEMINI };
   const line: DirectableBlock = { key: "p1.0", text: "“Ade, I am telling you. The goat looked at me like this, like say na me get the car.”", reader: { provider: "google", model: GEMINI.id, voiceId: "Kore" }, model: GEMINI, line: true };
@@ -323,9 +336,8 @@ describe("the director writes turn 181's direction (R-52)", () => {
             note,
             cues: [
               { kind: "sound", after: "I am telling you.", sound: "chuckles" },
-              { kind: "sound", after: "like this,", sound: "giggles" },
+              { kind: "sound", after: "like this,", sound: "wheezing" },
               { kind: "delivery", words: "like say na me get the car.", delivery: "whispered" },
-              { kind: "pause", after: "like this,", length: "short" },
             ],
           },
         ],
@@ -337,7 +349,7 @@ describe("the director writes turn 181's direction (R-52)", () => {
     assert.deepEqual(first.cues.map((cue) => cue.kind === "sound" && cue.sound), ["chuckles"], "the laugh in narration is dropped; the one right after the closing mark stands");
     const second = verified.proposed["p1.0"]!;
     assert.equal(second.note, note, "an instruction reader takes the note whole");
-    assert.deepEqual(second.cues.map((cue) => cue.kind), ["sound", "pause", "delivery"], "the made-up sound is dropped; the turn is anchored to its words");
+    assert.deepEqual(second.cues.map((cue) => cue.kind), ["sound", "delivery"], "the unmapped sound is dropped; the turn is anchored to its words");
     const turn = second.cues.find((cue) => cue.kind === "delivery");
     assert.equal(turn?.kind === "delivery" ? turn.span.text : undefined, "like say na me get the car.");
     assert.equal(verified.dropped, 2, "the narration's laugh and the sound off the list, counted");
@@ -354,6 +366,30 @@ describe("the director writes turn 181's direction (R-52)", () => {
     assert.equal(verified.dropped, 2, "the long note and the sound the row does not make");
   });
 
+  it("Eleven v4 takes descriptive notes, and a pause only where the punctuation carries none", () => {
+    // Measured 2026-10-07: v4 said "No." as "No. No." under a five-word tag, and read "let the
+    // silence sit" aloud; one or two words read clean.
+    const V4 = SHIPPED_MANIFEST.models.find((model) => model.id === "eleven_v4")!;
+    const v4Line: DirectableBlock = { ...line, reader: { provider: "elevenlabs", model: V4.id, voiceId: "Ife" }, model: V4 };
+    const long = verifyDirections({ blocks: [{ block: "p1.0", delivery: "warm", note: "low and soft, almost a breath" }] }, [v4Line]);
+    assert.equal(long.proposed["p1.0"]?.note, "low and soft, almost a breath");
+    assert.equal(long.dropped, 0);
+    const short = verifyDirections({ blocks: [{ block: "p1.0", delivery: "warm", note: "softly, smiling" }] }, [v4Line]);
+    assert.equal(short.proposed["p1.0"]?.note, "softly, smiling");
+    const prompt = directionPromptFor({ title: "Neap", pass: { index: 1, of: 1 }, blocks: [{ key: "p1.0", text: "No.", reader: "Ife · Eleven v4", deliveries: ["warm"],
+      note: "tag", noteChars: 160, pause: true, breath: true, emphasis: true, sounds: [], markers: true, speed: null }] } as unknown as Parameters<typeof directionPromptFor>[0]);
+    assert.match(prompt, /takes a note to 160 characters/);
+    const asking = directionPromptFor({ title: "Neap", pass: { index: 1, of: 1 }, asks: { speakerNotes: [{ key: "ade", name: "Ade" }] }, blocks: [{ key: "p1.0", text: "No.", reader: "Ife · Eleven v4",
+        deliveries: ["warm"], note: "tag", noteChars: 160, speakerNoteChars: 300, pause: true, breath: true, emphasis: true, sounds: [], markers: true, speed: null }] } as unknown as Parameters<typeof directionPromptFor>[0]);
+    assert.match(asking, /add a pause only at a revelation or interruption the punctuation does not carry/);
+    assert.match(asking, /no pause · no breath|· pause · breath/, "the row says what it takes");
+    assert.match(asking, /preserving|Preserve the selected narrator/);
+    assert.match(asking, /how the narrator plays them, at most 300 characters/, "a speaker's note leads every line as a tag, so it meets the same cap");
+    assert.match(asking, /fewest audible traits/);
+    assert.match(asking, /Short reporting clauses/);
+    assert.match(asking, /Never rewrite the words/);
+  });
+
   // Design turn 185: read per paragraph, chapter 01 changed delivery on most blocks.
   it("keeps one delivery across a run: a change within four blocks of the last is held to the one before and counted", () => {
     const blocks: DirectableBlock[] = Array.from({ length: 10 }, (_, index) => ({ ...narration, key: `p${index}.0` }));
@@ -366,9 +402,71 @@ describe("the director writes turn 181's direction (R-52)", () => {
     );
     assert.equal(verified.dropped, 3, "urgent, measured and whispered are held and counted");
     assert.equal(verified.directed, 10, "a held block keeps its direction, at the delivery before");
-    const prompt = directionPromptFor({ title: "Neap", blocks: [], pass: { index: 1, of: 1 } } as unknown as Parameters<typeof directionPromptFor>[0]);
-    assert.match(prompt, /about one block in four/);
-    assert.match(prompt, /no note is better than one that restates the chapter note/);
+    const prompt = directionPromptFor(passOf([{ key: "p0.0" }]));
+    assert.match(prompt, /at most about one such block in four/);
+    assert.doesNotMatch(prompt, /A block marked "a beat"/, "no beat in the pass, so no beat's rule");
+    assert.doesNotMatch(prompt, /chapterNote/, "a chapter note is never asked for");
+    const noted = directionPromptFor({ ...passOf([{ key: "p0.0" }]), context: { chapter: { order: 1, title: "Neap", version: 1 }, speakers: [], narrator: { label: "Kore" }, chapterNote: "night", before: null } });
+    assert.match(noted, /The chapter note carries the chapter's mood\. A block's note says what this block does within it, never restates it/, "one a book still holds is read as the chapter's mood");
+  });
+
+  // 2026-11-11: the director's chapters of Na Love or Juju read 60% of their beats measured and
+  // most with no note, so a Gemini row sent no style at all; the prologue directed by hand, a note
+  // on every block and two to twelve turns in each, was heard as far stronger.
+  it("a beat's change of delivery is never held; the paragraphs around it still keep one in four (R-219)", () => {
+    const kinds = [true, true, true, false, true, false, false];
+    const blocks: DirectableBlock[] = kinds.map((beat, index) => ({ ...narration, key: `p${index}.0`, ...(beat ? { beat: true } : {}) }));
+    const deliveries = ["warm", "urgent", "cold", "warm", "urgent", "urgent", "measured"];
+    const verified = verifyDirections({ blocks: blocks.map((block, index) => ({ block: block.key, delivery: deliveries[index] })) }, blocks);
+    assert.deepEqual(
+      blocks.map((block) => verified.proposed[block.key]?.delivery),
+      ["warm", "urgent", "cold", "cold", "urgent", "urgent", "urgent"],
+      "every beat turns; the paragraph after a beat's turn is held, as the last paragraph is",
+    );
+    assert.equal(verified.dropped, 2);
+  });
+
+  it("asks for a note on every block, turns inside a beat and on dialogue, the whisper only where the text has one, and no pause where the reader would say it", () => {
+    const prompt = directionPromptFor(passOf([{ key: "p0.0", beat: true }, { key: "p1.0", beat: true, pause: false, breath: false }]));
+    assert.match(prompt, /\[p0\.0\] narration · a beat · read by/);
+    assert.match(prompt, /A block marked "a beat" is a scene of several paragraphs/);
+    assert.match(prompt, /the delivery may change at any beat/);
+    assert.doesNotMatch(prompt, /one such block in four/, "a pass of beats has no spacing to keep");
+    assert.match(prompt, /Give every block a note where its reader takes one: the block's arc/);
+    assert.match(prompt, /A measured block with no note is read with no direction at all/);
+    assert.match(prompt, /turn the delivery inside a block wherever the scene turns/);
+    assert.match(prompt, /A beat with dialogue usually needs several/);
+    assert.match(prompt, /Give each line of dialogue whose feeling differs from its speaker's note its own "delivery" cue over the line's words, its quotation marks included/);
+    assert.match(prompt, /Where a block lists "no speed", pace goes in the note or a cue's phrase/);
+    assert.match(prompt, /"speed": <only where the block lists a speed/);
+    assert.match(prompt, /Use urgent and breaking wherever the text calls for them/);
+    assert.match(prompt, /"whispered" is a literal whisper: only where the story has someone whisper/);
+    assert.match(prompt, /Silence between blocks is the chapter's timing/);
+    assert.match(prompt, /A block that lists "no pause" or "no breath" takes neither: its reader would say the tag aloud/);
+    assert.match(prompt, /\[p1\.0\][^\n]*· no pause · no breath ·/);
+    for (const gone of [/no note is better/, /Inspect natural pauses/, /Add short or long pauses/, /about one block in four/]) assert.doesNotMatch(prompt, gone);
+  });
+
+  // 2026-11-11, hand-directing Na Love or Juju: set-audiobook-block refused `speed: 0.9` on Gemini,
+  // so slowness goes in the note.
+  it("a Gemini row is offered no pause, breath or speed, and each proposed is dropped and counted (R-219)", () => {
+    let input: DirectionDeriverInput | undefined;
+    return withDirector({}, async ({ store }) => {
+      const room = { narrator: { provider: "google", model: GEMINI.id, voiceId: "Kore", label: "Kore" }, models: [GEMINI], catalogue: [] };
+      const directed = await directChapter(store, LEDGER, "neap", async (asked) => {
+        input = asked;
+        const block = asked.blocks.find((candidate) => candidate.key !== "title")!;
+        // The block's whole words, which it holds exactly once: only the row can drop these cues.
+        const cues = [{ kind: "pause" as const, after: block.text, length: "long" as const }, { kind: "breath" as const, before: block.text, action: "inhale" as const }];
+        return { blocks: asked.blocks.map((candidate) => ({ block: candidate.key, ...(candidate === block ? { note: "low and close", speed: 0.9, cues } : {}) })) };
+      }, room);
+      assert.ok(input);
+      assert.ok(input.blocks.every((block) => !block.pause && !block.breath && block.speed === null), "the prompt says no pause, no breath and no speed on every Gemini block");
+      assert.match(directionPromptFor(input), /· no speed · no pause · no breath ·/);
+      const key = input.blocks.find((candidate) => candidate.key !== "title")!.key;
+      assert.deepEqual(directed.proposed[key], { delivery: "measured", speed: 1, note: "low and close", cues: [] }, "the note stands; neither cue nor the speed does");
+      assert.equal(directed.dropped, 3, "the pause, the breath and the speed, counted");
+    });
   });
 
   it("the words are never changed: an anchor that is not in the block, or is in it twice, is dropped", () => {
@@ -387,36 +485,51 @@ describe("the director writes turn 181's direction (R-52)", () => {
 });
 
 describe("the book note and the chapter note (R-53)", () => {
-  it("are written to the book record, raise the world first, lead Gemini's style before the block's own, and a tag reader holds a long one and tags a short one", () =>
+  it("the book note is written to the book record, raises the world first and leads Gemini's style; a chapter note is no longer written", () =>
     withDirector({}, async ({ worldDir, store, send }) => {
       const before = await schemaOf(worldDir);
       await send({ kind: "set-audiobook-reading-note", worldId: WORLD_ID, productionId: LEDGER, note: BOOK_NOTE });
       await send({ kind: "set-audiobook-reading-note", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", note: CHAPTER_NOTE });
       const book = await readBook(worldDir);
       assert.equal(book.note, BOOK_NOTE);
-      assert.equal(book.chapterNotes?.["neap"], CHAPTER_NOTE, "keyed by the chapter's id");
+      assert.equal(book.chapterNotes, undefined, "a chapter note is only cleared now, never written");
       assert.ok((await schemaOf(worldDir)) >= 45 && before < 45, "a build that cannot read the notes refuses the world rather than losing them");
 
-      // Gemini: both notes as sentences in the style, before the delivery's own sentence.
+      // Gemini: the note as a sentence in the style, before the delivery's own sentence.
       const gemini = { narrator: { provider: "google", model: GEMINI.id, voiceId: "Kore", label: "Kore" }, models: [GEMINI], catalogue: [] };
       const prepared = await prepareChapter(store, LEDGER, "neap", gemini, () => CLOCK, ["title"], { directions: { title: { delivery: "warm", speed: 1, cues: [] } } });
       assert.equal(prepared.kind, "ready");
       if (prepared.kind !== "ready") return;
       const title = prepared.prepared.speaking.find((block) => block.block.key === "title")!;
       const style = title.direction?.perPart[0]?.instructions ?? "";
-      assert.ok(style.startsWith(`${BOOK_NOTE} ${CHAPTER_NOTE}`), `the book note, then the chapter note, lead the style: ${style}`);
-      assert.ok(style.endsWith("Read warmly and gently."), "then the block's own direction");
+      assert.ok(style.startsWith(BOOK_NOTE), `the book note leads the style: ${style}`);
+      assert.ok(style.endsWith("Warm and gentle."), "then the block's own direction");
       assert.ok(!title.parts[0]!.includes(BOOK_NOTE), "never in the words a reader speaks");
+    }));
 
-      // A tag reader: the 94-character book note held; a chapter note short enough is a tag.
-      await send({ kind: "set-audiobook-reading-note", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", note: "night, the rail desk, quiet" });
-      const v3 = { narrator: { provider: "elevenlabs", model: V3.id, voiceId: "Rachel", label: "Rachel" }, models: [V3], catalogue: [] };
-      const tagged = await prepareChapter(store, LEDGER, "neap", v3, () => CLOCK, ["title"], { directions: { title: { delivery: "warm", speed: 1, cues: [] } } });
+  // 2026-10-24: Eleven v4 takes a 160-character tag on a line, and a 101-character chapter note
+  // before every block made it say each block's first line twice.
+  it("a chapter note a book already holds still leads: whole on Gemini, held on a tag reader past 60 however long its tags may be, and Remove clears it", () =>
+    withDirector({ book: { reading: "narrator", chapterNotes: { neap: CHAPTER_NOTE } } }, async ({ worldDir, store, send }) => {
+      const title = { directions: { title: { delivery: "warm" as const, speed: 1, cues: [] } } };
+      const gemini = { narrator: { provider: "google", model: GEMINI.id, voiceId: "Kore", label: "Kore" }, models: [GEMINI], catalogue: [] };
+      const styled = await prepareChapter(store, LEDGER, "neap", gemini, () => CLOCK, ["title"], title);
+      assert.equal(styled.kind, "ready");
+      if (styled.kind !== "ready") return;
+      assert.ok((styled.prepared.speaking[0]!.direction?.perPart[0]?.instructions ?? "").startsWith(CHAPTER_NOTE), "an instruction reader takes it whole");
+
+      const V4 = SHIPPED_MANIFEST.models.find((model) => model.id === "eleven_v4")!;
+      assert.ok(CHAPTER_NOTE.length > 60 && CHAPTER_NOTE.length <= (V4.cadence?.tagChars ?? 0), "short enough for a v4 line tag, too long to lead a block");
+      const v4 = { narrator: { provider: "elevenlabs", model: V4.id, voiceId: "Ife", label: "Ife" }, models: [V4], catalogue: [] };
+      const tagged = await prepareChapter(store, LEDGER, "neap", v4, () => CLOCK, ["title"], title);
       assert.equal(tagged.kind, "ready");
       if (tagged.kind !== "ready") return;
       const part = tagged.prepared.speaking[0]!.parts[0]!;
-      assert.ok(part.startsWith("[night, the rail desk, quiet] [warmly] "), `the short note as a tag, before the block's own: ${part}`);
-      assert.ok(!part.includes("harbour"), "the long book note is held, never spoken");
+      assert.ok(part.startsWith("[warmly] "), `held, so the block's own direction leads: ${part}`);
+      assert.ok(!part.includes("rail desk"), "the held note is never sent");
+
+      await send({ kind: "set-audiobook-reading-note", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", note: null });
+      assert.equal((await readBook(worldDir)).chapterNotes, undefined, "Remove takes it away");
     }));
 
   it("are part of a take's direction: a block made under them goes stale when either changes", () =>
@@ -461,6 +574,12 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
         assert.ok(accepted?.record, accepted?.refused);
         assert.ok(existsSync(castFile), "accepted: the cast is written");
         assert.equal((JSON.parse(await readFile(castFile, "utf8")) as ChapterVoices).lines.length, 1);
+        // And every window is told of it before the record, as a cast run or a pin is: a window
+        // that kept the cast it opened with read the cast lines as narration, and their takes,
+        // named with the speaker's note, as stale the moment they landed (issue 1637).
+        const told = events.findIndex((e) => e.type === "voices.record" && e.record?.lines.length === 1);
+        assert.ok(told >= 0, "the written cast is said to the windows");
+        assert.ok(told < events.indexOf(accepted), "before the record it is judged by");
       },
     ));
 
@@ -480,7 +599,7 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
         },
       },
       async ({ events, send }) => {
-        await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", cast: true, speakerNotes: true, chapterNote: true });
+        await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", cast: true, speakerNotes: true });
         const directed = events.find((e): e is Directed => e.type === "direction.finished");
         assert.equal(directed?.outcome, "directed", directed?.reason);
         assert.deepEqual(directed.cast, { lines: 1, speakers: 1 });
@@ -501,31 +620,35 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
       },
     ));
 
-  it("speaker notes are drafted for a speaker with none and written as the sheet's; an author's note is never replaced", () =>
+  it("speaker notes are drafted for a speaker with none and written into the character's narration; an author's note is never replaced (design turn 200)", () =>
     withDirector(
       {
         book: { reading: "performed" },
         direction: async (input) => ({
           blocks: input.blocks.map((block) => ({ block: block.key, delivery: "measured" })),
           speakerNotes: Object.fromEntries((input.asks?.speakerNotes ?? []).map((speaker) => [speaker.key, "dry, exact, unhurried"])),
-          ...(input.asks?.chapterNote === true ? { chapterNote: "Night at the rail desk." } : {}),
+          // A model that offers a chapter note unasked: nothing of it is kept.
+          ...({ chapterNote: "Night at the rail desk." } as Record<string, unknown>),
         }),
       },
       async ({ worldDir, events, send }) => {
-        await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", speakerNotes: true, chapterNote: true });
+        await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", speakerNotes: true });
         const directed = events.find((e): e is Directed => e.type === "direction.finished")!;
         assert.deepEqual(directed.speakerNotes, { "maren-kest": "dry, exact, unhurried" });
-        assert.equal(directed.chapterNote, "Night at the rail desk.");
+        assert.equal("chapterNote" in directed, false, "no chapter note is proposed");
         assert.ok(!existsSync(bookPath(worldDir)) || (await readBook(worldDir)).notes === undefined, "nothing written before acceptance");
         await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST, hash: directed.hash!, directions: directed.proposed!, proposalId: directed.proposalId });
         const book = await readBook(worldDir);
-        assert.equal(book.notes?.["maren-kest"], "dry, exact, unhurried");
-        assert.equal(book.noteSources?.["maren-kest"], "sheet", "said where it came from");
-        assert.equal(book.chapterNotes?.["neap"], "Night at the rail desk.");
+        // The draft is the character's (R-170): every book that reads her inherits it, and this
+        // one holds no note of its own for her.
+        assert.equal(await readNarration(worldDir, "maren-kest"), "dry, exact, unhurried");
+        assert.equal(book.notes?.["maren-kest"], undefined);
+        assert.equal(book.noteSources, undefined);
+        assert.equal(book.chapterNotes, undefined, "nor written on acceptance");
 
-        // The author writes their own: the source goes, and a later draft never replaces it.
+        // The author writes the book's own: it wins for this book, and a later draft replaces neither.
         await send({ kind: "set-audiobook-note", worldId: WORLD_ID, productionId: LEDGER, speaker: "maren-kest", note: "low, clipped" });
-        assert.equal((await readBook(worldDir)).noteSources, undefined);
+        assert.equal((await readBook(worldDir)).notes?.["maren-kest"], "low, clipped");
         events.length = 0;
         await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", speakerNotes: true });
         const again = events.find((e): e is Directed => e.type === "direction.finished")!;
@@ -533,7 +656,18 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
       },
     ));
 
-  it("Draft from the sheets fills the missing notes at once, marked as the sheet's, and leaves the author's alone", () => {
+  it("drafted briefs respect legacy readers before accepting a longer v4 performance", () => withDirector({}, async ({ store, worldDir }) => {
+    const note = "same narrator, slightly higher register, clipped articulation, preserve familiar timbre";
+    const ask: SpeakerNotesDeriver = async input => {
+      assert.ok(input.characters === 60 || input.characters === 300);
+      return { notes: { "maren-kest": note } };
+    };
+    assert.equal((await draftSpeakerNotes(store, LEDGER, ask, undefined, { model: V3 })).drafted, 0);
+    assert.equal((await draftSpeakerNotes(store, LEDGER, ask, undefined, { model: SHIPPED_MANIFEST.models.find(model => model.id === "eleven_v4")! })).drafted, 1);
+    assert.equal(await readNarration(worldDir, "maren-kest"), note);
+  }));
+
+  it("Draft from the sheets fills each character's empty narration at once and leaves the book's own notes alone (design turn 200)", () => {
     const asked: string[][] = [];
     return withDirector(
       {
@@ -550,9 +684,18 @@ describe("performed lines are cast first, in the same proposal (R-54)", () => {
         assert.equal(answer?.drafted, 1, answer?.refused);
         assert.deepEqual(asked, [["maren-kest"]], "only the speaker with no note is asked about");
         const book = await readBook(worldDir);
-        assert.equal(book.notes?.["maren-kest"], "dry, exact, unhurried");
+        assert.equal(await readNarration(worldDir, "maren-kest"), "dry, exact, unhurried", "the character's own, inherited by every book");
+        assert.equal(book.notes?.["maren-kest"], undefined);
         assert.equal(book.notes?.["someone-else"], "the author's own");
-        assert.deepEqual(book.noteSources, { "maren-kest": "sheet" });
+        assert.equal(book.noteSources, undefined);
+
+        // A narration the author wrote is never replaced, and a character who has one is not asked about.
+        await send({ kind: "set-sheet-narration", worldId: WORLD_ID, path: "characters/maren-kest.md", narration: "low, clipped" });
+        assert.equal(await readNarration(worldDir, "maren-kest"), "low, clipped");
+        events.length = 0;
+        await send({ kind: "draft-audiobook-speaker-notes", worldId: WORLD_ID, productionId: LEDGER, requestId: REQUEST });
+        assert.equal(asked.length, 1, "nobody left to draft for, so the writing service is not asked");
+        assert.equal(await readNarration(worldDir, "maren-kest"), "low, clipped");
       },
     );
   });
@@ -676,28 +819,24 @@ describe("a card's extras go only with that card (codex on PR 1476)", () => {
         direction: async (input) => ({
           blocks: input.blocks.map((block) => ({ block: block.key, delivery: "measured" })),
           speakerNotes: Object.fromEntries((input.asks?.speakerNotes ?? []).map((speaker) => [speaker.key, "dry, exact"])),
-          ...(input.asks?.chapterNote === true ? { chapterNote: "Night at the rail desk." } : {}),
         }),
       },
       async ({ worldDir, events, send }) => {
-        await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", speakerNotes: true, chapterNote: true });
+        await send({ kind: "direct-chapter", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", speakerNotes: true });
         const directed = events.find((e): e is Directed => e.type === "direction.finished")!;
         assert.ok(directed.proposalId);
         await send({ kind: "accept-direction", worldId: WORLD_ID, productionId: LEDGER, chapterFile: "01-neap", requestId: REQUEST, hash: directed.hash!, directions: directed.proposed!, proposalId: "an-older-card" });
         assert.ok(events.find((e): e is Recorded => e.type === "audiobook.record")?.record, "the directions it named are written");
         const book = await readBook(worldDir);
         assert.equal(book.notes, undefined, "not the held card's speaker notes");
-        assert.equal(book.chapterNotes, undefined, "nor its chapter note");
       },
     ));
 
   it("a card refused for prose that moved writes neither its cast nor its notes", () =>
     withDirector({ uncast: true, book: { reading: "performed" } }, async ({ worldDir, store }) => {
       const narrator = { provider: "kokoro", model: KOKORO.id, voiceId: "bm_george", label: "George" };
-      const accepted = await acceptDirections(store, LEDGER, "neap", { hash: `sha256:${"0".repeat(64)}`, directions: {} }, { narrator, models: [KOKORO], catalogue: [] }, { chapterNote: "Night.", speakerNotes: { "maren-kest": "dry" } });
+      const accepted = await acceptDirections(store, LEDGER, "neap", { hash: `sha256:${"0".repeat(64)}`, directions: {} }, { narrator, models: [KOKORO], catalogue: [] }, { speakerNotes: { "maren-kest": "dry" } });
       assert.deepEqual(accepted, { outcome: "refused", reason: "not cast · cast the lines first" });
-      assert.equal((await readBook(worldDir)).chapterNotes, undefined, "nothing of the card is written");
-      assert.equal((await readBook(worldDir)).notes, undefined);
+      assert.equal((await readBook(worldDir)).notes, undefined, "nothing of the card is written");
     }));
 });
-

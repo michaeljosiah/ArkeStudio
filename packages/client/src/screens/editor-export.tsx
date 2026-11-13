@@ -17,10 +17,10 @@ import { CutDialog as EditorDialog, cutTime, useCutLayout } from "./editor-respo
 import { runtimeSeconds } from "../lib/format.js";
 import { subtitleTracksOf } from "./editor-subtitles.js";
 import {
-  cancelExport,
   exportCut,
-  useExports,
+  useStore,
 } from "../lib/store.js";
+import { effectExportRefusal } from "../lib/editor-effect-export.js";
 import { storyShotCount } from "./production-story.js";
 
 /**
@@ -43,6 +43,7 @@ function exportAudioStatus(plan: RenderPlan): string | null {
 
 export function ExportSheet({
   open,
+  playable = false,
   onClose,
   worldId,
   prodId,
@@ -53,6 +54,8 @@ export function ExportSheet({
   commandsDisabled,
 }: {
   open: boolean;
+  /** Open with the playable edition unfolded, as Publish's Create edition asks. */
+  playable?: boolean;
   onClose: () => void;
   worldId: string | undefined;
   prodId: string | undefined;
@@ -62,7 +65,8 @@ export function ExportSheet({
   onMix: (speechFirst: boolean) => void;
   commandsDisabled: boolean;
 }) {
-  const exportsState = useExports();
+  const { state } = useStore();
+  const effectStates = state?.effectAnalyses?.find(row => row.worldId === worldId && row.productionId === prodId)?.byEffectId ?? {};
   const { compact } = useCutLayout();
   const [selection, setSelection] = useState<{ worldId: string | undefined; prodId: string | undefined; preset: keyof typeof PRESETS } | null>(null);
   const preset = selection && selection.worldId === worldId && selection.prodId === prodId
@@ -93,6 +97,9 @@ export function ExportSheet({
       ? buildRenderPlan({ production, artifacts: world?.artifacts ?? [], timeline: timelineState, scope: { kind: "production" }, preset })
       : null;
   if (plan !== null && !plan.ok && blockedBy === null) blockedBy = plan.reason;
+  const reactionRefusal = production && ready && plan?.ok ? (delivery: RenderPlan) => effectExportRefusal({ production,
+    timeline: timelineState.timeline, artifacts: world?.artifacts ?? [], canonical: plan.plan, delivery, states: effectStates }) : () => null;
+  const productionReactionRefusal = plan?.ok ? reactionRefusal(plan.plan) : null;
   /*
    * Nothing to render, said before the encode (issue 453): an empty plan is `concat=n=0`, which is
    * not a filter graph, and the coordinator would only fail it after reporting it running. The
@@ -114,7 +121,6 @@ export function ExportSheet({
   const speechFirst = ready ? timelineState.timeline.mix.speechFirst : true;
   const audioStatus = plan?.ok && blockedBy === null ? exportAudioStatus(plan.plan) : null;
   const noAudio = plan?.ok === true && plan.plan.audio.length === 0;
-  const mine = Object.entries(exportsState).filter(([, entry]) => entry.productionId === prodId);
   const revision = ready ? timelineState.timeline.revision : null;
   const episodic = production !== null && productionShape(production.meta).isEpisodic;
   const chip = (on: boolean, label: string, pick: () => void, disabled = false) => (
@@ -195,9 +201,9 @@ export function ExportSheet({
             </span>}
           </span>
         </div>
-        {blockedBy !== null && (
+        {(blockedBy !== null || productionReactionRefusal !== null) && (
           <div className="fy-exsheet__warn" role="status">
-            {blockedBy}
+            {blockedBy ?? productionReactionRefusal}
           </div>
         )}
         {blockedBy === null && gaps > 0 && (
@@ -212,7 +218,7 @@ export function ExportSheet({
               const range = episodeTimelineRange(production, timelineState.timeline, episode.id);
               const episodePlan = range.ok ? buildRenderPlan({ production, artifacts: world?.artifacts ?? [], timeline: timelineState,
                 scope: { kind: "episode", episodeId: episode.id }, preset }) : null;
-              const refused = !range.ok ? range.reason : episodePlan && !episodePlan.ok ? episodePlan.reason : null;
+              const refused = !range.ok ? range.reason : episodePlan && !episodePlan.ok ? episodePlan.reason : episodePlan?.ok ? reactionRefusal(episodePlan.plan) : null;
               const episodeAudio = episodePlan?.ok ? exportAudioStatus(episodePlan.plan) : null;
               // A duplicate order should never be minted (issue 947), but a person reading this
               // list still needs to tell two same-numbered rows apart at a glance.
@@ -241,29 +247,8 @@ export function ExportSheet({
             })}
           </div>
         )}
-        {production && worldId && <PublicationExport worldId={worldId} production={production} world={world} preset={preset} disabled={commandsDisabled} />}
-        {mine.length > 0 && (
-          <div className="fy-exsheet__delivered">
-            <span className="fy-exsheet__name">Delivered</span>
-            {mine.slice(-4).map(([id, entry]) => (
-              <div key={id} className="fy-exsheet__export">
-                <span className="fy-mono">render {id.slice(0, 8)}</span>
-                <span className="fy-mono fy-exsheet__status">
-                  {entry.status}
-                  {entry.status === "running" ? ` · ${Math.round(entry.percent)}%` : ""}
-                  {entry.output ? ` · ${entry.output}` : ""}
-                  {entry.sidecar ? ` · ${entry.sidecar}` : ""}
-                  {entry.error ? ` · ${entry.error}` : ""}
-                </span>
-                {entry.status === "running" && (
-                  <button type="button" className="fy-exsheet__chip" onClick={() => worldId && cancelExport(worldId, id)}>
-                    Cancel
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
+        {production && worldId && <PublicationExport worldId={worldId} production={production} world={world} preset={preset} disabled={commandsDisabled} expanded={playable} />}
+        {/* What it made is listed on Publish's Made, and a running render in Activity (design turn 276 rule 7). */}
       </div>
       <div className="fy-exsheet__foot">
         <span className="fy-mono"><span className="fy-cut-export-desktop">renders locally · no provider call</span><span className="fy-cut-export-compact">{meta}</span></span>
@@ -275,9 +260,9 @@ export function ExportSheet({
           type="button"
           className="fy-libpick__confirm"
           data-primary="true"
-          disabled={blockedBy !== null || !worldId || !prodId || commandsDisabled}
+          disabled={blockedBy !== null || productionReactionRefusal !== null || !worldId || !prodId || commandsDisabled}
           onClick={() => {
-            if (blockedBy !== null || !worldId || !prodId || commandsDisabled) return;
+            if (blockedBy !== null || productionReactionRefusal !== null || !worldId || !prodId || commandsDisabled) return;
             exportCut(worldId, prodId, preset, revision, undefined, subtitleChoice);
             onClose();
           }}

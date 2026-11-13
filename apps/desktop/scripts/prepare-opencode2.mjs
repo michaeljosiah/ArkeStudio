@@ -1,16 +1,14 @@
 // Stage the bundled OpenCode v2 harness (issue 327 §9, SPEC-016 R-7).
 //
 // Bundled rather than installed at setup, deliberately: the adapter is written against a
-// measured, pinned build, and a setup-time `npm install @opencode-ai/cli@beta` floats with
-// the beta dist-tag — ahead of the pin into an unstable API, or behind it into the gate's
-// rejection. The bundle keeps binary and adapter in lockstep, needs no Node, npm, network
+// measured, pinned release. A setup-time `npm install @opencode/cli@latest` floats ahead of
+// the supported API. The bundle keeps binary and adapter in lockstep, needs no Node, npm, network
 // or PATH mutation at install time, and updates only when a release moves the pin (which
 // re-runs the issue's spike by rule).
 //
-// Only the executable is staged. The platform package also carries ~60 MB of source maps,
-// which are debugging aids for upstream, not something 350 MB of installer should carry.
+// Only the executable and its licence are staged; upstream package metadata is not needed.
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertPeArchitecture, assertSha256, manifestFor, pruneEmptyDirectories, SUPPORTED_ARCHES, swapStagedDirectory } from "./runtime-support.mjs";
@@ -19,6 +17,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const desktopRoot = resolve(here, "..");
 const repoRoot = resolve(desktopRoot, "../..");
 const metadata = JSON.parse(readFileSync(join(desktopRoot, "runtime-sources.json"), "utf8"));
+const privateWriterPin = JSON.parse(readFileSync(join(repoRoot, "packages/coordinator/src/harness/private-writer-pin.json"), "utf8"));
 const args = process.argv.slice(2);
 
 function value(name) {
@@ -63,9 +62,14 @@ mkdirSync(extracted, { recursive: true });
 const untar = spawnSync(tarPath(), ["-xzf", tarball, "-C", extracted], { stdio: "inherit", shell: false });
 if (untar.status !== 0) throw new Error(`tar failed with exit code ${untar.status}`);
 
-const binary = join(extracted, "package", "bin", "opencode2.exe");
-if (!existsSync(binary)) throw new Error("the platform package did not contain bin/opencode2.exe");
+// Stable v2 moved to @opencode/cli and names the executable opencode.exe. Keep Studio's
+// staged name opencode2.exe for a stable packaged runtime path.
+const binary = join(extracted, "package", "bin", "opencode.exe");
+if (!existsSync(binary)) throw new Error("the platform package did not contain bin/opencode.exe");
 assertPeArchitecture(binary, arch);
+if (privateWriterPin.version !== metadata.opencode2.version || privateWriterPin.arch !== arch || privateWriterPin.archiveSha256.toUpperCase() !== source.sha256.toUpperCase()) throw new Error("the private writer content pin must move with the bundled runtime");
+if (statSync(binary).size !== privateWriterPin.bytes) throw new Error("the bundled runtime size does not match its private writer content pin");
+assertSha256(binary, privateWriterPin.sha256, "private writer executable");
 
 // Probe the verified extracted binary before copying it. Running the executable in stage
 // leaves Windows holding the directory that the final swap needs to rename (#1227).

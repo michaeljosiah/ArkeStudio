@@ -29,7 +29,7 @@ const publication: PublicationPlayback = { sessionId: "session", mediaType: 'vid
 it("renders the world-independent screen and explains when its desktop host is absent", () => {
   const html = renderToString(<MemoryRouter><PublicationsScreen /></MemoryRouter>);
   assert.match(html, /data-screen="publications"/); assert.match(html, /No world needs to be open/);
-  assert.match(html, /Open publications in the desktop app/);
+  assert.match(html, /Open video publication packages in the desktop app/);
 });
 it("preflights codecs, restores position, switches both caption kinds off/on and persists outside the package", async t => {
   const key = `arke-publication:${publication.manifest.id}:${publication.manifestSha256}`;
@@ -112,6 +112,21 @@ it("keeps the current movie on cancelled/invalid opens and releases it only afte
   await act(async () => candidate.dispatchEvent(new dom.Event("loadeddata")));
   assert.equal(node.querySelector("video"), candidate, "promotion preserves the already-decoded element");
   assert.deepEqual(closed, ["candidate-4", "candidate-5", "first"]);
+});
+
+it("opens unfolded when Publish's Create edition asks for it (issue 3034)", async t => {
+  const state = structuredClone(FIXTURE_STATE) as ClientState;
+  const previous = window.arke;
+  window.arke = { appVersion: "test", platform: "test", connect() {}, send() {}, subscribe() {}, publications: {
+    list: async () => ({ ok: true, value: [] }), start: async () => ({ ok: false, reason: "unused" }),
+    open: async () => ({ ok: false, reason: "unused" }), close: async () => {}, retry: async () => ({ ok: false, reason: "unused" }), cancel: async () => {}, reveal: async () => ({ ok: true, value: null }),
+  } };
+  const node = document.createElement("div"); document.body.append(node); const root = createRoot(node);
+  t.after(async () => { await act(async () => root.unmount()); node.remove(); window.arke = previous; });
+  await act(async () => root.render(<MemoryRouter><PublicationExport worldId="world" production={state.world!.productions[0]!} world={state.world} preset="master" disabled={false} expanded /></MemoryRouter>));
+  const toggle = Array.from(node.querySelectorAll("button")).find(item => item.textContent === "Publish playable edition")!;
+  assert.equal(toggle.getAttribute("aria-expanded"), "true");
+  assert.match(node.textContent!, /A clean movie with selectable caption tracks/);
 });
 
 for (const preset of ["master", "vertical-master"] as const) it(`submits ${preset} with the displayed dimensions and production frame rate`, async t => {

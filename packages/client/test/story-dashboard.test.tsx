@@ -28,7 +28,9 @@ it("shows a six-chapter book's total and accepted context without repeating the 
   ).replace(/<!-- -->/g, "");
   try {
     const dashboard = render(<ProductionDashboardScreen />);
-    assert.match(dashboard, /0 \/ 18,000 words in the book/);
+    assert.match(dashboard, /6 chapters planned · 18,000 words to write/);
+    assert.doesNotMatch(dashboard, /words in the book|words today|where you left off/, "no running count before a word exists");
+    assert.match(dashboard, /Open chapter/);
     assert.equal(dashboard.match(/Chapter 1</g)?.length, 1, "the in-hand card is not repeated as a row");
     assert.match(render(<ChapterTreeScreen />), /6 chapters · 0 drafted · 0 of 18,000 words/);
     const develop = render(<ProductionChatScreen />);

@@ -7,7 +7,6 @@
 .fy-passage-ask > header > button { margin-left: auto; flex: none; width: 44px; height: 44px; display: grid; place-items: center; border: 0; background: transparent; color: var(--muted-foreground); }
 .fy-passage-prompts { display: flex; overflow: auto; gap: 8px; padding: 8px 0; }
 .fy-passage-prompts button { flex: none; min-height: 44px; border: 1px solid var(--border); border-radius: 999px; padding: 0 14px; background: transparent; color: var(--muted-foreground); font: var(--type-ui); }
-.fy-passage-ask .fy-composer { min-width: 0; }
 .fy-passage-ask .fy-cx { position: relative; }
 .fy-passage-ask .fy-cx__editor { padding-right: 100px; min-height: 52px; }
 .fy-passage-ask .fy-cx__bar { position: absolute; right: 6px; bottom: 6px; padding: 0; }
@@ -37,6 +36,23 @@
 .fy-chapter-block-sheet { inset: 52px 42px 0 auto; width: 340px; max-width: 100%; border-radius: 0; }
 .fy-chapter-block-sheet .fy-page-sheet__grab { display: none; }
 .fy-chapter-block-sheet .fy-ch__side { width: 100%; overflow: visible; }
+/* The block's panel raised as a sheet (194h). The sheet draws no head of its own (PageSheet's
+   `headless`): the panel's head sits under the grab, and the panel fills the sheet edge to edge —
+   its tabs ruled across, its body the one that scrolls, its foot held at the bottom — as the
+   docked panel fills its column. The master's sizes stand over the sheet's 44-high presses, as the
+   foot's already do: the close keeps a 44 reach through negative margins, and a tab's reach runs
+   up to the meta line through padding the tab row gives up. Two classes outrank the sheet's 44s
+   (a class and an element), and the :has() its narrower widths' body padding, wherever they sit. */
+.fy-chapter-block-sheet .fy-page-sheet__body:has(.fy-abp) { padding: 0; gap: 0; overflow: hidden; }
+.fy-chapter-block-sheet .fy-ch__block-side:has(.fy-abp) { flex: 1; min-height: 0; gap: 0; padding: 0; overflow: hidden; }
+.fy-chapter-block-sheet .fy-abp__x { display: grid; place-items: center; align-self: center; width: 44px; height: 44px; min-height: 0; margin: -15px -15px -15px 0; }
+.fy-chapter-block-sheet .fy-abp__tabs { padding-top: 0; }
+.fy-chapter-block-sheet .fy-abp__tab { min-height: 0; padding-top: 12px; }
+/* The title takes the focus a sheet gives its heading on opening, by script and never by Tab
+   (tabindex -1), so no ring is ever the author's: the global :focus-visible draws its ring as a
+   box-shadow, which Chromium matches after showModal(), and an outline rule alone left the title
+   boxed on the phone (installed local.18). */
+.fy-abp__title h2:focus { outline: none; box-shadow: none; }
 @media (max-width: 1099px) {
   .fy-ch__panels { display: contents; }
   [data-screen="chapter"] { overflow: visible; min-width: 0; height: auto; min-height: 100%; }
@@ -63,11 +79,14 @@
   .fy-ch__viewrow { padding: 0; }
   .fy-ch__compact-actions { display: flex; gap: 8px; margin-left: auto; }
   .fy-ch__compact-actions > button, .fy-ch__compact-actions .fy-page-read, .fy-ch__viewrow .fy-seg__item { min-width: 44px; min-height: 44px; }
+  /* A press that is only its icon is 173's 44 outline, not a filled button: Read and Notes on a
+     phone (173a), Read beside the labelled Notes on a Fold (173c). Notes had no variant, so it
+     was filled in the browser's own button grey (installed app, 2026-10-05). */
+  .fy-ch__compact-actions > .ui-btn:has(> .fy-sr-only) { width: 44px; padding-inline: 0; border-color: var(--border); border-radius: 10px; background: transparent; box-shadow: none; color: var(--foreground); }
   .fy-chapter-notes-sheet, .fy-chapter-block-sheet { inset: 52px 42px 0 auto; width: 340px; max-width: 100%; border-radius: 0; }
   .fy-chapter-notes-sheet .fy-page-sheet__grab, .fy-chapter-block-sheet .fy-page-sheet__grab { display: none; }
   .fy-chapter-notes-sheet .fy-ch__side, .fy-chapter-block-sheet .fy-ch__side { width: 100%; gap: 18px; overflow: visible; }
   .fy-chapter-block-sheet .fy-page-sheet__head h2 { font: 600 18px var(--font-sans); }
-  .fy-chapter-block-sheet .fy-ab__blocktitle { display: none; }
   .fy-chapter-notes-sheet :is(button,a,select,input), .fy-chapter-block-sheet :is(button,a,select,input) { min-height: 44px; }
   .fy-chapter-notes-sheet .fy-bible__versions li { display: flex; justify-content: space-between; gap: 12px; }
   .fy-chapter-notes-sheet .fy-bible__versions button { width: 50%; }
@@ -84,6 +103,9 @@
   [data-screen="chapter"] .fy-ab__turn { width: auto; height: auto; margin: 9px 0 0; padding-top: 9px; border-top-color: var(--border); }
   [data-screen="chapter"] .fy-ab__turn::before { position: static; display: block; max-width: none; padding: 0 0 3px 14px; background: radial-gradient(circle at 3.5px 50%, var(--fy-voice) 3.5px, transparent 4px) no-repeat; }
   [data-screen="chapter"] .fy-ab__turn::after { display: none; }
+  /* A kept turn's name and its mark, on the same line above its words (design turn 198j). */
+  [data-screen="chapter"] .fy-ab__turn:has(.fy-ab__turn-who)::before { display: none; }
+  [data-screen="chapter"] .fy-ab__turn-who { position: static; max-width: none; padding: 0 0 3px 14px; background: radial-gradient(circle at 3.5px 50%, var(--fy-voice) 3.5px, transparent 4px) no-repeat; }
   .fy-ab__foot { flex-wrap: wrap; }
   .fy-chapter-menu .fy-page-sheet__body { display: grid; gap: 8px; }
   .fy-chapter-menu button { min-height: 44px; }
@@ -100,7 +122,7 @@
   .fy-ch__compact-actions { gap: 4px; }
   .fy-ch__compact-actions > button:has(svg) { width: 44px; padding-inline: 0; }
   .fy-ch__viewrow .fy-seg__item { padding-inline: 10px; }
-  [data-screen="chapter-tree"], [data-screen="audiobook"] { display: block; position: relative; padding: 14px 20px calc(var(--held-bar-height, 88px) + 16px); }
+  [data-screen="chapter-tree"] { display: block; position: relative; padding: 14px 20px calc(var(--held-bar-height, 88px) + 16px); }
   .fy-chapters-count { display: block; margin: 0 0 2px; color: var(--muted-foreground); font: 600 12px var(--font-sans); letter-spacing: 1.2px; text-transform: uppercase; }
   [data-screen="chapter-tree"] .fy-h1row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 24px 8px; margin-bottom: 12px; }
   [data-screen="chapter-tree"] .fy-h1 { font-size: 30px; }
@@ -141,30 +163,6 @@
   [data-screen="chapter"] .fy-ch__band > span:last-child { display: none; }
   .fy-passage-decision { padding: 12px 20px calc(12px + env(safe-area-inset-bottom, 0px)); }
   /* The count as the eyebrow, then the title with Listen and Export on its own line (173b, 186). */
-  [data-screen="audiobook"] .fy-h1row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 8px; }
-  [data-screen="audiobook"] .fy-h1 { grid-area: 2 / 1; font-size: 30px; }
-  [data-screen="audiobook"] .fy-h1row__meta { grid-area: 1 / 1 / 2 / -1; font: 600 12px var(--font-sans); text-transform: uppercase; letter-spacing: 1.2px; }
-  [data-screen="audiobook"] .fy-h1row__meta:empty, [data-screen="audiobook"] .fy-h1row__push { display: none; }
-  [data-screen="audiobook"] .fy-h1row__actions { grid-area: 2 / 2; display: flex; align-items: center; gap: 6px; }
-  [data-screen="audiobook"] .fy-h1row__actions .ui-btn { min-height: 44px; }
-  .fy-abdoor__voices { display: flex; flex-direction: column; align-items: stretch; gap: 12px; margin-top: 12px; }
-  .fy-abdoor__voices > .fy-seg { width: fit-content; }
-  .fy-abdoor__voices .fy-seg__item { min-height: 44px; }
-  .fy-abdoor__voice { display: flex; gap: 8px; min-height: 48px; align-items: center; width: 100%; padding: 8px 12px; }
-  .fy-abdoor__voice-name { flex: none; }
-  .fy-abdoor__voice-what { min-width: 0; white-space: normal; }
-  .fy-abdoor__voice::after { content: "›"; margin-left: auto; }
-  [data-screen="audiobook"] [data-testid="audiobook-bar"] { display: none; }
-  [data-screen="audiobook"] .fy-ledger { margin-top: 10px; }
-  [data-screen="audiobook"] .fy-row { position: relative; display: grid; grid-template-columns: 24px minmax(0,1fr) 16px; gap: 4px 0; min-height: 60px; padding: 10px 0; }
-  [data-screen="audiobook"] .fy-row > .fy-mono { grid-column: 1; grid-row: 1 / 3; }
-  [data-screen="audiobook"] .fy-row__name { grid-area: 1 / 2; white-space: normal; font-size: 13px; }
-  [data-screen="audiobook"] .fy-row__meta { grid-area: 2 / 2; font: var(--type-meta); text-align: left; margin: 0; width: auto; }
-  [data-screen="audiobook"] .fy-row__chev { grid-area: 1 / 3 / 3; }
-  [data-screen="audiobook"] .fy-row > .ui-badge { display: none; }
-  .fy-abdoor-held { display: flex; align-items: center; gap: 12px; padding: 12px 20px calc(12px + env(safe-area-inset-bottom, 0px)); }
-  .fy-abdoor-held > span { font: var(--type-meta); color: var(--muted-foreground); flex: 1; }
-  .fy-abdoor-held button { min-height: 44px; min-width: 0; max-width: 65%; }
   .fy-dock { flex-wrap: wrap; gap: 4px 8px; padding: 8px; }
   .fy-dock__label { flex: 1; width: auto; min-width: 0; }
   .fy-dock__scrub { order: 5; flex-basis: calc(100% - 80px); min-height: 44px; }
@@ -187,12 +185,19 @@
   .fy-ab__menu { max-width: calc(100vw - 40px); }
 }
 
+/*
+ * The page is the writing surface and the caret shows where focus is: no ring around the whole
+ * document. It was cleared only below 1100, so above it a keyboard shortcut, or Focus and Find
+ * handing the caret back, drew a 3 px box round the manuscript — two rails beside the text in
+ * Focus (issue 1827).
+ */
+[data-screen="chapter"] .fy-rme__doc:focus-visible { box-shadow: none; }
+
 /* Compact reading surfaces use the page's measure and quiet rules from the master. */
 @media (max-width: 1099px) {
   [data-screen="chapter"] .fy-sw__head { padding-top: 0; padding-bottom: 0; }
   [data-screen="chapter"] .fy-sw__breadcrumb { font: 500 12px/1.4 var(--font-sans); letter-spacing: 1.4px; color: var(--muted-foreground); margin-bottom: 2px; }
   [data-screen="chapter"] .fy-sw__title { font: 600 36px/1.2 var(--font-sans); }
-  [data-screen="chapter"] .fy-rme__doc:focus-visible { box-shadow: none; }
   [data-screen="chapter"] .fy-ch__context, [data-screen="chapter"] .fy-ch__mark .fy-mono { color: var(--foreground); }
   [data-screen="chapter"] .fy-ch__viewline { margin-bottom: 16px; }
   .fy-prodrail__chapters { display: grid; gap: 0; padding: 0 0 14px; border-bottom: 1px solid var(--border); margin: 0 12px 8px; }
@@ -213,15 +218,6 @@
   .fy-chapter-notes-sheet::backdrop, .fy-chapter-block-sheet::backdrop { background: linear-gradient(to bottom, transparent 52px, color-mix(in srgb, var(--foreground) 35%, transparent) 52px); }
   .fy-chapter-notes-sheet .fy-page-sheet__head, .fy-chapter-block-sheet .fy-page-sheet__head { padding-top: 4px; padding-bottom: 4px; }
   .fy-chapter-notes-sheet .fy-page-sheet__body, .fy-chapter-block-sheet .fy-page-sheet__body { padding-top: 8px; scrollbar-width: none; }
-  [data-screen="audiobook"] .fy-h1row__meta { font: 500 12px/1.4 var(--font-sans); letter-spacing: 1.4px; }
-  .fy-abdoor__voices > .fy-seg { padding: 0; }
-  .fy-abdoor__voices .fy-abdoor__voice { flex-direction: row; flex-wrap: nowrap; text-align: left; gap: 10px; min-height: 48px; }
-  .fy-abdoor__voice .fy-abdoor__voice-what { font: 400 10px/1.4 var(--font-sans); }
-  .fy-abdoor__voice .fy-abdoor__voice-name { font: 600 12px/1.4 var(--font-sans); }
-  .fy-abdoor__voice > svg { flex: none; }
-  [data-screen="audiobook"] .fy-ledger { border: 0; }
-  [data-screen="audiobook"] .fy-row { border-bottom: 1px solid var(--border); }
-  .fy-abdoor-held button { min-width: 195px; }
   .fy-passage-ask .fy-cx { box-shadow: none; }
   .fy-passage-ask .fy-cx__send { border-radius: 999px; }
 }
@@ -237,7 +233,6 @@
   .fy-abnarr__sheet .fy-abnarr__list { width: 100%; max-height: none; min-width: 0; border-right: 0; }
   .fy-abnarr__sheet .fy-abnarr__detail { width: 100%; min-width: 0; padding: 16px 0 0; }
   .fy-abnarr__sheet :is(button,input) { min-height: 44px; }
-  .fy-abnarr__sheet .fy-abnarr__where { flex-wrap: wrap; }
   .fy-abnarr__sheet .fy-rectake__foot { position: sticky; bottom: -20px; background: var(--background); padding-bottom: 12px; flex-wrap: wrap; }
 }
 
@@ -256,7 +251,6 @@
 }
 @media (max-width: 599px) {
   .fy-passage-decision { max-height: 55dvh; overflow: auto; }
-  [data-screen="audiobook"] .fy-row { border-radius: 0; }
   .fy-abnarr__sheet { inset: 0; border-radius: 0; height: 100dvh; }
   .fy-abnarr__sheet .fy-page-sheet__grab { display: none; }
   .fy-abnarr__sheet .fy-page-sheet__head { min-height: 52px; padding: 0 12px; gap: 2px; }
@@ -278,6 +272,12 @@
 .fy-passage-prompts { scrollbar-width: none; }
 @media (max-width: 599px) {
   .fy-chapter-block-sheet { top: min(311px, 40dvh); }
+  /* The block's panel rises to 110, just under the view switch (194h): the picture, its facts and
+     In frame show together, where at 311 only the head and tabs cleared the fold. The grab is the
+     master's 40 in neutral 400, which the sheet's 36 in the border colour all but lost on dark. The
+     Read and Direct sheets and Timing's keep the lower top; :has() names the panel alone. */
+  .fy-chapter-block-sheet:has(.fy-abp) { top: calc(110px + env(safe-area-inset-top, 0px)); }
+  .fy-chapter-block-sheet:has(.fy-abp) .fy-page-sheet__grab { width: 40px; border-radius: 2px; background: var(--neutral-400); margin-top: 8px; }
   .fy-chapter-notes-sheet .fy-ch__draws > li { width: auto; }
   .fy-chapter-notes-sheet .fy-ch__draw-name { color: var(--muted-foreground); font-weight: 400; }
 }
@@ -389,6 +389,16 @@
 .fy-ab__pill--pri { background: var(--foreground); color: var(--background); border-color: transparent; font-weight: 600; }
 .fy-ab__pill--pri:hover:not(:disabled) { background: var(--foreground); opacity: 0.9; }
 .fy-ab__pill--pri em { color: color-mix(in srgb, var(--background) 70%, transparent); }
+/* Kept speakers and the paragraphs left to cast (design turn 198): the kept mark is mono 2xs in a
+   dashed 1-px box beside the speaker's name; the press carries the stale dot before its count. */
+.fy-ab__kept { flex: none; padding: 0 5px; border: 1px dashed var(--neutral-400); border-radius: 5px; font: var(--type-mono); font-size: var(--text-2xs); font-style: normal; line-height: 16px; color: var(--muted-foreground); }
+.fy-ab__turn-who { position: absolute; left: 14px; top: 10px; display: flex; align-items: center; gap: 7px; max-width: 160px; }
+.fy-ab__turn-who::before { content: attr(data-who); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-label); color: var(--muted-foreground); }
+.fy-ab__turn-who::after { content: "kept"; flex: none; padding: 0 5px; border: 1px dashed var(--neutral-400); border-radius: 5px; font: var(--type-mono); font-size: var(--text-2xs); line-height: 16px; color: var(--muted-foreground); }
+.fy-ab__pill-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--warning); }
+.fy-ab__toolmenu.fy-ab__castmenu { width: 260px; min-width: 0; }
+.fy-ab__menu-hd { padding: 8px 10px 4px; font: var(--type-label); color: var(--muted-foreground); }
+.fy-ab__menu-rule { height: 1px; margin: 5px 4px; background: var(--border); }
 .fy-ab__ico { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 32px; height: 32px; padding: 0; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
 .fy-ab__ico:hover, .fy-ab__ico--on { border-color: var(--border); background: var(--secondary); color: var(--foreground); }
 /* The menus under the presses (194d, 194f): the reading menu's primitive at 12 round, items in the
@@ -439,10 +449,11 @@
 .fy-abp__body { display: flex; flex-direction: column; gap: 13px; flex: 1; min-height: 0; overflow: auto; padding: 16px 22px 0; }
 /* The Picture tab's section and card are columns too, so the foot inside them still reaches the bottom. */
 .fy-abp :is(.fy-ab__picture, .fy-pcard, .fy-sugg) { display: flex; flex-direction: column; gap: 13px; flex: 1; }
-.fy-abp__foot { position: sticky; bottom: 0; z-index: 1; display: flex; align-items: center; gap: 8px; margin: auto -22px 0; padding: 12px 22px 16px; border-top: 1px solid var(--border); background: var(--background); }
+.fy-abp__foot { position: sticky; bottom: 0; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: auto -22px 0; padding: 12px 22px 16px; border-top: 1px solid var(--border); background: var(--background); }
 .fy-abp :is(.fy-abp__foot, .fy-ab__splitpanel, .fy-ab__make-line) .ui-btn { height: 30px; min-height: 0; padding: 0 11px; gap: 6px; border-radius: 8px; font: var(--type-label); box-shadow: none; }
 .fy-abp .fy-abp__foot .ui-btn--outline { border-color: var(--border); background: var(--background); }
 .fy-abp .fy-abp__foot .ui-btn--primary { background: var(--foreground); color: var(--background); }
+.fy-abp .fy-abp__foot .ui-btn { max-width: 100%; height: auto; min-height: 30px; padding-block: 6px; white-space: normal; }
 .fy-abp__foot .ui-btn svg { width: 10px; height: 10px; }
 /* Rows and sections. */
 .fy-abp__sec { display: flex; flex-direction: column; gap: 7px; }
@@ -456,6 +467,88 @@
 .fy-abp__add { flex: none; padding: 0; border: 0; background: transparent; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); cursor: pointer; }
 .fy-abp__add:hover { color: var(--foreground); }
 .fy-abp__none { font-size: var(--text-sm); }
+
+/*
+ * Block seams (design turn 198, rules 1, 2 and 15). On a fine pointer the line between two blocks
+ * is a seam: hovered, it darkens across the row (the foreground at 55%) and a Join sits on the
+ * bracket line, its left 22 px left of the bracket, 20 high, mono 2xs in a 1-px foreground border;
+ * the rule between two rows of one block is the same with Split. A Join a limit refuses is drawn
+ * off with its reason, border and words muted. The seam sits in the lower block, over the upper
+ * one's bottom rule: 5 px up where the blocks' margins stand apart in the list, 3 where they meet
+ * inside a request's bracket. The press's word is its data, never the page's, so a Split inside
+ * the words leaves a selection's offsets as they were.
+ */
+.fy-ab__seam { position: absolute; left: 0; right: 0; top: -5px; height: 1px; z-index: 3; cursor: default; }
+.fy-ab__request .fy-ab__seam:not(.fy-ab__seam--in) { top: -3px; }
+.fy-ab__seam::after { content: ""; position: absolute; left: -22px; right: 0; top: -6px; height: 13px; }
+.fy-ab__seam::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 1px; background: var(--foreground); opacity: 0; }
+.fy-ab__seam:is(:hover, :focus-within, .fy-ab__seam--open)::before { opacity: 0.55; }
+.fy-ab__seam--off:is(:hover, :focus-within)::before { background: var(--muted-foreground); opacity: 0.3; }
+.fy-ab__seam-press { position: absolute; z-index: 1; top: -10px; left: -22px; height: 20px; padding: 0 8px; border: 1px solid var(--foreground); border-radius: 6px; background: var(--background); color: var(--foreground); font: var(--type-mono); font-size: var(--text-2xs); line-height: 1; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; box-sizing: border-box; cursor: pointer; opacity: 0; user-select: none; }
+.fy-ab__seam-press::before { content: attr(data-label); }
+.fy-ab__seam:is(:hover, .fy-ab__seam--open) .fy-ab__seam-press, .fy-ab__seam-press:focus-visible { opacity: 1; }
+.fy-ab__seam-press:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.fy-ab__seam--off .fy-ab__seam-press { border-color: var(--border); color: var(--muted-foreground); cursor: default; }
+/* Between two rows of one block: the rule the row before draws, from the bracket across. */
+.fy-ab__seam--in { top: -1px; left: -12px; }
+.fy-ab__block:has(.fy-ab__seam--open, .fy-ab__seam:focus-within) { z-index: 7; }
+/*
+ * Picture marks (design turn 237, 237a – 237c). A picture's bar stands before its first word: solid
+ * once made, dashed while proposed or placed, ringed while its panel is open; a made bar drags. A
+ * mark inside a block draws its chip at the block's end on the line the bar is on: placed where the
+ * bar is, with no top, it keeps that line, and the block's inline size (its container) puts its
+ * right edge at the block's, past the 134 the margin and its gap take. `+ Picture` waits at each
+ * sentence's start as 198's seams wait between lines, its word its data, never the page's.
+ */
+.fy-ab__pin { display: inline-block; width: 3px; height: 1.05em; margin: 0 5px 0 1px; vertical-align: -2px; border-radius: 2px; background: var(--foreground); }
+.fy-ab__pin[draggable="true"] { cursor: grab; }
+.fy-ab__pin--prop { width: 4px; background: transparent; border: 1px dashed var(--muted-foreground); box-sizing: border-box; }
+.fy-ab__pin--on { box-shadow: 0 0 0 2px color-mix(in srgb, var(--foreground) 25%, transparent); }
+.fy-ab__picchip--mark { position: absolute; z-index: 2; left: calc(100cqw - 134px); margin-top: -3px; transform: translateX(-100%); cursor: pointer; }
+.fy-ab__picchip--mark b { font-weight: 500; color: var(--foreground); }
+/* Drawn from the chip's data: it sits in the block's words, whose selection offsets count only them. */
+.fy-ab__picchip--mark [data-label]::before { content: attr(data-label); }
+.fy-ab__picchip--mark.fy-ab__picchip--prop i { width: 28px; height: 18px; border-radius: 4px; border: 1px dashed var(--neutral-400); display: inline-block; box-sizing: border-box; }
+.fy-ab__picchip--on { border-color: var(--foreground); box-shadow: 0 0 0 1px var(--foreground); }
+.fy-ab__place { position: relative; display: inline-block; width: 0; height: 1em; vertical-align: -2px; }
+.fy-ab__place--first { display: none; }
+.fy-ab__place--first.fy-ab__place--drop { display: inline-block; }
+.fy-ab__place--drop { width: 6px; margin: 0 2px; border-left: 2px dotted var(--muted-foreground); }
+.fy-ab__place-press { position: absolute; z-index: 3; top: -3px; left: -7px; width: 14px; height: calc(100% + 6px); padding: 0; border: 0; background: transparent; cursor: pointer; }
+.fy-ab__place-press::after { content: attr(data-label); position: absolute; top: 0; left: 0; height: 20px; padding: 0 7px; border: 1px dashed var(--foreground); border-radius: 6px; background: var(--background); color: var(--foreground); font: var(--type-mono); font-size: var(--text-2xs); line-height: 1; display: inline-flex; align-items: center; white-space: nowrap; box-sizing: border-box; opacity: 0; pointer-events: none; }
+/* Open in the line as 237b draws it, the words moved aside; the bar before it keeps the press under
+   the pointer that opened it. Over the words at a line's end, where in the line it would wrap. */
+.fy-ab__place--open { width: auto; height: auto; vertical-align: 1px; }
+.fy-ab__place-press--open { position: relative; top: auto; left: auto; width: auto; height: auto; margin: 0 5px 0 0; display: inline-block; vertical-align: top; }
+.fy-ab__place-press--open::before { content: ""; position: absolute; top: 0; bottom: 0; left: -8px; width: 8px; }
+.fy-ab__place-press--open::after { position: static; }
+.fy-ab__place-press--over::after { left: 7px; }
+.fy-ab__place-press:is(.fy-ab__place-press--open, .fy-ab__place-press--over)::after { opacity: 1; pointer-events: auto; }
+.fy-ab__place-press:focus-visible { outline: none; }
+.fy-ab__beathead em { font-style: normal; color: var(--foreground); }
+.fy-ab__markwords { margin: 0; font-size: var(--text-sm); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+/* A block put back and found made again (198g): `made` with a green dot until the author leaves the view. */
+.fy-ab__state--again::before { background: var(--success); }
+/* On touch, in the block's sheet (198j): Join next and Split under the head, 30 high on one line. */
+.fy-abp__acts { display: flex; gap: 8px; padding: 10px 22px 0; }
+.fy-abp__acts .fy-ab__pill { height: 30px; }
+/* 30 and 28 high as 198j draws them, under the phone sheet's 44-high rule for its other presses. */
+.fy-chapter-block-sheet .fy-abp__acts .fy-ab__pill { min-height: 30px; }
+.fy-chapter-block-sheet .fy-ab__seam--sheet .fy-ab__seam-press { min-height: 0; }
+.fy-ab__pill--off { color: var(--muted-foreground); cursor: default; }
+.fy-ab__pill--off:hover:not(:disabled) { background: var(--background); }
+/* Split on a block of three or more lines: its lines, a Split at the right of each gap between them. */
+.fy-abp__lines { flex: 1; min-height: 0; overflow: auto; padding: 4px 22px 16px; }
+.fy-abp__line { display: flex; flex-direction: column; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.fy-abp__line:last-child { border-bottom: 0; }
+.fy-abp__line-who { display: flex; align-items: center; gap: 7px; font: var(--type-label); color: var(--muted-foreground); }
+.fy-abp__line-who .fy-ab__speaker-dot { width: 7px; height: 7px; background: var(--fy-voice); }
+.fy-abp__line-text { margin-top: 3px; font-size: var(--text-base); line-height: 1.6; color: var(--foreground); }
+.fy-ab__seam--sheet { position: relative; display: block; top: 0; height: 0; z-index: 1; }
+.fy-ab__seam--sheet::after { content: none; }
+.fy-ab__seam--sheet::before { top: -1px; opacity: 0.55; }
+.fy-ab__seam--sheet .fy-ab__seam-press { left: auto; right: 0; top: -14px; height: 28px; padding: 0 12px; border-radius: 8px; font: var(--type-label); opacity: 1; }
+.fy-ab__blocksmenu { min-width: 240px; }
 .fy-abp .fy-ab__cues { flex: 1; }
 .fy-abp .fy-ab__direction { display: flex; flex-direction: column; gap: 13px; }
 .fy-abp .fy-ab__chips { gap: 6px; }
@@ -546,7 +639,12 @@
   [data-screen="chapter"][data-view="audiobook"] { --ab-gutter: 24px; }
   [data-screen="chapter"][data-view="audiobook"] .fy-sw__centre { padding: 0 var(--ab-gutter); }
   [data-screen="chapter"][data-view="audiobook"] :is(.fy-sw__head, .fy-ch__body) { max-width: none; }
-  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline { position: relative; flex-wrap: wrap; align-items: center; gap: 0 6px; margin: 0 calc(-1 * var(--ab-gutter)); padding: 10px var(--ab-gutter); border-bottom: 1px solid var(--border); font: var(--type-ui); }
+  /* Approved journey B: one existing action band follows the reader inside this scrollport.
+     The header has no box here so it cannot end the sticky range at the first block. */
+  [data-screen="chapter"][data-view="audiobook"] .fy-sw__head { display: contents; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-sw__head > button { align-self: flex-start; }
+  [data-screen="chapter"][data-view="audiobook"] :is(.fy-ab__block, .fy-ab__block button, .fy-ab__block [tabindex]) { scroll-margin-top: var(--chapter-action-space, 0px); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline { position: sticky; top: var(--chapter-action-top, 0px); z-index: 7; background: var(--background); flex-wrap: wrap; align-items: center; gap: 0 6px; margin: 0 calc(-1 * var(--ab-gutter)); padding: 10px var(--ab-gutter); border-bottom: 1px solid var(--border); font: var(--type-ui); }
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__compact-actions { display: none; }
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewrow { align-self: center; margin-bottom: 8px; padding: 0; border: 1px solid var(--border); border-radius: 9px; background: transparent; overflow: hidden; flex: none; }
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewrow .fy-seg__item { height: 30px; min-height: 0; min-width: 0; padding: 0 13px; border-radius: 0; box-shadow: none; font: var(--type-label); color: var(--muted-foreground); }
@@ -563,6 +661,8 @@
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__reading-menu { top: calc(100% - 6px); left: var(--ab-gutter); max-width: calc(100vw - 2 * var(--ab-gutter)); }
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__notes { top: calc(100% - 6px); left: var(--ab-gutter); right: var(--ab-gutter); width: auto; }
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__toolmenu { top: calc(100% - 6px); left: auto; right: var(--ab-gutter); min-width: min(284px, calc(100vw - 2 * var(--ab-gutter))); max-width: calc(100vw - 2 * var(--ab-gutter)); }
+  /* The ⋯ headed by the lines to cast is 250 wide (design turn 198j). */
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__toolmenu--lead { width: 250px; min-width: 0; }
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline > .fy-ab__control { gap: 6px; flex: none; }
   /* The view switch takes the phone's whole line; a tablet's keeps its own width. */
   [data-screen="chapter"][data-view="audiobook"] .fy-ab__block--selected { margin-inline: calc(-1 * var(--ab-gutter)); padding-inline: calc(var(--ab-gutter) - 3px) var(--ab-gutter); }
@@ -575,6 +675,10 @@
   [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold .ui-btn--ghost { border-color: var(--border); }
   [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold .ui-btn svg { width: 13px; height: 13px; }
   [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold .fy-ab__control > :is(.ui-btn, .fy-ab__pill) { flex: 1 1 auto; }
+  /* Turn 206: progress gets its own line; Stop and Listen share the action row. */
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold:has(.fy-ab__read-progress) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold > .fy-ab__read-progress { display: contents; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold .fy-ab__read-progress > .fy-mono { grid-column: 1 / -1; white-space: normal; }
 }
 @media (max-width: 599px) {
   [data-screen="chapter"][data-view="audiobook"] { --ab-gutter: 16px; }
@@ -590,3 +694,71 @@
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline :is(.fy-ab__pill, .fy-ab__ico, .fy-ab__reading-press, .fy-seg__item) { position: relative; }
   [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline :is(.fy-ab__pill, .fy-ab__ico, .fy-ab__reading-press, .fy-seg__item)::after { content: ""; position: absolute; inset: -6px -3px; }
 }
+
+/*
+ * Folded on a wide window (design turn 203, issue 1642): where 194's one line does not fit the
+ * chapter's centre — 1200 with Arke open left it 823 for a line of 1,164 — the line is the tablet's:
+ * the reading and Direct and illustrate in its ⋯, Read and Listen held at the foot. Should even that
+ * not fit, the line wraps rather than the column scrolling sideways.
+ */
+@media (min-width: 1100px) {
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline[data-narrow] { position: relative; flex-wrap: wrap; height: auto; min-height: 53px; row-gap: 6px; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline[data-narrow] .fy-ab__reading--external { position: static; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline[data-narrow] .fy-ab__reading--external .fy-ab__reading-menu { left: auto; right: 24px; top: calc(100% - 6px); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold[data-wide] { display: flex; flex: none; justify-content: flex-end; align-items: center; gap: 8px; padding: 8px 24px; border-top: 1px solid var(--border); background: var(--background); }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold[data-wide] > .fy-ab__control { gap: 8px; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold[data-wide] :is(.ui-btn, .fy-ab__pill) { height: 32px; min-height: 0; padding: 0 11px; gap: 6px; border-radius: 8px; font: var(--type-label); box-shadow: none; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold[data-wide] .ui-btn--primary { font-weight: 600; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold[data-wide] .ui-btn svg { width: 13px; height: 13px; }
+}
+
+/* A chapter decision has its own review, above both the block panel and Arke's dock. */
+.fy-page-sheet.fy-chapter-review-sheet { inset: max(24px, 10dvh) 24px auto; width: min(560px, calc(100% - 48px)); max-height: calc(100dvh - max(24px, 10dvh) - 24px); margin: 0 auto; border: 1px solid var(--border); border-radius: 14px; }
+.fy-chapter-review-sheet::backdrop { background: color-mix(in srgb, var(--neutral-950) 28%, transparent); }
+.fy-chapter-review-sheet > .fy-page-sheet__grab { display: none; }
+.fy-chapter-review-sheet .fy-ch__side { width: 100%; overflow: visible; }
+.fy-chapter-review-sheet .fy-ab__directsheet { padding: 0; border: 0; border-radius: 0; box-shadow: none; }
+.fy-chapter-review-sheet .fy-ab__directsheet > div > h3 { display: none; }
+.fy-chapter-review-sheet .fy-ab__directsheet-foot { flex-wrap: wrap; }
+.fy-chapter-review-sheet .ui-btn { max-width: 100%; height: auto; padding-block: 8px; white-space: normal; }
+/* Turn206 keeps the current reading step distinct from durable saved-block progress. */
+.fy-ab__read-progress [data-testid="audiobook-progress"] { display: inline-flex; gap: 8px; align-items: baseline; font: var(--type-ui); color: var(--foreground); }
+.fy-ab__hold:has(.fy-ab__read-progress) [data-testid="audiobook-listen"] { background: var(--background); color: var(--foreground); border-color: var(--border); }
+.fy-ab__hold:has(.fy-ab__read-progress) [data-testid="audiobook-listen"] svg { display: none; }
+.fy-ab__read-saved { font: var(--type-meta); font-size: var(--text-xs); color: var(--muted-foreground); }
+@media (max-width: 599px) {
+  .fy-ab__read-progress [data-testid="audiobook-progress"] { flex-direction: column; align-items: flex-start; gap: 4px; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ab__hold:has(.fy-ab__read-progress) { padding-inline: 18px; }
+}
+
+/* Turn 209: Reading settings opens from the named chapter menu at every narrow width. */
+@media (max-width: 1099px) {
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__reading--external { position: static; }
+  [data-screen="chapter"][data-view="audiobook"] .fy-ch__viewline .fy-ab__reading--external .fy-ab__reading-menu { left: auto; right: var(--ab-gutter, 16px); top: calc(100% - 6px); max-width: calc(100vw - 2 * var(--ab-gutter, 16px)); }
+}
+
+/* Turn 209ad: a scoped export recovery is a decision about the missing blocks. */
+.fy-page-sheet.fy-chapter-read-recovery { inset: 24px; margin: auto; width: min(780px, calc(100% - 48px)); height: fit-content; max-height: calc(100dvh - 48px); border-radius: 12px; }
+.fy-chapter-read-recovery > .fy-page-sheet__head { padding: 20px 24px; }
+.fy-chapter-read-recovery > .fy-page-sheet__body { padding: 24px; }
+.fy-chapter-read-recovery .fy-ab__readsheet { display: flex; flex-direction: column; gap: 20px; font: var(--type-ui); }
+.fy-chapter-read-recovery .fy-ab__reads { border: 0; border-radius: 0; }
+.fy-chapter-read-recovery .fy-ab__read { height: auto; min-height: 68px; padding: 20px 0; border-top: 0; border-bottom: 1px solid var(--border); gap: 20px; font: var(--type-ui); }
+.fy-chapter-read-recovery .fy-ab__read b { width: auto; color: var(--foreground); font: var(--type-ui); }
+.fy-chapter-read-recovery .fy-ab__read span { margin-left: auto; text-align: right; white-space: normal; overflow: visible; }
+.fy-chapter-read-recovery .fy-ab__read:not(:first-child) span { font-weight: 600; }
+.fy-chapter-read-recovery .fy-ab__readsheet p { margin: 0; }
+.fy-chapter-read-recovery > .fy-page-sheet__foot { padding: 14px 24px; }
+.fy-chapter-read-recovery .fy-ab__directsheet-foot { width: 100%; display: flex; justify-content: space-between; }
+.fy-chapter-read-recovery .fy-ch__panelpush { display: none; }
+.fy-chapter-read-recovery .ui-btn { min-height: 44px; border-radius: 8px; padding: 10px 14px; font: var(--type-ui); }
+.fy-chapter-read-recovery .ui-btn--ghost { border: 1px solid var(--border); }
+@media (max-width: 599px) {
+  .fy-page-sheet.fy-chapter-read-recovery { inset: 44px 0 0; margin: 0; width: 100%; max-height: calc(100dvh - 44px); border-radius: 0; }
+  .fy-chapter-read-recovery .fy-ab__directsheet-foot .ui-btn { flex: 1; justify-content: center; }
+}
+
+.fy-chapter-read-recovery, .fy-chapter-read-recovery * { box-sizing: border-box; }
+
+/* A dismissed narrow inspector stays dismissed if the chapter widens. */
+.fy-ch__block-side[hidden] { display: none; }

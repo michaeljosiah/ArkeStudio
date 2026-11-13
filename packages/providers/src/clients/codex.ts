@@ -10,6 +10,10 @@ import {
   type SubmitRequest,
   type SubmitResult,
 } from "../types.js";
+import { SHIPPED_MANIFEST } from "../manifest-data.js";
+
+/** The shipped row's verified reference count, so the client and the dispatch surface agree. */
+const MAX_REFERENCES = SHIPPED_MANIFEST.models.find((model) => model.id === "codex-image")?.accepts.referenceImages ?? 1;
 
 /**
  * What the host's Codex app-server can do for images. Structural on purpose: this package never
@@ -69,7 +73,7 @@ export class CodexClient implements ProviderClient {
     const prompt = request.params["prompt"];
     if (typeof prompt !== "string" || prompt.trim().length === 0) throw new Error("codex: image prompt is required");
     const references = request.imageReferences ?? [];
-    if (references.length > 1) throw new ProviderRequestRejectedError("codex: at most one reference image is supported");
+    if (references.length > MAX_REFERENCES) throw new ProviderRequestRejectedError(`codex: at most ${MAX_REFERENCES} reference images are supported`);
     const durable = request.params["references"];
     if (Array.isArray(durable) && durable.length > 0 && durable.length !== references.length) {
       throw new Error("codex: not every image reference was prepared");
@@ -85,6 +89,14 @@ export class CodexClient implements ProviderClient {
         const validReset = reset && Number.isFinite(reset.getTime()) ? reset.toISOString() : undefined;
         const when = validReset ? ` It resets ${validReset}. Try again after it resets.` : " Try again after it resets; use Test connection in Providers to check again.";
         throw new ProviderPlanLimitError(`codex: the Codex allowance has been reached.${when}`, validReset);
+      }
+      // A turn that finished with no picture is witnessed (an output-stage safety refusal, most
+      // often): rejected and terminal with Codex's own words, never a result held for
+      // reconciliation, which stalled a whole chapter's pictures behind each refusal.
+      // Declared terminal: Codex's sentence is free text, and a word like "unauthorized" or
+      // "try again" in it must not reclassify a refusal the turn already settled.
+      if (err instanceof Error && err.name === "CodexImageRefusedError") {
+        throw Object.assign(new ProviderRequestRejectedError(`codex: ${err.message}`), { failureClass: "terminal" as const });
       }
       // The queue classifies by message, and only a message it recognises pauses the lane for a
       // sign-in instead of failing the job: this phrase is the one its credential path reads.

@@ -1,0 +1,94 @@
+/* Turn 277 · text clips in the Cut: Add, the clip on its lane, the Inspector's rows, the typeface
+   menu and the phone's tools. The rest is turn 220's shell. Sizes come from the type tokens. */
+@font-face{font-family:"Comic Neue";font-style:normal;font-weight:400;font-display:block;src:url("_ds/fonts/comic-neue-latin-400-normal.woff2") format("woff2")}
+@font-face{font-family:"Bangers";font-style:normal;font-weight:400;font-display:block;src:url("_ds/fonts/bangers-latin-400-normal.woff2") format("woff2")}
+
+.tx277 .tx-t{width:14px;height:14px;flex:none}
+
+/* Add, beside the transport */
+.tx277 .n-timeline header .tx-add{position:relative;display:inline-grid;place-items:center;width:28px;padding:0}
+.tx277 .n-timeline header .tx-add.tx-tip{background:var(--secondary)}
+.tx277 .tx-tip::after{content:attr(data-tip);position:absolute;z-index:4;top:calc(100% + 6px);left:50%;transform:translateX(-50%);padding:3px 7px;border-radius:5px;background:var(--foreground);color:var(--background);font:var(--type-meta);white-space:nowrap}
+
+/* The clip on its lane: no picture, a T and the first line */
+.tx277 .tx-lane>div{position:relative;height:42px}
+.tx277 .tx-clip{position:absolute;top:5px;bottom:5px;display:flex;align-items:center;gap:5px;min-width:0;padding:0 7px;box-sizing:border-box;overflow:hidden;border:1px solid color-mix(in srgb,var(--foreground) 22%,transparent);border-radius:5px;background:var(--secondary);color:var(--foreground)}
+.tx277 .tx-clip b{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font:var(--type-meta);font-weight:var(--weight-medium)}
+.tx277 .tx-clip.on{border-color:var(--foreground);box-shadow:inset 0 0 0 1px var(--foreground)}
+.tx277.phone .tx-clip.on{border:0;box-shadow:inset 0 0 0 3px var(--timeline-selection)}
+.tx277 .tx-clip.tiny{justify-content:center;padding:0}
+.tx277 .tx-clip.tiny b{display:none}
+
+/* The Viewer draws the film's 16:9 frame, still and title together; the shell's own still is hidden */
+.tx277 .tx-stage{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.tx277 .n-viewer>img{display:none}
+
+/* Inspector */
+.tx277 .tx-words{min-height:58px;padding:8px 10px;box-sizing:border-box;border:1px solid var(--border);border-radius:6px;background:var(--background);font:var(--type-ui);white-space:pre-line}
+.tx277 .tx-words.focus{outline:2px solid var(--ring);outline-offset:2px}
+.tx277 .tx-words.bad,.tx277 .tx-face.bad{border-color:var(--destructive)}
+.tx277 .tx-sel{background:color-mix(in srgb,var(--foreground) 18%,transparent)}
+.tx277 .tx-refusal{margin:6px 0 0;color:var(--destructive);font:var(--type-meta)}
+.tx277 .tx-type{position:relative}
+.tx277 .tx-face{display:flex;align-items:center;justify-content:space-between;width:100%;height:34px;font-size:var(--text-base);text-align:left}
+.tx277 .tx-face i{font:var(--type-meta);font-style:normal;color:var(--muted-foreground)}
+.tx277 .tx-seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;margin:0 0 12px;overflow:hidden;border:1px solid var(--border);border-radius:6px}
+.tx277 .tx-seg button{min-height:32px;border:0;border-radius:0;background:transparent}
+.tx277 .tx-seg button+button{border-left:1px solid var(--border)}
+.tx277 .tx-seg button.on{background:var(--secondary);font-weight:var(--weight-semibold)}
+.tx277 .tx-checks{display:flex;gap:20px}
+.tx277 .tx-checks .n-check{margin:0}
+.tx277 .tx-off{opacity:.45}
+.tx277 .tx-drawn{margin-left:8px;padding:1px 5px;border-radius:4px;background:var(--secondary);color:var(--foreground);font:var(--type-mono);font-size:var(--text-2xs)}
+.tx277 .n-input input::placeholder{color:var(--muted-foreground);opacity:1}
+.tx277 input[type=range].tx-mixed::-webkit-slider-thumb{visibility:hidden}
+.tx277 .n-check input{accent-color:var(--primary)}
+html.dark .tx277 input[type=checkbox]{color-scheme:dark}
+.tx277 .n-inspector-scroll{scrollbar-width:none}
+.tx277 .tx-row{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);align-items:end;gap:8px;margin:12px 0 0}
+.tx277 .tx-row.sw{grid-template-columns:44px}
+.tx277 .tx-f{display:grid;gap:4px;min-width:0;font:var(--type-label)}
+.tx277 .tx-f .n-input{gap:4px}
+.tx277 .tx-f .n-input input{width:100%;min-width:0;text-align:right}
+.tx277 .tx-swatches{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:6px}
+.tx277 .tx-swatch{width:100%;min-width:0;height:34px;padding:0;border:1px solid color-mix(in srgb,var(--foreground) 45%,transparent)}
+.tx277 .n-section h3.tx-h{display:flex;align-items:center;justify-content:space-between}
+.tx277 .tx-switch{position:relative;flex:none;width:30px;height:18px;border-radius:9px;background:var(--input)}
+.tx277 .tx-switch::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--background);box-shadow:0 0 0 1px color-mix(in srgb,var(--foreground) 18%,transparent)}
+.tx277 .tx-switch.on{background:var(--primary)}
+.tx277 .tx-switch.on::after{left:14px;box-shadow:none}
+.tx277 .tx-checkline{margin:12px 0 0}
+.tx277 .tx-checkline .n-check{margin:0}
+
+/* The rows a still picture shows, as shipped: four timing rows with no heading, each a timecode
+   between two frame steps; then Appearance's own protection */
+.tx277 .tx-trows{margin:0 0 16px;border-top:1px solid var(--border)}
+.tx277 .tx-trow{display:flex;align-items:baseline;gap:9px;min-height:30px;padding:6px 1px;box-sizing:border-box;border-bottom:1px solid var(--line-soft,var(--border));font:var(--type-meta)}
+.tx277 .tx-trow>span{flex:none;width:72px;color:var(--muted-foreground)}
+.tx277 .tx-trow>strong{flex:1;min-width:0;display:inline-flex;align-items:center;justify-content:flex-end;gap:6px;font-weight:var(--weight-medium)}
+.tx277 .tx-trow .tx-code{width:12ch;height:auto;min-height:0;padding:2px 3px;border:1px solid transparent;border-radius:4px;background:transparent;color:var(--muted-foreground);font:var(--type-mono);font-size:var(--text-2xs);text-align:center}
+.tx277 .tx-trow .tx-step{width:auto;height:auto;min-height:0;padding:6px 9px;border:0;background:none;color:var(--muted-foreground);font:var(--type-mono)}
+.tx277 .tx-protect{margin:16px 0 0;padding:12px 0 0;border-top:1px solid var(--border)}
+.tx277 .tx-protect p{margin:0 0 8px;color:var(--muted-foreground);font:var(--type-meta)}
+.tx277 .tx-protect p:last-child{margin:8px 0 0}
+.tx277 .tx-protect summary{font:var(--type-label);cursor:default}
+
+/* The typeface menu: each name in its own face */
+.tx277 .tx-menu{position:absolute;z-index:3;left:0;right:0;top:84px;display:flex;flex-direction:column;padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--popover,var(--background));box-shadow:0 12px 32px #0003}
+.tx277 .tx-menu .it{display:flex;align-items:center;justify-content:space-between;min-height:36px;padding:0 10px;border-radius:5px;font-size:var(--text-lg);line-height:var(--leading-normal)}
+.tx277 .tx-menu .it.on{background:var(--accent,var(--muted))}
+.tx277 .tx-menu .it svg{width:14px;height:14px}
+
+/* Phone: the foot's tools as shipped, with Text among them; the sheet starts under the Viewer */
+.tx277.phone .tx-foot{position:relative;flex:none;display:flex;justify-content:space-around;padding:6px;border-top:1px solid var(--border);background:var(--background)}
+.tx277.phone .tx-foot.picked{margin-top:30px;background:color-mix(in srgb,var(--timeline-selection) 10%,var(--background))}
+.tx277.phone .tx-foot button{display:grid;align-content:center;justify-items:center;gap:4px;min-width:60px;height:52px;min-height:0;padding:0;border:0;border-radius:0;background:transparent;color:var(--foreground);font:var(--type-meta)}
+.tx277.phone .tx-foot button:disabled{opacity:.4}
+.tx277.phone .tx-foot svg{width:20px;height:20px}
+.tx277.phone .tx-picked{position:absolute;left:0;right:0;top:-30px;height:30px;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 8px;box-sizing:border-box;background:var(--timeline-selection);color:var(--media-overlay-bg,#1a1a1a);font:var(--type-meta);white-space:nowrap}
+.tx277.phone .tx-picked svg{width:13px;height:13px}
+.tx277.phone .n-inspector{top:272px}
+.tx277.phone .tx-back{display:flex;align-items:center;gap:6px}
+.tx277.phone .tx-list{display:flex;flex-direction:column}
+.tx277.phone .tx-list .it{display:flex;align-items:center;justify-content:space-between;min-height:56px;padding:0 4px;border-bottom:1px solid var(--border);font-size:var(--text-xl);line-height:var(--leading-normal)}
+.tx277.phone .tx-list .it svg{width:18px;height:18px}

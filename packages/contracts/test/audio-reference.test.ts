@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import type { Sheet } from "../src/world.js";
-import { AudioUseRequestSchema, castVoiceRequests, characterAudioRoute, planCastCharacterAudio, planCharacterAudio, type FrozenPerformanceAudio } from "../src/audio-reference.js";
-import type { ManifestModel, ProductionBundle, SceneRecord } from "../src/index.js";
+import { AudioUseRequestSchema, castVoiceRequests, shotCast, characterAudioRoute, planCastCharacterAudio, planCharacterAudio, type FrozenPerformanceAudio } from "../src/audio-reference.js";
+import type { ManifestModel, ProductionBundle, SceneRecord, Shot } from "../src/index.js";
 
 it("voice guidance and performance sync enforce distinct source authorities", () => {
   const hash = `sha256:${"a".repeat(64)}`;
@@ -115,4 +115,12 @@ it("a Cast picture's On screen voice rides a world Bench take, and stays home wh
   }
   assert.equal(plan(model("seedance-2.0"), sample({ acknowledgementId: "ack" })).references.length, 1, "cleared for cloud reuse, it rides Seedance");
   assert.match(plan(local, sample({}, 16)).problems.join(" "), /15 second file limit/, "what rides is held to the route's limits");
+});
+it("a shot's cast is the characters it mentions, then those who speak, each once", () => {
+  const sheets = [{ id: "maren-kest", type: "character" }, { id: "bray-half-hitch", type: "character" }, { id: "the-vigil", type: "location" }] as unknown as Sheet[];
+  const shot = (description: string, audio?: unknown) => ({ id: "sh_1", description, audio }) as unknown as Shot;
+  const scene = {} as unknown as SceneRecord;
+  assert.deepEqual(shotCast(scene, shot("@maren-kest at the rail of @the-vigil.", { kind: "dialogue", speaker: "bray-half-hitch", line: "say again?" }), sheets), ["maren-kest", "bray-half-hitch"], "a place is not cast; an unmentioned speaker is");
+  assert.deepEqual(shotCast(scene, shot("@maren-kest listens.", { kind: "vo", speaker: "maren-kest", line: "the verse" }), sheets), ["maren-kest"]);
+  assert.deepEqual(shotCast(scene, shot("The harbour, flat as glass. @nobody-here", { kind: "silence" }), sheets), []);
 });

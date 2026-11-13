@@ -1,16 +1,25 @@
 import {
   EpisodeSchema, ProductionCreationPlanSchema, ProductionNarrativeSchema, ProductionSchema,
   ProductionSetupDraftSchema, SceneRecordSchema, SeasonSchema, SeriesSchema,
-  migrateLegacyScene, normalizeAspect, pickableSheets, productionSetupProblems,
+  AUDIO_DRAMA_KIND, AudioDramaRecordSchema, DEFAULT_AUDIO_DRAMA_PLAN, DEFAULT_COMIC_PLAN, GRAPHIC_NOVEL_KIND,
+  newGraphScene, normalizeAspect, pickableSheets, productionSetupProblems,
   type ProductionCreationPlan, type ProductionSetupDraft, type WorldBundle,
 } from "@arke-studio/contracts";
 import { stableJson } from "../arke-actions/digest.js";
 import { sha256 } from "../world/text-files.js";
 import { planProductionCreation } from "./ops.js";
+import { slugify, uniqueSlug } from "../world/slug.js";
 
 /** Full relevant records, not a windowed search or just version numbers. */
-export function setupSourceDigest(bundle: WorldBundle): string {
+export function setupSourceDigest(bundle: WorldBundle, sourceId?: string): string {
+  // The story a setup adapts, chapter by chapter (codex on PR 1866): an edit or a retirement
+  // between Review and Create is a different source, so the reviewed plan must be reviewed again.
+  // Absent for a setup that adapts nothing, so its digest is what it always was.
+  const source = sourceId === undefined ? undefined : bundle.productions.find(production => production.meta.id === sourceId);
   return sha256(stableJson({
+    ...(sourceId !== undefined ? { source: source ? source.chapters.map(chapter => ({
+      id: chapter.id, order: chapter.order, version: chapter.version ?? null, hash: chapter.hash ?? null, retired: chapter.retired === true,
+    })).sort((a, b) => a.id.localeCompare(b.id)) : null } : {}),
     worldId: bundle.meta.worldId,
     canon: bundle.canon,
     bible: bundle.bible,
@@ -23,8 +32,62 @@ export function setupSourceDigest(bundle: WorldBundle): string {
 export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDraft, at: string): ProductionCreationPlan {
   const draft = ProductionSetupDraftSchema.parse(raw);
   if (draft.worldId !== bundle.meta.worldId) throw new Error("This setup belongs to another world.");
-  const problems = productionSetupProblems(draft, bundle.sheets);
+  const problems = productionSetupProblems(draft, bundle.sheets, bundle.productions);
   if (problems.length) throw new Error(problems.join("\n"));
+  // An audio drama is a Story production (SPEC-057 R-82): no aspect, frame rate, season or scenes.
+  // What setup agreed — the plan and the story it adapts — is written as audio-drama.json.
+  if (draft.kind === AUDIO_DRAMA_KIND) {
+    const base = planProductionCreation(bundle, {
+      title: draft.title, medium: "story", productionKind: AUDIO_DRAMA_KIND,
+      ...(draft.logline !== undefined ? { logline: draft.logline } : {}),
+    }, at);
+    if (draft.models && Object.keys(draft.models).length > 0) {
+      base.production = ProductionSchema.parse({ ...base.production, models: draft.models });
+    }
+    return ProductionCreationPlanSchema.parse({
+      ...base,
+      initialContent: {
+        worldId: draft.worldId, setupId: draft.setupId, revision: draft.revision,
+        narrative: null, episodes: [], scenes: [],
+        audioDrama: AudioDramaRecordSchema.parse({
+          version: 1, plan: draft.audioDrama ?? DEFAULT_AUDIO_DRAMA_PLAN, ...(draft.source ? { source: draft.source } : {}),
+        }),
+      },
+    });
+  }
+  // A graphic novel is a Story production too (SPEC-064 R-4, turn 249b): its plan becomes
+  // comic.json, and each planned chapter a chapter of its own, mapped to the one it adapts.
+  if (draft.kind === GRAPHIC_NOVEL_KIND) {
+    const base = planProductionCreation(bundle, {
+      title: draft.title, medium: "story", productionKind: GRAPHIC_NOVEL_KIND,
+      ...(draft.logline !== undefined ? { logline: draft.logline } : {}),
+    }, at);
+    if (draft.models && Object.keys(draft.models).length > 0) {
+      base.production = ProductionSchema.parse({ ...base.production, models: draft.models });
+    }
+    const plan = draft.graphicNovel ?? DEFAULT_COMIC_PLAN;
+    const story = draft.source ? bundle.productions.find((production) => production.meta.id === draft.source!.productionId) : undefined;
+    const taken: string[] = [];
+    const chapters = plan.chapters.map((chapter) => {
+      const stem = uniqueSlug(slugify(chapter.title) || `chapter-${chapter.from}`, "chapter", taken);
+      taken.push(stem);
+      return { stem, title: chapter.title, about: chapter.about, from: story?.chapters.find((candidate) => candidate.order === chapter.from && candidate.retired !== true)?.id };
+    });
+    return ProductionCreationPlanSchema.parse({
+      ...base,
+      initialContent: {
+        worldId: draft.worldId, setupId: draft.setupId, revision: draft.revision,
+        narrative: null, episodes: [], scenes: [],
+        graphicNovel: {
+          reading: plan.reading, aspect: plan.aspect,
+          ...(plan.style ? { style: plan.style } : {}),
+          ...(plan.mode ? { mode: plan.mode } : {}),
+          ...(story ? { adapts: { story: story.meta.id, chapters: chapters.flatMap((chapter) => chapter.from ? [{ chapter: chapter.stem, from: chapter.from }] : []) } } : {}),
+          chapters: chapters.map(({ stem, title, about }) => ({ stem, title, ...(about !== undefined && !story ? { about } : {}) })),
+        },
+      },
+    });
+  }
   if (!normalizeAspect(draft.aspect)) throw new Error("Choose a valid aspect, such as 16:9 or 9:16.");
   const base = planProductionCreation(bundle, {
     title: draft.title, medium: "video", ...(draft.kind !== "other" ? { productionKind: draft.kind } : {}),
@@ -44,9 +107,9 @@ export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDra
   const scenes = draft.scenes.map((scene, index) => ({
     stem: scene.key,
     record: SceneRecordSchema.parse({
-      ...migrateLegacyScene({
+      ...newGraphScene({
         id: sceneId(scene.key), number: index + 1, order: index + 1, slug: scene.key,
-        title: scene.title, status: "draft", version: 1, shots: [],
+        title: scene.title, status: "draft", version: 1,
       }),
       ...(scene.synopsis !== undefined ? { synopsis: scene.synopsis } : {}),
       ...(scene.inherits ? { inherits: scene.inherits } : {}),
@@ -65,6 +128,8 @@ export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDra
     const { arcNotes: _arcNotes, ...narrative } = draft.narrative;
     base.initialSeason = SeasonSchema.parse({
       ...base.initialSeason, ...narrative,
+      // The Target travels with the season it describes (SPEC-052 R-6).
+      ...(draft.target ? { target: draft.target } : {}),
       arcs: draft.arcs.map(arc => ({
         ...arc,
         ...(arc.setup ? { setup: episodeId(arc.setup) } : {}),

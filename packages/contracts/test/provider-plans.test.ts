@@ -10,6 +10,12 @@ import {
   freeCreditOverrun,
   freeCreditThisMonth,
   freeDayRefused,
+  dailyLimitFailure,
+  dailyLimitNote,
+  dailyQuotaNotices,
+  dailyQuotaRefusal,
+  googleDailyQuota,
+  GOOGLE_DAILY_LIMIT,
   freeLimitReason,
   freePlanAllowance,
   freePlanAskCopy,
@@ -35,6 +41,7 @@ import {
   type LedgerEntry,
   type ManifestModel,
   type ModelManifest,
+  type Job,
 } from "../src/index.js";
 
 // Design turn 182: a provider's Free plan, voice first.
@@ -388,5 +395,54 @@ describe("Read replies' narrator (design turn 183)", () => {
     const models = applyProviderPlans(manifest, credit).models;
     assert.equal(narratorReadsUnasked({ ...paul, worldId: "w1" }, "w1", models, Infinity), false);
     assert.equal(narratorReadsUnasked({ provider: "fishaudio", model: "s1", voiceId: "x" }, "w1", manifest.models, Infinity), false);
+  });
+});
+
+describe("paid Google daily quota (issue 1934)", () => {
+  const now = new Date("2026-10-20T20:00:00.000Z");
+  const resetsAt = "2026-10-21T07:00:01.000Z";
+  const error = `${GOOGLE_DAILY_LIMIT} for this key (HTTP 429 daily quota · 100 a day · resets ${resetsAt})`;
+  const failed: Pick<Job, "provider" | "model" | "status" | "error" | "createdAt" | "updatedAt"> = {
+    provider: "google", model: gemini.id, status: "failed", error, createdAt: "2026-10-20T18:50:00.000Z", updatedAt: "2026-10-20T18:51:05.000Z",
+  };
+  const reads = [{ model: gemini, requests: 3 }, { model: gemini, requests: 2 }, { model: voxtral, requests: 9 }];
+
+  it("scopes refusal to the model and key, and expires the original reset without rolling it forward", () => {
+    const observed = googleDailyQuota([failed], gemini.id, now)!;
+    assert.deepEqual(observed, { model: gemini.id, limit: 100, resetsAt, observedAt: failed.updatedAt, reached: true });
+    assert.equal(googleDailyQuota([failed], "gemini-3.8-flash-lite-tts", now), null);
+    assert.equal(googleDailyQuota([{ ...failed, provider: "other" }], gemini.id, now), null);
+    assert.equal(googleDailyQuota([failed], gemini.id, now, "2026-10-20T19:00:00.000Z"), null);
+    assert.equal(googleDailyQuota([failed], gemini.id, now, "2026-10-20T18:50:30.000Z"), null, "an old-key response arriving after the key save does not hold the new key");
+    assert.equal(googleDailyQuota([failed], gemini.id, now, failed.createdAt)?.reached, true);
+    assert.equal(googleDailyQuota([failed], gemini.id, new Date(resetsAt))?.reached, false);
+    assert.equal(googleDailyQuota([{ ...failed, error: GOOGLE_DAILY_LIMIT }], gemini.id, new Date("2026-10-22T12:00:00Z"))?.reached, false);
+    assert.equal(googleDailyQuota([{ ...failed, error: "HTTP 429 requests per minute" }], gemini.id, now), null);
+  });
+
+  it("keeps the newest observed model limit even when job order changes", () => {
+    const older = { ...failed, error: error.replace("100 a day", "50 a day"), updatedAt: "2026-10-20T17:00:00Z" };
+    for (const jobs of [[older, failed], [failed, older]]) assert.equal(googleDailyQuota(jobs, gemini.id, now)?.limit, 100);
+  });
+
+  it("reports unknown remaining allowance and the actual model request count, never a free-tier guess", () => {
+    assert.deepEqual(dailyQuotaNotices(reads), [`${gemini.displayName} · 5 requests · remaining daily allowance unknown`]);
+    const expired = googleDailyQuota([failed], gemini.id, new Date(resetsAt))!;
+    assert.match(dailyQuotaNotices(reads, () => expired)[0]!, /last reported 100 a day$/);
+    assert.equal(dailyQuotaRefusal(reads, () => expired), null);
+    const live = googleDailyQuota([failed], gemini.id, now)!;
+    assert.equal(dailyQuotaRefusal(reads, () => live), `${GOOGLE_DAILY_LIMIT} · ${gemini.displayName} · 100 a day · resets ${resetsAt}`);
+    assert.equal(dailyQuotaRefusal([{ model: gemini, requests: 0 }], () => live), null, "kept recordings need no quota");
+    assert.equal(dailyQuotaRefusal([{ model: { ...gemini, speechPlan: "free-plan" }, requests: 1 }], () => live), null, "free-plan admission keeps its existing owner");
+  });
+
+  it("preserves the refusal details and renders the known reset without renewing an expired hold", () => {
+    const reason = dailyLimitFailure(error, gemini.displayName)!;
+    assert.equal(reason, `${GOOGLE_DAILY_LIMIT} · ${gemini.displayName} · 100 a day · resets ${resetsAt}`);
+    assert.match(freePlanNote(reason, now)!, /Gemini 3.8 Flash TTS · daily request limit reached · 100 a day · resets 00:00 PT/);
+    assert.match(dailyLimitNote(reason, new Date(resetsAt))!, /reset time passed · ready to retry/);
+    assert.match(dailyLimitNote(GOOGLE_DAILY_LIMIT)!, /reset time unavailable/);
+    assert.equal(dailyLimitFailure("HTTP 429 per minute", gemini.id), null);
+    assert.equal(dailyLimitNote("another failure"), null);
   });
 });

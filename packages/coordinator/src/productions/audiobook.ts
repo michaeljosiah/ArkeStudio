@@ -1,13 +1,24 @@
+import { needsExpressiveDirection, directionSchemaVersion, EXTENDED_SOUNDS, EXPRESSIVE_DIRECTION_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { mkdir, readFile, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  AUDIOBOOK_CREDIT_KEYS,
+  AUDIOBOOK_CREDITS_ID,
+  AudiobookCreditsSchema,
+  audiobookCreditFacts,
+  audiobookCreditWords,
+  type AudiobookCreditDefaults,
+  type AudiobookCredits,
   AudiobookBookSchema,
+  AudioArrangementRefusal,
   ChapterAudiobookSchema,
   DEFAULT_AUDIOBOOK_BOOK,
   audiobookBlocks,
   audiobookBlockOptions,
   audiobookNoteFor,
+  sheetNarrations,
   audiobookReadingNotes,
+  castStanding,
   hasReadingNotes,
   lookNeedsChoiceBoundary,
   audiobookDirectionFor,
@@ -15,8 +26,8 @@ import {
   audiobookBlockState,
   audiobookRecordingKey,
   audiobookHeading,
+  chapterNumber,
   audiobookTextHash,
-  CADENCE_PHRASE_MAX,
   legacyVoiceModel,
   normalizeSpeechText,
   voiceDisplayLabel,
@@ -29,6 +40,7 @@ import {
   type AudiobookReader,
   type AudiobookReadingNotes,
   type AudiobookReading,
+  type AudiobookSeamView,
   type AudiobookSubstitution,
   type CadencePlan,
   type ChapterAudiobook,
@@ -41,9 +53,10 @@ import {
   type WorldDesignedVoice,
 } from "@arke-studio/contracts";
 import { clipFor } from "../voice/library.js";
+import { AUDIOBOOK_CREDITS_SCHEMA_VERSION, AUDIOBOOK_MOTION_SCHEMA_VERSION, AUDIO_STUDIO_SCHEMA_VERSION, AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION, AUDIOBOOK_PICTURE_LOOK_REVIEW_SCHEMA_VERSION, AUDIOBOOK_PICTURE_MARKS_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHAPES_SCHEMA_VERSION } from "../world/commit.js";
 import { directionPlan } from "../voice/direction.js";
 import { atomicWriteFile } from "../world/atomic.js";
-import { AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_LOOKS_SCHEMA_VERSION, AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, AUDIOBOOK_TIMING_SCHEMA_VERSION } from "../world/commit.js";
+import { AUDIOBOOK_CHAPTER_NARRATOR_SCHEMA_VERSION, AUDIOBOOK_DIRECTION_SCHEMA_VERSION, AUDIOBOOK_GROUPED_SCHEMA_VERSION, AUDIOBOOK_LOOKS_SCHEMA_VERSION, AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_MARKERS_SCHEMA_VERSION, AUDIOBOOK_NOTE_SCHEMA_VERSION, AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, AUDIOBOOK_PERFORMED_SCHEMA_VERSION, AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, AUDIOBOOK_PICTURES_SCHEMA_VERSION, AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, AUDIOBOOK_SEAMS_SCHEMA_VERSION, AUDIOBOOK_TIMING_SCHEMA_VERSION, AUDIOBOOK_BEATS_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
@@ -120,16 +133,86 @@ export async function readAudiobookBook(store: WorldStore, productionId: string)
   });
 }
 
-async function writeOwned(store: WorldStore, rel: string, value: unknown, supersedes?: string): Promise<void> {
+/**
+ * The audiobook's credits (design turn 252, SPEC-047 R-210 – R-215): their details and the words
+ * the author wrote over a draft, beside the book's file. Their takes and flags are a reading
+ * record of their own, at `audiobookPath(productionId, AUDIOBOOK_CREDITS_ID)`, beside the chapters'.
+ */
+export function audiobookCreditsPath(productionId: string): string {
+  return `productions/${productionId}/.audiobook/credits.json`;
+}
+
+export async function readAudiobookCredits(store: WorldStore, productionId: string): Promise<AudiobookCredits | "unreadable" | null> {
+  return readJson(store, audiobookCreditsPath(productionId), (raw) => {
+    const parsed = AudiobookCreditsSchema.safeParse(raw);
+    return parsed.success ? parsed.data : null;
+  });
+}
+
+const creditLanes = new Map<string, Promise<unknown>>();
+
+/**
+ * The credits read afresh, changed and written in one lane a production, as a chapter's record is
+ * (codex on PR 1186): two quick edits on the sheet otherwise each write over the other's. `mutate`
+ * answers null for no change. The world is raised before the first credits it has (R-215).
+ */
+export async function updateAudiobookCredits(
+  store: WorldStore,
+  productionId: string,
+  mutate: (current: AudiobookCredits | null) => Omit<AudiobookCredits, "updatedAt" | "schemaVersion"> | null,
+  now: () => string,
+): Promise<AudiobookCredits | null> {
+  const key = `${store.dir}::${productionId}`;
+  const run = (creditLanes.get(key) ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(async () => {
+      const read = await readAudiobookCredits(store, productionId);
+      if (read === "unreadable") throw new Error("The credits could not be read.");
+      const next = mutate(read);
+      if (next === null) return read;
+      const value = AudiobookCreditsSchema.parse({ ...next, schemaVersion: 1, updatedAt: now() });
+      await store.ensureSchemaVersion(AUDIOBOOK_CREDITS_SCHEMA_VERSION, "audiobook-credits");
+      await writeOwned(store, audiobookCreditsPath(productionId), value);
+      return value;
+    });
+  creditLanes.set(key, run);
+  try {
+    return await run;
+  } finally {
+    if (creditLanes.get(key) === run) creditLanes.delete(key);
+  }
+}
+
+/**
+ * What the credits are drafted from where the author set nothing (R-211): the production's title,
+ * the narrator's voice by its name, and the year the production was made, so a credit drafted in
+ * one year still matches its take in the next. The author is the credits file's own, written there
+ * from Publish (`creditsAuthor` in the coordinator), never looked up here.
+ */
+/** Credits read a name aloud: a voice's label also carries its description ("Undersong — the harbour witness"). */
+function creditName(label: string | undefined): string | null {
+  return label?.split(/\s+[—·]\s+/)[0] ?? null;
+}
+
+export function audiobookCreditDefaults(production: { meta: { title: string } }, narrator: AudiobookReader | null): AudiobookCreditDefaults {
+  const created = (production.meta as { created?: string }).created;
+  const year = Number((created ?? new Date().toISOString()).slice(0, 4));
+  return { title: production.meta.title, author: "", voiceLabel: creditName(narrator?.label), year: Number.isFinite(year) ? year : new Date().getFullYear() };
+}
+
+async function writeOwned(store: WorldStore, rel: string, value: unknown, supersedes?: string, beforeWrite?: () => Promise<void>, inGate?: true): Promise<void> {
   const absolute = join(store.dir, fromPortable(rel));
-  await store.ownedWrite(async () => {
+  const write = async () => {
+    await beforeWrite?.();
     await mkdir(toExtendedLength(join(absolute, "..")), { recursive: true });
     await atomicWriteFile(absolute, `${JSON.stringify(value, null, 2)}\n`);
     // The old file goes with the same claim the new one was written under: left behind, it
     // would be read again only if the new one were lost, and then as an older record over a
     // newer set of takes.
     if (supersedes !== undefined) await unlink(toExtendedLength(join(store.dir, fromPortable(supersedes)))).catch(() => {});
-  });
+  };
+  // A gate the caller holds has checked the claim, holds the watcher off and scans as it ends.
+  await (inGate ? write() : store.ownedWrite(write));
 }
 
 /**
@@ -139,38 +222,64 @@ async function writeOwned(store: WorldStore, rel: string, value: unknown, supers
  * PR 1186): its strict reader would otherwise take the record for unreadable and make the
  * chapter's paid takes again.
  */
-export async function writeAudiobook(store: WorldStore, productionId: string, chapterFile: string, untimed: ChapterAudiobook): Promise<void> {
+export async function writeAudiobook(store: WorldStore, productionId: string, chapterFile: string, untimed: ChapterAudiobook, beforeWrite?: () => Promise<void>, inGate?: true): Promise<void> {
+  const ensure = (version: number, source: string) => inGate ? store.ensureSchemaVersionInGate(version, source) : store.ensureSchemaVersion(version, source);
+  // The credits' reading record (design turn 252, R-215): a file the builds before credits never keep.
+  if (chapterFile === AUDIOBOOK_CREDITS_ID) await ensure(AUDIOBOOK_CREDITS_SCHEMA_VERSION, "audiobook-credits");
+  if (untimed.arrangement !== undefined || untimed.audioStudioProposals !== undefined) ChapterAudiobookSchema.parse(untimed);
+  if (untimed.arrangement !== undefined || untimed.audioStudioProposals !== undefined) await ensure(AUDIO_STUDIO_SCHEMA_VERSION, "audio-studio");
   // Timing, reactions, beds and sounds (design turn 187, R-89) the same way: each part written
   // only when it holds something, and the world raised before the first record carrying any.
-  const { timing, reactions, beds, sounds, ...bare } = untimed;
+  const { timing, reactions, beds, sounds, ownLooks, seams, beats, ...bare } = untimed;
   const parts = { timing, reactions, beds, sounds };
   const kept = Object.fromEntries(Object.entries(parts).filter(([, part]) => part !== undefined && Object.keys(part).length > 0));
-  if (Object.keys(kept).length > 0) await store.ensureSchemaVersion(AUDIOBOOK_TIMING_SCHEMA_VERSION, "audiobook-timing");
-  const record: ChapterAudiobook = { ...bare, ...kept };
+  if (Object.keys(kept).length > 0) await ensure(AUDIOBOOK_TIMING_SCHEMA_VERSION, "audiobook-timing");
+  // Looks chosen for one picture and held until it is made (design turn 193d, R-146): written only
+  // while one is held, and the world raised before the first record that holds one.
+  const owned = ownLooks !== undefined && Object.keys(ownLooks).length > 0;
+  if (owned) await ensure(AUDIOBOOK_OWN_LOOKS_SCHEMA_VERSION, "audiobook-own-looks");
+  // Seams set by hand (design turn 198): written only while one is set, and the world raised
+  // before the first record that holds one, since the builds before read it as unreadable.
+  const seamed = seams !== undefined && seams.length > 0;
+  if (seamed) await ensure(AUDIOBOOK_SEAMS_SCHEMA_VERSION, "audiobook-seams");
+  // The beats a chapter was grouped by (design turn 201) the same way: only while it has some.
+  const beaten = beats !== undefined && beats.length > 0;
+  if (beaten) await ensure(AUDIOBOOK_BEATS_SCHEMA_VERSION, "audiobook-beats");
+  const record: ChapterAudiobook = { ...bare, ...kept, ...(owned ? { ownLooks } : {}), ...(seamed ? { seams } : {}), ...(beaten ? { beats } : {}) };
   // A record with no picture is written without the field, in the shape the builds before
   // pictures read; one with a picture raises the world past them first (design turn 186, R-73).
   const { pictures, ...unpictured } = record;
+  if (Object.values(pictures ?? {}).some((picture) => picture.motion !== undefined || picture.motionCandidate !== undefined) || Object.keys(record.wordTiming ?? {}).length > 0) await ensure(AUDIOBOOK_MOTION_SCHEMA_VERSION, "audiobook-motion-and-word-timing");
   const pictured = pictures !== undefined && Object.keys(pictures).length > 0;
-  if (pictured) await store.ensureSchemaVersion(AUDIOBOOK_PICTURES_SCHEMA_VERSION, "audiobook-pictures");
+  if (pictured) await ensure(AUDIOBOOK_PICTURES_SCHEMA_VERSION, "audiobook-pictures");
   // The chapter's look, or a picture that keeps the lines it was made under (design turn 191c,
   // R-98): fields the builds before it read as unreadable, so the world is raised first.
-  if (record.look !== undefined || Object.values(pictures ?? {}).some((picture) => picture.look !== undefined)) await store.ensureSchemaVersion(AUDIOBOOK_LOOK_SCHEMA_VERSION, "audiobook-look");
+  if (Object.values(pictures ?? {}).some(picture => picture.lookReview !== undefined)) await ensure(AUDIOBOOK_PICTURE_LOOK_REVIEW_SCHEMA_VERSION, "audiobook-picture-look-review");
+  // A picture's Tall (design turn 235): a field the builds before it refuse.
+  if (Object.values(pictures ?? {}).some((picture) => picture.tall !== undefined)) await ensure(AUDIOBOOK_PICTURE_SHAPES_SCHEMA_VERSION, "audiobook-picture-shapes");
+  // A picture set at a sentence inside its block (design turn 237, R-202): one more field the builds before it refuse.
+  if (Object.values(pictures ?? {}).some((picture) => picture.mark !== undefined)) await ensure(AUDIOBOOK_PICTURE_MARKS_SCHEMA_VERSION, "audiobook-picture-marks");
+  if (record.look !== undefined || Object.values(pictures ?? {}).some((picture) => picture.look !== undefined)) await ensure(AUDIOBOOK_LOOK_SCHEMA_VERSION, "audiobook-look");
   // A look chosen for a character, the mood line, or the look a picture rode (design turn 193,
   // R-112): more fields the builds before it read as unreadable, so the world is raised first.
-  if (lookNeedsChoiceBoundary({ look: record.look, pictures })) await store.ensureSchemaVersion(AUDIOBOOK_LOOKS_SCHEMA_VERSION, "audiobook-looks");
+  if (lookNeedsChoiceBoundary({ look: record.look, pictures })) await ensure(AUDIOBOOK_LOOKS_SCHEMA_VERSION, "audiobook-looks");
   // The shot a made picture keeps (design turn 194g): one more field the builds before it refuse.
-  if (Object.values(pictures ?? {}).some((picture) => picture.shot !== undefined)) await store.ensureSchemaVersion(AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, "audiobook-picture-shot");
+  if (Object.values(pictures ?? {}).some((picture) => picture.shot !== undefined)) await ensure(AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, "audiobook-picture-shot");
+  if (Object.values(pictures ?? {}).some((picture) => picture.shot?.checkedPrompt !== undefined)) await ensure(AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION, "audiobook-picture-check-prompt");
+  // Where a picture's subject stands (design turn 197b): one more field the builds before it refuse.
+  if (Object.values(pictures ?? {}).some((picture) => picture.focus !== undefined)) await ensure(AUDIOBOOK_PICTURE_FOCUS_SCHEMA_VERSION, "audiobook-picture-focus");
   const { direction, ...undirected } = pictured ? { ...unpictured, pictures } : unpictured;
   const directed = Object.keys(direction).length > 0;
-  if (directed) await store.ensureSchemaVersion(AUDIOBOOK_DIRECTION_SCHEMA_VERSION, "audiobook-direction");
+  if (Object.values(direction).some(entry => needsExpressiveDirection(entry.plan)) || Object.values(reactions ?? {}).some(reaction => reaction.sound !== undefined && EXTENDED_SOUNDS.includes(reaction.sound))) await ensure(Math.max(EXPRESSIVE_DIRECTION_SCHEMA_VERSION, ...Object.values(direction).map(entry => directionSchemaVersion(entry.plan)), ...Object.values(reactions ?? {}).map(reaction => directionSchemaVersion({ cues: reaction.sound === undefined ? [] : [{ kind: "sound", at: 0, sound: reaction.sound }] }))), "audiobook-expressive-direction");
+  if (directed) await ensure(AUDIOBOOK_DIRECTION_SCHEMA_VERSION, "audiobook-direction");
   // A marker, or the words a direction was written for, is a field the build before it reads
   // as unreadable (R-49): raised before the first record that carries one.
   const marked = Object.values(direction).some((entry) => entry.text !== undefined || entry.dropped !== undefined || entry.plan.cues.some((cue) => cue.kind === "delivery"));
-  if (marked) await store.ensureSchemaVersion(AUDIOBOOK_MARKERS_SCHEMA_VERSION, "audiobook-markers");
+  if (marked) await ensure(AUDIOBOOK_MARKERS_SCHEMA_VERSION, "audiobook-markers");
   // A take that records its note was not played (R-45) is a field the build before it cannot read.
-  if (Object.values(record.takes).some((take) => take.noteHeld !== undefined)) await store.ensureSchemaVersion(AUDIOBOOK_PERFORMED_SCHEMA_VERSION, "audiobook-performed");
+  if (Object.values(record.takes).some((take) => take.noteHeld !== undefined)) await ensure(AUDIOBOOK_PERFORMED_SCHEMA_VERSION, "audiobook-performed");
   // A grouped take, a take's loudness or a mismatched split's flag (design turn 185).
-  if (Object.values(record.takes).some((take) => take.grouped !== undefined || take.loudness !== undefined) || Object.values(record.flags).some((flag) => flag.split !== undefined)) await store.ensureSchemaVersion(AUDIOBOOK_GROUPED_SCHEMA_VERSION, "audiobook-grouped");
+  if (Object.values(record.takes).some((take) => take.grouped !== undefined || take.loudness !== undefined) || Object.values(record.flags).some((flag) => flag.split !== undefined)) await ensure(AUDIOBOOK_GROUPED_SCHEMA_VERSION, "audiobook-grouped");
   // The note (design turn 181) is written under the phrase's old key while it is one — sixty
   // characters or fewer — so a block directed before the rename, or since within the old
   // bounds, stays readable by the builds before it and raises nothing. A longer note, a sound
@@ -179,12 +288,12 @@ export async function writeAudiobook(store: WorldStore, productionId: string, ch
   let renamed = false;
   for (const [key, entry] of Object.entries(direction)) {
     const { note, ...plan } = entry.plan;
-    const fits = note === undefined || note.length <= CADENCE_PHRASE_MAX;
+    const fits = note === undefined || note.length <= 60;
     if (!fits || plan.delivery === undefined || plan.cues.some((cue) => cue.kind === "sound")) renamed = true;
     onDisk[key] = note !== undefined && fits ? { ...entry, plan: { ...plan, phrase: note } } : entry;
   }
-  if (renamed) await store.ensureSchemaVersion(AUDIOBOOK_NOTE_SCHEMA_VERSION, "audiobook-note");
-  await writeOwned(store, audiobookPath(productionId, chapterFile), directed ? { ...undirected, direction: onDisk } : undirected, chapterFile === "book" ? undefined : legacyAudiobookPath(productionId, chapterFile));
+  if (renamed) await ensure(AUDIOBOOK_NOTE_SCHEMA_VERSION, "audiobook-note");
+  await writeOwned(store, audiobookPath(productionId, chapterFile), directed ? { ...undirected, direction: onDisk } : undirected, chapterFile === "book" ? undefined : legacyAudiobookPath(productionId, chapterFile), beforeWrite, inGate);
 }
 
 /**
@@ -202,19 +311,59 @@ export async function updateAudiobook(
   chapter: { file: string; version: number; hash: string },
   /** The record to write, or null to leave the file as it is; may read the world afresh under the lane's turn. */
   mutate: (current: ChapterAudiobook) => ChapterAudiobook | null | Promise<ChapterAudiobook | null>,
+  options: { requireReadable?: boolean; beforeWrite?: () => Promise<void> } = {},
 ): Promise<ChapterAudiobook> {
-  const key = `${store.dir}\n${productionId}\n${chapter.file}`;
-  const ahead = recordLanes.get(key) ?? Promise.resolve();
-  const turn = ahead.then(async () => {
-    const held = await readAudiobook(store, productionId, chapter.file);
-    // An unreadable record is no record for a writer too: the takes it named stay on the shelf
-    // as artifacts, and a run reads them afresh rather than guessing at a file it cannot read.
-    const current = held === null || held === "unreadable" ? emptyAudiobook(chapter.version, chapter.hash, store.now()) : held;
-    const next = await mutate(current);
-    if (next === null) return current;
-    await writeAudiobook(store, productionId, chapter.file, next);
-    return next;
-  });
+  return inRecordLane(store, productionId, chapter.file, () => mergeAudiobook(store, productionId, chapter, mutate, options));
+}
+
+/**
+ * A take filed and the record that names it written as one gate operation (issue 2794): the
+ * take's commit leaves its refresh to the gate, so a block costs one scan where the filing and
+ * the record cost one each. The order is the one they always had, the take on the shelf and then
+ * the record, so a failure between them leaves a filed take the next run adopts, never a record
+ * naming a take that is not there. The lane is taken before the gate, as `updateAudiobook` takes
+ * it before its own, so the two are always entered in one order.
+ */
+export async function fileIntoAudiobook<T>(
+  store: WorldStore,
+  productionId: string,
+  chapter: { file: string; version: number; hash: string },
+  /** Files the take; runs inside the gate. */
+  file: (store: WorldStore) => Promise<T>,
+  mutate: (current: ChapterAudiobook, filed: T) => ChapterAudiobook | null,
+): Promise<{ filed: T; record: ChapterAudiobook }> {
+  return inRecordLane(store, productionId, chapter.file, () => store.gateOp(async () => {
+    const filed = await file(store);
+    return { filed, record: await mergeAudiobook(store, productionId, chapter, (current) => mutate(current, filed), {}, true) };
+  }));
+}
+
+async function mergeAudiobook(
+  store: WorldStore,
+  productionId: string,
+  chapter: { file: string; version: number; hash: string },
+  mutate: (current: ChapterAudiobook) => ChapterAudiobook | null | Promise<ChapterAudiobook | null>,
+  options: { requireReadable?: boolean; beforeWrite?: () => Promise<void> },
+  inGate?: true,
+): Promise<ChapterAudiobook> {
+  const held = await readAudiobook(store, productionId, chapter.file);
+  if (held === "unreadable" && options.requireReadable) throw new Error("The chapter's audio record is unreadable; restore it before editing");
+  // An unreadable record is no record for a writer too: the takes it named stay on the shelf
+  // as artifacts, and a run reads them afresh rather than guessing at a file it cannot read.
+  const current = held === null || held === "unreadable" ? emptyAudiobook(chapter.version, chapter.hash, store.now()) : held;
+  const next = await mutate(current);
+  if (next === null) return current;
+  if (current.arrangement && next.arrangement?.revision === current.arrangement.revision &&
+    ["timing", "reactions", "beds", "sounds"].some(key => JSON.stringify(current[key as keyof ChapterAudiobook]) !== JSON.stringify(next[key as keyof ChapterAudiobook]))) {
+    throw new AudioArrangementRefusal("This chapter is arranged in Audio Studio; edit its clips there");
+  }
+  await writeAudiobook(store, productionId, chapter.file, next, options.beforeWrite, inGate);
+  return next;
+}
+
+async function inRecordLane<T>(store: WorldStore, productionId: string, chapterFile: string, work: () => Promise<T>): Promise<T> {
+  const key = `${store.dir}\n${productionId}\n${chapterFile}`;
+  const turn = (recordLanes.get(key) ?? Promise.resolve()).then(work);
   // The lane holds nothing once its last turn settles (codex on PR 1186), as the file
   // mutation serialiser does: a long session across many chapters would otherwise keep a
   // settled promise, and the record it resolved to, for every chapter ever written.
@@ -235,14 +384,35 @@ export async function updateAudiobook(
  * PR 1186): a line whose speaker the cast cannot name would otherwise be directed for the
  * narrator, and a model turn spent on a chapter the next read refuses at once.
  */
-export function castRefusal(plan: Pick<AudiobookPlan, "reading" | "cast" | "chapter">): string | null {
+export function castRefusal(
+  plan: Pick<AudiobookPlan, "reading" | "cast" | "chapter" | "body"> & Partial<Pick<AudiobookPlan, "blocks">>,
+  options: { only?: readonly string[]; castPending?: boolean } = {},
+): string | null {
   // Under `performed`, as under `cast`, a line's note follows its speaker (R-44), so the cast
   // must be current before anything is made.
   if (plan.reading === "narrator") return null;
   if (plan.cast === null) return "not cast · cast the lines first";
   if (plan.cast === "unreadable") return "cast unreadable · cast again";
-  if (plan.cast.hash !== plan.chapter.hash) return "cast moved · cast again";
-  return null;
+  // A cast with paragraph hashes is stale only in the paragraphs an edit touched (design turn
+  // 198, SPEC-012 R-66); one without them is stale whole once the chapter's hash moves, as before.
+  const standing = castStanding(plan.cast, plan.body, plan.chapter.hash);
+  if (standing.current) return null;
+  if (standing.legacy) return "cast moved · cast again";
+  // A read asked to cast those paragraphs first goes on to its price (R-69); a block made alone
+  // in a paragraph the edit left is made as it stands, since its speaker is the cast's (R-67).
+  if (options.castPending === true) return null;
+  if (options.only !== undefined && plan.blocks !== undefined) {
+    const waiting = new Set(standing.toCast);
+    const named = plan.blocks.filter((planned) => options.only!.includes(planned.block.key));
+    if (named.length > 0 && named.every((planned) => !waiting.has(planned.block.paragraph))) return null;
+  }
+  return `${standing.toCast.length} paragraph${standing.toCast.length === 1 ? "" : "s"} to cast`;
+}
+
+/** The paragraphs a cast stale only in some leaves to cast (design turn 198): none for a cast current or stale whole. */
+export function castLeftToCast(plan: Pick<AudiobookPlan, "reading" | "cast" | "chapter" | "body">): number[] {
+  if (plan.reading === "narrator" || plan.cast === null || plan.cast === "unreadable") return [];
+  return castStanding(plan.cast, plan.body, plan.chapter.hash).toCast;
 }
 
 /**
@@ -278,22 +448,28 @@ export async function effectiveReader(
  * without them is written in the shape the earlier build reads.
  */
 export async function writeAudiobookBookRaised(store: WorldStore, productionId: string, book: AudiobookBook): Promise<void> {
-  const { notes, narrator, chapterNotes, noteSources, ...rest } = book;
+  const { notes, narrator, chapterNarrators, chapterNotes, noteSources, ...rest } = book;
   // A source names a note that stands, or nothing (R-54): a note taken away takes its source.
   const sources = Object.fromEntries(Object.entries(noteSources ?? {}).filter(([key]) => notes?.[key] !== undefined));
   const kept: AudiobookBook = {
     ...rest,
     ...(notes !== undefined && Object.keys(notes).length > 0 ? { notes } : {}),
     ...(narrator !== undefined ? { narrator } : {}),
+    ...(chapterNarrators !== undefined && Object.keys(chapterNarrators).length > 0 ? { chapterNarrators } : {}),
     ...(chapterNotes !== undefined && Object.keys(chapterNotes).length > 0 ? { chapterNotes } : {}),
     ...(Object.keys(sources).length > 0 ? { noteSources: sources } : {}),
   };
+  // A chapter's own narrator (R-195): the builds before it read the whole record as unreadable.
+  if (kept.chapterNarrators !== undefined) await store.ensureSchemaVersion(AUDIOBOOK_CHAPTER_NARRATOR_SCHEMA_VERSION, "audiobook-chapter-narrator");
+  if (Object.values(kept.notes ?? {}).some((note) => note.length > 60)) await store.ensureSchemaVersion(EXPRESSIVE_DIRECTION_SCHEMA_VERSION, "audiobook-expressive-direction");
   if (kept.reading === "performed" || kept.notes !== undefined || kept.narrator !== undefined) await store.ensureSchemaVersion(AUDIOBOOK_PERFORMED_SCHEMA_VERSION, "audiobook-performed");
   // The book note, the chapter notes and a note's source (design turn 184) are fields the builds
   // before them read as unreadable: raised before the first record that carries one.
   if (kept.note !== undefined || kept.chapterNotes !== undefined || kept.noteSources !== undefined) await store.ensureSchemaVersion(AUDIOBOOK_READING_NOTES_SCHEMA_VERSION, "audiobook-reading-notes");
   // A book read a block a request (design turn 185d).
   if (kept.requests !== undefined) await store.ensureSchemaVersion(AUDIOBOOK_GROUPED_SCHEMA_VERSION, "audiobook-grouped");
+  // The book's picture shapes (design turn 235): refused by the builds before them, so raised first.
+  if (kept.pictureShapes !== undefined) await store.ensureSchemaVersion(AUDIOBOOK_PICTURE_SHAPES_SCHEMA_VERSION, "audiobook-picture-shapes");
   await writeAudiobookBook(store, productionId, kept);
 }
 
@@ -365,8 +541,15 @@ export async function writeBlockDirection(
   return updateAudiobook(store, productionId, chapter, (record) => {
     const { [key]: _was, ...rest } = record.direction;
     const kept: ChapterAudiobook["direction"] = {};
-    for (const other of Object.keys(rest)) {
+    for (const [other, entry] of Object.entries(rest)) {
       const block = blocks.find((candidate) => candidate.key === other);
+      // A key a join took into another block, and a block a seam shaped, keep their own entries as
+      // they are (design turn 198): the shaped block is directed from them, and a split or Reset
+      // wants them back. Carrying them to the shaped words would write over what is put back.
+      if (block === undefined ? (record.seams ?? []).length > 0 : block.shaped === true) {
+        kept[other] = entry;
+        continue;
+      }
       const carried = block === undefined ? null : currentDirection(record, block, store.now());
       if (carried !== null) kept[other] = carried;
     }
@@ -421,12 +604,15 @@ export function assignReaders(
   designedVoices: readonly Pick<WorldDesignedVoice, "id" | "revision" | "name">[] = [],
 ): PlannedBlock[] {
   const reading_ = hasReadingNotes(readingNotes) ? readingNotes : undefined;
+  // The characters' own narration (design turn 200, R-166): what a line is played with where the
+  // book has no note of its own for its speaker.
+  const narrations = reading === "performed" ? sheetNarrations(sheets) : {};
   return blocks.map((block) => {
     const planned = ((): Omit<PlannedBlock, "state" | "block"> => {
       // Under `performed` the narrator reads every block, as under `narrator` (R-44); a line
       // carries its speaker's note, and narration none.
       if (reading === "performed") {
-        const note = audiobookNoteFor({ reading: "performed", notes }, block);
+        const note = audiobookNoteFor({ reading: "performed", notes }, block, narrations);
         return { assigned: narrator, ...(note !== undefined ? { note } : {}) };
       }
       if (reading === "narrator" || block.speaker === undefined) return { assigned: narrator };
@@ -448,7 +634,7 @@ export function assignReaders(
       ...planned,
       ...(byPerson ? { recorded: true as const } : {}),
       ...(reading_ !== undefined ? { reading: reading_ } : {}),
-      state: audiobookBlockState(block, record, planned.assigned, hasArtifact, byPerson, planned.note, reading_),
+      state: audiobookBlockState(block, record, planned.assigned, hasArtifact, byPerson, planned.note, reading_, reading === "performed"),
     };
   });
 }
@@ -474,10 +660,13 @@ export async function presentTakes(store: WorldStore, record: ChapterAudiobook |
 }
 
 export interface AudiobookPlan {
-  chapter: { id: string; file: string; title: string; order: number; version: number; hash: string };
+  /** `number` is what the chapter is called by (R-2): none for a prologue, and counted without one. */
+  chapter: { id: string; file: string; title: string; order: number; number: number | null; version: number; hash: string };
   body: string;
   cast: ChapterVoices | "unreadable" | null;
   ambiguous: number;
+  /** What the record's seams do under this reading (design turn 198): the blocks they shape, the joins held, the gaps. */
+  seams: AudiobookSeamView;
   record: ChapterAudiobook | "unreadable" | null;
   /** The artifact ids of the record's takes that are still on the shelf with their media (codex on PR 1180). */
   present: Set<string>;
@@ -489,15 +678,48 @@ export interface AudiobookPlan {
 
 /**
  * A chapter as a held proposal would read it (design turn 184, SPEC-047 R-54, R-55): the cast
- * it carries before it is written, the chapter note it drafted, the speaker notes it drafted
- * for speakers with none, and — for a run's preparation — the directions it would put in place
- * of the record's, whole. Nothing of it is on disk until the proposal is accepted.
+ * it carries before it is written, the speaker notes it drafted for speakers with none, and —
+ * for a run's preparation — the directions it would put in place of the record's, whole.
+ * Nothing of it is on disk until the proposal is accepted.
  */
 export interface ProposalOverride {
   cast?: ChapterVoices;
-  chapterNote?: string;
   speakerNotes?: Readonly<Record<string, string>>;
   directions?: Readonly<Record<string, AudiobookDirectionInput>>;
+}
+
+/**
+ * The credits as the run reads them (design turn 252, R-214): the opening and the closing as the
+ * two blocks of a chapter of their own, both the book narrator's under the book note, so they are
+ * priced, grouped, checked, filed and flagged as a chapter's blocks are. They are narration alone:
+ * no cast, no seams, no reactions.
+ */
+async function planAudiobookCredits(store: WorldStore, productionId: string, narrator: AudiobookReader): Promise<AudiobookPlan> {
+  const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
+  if (!production) throw new Error("That production is no longer in this world.");
+  const read = await readAudiobookCredits(store, productionId);
+  const credits = read === "unreadable" ? null : read;
+  const facts = audiobookCreditFacts(credits?.details ?? {}, audiobookCreditDefaults(production, narrator));
+  const blocks: AudiobookBlock[] = AUDIOBOOK_CREDIT_KEYS.map((key) => ({ key, paragraph: -1, text: audiobookCreditWords(credits, key, facts).words }));
+  const record = await readAudiobook(store, productionId, AUDIOBOOK_CREDITS_ID);
+  const bookRead = await readAudiobookBook(store, productionId);
+  const book = bookRead === null || bookRead === "unreadable" ? null : bookRead;
+  const present = await presentTakes(store, record === "unreadable" ? null : record);
+  const sheets = store.getBundle().sheets.filter((sheet) => sheet.type === "character" && !sheet.retired);
+  const planned = assignReaders(blocks, "narrator", narrator, sheets, store.getBundle().clonedVoices ?? [], record === "unreadable" ? null : record, (artifactId) => present.has(artifactId), new Set(), {}, audiobookReadingNotes(book, AUDIOBOOK_CREDITS_ID), store.getBundle().designedVoices ?? []);
+  const body = blocks.map((block) => block.text).join("\n\n");
+  return {
+    chapter: { id: AUDIOBOOK_CREDITS_ID, file: AUDIOBOOK_CREDITS_ID, title: "Credits", order: 0, number: null, version: 1, hash: sha256(body) },
+    body,
+    cast: null,
+    ambiguous: 0,
+    seams: { changed: 0, held: 0, dropped: 0, droppedSeams: [], gaps: [] },
+    record,
+    present,
+    reading: "narrator",
+    blocks: planned,
+    book,
+  };
 }
 
 /**
@@ -512,10 +734,12 @@ export async function planAudiobook(
   chapterId: string,
   input: { narrator: AudiobookReader; override?: ProposalOverride },
 ): Promise<AudiobookPlan> {
+  if (chapterId === AUDIOBOOK_CREDITS_ID) return planAudiobookCredits(store, productionId, input.narrator);
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const summary = production.chapters.find((c) => c.id === chapterId || c.file === chapterId);
   if (!summary) throw new Error("That chapter is no longer in this production.");
+  const number = chapterNumber(production.chapters, summary);
   const opened = await openChapter(store, productionId, summary.id);
   const override = input.override;
   const cast = override?.cast ?? (await readVoices(store, productionId, summary.file));
@@ -526,21 +750,20 @@ export async function planAudiobook(
   // One reader, one block (design turn 190): under `narrator` and `performed` one voice reads the
   // chapter, so a paragraph's turns are one block; a speaker a person records is read apart.
   const recorded = new Set(book === null ? [] : (book.recorded ?? []));
-  const derived = audiobookBlocks(opened.body, cast === "unreadable" ? null : cast, audiobookHeading(summary.order, summary.title), audiobookBlockOptions(book));
+  // The seams set by hand on the record reshape the blocks (design turn 198), under every reading.
+  const derived = audiobookBlocks(opened.body, cast === "unreadable" ? null : cast, audiobookHeading(number, summary.title), audiobookBlockOptions(book, record === "unreadable" ? null : record));
   const sheets = store.getBundle().sheets.filter((sheet) => sheet.type === "character" && !sheet.retired);
   const present = await presentTakes(store, record === "unreadable" ? null : record);
   // A drafted note stands only where the author has none (R-54): the author's always wins.
   const notes = { ...override?.speakerNotes, ...book?.notes };
-  const readingNotes = audiobookReadingNotes(
-    override?.chapterNote === undefined ? book : { ...book, chapterNotes: { ...book?.chapterNotes, [summary.id]: override.chapterNote } },
-    summary.id,
-  );
+  const readingNotes = audiobookReadingNotes(book, summary.id);
   const blocks = assignReaders(derived.blocks, reading, input.narrator, sheets, store.getBundle().clonedVoices ?? [], record === "unreadable" ? null : record, (artifactId) => present.has(artifactId), recorded, notes, readingNotes, store.getBundle().designedVoices ?? []);
   return {
-    chapter: { id: summary.id, file: summary.file, title: summary.title, order: summary.order, version: opened.version, hash: sha256(opened.body) },
+    chapter: { id: summary.id, file: summary.file, title: summary.title, order: summary.order, number, version: opened.version, hash: sha256(opened.body) },
     body: opened.body,
     cast,
     ambiguous: derived.ambiguous,
+    seams: derived.seams,
     record,
     present,
     reading,

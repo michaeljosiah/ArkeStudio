@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { ZodType } from "zod";
 import type { ClientMessage } from "./frames.js";
+import { ProductionCardPreviewSchema } from "./production-card-preview.js";
 import {
   ConversationActionIdSchema,
   ConversationIdSchema,
@@ -113,6 +114,7 @@ export const ArkeReadRequirementSchema = z.enum([
   "exports",
   "bench",
   "readiness",
+  "conversation-candidate",
 ]);
 export type ArkeReadRequirement = z.infer<typeof ArkeReadRequirementSchema>;
 
@@ -331,6 +333,7 @@ export const ArkeTakeReviewBodySchema = z
     mediaId: ConversationActionSemanticIdSchema,
     destination: z.string().min(1).max(500),
     currentSelection: z.string().max(500).nullable(),
+    currentMediaPath: z.string().min(1).max(1_000).optional(),
     reason: z.string().max(2_000).optional(),
     mediaPath: z.string().min(1).max(1_000).optional(),
     posterPath: z.string().min(1).max(1_000).optional(),
@@ -454,6 +457,7 @@ export const ConversationActionShownProjectionSchema = z
     ripples: z.array(z.string().min(1).max(2_000)).default([]),
     permissionReason: ArkePermissionReasonSchema,
     body: ConversationActionBodySchema,
+    productionPreview: ProductionCardPreviewSchema.optional(),
   })
   .strict();
 export type ConversationActionShownProjection = z.infer<typeof ConversationActionShownProjectionSchema>;
@@ -486,6 +490,9 @@ const ConversationActionIntentFields = {
 export const ConversationActionPrepareIntentSchema = z.object(ConversationActionIntentFields).strict();
 export type ConversationActionPrepareIntent = z.infer<typeof ConversationActionPrepareIntentSchema>;
 
+export const SHEET_CREATION_CARD_REVIEW_SCHEMA_VERSION = 99;
+const SheetCreationProseFieldsSchema = z.array(z.number().int().nonnegative()).min(1);
+
 export const ConversationActionBindingSchema = z
   .object({
     ...ConversationActionIntentFields,
@@ -493,6 +500,7 @@ export const ConversationActionBindingSchema = z
     authorityRevision: z.number().int().min(0),
     previewDigest: Sha256Schema,
     shown: ConversationActionShownProjectionSchema,
+    sheetCreationProseFields: SheetCreationProseFieldsSchema.optional(),
     approvalBlockedReason: z.string().min(1).max(1_000).optional(),
     status: z.literal("pending"),
     preparedAt: IsoDateTimeSchema,
@@ -504,6 +512,13 @@ export const ConversationActionBindingSchema = z
     }
     if (binding.shown.body.family !== binding.cardFamily) {
       ctx.addIssue({ code: "custom", path: ["shown", "body", "family"], message: "card body family differs from binding" });
+    }
+    if (binding.sheetCreationProseFields) {
+      const body = binding.shown.body, indices = binding.sheetCreationProseFields;
+      if (body.family !== "authored-diff" || body.fields.some(field => field.before !== null) ||
+        indices.some(index => index >= body.fields.length) || new Set(indices).size !== indices.length) {
+        ctx.addIssue({ code: "custom", path: ["sheetCreationProseFields"], message: "expected unique field indices for a creation review" });
+      }
     }
   });
 export type ConversationActionBinding = z.infer<typeof ConversationActionBindingSchema>;
@@ -552,6 +567,7 @@ export const ConversationActionRecordSchema = z
     authorityRevision: z.number().int().min(0),
     previewDigest: Sha256Schema,
     shown: ConversationActionShownProjectionSchema,
+    sheetCreationProseFields: SheetCreationProseFieldsSchema.optional(),
     approvalBlockedReason: z.string().min(1).max(1_000).optional(),
     status: ConversationActionStatusSchema,
     preparedAt: IsoDateTimeSchema,
@@ -565,11 +581,44 @@ export const ConversationActionRecordSchema = z
 export type ConversationActionRecord = z.infer<typeof ConversationActionRecordSchema>;
 
 /** The renderer gets coordinator-derived controls, never authority payload or mutable options. */
+export const ConversationCardMediaSchema = z.object({
+  kind: z.enum(["image", "video", "audio", "document"]),
+  path: ArkeGenerationResultSchema.shape.mediaPath.unwrap(),
+  poster: ArkeGenerationResultSchema.shape.posterPath.unwrap().optional(),
+  alt: z.string().min(1).max(1_000), role: z.string().min(1).max(200),
+}).strict();
+/** Presentation bindings to the sealed quote; these never enter the durable decision envelope. */
+export const ConversationGenerationWorkSchema = z.object({
+  jobKeys: z.array(UlidSchema).min(1).max(100),
+  media: z.array(ConversationCardMediaSchema).max(100),
+  results: z.array(ArkeGenerationResultSchema).max(100).optional(),
+}).strict();
+export type ConversationGenerationWork = z.infer<typeof ConversationGenerationWorkSchema>;
+export type ConversationCardMedia = z.infer<typeof ConversationCardMediaSchema>;
+export const ConversationExportStateSchema = z.object({
+  status: z.enum(["running", "done", "failed", "cancelled"]), percent: z.number().min(0).max(100),
+  output: ConversationCardMediaSchema.shape.path.refine(path => path.startsWith("exports/"), "expected an export media address").nullable(),
+}).strict();
 export const ConversationActionCardSchema = ConversationActionRecordSchema.extend({
   availableDecisions: z.array(ConversationActionDecisionKindSchema),
   blockedReason: z.string().min(1).max(1_000).optional(),
+  generationWork: ConversationGenerationWorkSchema.optional(),
+  exportState: ConversationExportStateSchema.optional(),
 }).strict();
 export type ConversationActionCard = z.infer<typeof ConversationActionCardSchema>;
+
+/** Selecting a landed result prepares a review; this gesture never accepts a take. */
+export const PrepareConversationTakeReviewSchema = z.object({
+  kind: z.literal("conversation-take-review-prepare"), worldId: UlidSchema,
+  conversationId: ConversationIdSchema, sourceActionId: ConversationActionIdSchema,
+  takeId: ConversationActionSemanticIdSchema, shotId: ConversationActionSemanticIdSchema,
+  expectedConversationSeq: z.number().int().nonnegative(), requestId: UlidSchema,
+}).strict();
+export type PrepareConversationTakeReview = z.infer<typeof PrepareConversationTakeReviewSchema>;
+export const ConversationTakeReviewPreparationResultSchema = z.object({
+  worldId: UlidSchema, conversationId: ConversationIdSchema, requestId: UlidSchema,
+  actionId: ConversationActionIdSchema.optional(), detail: z.string().max(1_000).optional(),
+}).strict();
 
 /** The content-minimising world-scoped audit retained after a conversation is deleted. */
 export const ConversationActionTombstoneSchema = z
@@ -601,6 +650,7 @@ export const DecideConversationActionSchema = z
     requestId: UlidSchema,
     /** The paired gateway always adds this restriction; only stored action facts decide its scope. */
     hostActions: z.literal("refuse").optional(),
+    groupApprovalTurnId: TurnIdSchema.optional(),
   })
   .strict();
 export type DecideConversationAction = z.infer<typeof DecideConversationActionSchema>;

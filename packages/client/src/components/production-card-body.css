@@ -1,0 +1,92 @@
+.fy-production-preview { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.fy-production-preview h4 { margin: 10px 0; }
+.fy-production-preview dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+.fy-production-preview dt, .fy-production-preview small { color: var(--muted-foreground); font-size: 11px; }
+.fy-production-preview dd { margin: 3px 0; }
+.fy-production-preview__script { border: 1px solid var(--border); padding: 12px; max-height: 480px; overflow: auto; white-space: pre-wrap; }
+.fy-production-preview__script > div { padding: 8px; }
+.fy-production-preview__script [data-kind="dialogue"] { margin-inline: 12%; }
+.fy-production-preview__script strong, .fy-production-preview__script small { display: block; }
+.fy-production-preview__script [data-changed] { border-left: 3px solid var(--accent); }
+.fy-production-preview [data-removed] { opacity: .65; }
+.fy-production-preview__rows { max-height: 520px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border); min-width: 0; }
+.fy-production-preview__rows .fy-swrows { min-width: 0; }
+.fy-production-preview__rows[data-screen="scene-detail"] .fy-swrows[data-layout] .fy-swrow__band { display: flex; flex-direction: column; width: 100%; min-width: 0; }
+.fy-production-preview__rows[data-screen="scene-detail"] .fy-swrows[data-layout] .fy-swrow__body { width: 100%; padding: 10px; }
+.fy-production-preview__rows[data-screen="scene-detail"] .fy-swrows[data-layout] .fy-swrow__framewrap { width: 100%; height: auto; }
+.fy-production-preview__rows .fy-swrow__frame { width: 100%; aspect-ratio: 16/9; min-height: 100px; max-height: 180px; }
+.fy-production-preview__rows .fy-swrow__titleline { padding-right: 0; }
+.fy-production-preview__rows .fy-swrow__pencil { display: none; }
+.fy-production-preview__shotmeta { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; font: var(--type-meta); }
+.fy-production-preview__rows :is(.fy-swrow__actions, .fy-swrow__frameactions, .fy-swaddshot, .fy-swdivider, .fy-swboard__actions) { display: none; }
+.fy-production-preview__rows textarea { pointer-events: none; }
+.fy-production-preview__mark { padding: 6px 10px; color: var(--foreground); border-left: 3px solid var(--accent); font-size: 11px; }
+.fy-production-preview__cast { display: flex; flex-wrap: wrap; gap: 12px; }
+.fy-production-preview__cast figure { width: 72px; margin: 0; }
+.fy-production-preview__cast img { width: 100%; height: 72px; object-fit: cover; }
+.fy-production-preview__cast figcaption { font-size: 11px; }
+.fy-production-preview__stage { height: 340px; overflow: auto; position: relative; }
+.fy-actiongroup { min-width: 0; max-width: 100%; }
+.fy-actiongroup__head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 12px 0; font-size: 12px; }
+.fy-actiongroup__head .ui-btn { min-height: 44px; }
+.fy-actiongroup__sequence { list-style: decimal; padding-left: 20px; margin: 0; }
+.fy-actiongroup__sequence:has(> li:only-child) { list-style: none; padding-left: 0; }
+.fy-actiongroup__sequence > li { min-width: 0; }
+.fy-actiongroup__sequence .fy-actioncard { margin-bottom: 10px; }
+.fy-generation-card { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.fy-actioncard__receipt > .fy-generation-card { flex: 1 1 100%; }
+.fy-generation-card__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px; min-width: 0; }
+.fy-generation-card__grid figure { margin: 0; min-width: 0; }
+.fy-generation-card__grid :is(img, video) { display: block; width: 100%; max-height: 240px; object-fit: contain; background: var(--muted); }
+.fy-generation-card__grid audio { max-width: 100%; width: 100%; }
+.fy-generation-card__grid figcaption { margin: 6px 0; font: var(--type-meta); overflow-wrap: anywhere; }
+.fy-generation-card__grid :is(.ui-btn, a), .fy-generation-card__job .ui-btn { min-height: 44px; }
+.fy-generation-card__acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.fy-generation-card__job { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fy-generation-card__use summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; font: var(--type-meta); }
+.fy-generation-card__use [role="status"] { display: block; font: var(--type-meta); }
+.fy-production-timeline { min-width: 0; max-width: 100%; }
+.fy-production-timeline h4 { margin: 8px 0; }
+.fy-production-timeline__scroll { max-width: 100%; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--border); }
+.fy-production-timeline__tracks { min-width: 660px; position: relative; }
+.fy-production-timeline .fy-track__label { width: 146px; }
+.fy-production-timeline :is(.fy-pictclip, .fy-typedclip):disabled { opacity: 1; }
+.fy-production-timeline :is(.fy-cut-lane-open, .fy-trackbtns, .fy-pictclip__grip, .fy-typedclip__grip) { display: none; }
+.fy-production-timeline [data-review-change="inserted"] { outline: 2px solid var(--accent); outline-offset: -2px; }
+.fy-production-timeline [data-review-change="changed"] { outline: 2px solid var(--ring); outline-offset: -2px; }
+.fy-production-timeline [data-version="before"] [data-review-change] { opacity: .6; border-style: dashed; }
+.fy-production-timeline__range-lane { position: absolute; inset: 0 0 0 146px; z-index: 5; pointer-events: none; }
+.fy-production-timeline__range { position: absolute; top: 0; bottom: 0; border-inline: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.fy-production-timeline__text { margin: 8px 0; padding: 0 0 0 14px; }
+
+.fy-chat__runreport-row[data-kind="step"] { flex-wrap: wrap; }
+.fy-chat__runreport-frames { width: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr)); gap: 6px; padding: 0 10px 10px; min-width: 0; }
+.fy-chat__runreport-frames figure { margin: 0; min-width: 0; }
+.fy-chat__runreport-frames img { display: block; width: 100%; aspect-ratio: 16/9; object-fit: contain; background: var(--muted); }
+.fy-chat__runreport-frames figcaption { font: var(--type-meta); overflow-wrap: anywhere; }
+.fy-chat__runsummary { max-width: 100%; overflow-wrap: anywhere; }
+
+.fy-production-preview__stage .fy-swstage__construction { display: none; }
+.fy-chat__runreport-frames .fy-portrait--fallback { aspect-ratio: 16/9; }
+
+/* The Make card (design turn 270). */
+.fy-comicmake { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.fy-comicmake__facts { display: flex; flex-direction: column; gap: 5px; }
+.fy-comicmake__facts > div { display: flex; justify-content: space-between; gap: 12px; font-size: var(--text-sm); }
+.fy-comicmake__facts span { color: var(--muted-foreground); }
+.fy-comicmake__facts b { font-weight: 500; text-align: right; }
+.fy-comicmake__facts .price { padding-top: 7px; margin-top: 2px; border-top: 1px solid var(--border); }
+.fy-comicmake__facts .price b { font: var(--type-mono); font-size: var(--text-sm); font-weight: 600; }
+.fy-comicmake__note { margin: 0; font-size: var(--text-sm); }
+.fy-comicmake__steps { display: flex; flex-direction: column; gap: 6px; }
+.fy-comicmake__steps > div { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--muted-foreground); }
+.fy-comicmake__steps > div.done, .fy-comicmake__steps > div.now { color: var(--foreground); }
+.fy-comicmake__steps svg { color: var(--success); flex: none; }
+.fy-comicmake__steps i { width: 14px; height: 14px; flex: none; display: grid; place-items: center; }
+.fy-comicmake__steps i::after { content: ""; width: 9px; height: 9px; border: 1.5px solid var(--border); border-radius: 50%; }
+.fy-comicmake__steps .now i::after { border-color: var(--foreground); }
+.fy-comicmake .m { margin-left: auto; font: var(--type-mono); font-size: var(--text-2xs); color: var(--muted-foreground); }
+.fy-comicmake__needs { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.fy-comicmake__needs > b { padding: 7px 10px; font: var(--type-label); font-weight: 600; background: var(--secondary); }
+.fy-comicmake__needs button { display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 0 10px; border: 0; border-top: 1px solid var(--border); background: none; color: inherit; font-size: var(--text-sm); text-align: left; cursor: pointer; }
+.fy-comicmake__needs button > svg:first-child { color: var(--destructive); flex: none; }

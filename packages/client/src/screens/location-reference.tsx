@@ -17,8 +17,7 @@ import {
 } from "@arke-studio/contracts";
 import { GenerationDialog } from "../components/generation-dialog.js";
 import { ImageDialog } from "../components/image-dialog.js";
-import { Portrait } from "../components/portrait.js";
-import { Button, Callout, IconButton, cx } from "../components/ui.js";
+import { Button, Callout, cx } from "../components/ui.js";
 import { Upload } from "../components/icons.js";
 import { Loading } from "../components/loading.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
@@ -51,11 +50,22 @@ export type PendingLocationView = {
   /** What the generation asked this angle to be called; the name field opens on it. */
   proposedName: string;
   model: string;
-  anchored: boolean;
+  referenceNote: string;
   /** Newest first, and the download name's last resort. */
   at: string;
   sourceId: string;
 };
+
+/** A historical anchor is proved by the saved request, never by today's accepted kit. */
+function locationReferenceNote(params: Record<string, unknown>, references: unknown, sheetId: string): string {
+  const carried = Array.isArray(references) ? references.filter((file): file is string => typeof file === "string" && file.length > 0) : [];
+  const provenance = params["provenance"];
+  const anchor = provenance !== null && typeof provenance === "object" && "anchorFile" in provenance ? provenance.anchorFile : undefined;
+  if (typeof anchor === "string" && anchor.length > 0 && carried.includes(`references/${sheetId}/${anchor}`)) {
+    return "anchored to the establishing view";
+  }
+  return carried.length > 0 ? "other references attached" : "no references recorded";
+}
 
 /**
  * Everything this location has waiting on a name.
@@ -92,7 +102,7 @@ export function pendingLocationViews(
       takeId: take.id,
       proposedName: proposed?.name ?? "",
       model: take.model,
-      anchored: take.references.length > 0,
+      referenceNote: locationReferenceNote(take.params, take.references, sheetId),
       at: take.completedAt ?? take.dispatchedAt,
       sourceId: take.id,
     });
@@ -118,7 +128,7 @@ export function pendingLocationViews(
       takeId: null,
       proposedName: proposed?.name ?? "",
       model: job.model,
-      anchored: ((job.params["references"] as unknown[] | undefined) ?? []).length > 0,
+      referenceNote: locationReferenceNote(job.params, job.params["references"], sheetId),
       at: job.updatedAt,
       sourceId: file.replace(/\.[^.]+$/, ""),
     });
@@ -219,75 +229,70 @@ export function LocationReferenceScreen() {
   return (
     <div data-screen="location-reference">
       <LocationHeader worldId={worldId} sheetId={sheetId} name={sheet.name} status={sheet.status} />
-      <main className="fy-locref">
+      <main className={cx("fy-locref", !sheetFile && "fy-locref--uncompiled")}>
         <section className="fy-locref__views">
-          <div className="fy-locref__sechead">
+          {views.length > 0 && <div className="fy-locref__sechead">
             <h2>Accepted views</h2>
             <span className="fy-mono">
               {views.length} of {MAX_ACTIVE_LOCATION_VIEWS}
             </span>
-          </div>
+          </div>}
 
-          {views.length === 0 && pending.length === 0 && (
-            <Callout tone="neutral" title="Start with the establishing view">
-              <p>
-                The first view you accept becomes the one a card shows and the one every later view is
-                anchored to. Its Look is already written — the generation reads it.
-              </p>
-            </Callout>
-          )}
-
-          {views.map((view, index) => (
-            <article key={view.id} className="fy-locref__view">
-              <span className="fy-locref__panel fy-mono">PANEL {String(index + 1).padStart(2, "0")}</span>
-              <div className="fy-locref__viewimage fy-imghost">
-                <ImageDialog
-                  worldSlug={world.meta.slug}
-                  path={`references/${sheetId}/${view.file}`}
-                  label={`${sheet.name}: ${view.name}`}
-                  title={sheet.name}
-                  subtitle={view.name}
-                  triggerLabel={`View larger: ${view.name}`}
-                  closeLabel="Close view"
-                  triggerClassName="fy-locref__zoom"
-                  triggerRadius={6}
-                  download
-                  downloadName={`${sheet.name} ${view.name}`}
-                />
-              </div>
-              <div className="fy-locref__viewfoot">
-                <h3>{view.name}</h3>
-                <p className="fy-mono">
-                  accepted {shortDate(view.acceptedAt)} · sheet v{view.sheetVersion} · look v
-                  {view.artDirectionVersion}
-                </p>
-                {/* The establishing view is what the sheet opens on and the dialog's Kit card; a scene pins another angle, never that one (codex round 4). */}
-                {preset !== null && index !== 0 && !(kit?.looks ?? []).some((look) => look.id === view.id && look.attachedTo?.kind === "scene" && look.attachedTo.productionId === preset.productionId && look.attachedTo.sceneId === preset.sceneId) ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => attachCharacterLook(worldId, sheetId, view.id, { kind: "scene", productionId: preset.productionId, sceneId: preset.sceneId })}
-                  >
-                    Use in scene {preset.number}
-                  </Button>
-                ) : null}
-                {index === 0 && (
-                  // Panel 1 is the anchor every other angle was generated against, so replacing it
-                  // is the one generation that is deliberately *not* anchored to anything.
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      setAngleName(view.name);
-                      setReplacingEstablishing(true);
-                      setAdding(true);
-                    }}
-                  >
-                    Replace
-                  </Button>
-                )}
-              </div>
-            </article>
-          ))}
+          {views.length > 0 && <div className="fy-locref__gallery">
+            {views.map((view, index) => (
+              <article key={view.id} className={cx("fy-locref__view", index === 0 && "fy-locref__view--establishing")}>
+                <div className="fy-locref__viewimage fy-imghost">
+                  <ImageDialog
+                    worldSlug={world.meta.slug}
+                    path={`references/${sheetId}/${view.file}`}
+                    label={`${sheet.name}: ${view.name}`}
+                    title={sheet.name}
+                    subtitle={view.name}
+                    triggerLabel={`View larger: ${view.name}`}
+                    closeLabel="Close view"
+                    triggerClassName="fy-locref__zoom"
+                    triggerRadius={6}
+                    download
+                    downloadName={`${sheet.name} ${view.name}`}
+                  />
+                </div>
+                <div className="fy-locref__viewfoot">
+                  <div className="fy-locref__viewhead">
+                    <span className="fy-locref__panel fy-mono">PANEL {String(index + 1).padStart(2, "0")}</span>
+                    <h3 title={view.name}>{view.name}</h3>
+                    {/* The establishing view is what the sheet opens on and the dialog's Kit card; a scene pins another angle, never that one (codex round 4). */}
+                    {preset !== null && index !== 0 && !(kit?.looks ?? []).some((look) => look.id === view.id && look.attachedTo?.kind === "scene" && look.attachedTo.productionId === preset.productionId && look.attachedTo.sceneId === preset.sceneId) ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => attachCharacterLook(worldId, sheetId, view.id, { kind: "scene", productionId: preset.productionId, sceneId: preset.sceneId })}
+                      >
+                        Use in scene {preset.number}
+                      </Button>
+                    ) : null}
+                    {index === 0 && (
+                      // Panel 1 is the anchor every other angle was generated against, so replacing it
+                      // is the one generation that is deliberately *not* anchored to anything.
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          setAngleName(view.name);
+                          setReplacingEstablishing(true);
+                          setAdding(true);
+                        }}
+                      >
+                        Replace
+                      </Button>
+                    )}
+                  </div>
+                  <p className="fy-mono">
+                    accepted {shortDate(view.acceptedAt)} · sheet v{view.sheetVersion} · look v
+                    {view.artDirectionVersion}
+                  </p>
+                </div>
+              </article>
+            ))}
+          </div>}
 
           {superseded.length > 0 && (
             <p className="fy-locref__superseded">
@@ -310,17 +315,23 @@ export function LocationReferenceScreen() {
                     {/* Unnamed until it is accepted, so a candidate saves under the take that
                         made it — deterministic, and it says which one it was. */}
                     <div className="fy-locref__candidateimage fy-imghost">
-                      <Portrait
+                      <ImageDialog
                         worldSlug={world.meta.slug}
                         path={candidate.path}
                         label={name || "Candidate view"}
-                        radius={6}
+                        title={sheet.name}
+                        subtitle={name || "Candidate view"}
+                        triggerLabel={`View larger candidate: ${name || "unnamed view"}`}
+                        closeLabel="Close candidate view"
+                        triggerClassName="fy-locref__zoom"
+                        triggerRadius={6}
                         download
                         downloadName={name.trim() || `${sheet.name} candidate view ${candidate.sourceId}`}
                       />
                     </div>
+                    <span className="fy-locref__note">Select the image to view larger</span>
                     <p className="fy-mono">
-                      {candidate.model} · {candidate.anchored ? "anchored to the establishing view" : "unanchored"}
+                      {candidate.model} · {candidate.referenceNote}
                     </p>
                     <label className="fy-locref__namefield">
                       <span>Name this view</span>
@@ -433,14 +444,15 @@ export function LocationReferenceScreen() {
             <Button ref={addRef} disabled={full} onClick={() => setAdding(true)}>
               {establishing ? "Generate" : "Add a view"}
             </Button>
-            {/* The glyph, for the same reason the character kit's is one (issue 1010, U1). */}
-            <IconButton
-              label={uploading ? "Uploading…" : canUpload ? "Upload" : UPLOAD_UNAVAILABLE}
+            <Button
+              variant="outline"
+              title={!canUpload ? UPLOAD_UNAVAILABLE : undefined}
               disabled={!canUpload || uploading || full}
               onClick={() => importLocationViewCandidate(worldId, sheetId)}
             >
               {uploading ? <Loading inline size={13} /> : <Upload />}
-            </IconButton>
+              {uploading ? "Uploading…" : "Upload"}
+            </Button>
             {!establishing && <span className="fy-locref__note">anchored to the establishing view</span>}
           </div>
           <GenerationDialog
@@ -518,38 +530,34 @@ export function LocationReferenceScreen() {
           )}
         </section>
 
-        <section className={cx("fy-locref__sheet", !sheetFile && "fy-locref__sheet--empty")}>
+        {sheetFile && <section className="fy-locref__sheet">
           <div className="fy-locref__sechead">
             <h2>Location sheet</h2>
             <span className="fy-mono">assembled here, not generated</span>
           </div>
-          {sheetFile ? (
-            <>
-              <div className="fy-imghost">
-                <ImageDialog
-                  worldSlug={world.meta.slug}
-                  path={`references/${sheetId}/${sheetFile}`}
-                  label={`${sheet.name} location sheet`}
-                  title={sheet.name}
-                  subtitle="location sheet"
-                  triggerLabel={`View larger location sheet for ${sheet.name}`}
-                  closeLabel="Close location sheet"
-                  triggerClassName="fy-locref__sheetimage"
-                  triggerRadius={6}
-                  download
-                  downloadName={`${sheet.name} location sheet`}
-                />
-              </div>
-              <p className="fy-mono">{sheetFile}</p>
-              {/* The same function dispatch composes the preamble from, so what this promises and
-                  what a request states cannot drift into disagreeing. */}
-              <div className="fy-locref__carries">
-                <span className="fy-mono">WHAT A SHOT CARRIES</span>
-                <p>{panelMapPhrase(views.map((view) => view.name))}</p>
-              </div>
-            </>
-          ) : null}
-        </section>
+          <div className="fy-locref__compilation fy-imghost">
+            <ImageDialog
+              worldSlug={world.meta.slug}
+              path={`references/${sheetId}/${sheetFile}`}
+              label={`${sheet.name} location sheet`}
+              title={sheet.name}
+              subtitle="location sheet"
+              triggerLabel={`View larger location sheet for ${sheet.name}`}
+              closeLabel="Close location sheet"
+              triggerClassName="fy-locref__sheetimage"
+              triggerRadius={6}
+              download
+              downloadName={`${sheet.name} location sheet`}
+            />
+          </div>
+          <p className="fy-mono">{sheetFile}</p>
+          {/* The same function dispatch composes the preamble from, so what this promises and
+              what a request states cannot drift into disagreeing. */}
+          <div className="fy-locref__carries">
+            <span className="fy-mono">WHAT A SHOT CARRIES</span>
+            <p>{panelMapPhrase(views.map((view) => view.name))}</p>
+          </div>
+        </section>}
       </main>
     </div>
   );

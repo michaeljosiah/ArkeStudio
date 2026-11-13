@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { JobSchema, newId, orderedShots, ulid, storyTimelineFingerprint, performanceLineKey, type ConversationActionCard, type ModelWorldChatAction, type ProviderStatus, type WorldChatPreparedAction } from "@arke-studio/contracts";
 import { productionAudioGenerationSource, productionAudioOperationId } from "../../src/world-chat/production-audio-generation.js";
 import { GenerationQuotes } from "../../src/world-chat/generation-quotes.js";
+import { generationCardResults } from "../../src/world-chat/generation-card-results.js";
 import { worldChatActionAdapters } from "../../src/world-chat/actions.js";
+import { readWorldMeta } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { applyVoiceAssignment } from "../../src/sheets/authoring.js";
 import { createAudioMediaTools } from "../../src/audio/media-tools.js";
@@ -23,6 +25,8 @@ import { makeTempWorld } from "../world/helpers.js";
 import { wav } from "../audio/helpers.js";
 import { encodePng, solidImage } from "../../src/references/png.js";
 
+// A date, not now: the store below runs on it, and a sealed performance quote's day of freshness
+// is counted on the store's clock, so its quotes stay fresh however far the wall clock runs past.
 const AT = "2026-10-04T12:00:00.000Z";
 const providers: ProviderStatus[] = [{ id: "google", configured: true, validation: "valid", fault: null, probes: [{ capability: "voice-tts", available: true }] }];
 const action = (productionId: string, request: Extract<ModelWorldChatAction, { kind: "production-audio-generation" }>["request"]): ModelWorldChatAction =>
@@ -104,6 +108,21 @@ it("uses the native single-line performance compiler and retains its stable quot
     direction: { speed: 0.8, cues: [] } }), newId("act"), AT), /speed/);
 });
 
+it("fences expressive performance quotes before approval and paid dispatch", async t => {
+  const h = await setup(); t.after(() => h.store.close());
+  await applyVoiceAssignment(h.store, { path: "characters/maren-kest.md", voice: { provider: "elevenlabs", model: "eleven_v4", voiceId: "calen" } });
+  const id = newId("act"), request = action(h.production.meta.id, { operation: "performance", sceneId: h.scene.id, shotId: h.shot.id,
+    direction: { speed: 1, cues: [{ kind: "sound", at: 0, sound: "snorts" }], note: "same male narrator imitating a British woman, slight pitch lift, retain male timbre" } });
+  await h.quotes().prepare(request, id, AT);
+  assert.equal((await readWorldMeta(h.store.dir)).schemaVersion, 78);
+  await assert.rejects(readWorldMeta(h.store.dir, { supports: 77 }), /newer|schema|version/i);
+  assert.equal(h.inputs.length, 0);
+  await assert.rejects(readPerformanceGenerationQuote(h.store, productionAudioOperationId(id)));
+  await h.quotes().dispatch(request, id);
+  assert.equal(h.inputs.length, 1);
+  assert.equal((await readPerformanceGenerationQuote(h.store, productionAudioOperationId(id))).cadencePlan.note, request.kind === "production-audio-generation" && request.request.operation === "performance" ? request.request.direction?.note : undefined);
+});
+
 it("quotes table-read work through the native planner, including explicit unavailable lines", async t => {
   const h = await setup(); t.after(() => h.store.close());
   const compiled = await h.source.compile(action(h.production.meta.id, { operation: "table-read", sceneId: h.scene.id }), newId("act"), AT);
@@ -147,9 +166,15 @@ it("keeps generated dialogue unselected, requires human review, proposes duratio
   await h.quotes().prepare(request, id, AT); await h.quotes().dispatch(request, id);
   const quote = await readPerformanceGenerationQuote(h.store, productionAudioOperationId(id));
   const bytes = wav(Array.from({ length: 48000 }, (_, i) => Math.round(Math.sin(i / 10) * 3000)));
-  const record = await finalizeGeneratedPerformance(h.store, undefined, quote, `pf_${id.slice(4)}`, bytes, "wav", { estimatedMicroUsd: quote.estimatedMicroUsd, actualMicroUsd: null });
+  const jobId = newId("jb");
+  const record = await finalizeGeneratedPerformance(h.store, undefined, quote, `pf_${id.slice(4)}`, bytes, "wav", { estimatedMicroUsd: quote.estimatedMicroUsd, actualMicroUsd: null }, jobId);
   assert.ok(record.kind === "generated-tts");
-  assert.deepEqual(await finalizeGeneratedPerformance(h.store, undefined, quote, record.id, bytes, "wav", record.cost), record);
+  assert.deepEqual(await finalizeGeneratedPerformance(h.store, undefined, quote, record.id, bytes, "wav", record.cost, jobId), record);
+  const { voiceReference: _reference, ...input } = h.inputs[0]!;
+  const job = JobSchema.parse({ ...input, id: jobId, status: "succeeded", createdAt: AT, updatedAt: AT, finalization: { status: "complete", error: null, updatedAt: AT } });
+  assert.equal(generationCardResults(h.store, [job])[0]?.id, record.id);
+  assert.deepEqual(generationCardResults(h.store, [{ ...job, id: newId("jb") }]), []);
+  assert.deepEqual(generationCardResults(h.store, [{ ...job, finalization: { status: "pending", error: null, updatedAt: AT } }]), []);
   const current = () => h.store.getBundle().productions.find(p => p.meta.id === h.production.meta.id)!;
   assert.deepEqual(current().performanceReview.reviews, []); assert.deepEqual(current().performanceReview.selections, {});
   const timing = { postHandle: { kind: "reaction" as const, durationSec: 0.5 }, overflow: { mode: "forbid" as const } };

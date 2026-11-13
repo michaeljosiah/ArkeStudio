@@ -49,7 +49,7 @@ function engine() {
     throw new Error(`Unexpected request ${url}`);
   };
   const client = new ComfyUiClient(fetch, () => "http://127.0.0.1:8188", async () => ({ ok: true }),
-    undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, async () => {});
+    undefined, undefined, undefined, undefined, async () => {});
   return { client, calls, graphs };
 }
 

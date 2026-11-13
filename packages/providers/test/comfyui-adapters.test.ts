@@ -61,8 +61,7 @@ test("bundle submission resolves every engine filename and retains all frozen ch
     if (url.endsWith("/object_info/LoraLoaderModelOnly")) return Response.json({ LoraLoaderModelOnly: { input: { required: { lora_name: [names] } } } });
     if (url.endsWith("/prompt")) { submitted = JSON.parse(String(init?.body)).prompt; return Response.json({ prompt_id: "fixture-bundle" }); }
     throw new Error(`Unexpected request: ${url}`);
-  }, () => "http://127.0.0.1:8188", async () => ({ ok: true }), undefined, undefined, undefined, undefined,
-  undefined, undefined, undefined, undefined, async () => { guarded++; });
+  }, () => "http://127.0.0.1:8188", async () => ({ ok: true }), undefined, undefined, undefined, undefined, async () => { guarded++; });
   try {
     await client.submit("", { model: base.id, capability: "video", recipe: identity,
       params: { prompt: "A red cube moves.", seed: 1, durationSec: 5, aspect: "16:9", adapters: selected } });
@@ -106,7 +105,7 @@ test("the maintainer candidate does not grant production verification or bypass 
   assert.deepEqual(candidate.adapters, selections);
   assert.throws(() => recipeWithAdapters(base, selections, [release]), /validation/);
   const client = new ComfyUiClient(async () => { throw new Error("Must refuse before HTTP"); }, () => "http://127.0.0.1:8188",
-    async () => ({ ok: true }), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined,
+    async () => ({ ok: true }), undefined, undefined, undefined, undefined, undefined,
     adapterValidationCandidate);
   try {
     await assert.rejects(client.submit("", { model: base.id, capability: "video", recipe: comfyUiRecipeIdentity(candidate),
@@ -180,8 +179,7 @@ test("adapter transport follows the engine's filename spelling and rejects missi
       if (url.endsWith("/object_info/LoraLoaderModelOnly")) return Response.json({ LoraLoaderModelOnly: { input: { required: { lora_name: [[name]] } } } });
       if (url.endsWith("/prompt")) { sent = JSON.parse(String(init?.body)).prompt.arke_adapter_0.inputs.lora_name; return Response.json({ prompt_id: "fixture-prompt" }); }
       throw new Error(`Unexpected request: ${url}`);
-    }, () => "http://127.0.0.1:8188", async () => ({ ok: true }), undefined, undefined, undefined, undefined,
-    undefined, undefined, undefined, undefined, async () => {}, adapterValidationCandidate);
+    }, () => "http://127.0.0.1:8188", async () => ({ ok: true }), undefined, undefined, undefined, undefined, async () => {}, adapterValidationCandidate);
     try {
       const dispatch = client.submit("", { model: base.id, capability: "video", recipe: comfyUiRecipeIdentity(candidate),
         params: { prompt: "A red cube moves.", seed: 1, durationSec: 5, aspect: "16:9", adapters: selected } });

@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import { ChapterAudiobookSchema } from "../src/audiobook.js";
 import {
   AudiobookLookSchema,
+  cutMoodScene,
+  pictureMood,
   editLook,
   lookDigest,
   lookKey,
@@ -73,6 +75,16 @@ describe("a derive laid over the look the chapter holds", () => {
   });
 });
 
+describe("scene facts stay out of shared visual treatment", () => {
+  it("removes transient lighting, weather and injuries from derived mood, preserving author-owned text", () => {
+    const text = "Warm interior lamplight and distant smoke, grainy realism. Bandaged hands; restrained colour.";
+    assert.deepEqual(cutMoodScene(text), { text: "grainy realism. restrained colour.", cut: 2 });
+    assert.equal(pictureMood({ mood: { text } }, undefined), "grainy realism. restrained colour.");
+    assert.equal(pictureMood({ mood: { text, by: "author" } }, undefined), text);
+    assert.equal(pictureMood({ mood: { text: "Sunset and firelight." } }, "Fine grain."), undefined, "a wholly local derived line does not fall back to another scene description");
+  });
+});
+
 describe("a line the author writes", () => {
   it("becomes the author's, keeping the blocks it was read from", () => {
     const next = editLook(LOOK, { kind: "character", key: "maren-kest" }, "  Her father's   jacket. ", stamp)!;
@@ -137,5 +149,22 @@ describe("the look a picture was made under", () => {
     const { look: _look, ...without } = record;
     assert.ok(ChapterAudiobookSchema.safeParse(without).success, "a record with no look reads as before");
     assert.equal(ChapterAudiobookSchema.safeParse({ ...record, look: { ...LOOK, stray: true } }).success, false, "a field this build does not know is unreadable, which is why the world is raised");
+  });
+});
+
+
+describe("retained-picture look reviews (#2125)", () => {
+  it("accepts only the current relevant look without rewriting the original generation stamp", () => {
+    const made = pictureLookFor(LOOK, ["maren-kest"])!;
+    const changed = { ...LOOK, place: { text: "The flooded quarter, dawn." } };
+    const review = { hash: lookDigest(lookLinesFor(changed, made.who, made.looks)), at: LATER };
+    assert.equal(pictureLookChanged(made, changed), true);
+    assert.equal(pictureLookChanged(made, changed, undefined, review), false);
+    assert.equal(pictureLookChanged(made, { ...changed, place: { text: "The dry quarter, dawn." } }, undefined, review), true);
+    assert.equal(pictureLookChanged(made, LOOK, undefined, review), false, "the original look remains valid too");
+    const picture = { file: "world-art.png", source: "generated", textHash: "h", at: AT, look: made, lookReview: review };
+    assert.equal(AudiobookPictureSchema.safeParse(picture).success, true);
+    assert.equal(AudiobookPictureSchema.safeParse({ ...picture, lookReview: { ...review, extra: true } }).success, false);
+    assert.equal(AudiobookPictureSchema.safeParse({ ...picture, lookReview: { hash: "", at: "invalid" } }).success, false);
   });
 });

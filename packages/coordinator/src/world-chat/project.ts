@@ -7,6 +7,7 @@ import type {
   HumanDecisionCard,
 } from "@arke-studio/contracts";
 import { type CurrentLook, lookHasMoved } from "./look.js";
+import { attachmentFileName } from "./attachments.js";
 import type { ProductionPlanRequest, ProductionPlanCard } from "@arke-studio/contracts";
 
 /**
@@ -133,6 +134,7 @@ const WORKING_LABELS: Record<string, string> = {
   search_sheets: "Searching the cast",
   get_entry: "Reading canon",
   get_sheet: "Reading a sheet",
+  get_candidate: "Reading the earlier draft",
   list_entities: "Looking over the world",
   related: "Checking what references it",
   get_attachment_text: "Reading what you attached",
@@ -205,7 +207,7 @@ export const WRITING_LABEL = "Writing";
  */
 export function workingLabel(tool: string): string {
   const key = tool.toLowerCase();
-  // Arke-run tools arrive as `arke.<name>` (the Codex and local Arke harnesses): the name
+  // Arke-run tools arrive as `arke.<name>` (the Codex harness): the name
   // after the dot is the shared tool, so it takes that tool's wording.
   const bare = key.slice(key.lastIndexOf(".") + 1);
   const direct = WORKING_LABELS[key] ?? WORKING_LABELS[bare];
@@ -218,6 +220,8 @@ export function workingLabel(tool: string): string {
 
 export interface ProjectOptions {
   productionPlan?: (request: ProductionPlanRequest) => ProductionPlanCard;
+  /** The story a setup adapts, as its receipt names it: its title and how many chapters it has. */
+  sourceStory?: (productionId: string) => { title: string; chapters: number } | null;
   humanDecisions?: HumanDecisionCard[];
   humanDecisionProblems?: string[];
   sheetName?: (slug: string) => string | null;
@@ -301,6 +305,16 @@ export function projectPoints(
  * nothing in canon" mean opposite things to somebody deciding whether an idea is new, and the
  * line under a reply is exactly where that distinction is read.
  */
+/**
+ * How much of the adapted story a setup reply read (SPEC-057 R-5): "read Low Water · 18 of 18
+ * chapters · nothing written". A partial read says so by its count; setup never writes the world.
+ */
+export function wordSourceRead(read: NonNullable<WorldChatLoaded["sourceReads"]>[string], story: ProjectOptions["sourceStory"]): string {
+  const known = story?.(read.productionId) ?? null;
+  const of = known ? ` of ${Math.max(known.chapters, read.chapters)}` : "";
+  return `read ${known?.title ?? read.productionId} · ${read.chapters}${of} chapter${read.chapters === 1 && !of ? "" : "s"} · nothing written`;
+}
+
 export function wordReceipt(receipt: WorldChatCheckReceipt): string {
   const what = receipt.querySummary ? ` ${receipt.querySummary}` : "";
   switch (receipt.status) {
@@ -318,6 +332,12 @@ export function wordReceipt(receipt: WorldChatCheckReceipt): string {
       break;
   }
   switch (receipt.tool) {
+    case "listen-audio": return "local audio model reviewed the supplied interval; subjective interpretation";
+    case "inspect-media": return "read verified media metadata only";
+    case "sample-video": return `inspected ${receipt.media?.frames?.length ?? 0} timestamped still frames; gaps unreviewed`;
+    case "analyze-audio-signal": return "measured original audio channels; no listening judgment";
+    case "transcribe-audio": return "recognized speech locally; automatic words may be wrong";
+    case "review-audio-content": return "compared recognized speech with the supplied script; delivery unreviewed";
     case "search-canon":
       return `searched ${receipt.searchedCount ?? 0} canon entries`;
     case "search-sheets":
@@ -377,7 +397,7 @@ const REFUSAL_FALLBACK = "use a tool it does not have";
  */
 export function refusalLabel(tool: string): string {
   const key = tool.toLowerCase();
-  // Arke-run tools arrive as `arke.<name>` (the Codex and local Arke harnesses): the name
+  // Arke-run tools arrive as `arke.<name>` (the Codex harness): the name
   // after the dot is the shared tool, so it takes that tool's wording.
   const bare = key.slice(key.lastIndexOf(".") + 1);
   const direct = REFUSAL_LABELS[key] ?? REFUSAL_LABELS[bare];
@@ -405,6 +425,9 @@ export function projectWorkspace(
 ): WorldChatWorkspace {
   return {
     conversationId: loaded.id,
+    ...(loaded.voiceOperations ? { voiceOperations: loaded.voiceOperations } : {}),
+    ...(loaded.inputQueue ? { inputQueue: loaded.inputQueue } : {}),
+    runId: options.liveRun ? loaded.activeRun?.id ?? null : null,
     ...(loaded.productionSetup ? { productionSetup: loaded.productionSetup } : {}),
     status: loaded.status,
     // The mode changes initiative, never acceptance authority (SPEC-023 R-21).
@@ -414,12 +437,17 @@ export function projectWorkspace(
       turnId: m.turnId,
       role: m.role,
       text: m.text,
+      attachmentIds: m.attachmentIds,
       // Not a look at the world, so not a check the person is shown beside the reply.
-      receipts: (receiptsByMessage.get(m.id) ?? []).filter((r) => r.tool !== "describe-action").map(wordReceipt),
-      refusals: wordRefusals(loaded.refusals[m.id] ?? []),
+      receipts: [
+        ...(receiptsByMessage.get(m.id) ?? []).filter((r) => r.tool !== "describe-action").map(wordReceipt),
+        ...(loaded.sourceReads?.[m.id] ? [wordSourceRead(loaded.sourceReads[m.id]!, options.sourceStory)] : []),
+      ],
+      refusals: [...wordRefusals(loaded.refusals[m.id] ?? []), ...(loaded.notPrepared?.[m.id] ?? [])],
       ...(loaded.bibleEdits[m.id] ? { bibleEdit: loaded.bibleEdits[m.id]! } : {}),
       ...(loaded.benchOutcomes[m.id] ? { benchOutcome: loaded.benchOutcomes[m.id]! } : {}),
       ...(loaded.frameRunOutcomes[m.id] ? { frameRunOutcome: loaded.frameRunOutcomes[m.id]! } : {}),
+      ...(m.replyDelivery ? { replyDelivery: m.replyDelivery } : {}),
       ...(loaded.productionPlans?.[m.id] && options.productionPlan ? { productionPlan: options.productionPlan(loaded.productionPlans[m.id]!) } : {}),
       createdAt: m.createdAt,
     })),
@@ -431,6 +459,7 @@ export function projectWorkspace(
     ...(options.humanDecisionProblems?.length ? { humanDecisionProblems: options.humanDecisionProblems } : {}),
     ...(loaded.imageDisclosures ? { imageDisclosures: loaded.imageDisclosures } : {}),
     ...(loaded.imageReceipts ? { imageReceipts: loaded.imageReceipts } : {}),
+    ...(loaded.mediaReceipts ? { mediaReceipts: loaded.mediaReceipts } : {}),
     attachments: loaded.attachments.map((a) => ({
       ...(loaded.imageReceipts?.some(receipt => receipt.image?.id === a.id && receipt.image.sourceHash.startsWith(a.contentHash))
         ? { imageInspection: "prepared" as const } : {}),
@@ -439,6 +468,8 @@ export function projectWorkspace(
       kind: a.kind,
       readability: a.readability,
       promoted: a.promotedArtifactId !== undefined,
+      ...(a.kind === "image" && a.conversationId === loaded.id && attachmentFileName(a.fileName) === a.fileName
+        ? { imagePath: `.conversations/${loaded.id}/attachments/${a.id}/${a.fileName}` } : {}),
     })),
     // The live signal wins over the fold's reading of the log — see ProjectOptions.liveRun.
     runStatus: options.liveRun === true ? "running" : (loaded.activeRun?.status ?? null),

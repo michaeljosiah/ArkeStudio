@@ -47,6 +47,11 @@ describe("slugification (R-7, R-8)", () => {
     assert.equal(uniqueSlug("MAREN KEST", "character", ["maren-kest", "maren-kest-2"]), "maren-kest-3");
   });
 
+  it("never gives a chapter the audiobook credits' id (design turn 252, codex on PR 2274)", () => {
+    assert.equal(uniqueSlug("Audiobook Credits", "chapter", []), "audiobook-credits-2");
+    assert.equal(uniqueSlug("Audiobook Credits", "character", []), "audiobook-credits", "only a chapter's id is the credits'");
+  });
+
   it("keeps collision suffixes within the length cap", () => {
     const long = "x".repeat(60);
     const first = uniqueSlug(long, "character", []);

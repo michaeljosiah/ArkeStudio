@@ -1,5 +1,7 @@
+import { PictureAppearanceInspector } from "./editor-picture-appearance.js";
+import { PictureMotionInspector } from "./editor-picture-motion.js";
 import {
-  resolvedAuthoredDuration,
+  resolvedAuthoredDuration, transitionStill,
 } from "@arke-studio/contracts";
 import { useState, type ReactNode } from "react";
 import { useCutLayout } from "./editor-responsive.js";
@@ -31,8 +33,14 @@ import {
 import { ClipGain, MixPanel, AudioClipSettings } from "./editor-audio.js";
 import { CueInspector, SubtitleSources } from "./editor-subtitles.js";
 import { TrimStrip } from "./editor-preview.js";
+import { SourceMeasurement, measurementSubject } from "./editor-media-measurement.js";
+import { TextInspector, type TextInspectorContext } from "./editor-text-inspector.js";
 
-export type CutSelection = { kind: "picture"; id: string } | { kind: "cue"; id: string };
+/**
+ * What the Cut has selected. `texts` is several titles at once (SPEC-065 R-31), always two or
+ * more: one title alone is a `picture` like any clip on a Picture track.
+ */
+export type CutSelection = { kind: "picture"; id: string } | { kind: "cue"; id: string } | { kind: "effect"; id: string } | { kind: "texts"; ids: readonly string[] };
 
 function InspectorRow({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -56,6 +64,9 @@ export function CutInspector({
   savedPictureOrder,
   frameRate,
   commandsDisabled,
+  appearanceDisabled,
+  appearanceRevision,
+  appearanceScopeLabel,
   onCommands,
   timeline,
   subtitleView,
@@ -66,6 +77,9 @@ export function CutInspector({
   sourceLength,
   nameOf,
   onScrub,
+  selectedTexts = [],
+  text,
+  playheadFrame = 0,
 }: {
   worldId: string | undefined;
   prodId: string | undefined;
@@ -80,6 +94,9 @@ export function CutInspector({
   savedPictureOrder: boolean;
   frameRate: FrameRate;
   commandsDisabled: boolean;
+  appearanceDisabled?: boolean;
+  appearanceRevision?: string;
+  appearanceScopeLabel?: string;
   onCommands: (commands: TimelineCommand[], label?: string) => void;
   timeline: ProductionTimeline | null;
   subtitleView: TimelineTrackId | null;
@@ -95,6 +112,11 @@ export function CutInspector({
   nameOf: (artifact: ArtifactSidecar) => string;
   /** Bring the viewer to the edge a stepped or typed trim moved (issue 1036). */
   onScrub: (frame: number) => void;
+  /** The titles selected together, as the lanes draw them, when the selection is several. */
+  selectedTexts?: readonly { clip: TimelineClip; track: TimelineTrack }[];
+  /** What the text Inspector needs beyond this one: the draft, Add's focus, the refusal routing. */
+  text?: TextInspectorContext;
+  playheadFrame?: number;
 }) {
   const { compact } = useCutLayout();
   const [takesOpen, setTakesOpen] = useState(false);
@@ -120,20 +142,29 @@ export function CutInspector({
         (clipShotId !== null ? (cut?.entries.find((entry) => entry.shot.id === clipShotId) ?? null) : null))
       : null;
   const selectedShotId = selectedSpine?.shotId ?? clipShotId ?? selectedStory?.shot.id ?? null;
-  const selectedTakeId = selectedSpine?.takeId ?? selectedStory?.takeId ?? null;
+  const selectedTakeId = selectedSpine?.takeId ?? selectedStory?.takeId ??
+    (selectedClip?.source.kind === "take" ? selectedClip.source.takeId : null) ??
+    (selectedShotId ? production?.selections[selectedShotId]?.acceptedTakeId : null) ?? null;
   const shotTakes = production && selectedShotId ? reviewableTakesForShot(production, selectedShotId) : [];
   const takeIndex = shotTakes.findIndex((take) => take.id === selectedTakeId);
+  const directTake = selectedClip?.source.kind === "take" ? production?.takes.find(take => take.id === selectedTakeId) : undefined;
   const takeLabel = takeIndex >= 0
     ? `Take ${takeIndex + 1} · ${shotTakes[takeIndex]!.model}`
-    : selectedTakeId ? "Take unavailable" : "no accepted take";
+    : directTake ? directTake.model : selectedTakeId ? "Take unavailable" : "no accepted take";
   const ceiling =
     production && selectedShotId && selectedTakeId
       ? trimCeilingSec(production, selectedShotId, selectedTakeId)
       : null;
   const trim = selectedShotId ? (production?.selections[selectedShotId]?.trimInSec ?? 0) : 0;
-  const takeSec = selectedTakeId
-    ? production?.takeMediaInfo[selectedTakeId]?.mediaInfo.durationSec
-    : undefined;
+  const takeSubject = production && selectedTakeId ? measurementSubject(production, artifacts, { kind: "take", takeId: selectedTakeId }) : null;
+  const physicalSec = takeSubject?.info?.durationSec;
+  const takeSec = physicalSec !== undefined && takeSubject?.segment
+    ? Math.max(0, Math.min(takeSubject.segment.outSec, physicalSec) - takeSubject.segment.inSec) : physicalSec;
+  const measurementSource = selectedClip?.source.kind === "artifact" ? { kind: "artifact" as const, artifactId: selectedClip.source.artifactId }
+    : selectedTakeId ? { kind: "take" as const, takeId: selectedTakeId } : null;
+  const measurement = worldId && production && measurementSource
+    ? <SourceMeasurement worldId={worldId} production={production} artifacts={artifacts} source={measurementSource} disabled={commandsDisabled}
+        onChooseTake={clipShotId && selectedTrack?.kind === "picture" ? () => setTakesOpen(true) : undefined} /> : null;
 
   if (selectedClip && selectedTrack && selectedTrack.kind !== "picture" && production) {
     const label = selectedClip.source.label;
@@ -149,6 +180,7 @@ export function CutInspector({
             <InspectorRow label="Voice">{selectedClip.source.sheetId}{selectedClip.source.voiceAssignedAtVersion !== undefined ? ` · sheet v${selectedClip.source.voiceAssignedAtVersion}` : ""}</InspectorRow>
           )}
         </div>
+        {measurement}
         <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={compact} />
         {AUDIO_TRACK_KINDS.has(selectedTrack.kind) && <ClipGain clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} />}
         {AUDIO_TRACK_KINDS.has(selectedTrack.kind) && timeline !== null && (
@@ -181,9 +213,25 @@ export function CutInspector({
           )}
         </div>
         <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={compact} />
+        {measurement}
+        <PictureMotionInspector key={`motion-${selectedClip.id}`} clip={selectedClip} still={transitionStill(selectedClip, artifacts)} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} resetToken={timeline?.revision} />
+        {selectedClip && selectedTrack?.kind === "picture" && <PictureAppearanceInspector key={selectedClip.id} clip={selectedClip} frameRate={frameRate} disabled={appearanceDisabled ?? commandsDisabled} onCommands={onCommands} resetToken={appearanceRevision ?? timeline?.revision} scopeLabel={appearanceScopeLabel} />}
         {timeline && selectedTrack?.kind === "picture" && <DetachAudio production={production} timeline={timeline} artifacts={artifacts} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} mintClipId={mintClipId} />}
       </div>
     );
+  }
+
+  // A title shows its words and its look, then what a still shows, and no control that would
+  // refuse (SPEC-065 R-2, R-14 – R-17, R-31): no source, take, in-point or sound. Several titles
+  // show the look they share, and a change reaches all of them at once.
+  const titles = selection?.kind === "texts"
+    ? selectedTexts.flatMap(({ clip, track }) => (clip.source.kind === "text" ? [{ clip: { ...clip, source: clip.source }, track }] : []))
+    : selectedClip && selectedTrack && selectedTrack.kind === "picture" && selectedClip.source.kind === "text"
+      ? [{ clip: { ...selectedClip, source: selectedClip.source }, track: selectedTrack }] : [];
+  if (titles.length > 0 && production && text) {
+    return <TextInspector key={titles.map(({ clip }) => clip.id).join(" ")} clips={titles} timeline={timeline} artifacts={artifacts} frameRate={frameRate}
+      disabled={commandsDisabled} appearanceDisabled={appearanceDisabled ?? commandsDisabled} appearanceRevision={appearanceRevision} appearanceScopeLabel={appearanceScopeLabel}
+      onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} playheadFrame={playheadFrame} text={text} />;
   }
 
   if ((selectedShotId || selectedClip) && production && worldId && prodId) {
@@ -205,8 +253,11 @@ export function CutInspector({
           <InspectorRow label={selectedSpine ? "Window" : "Shot length"}>{duration.toFixed(1)}s</InspectorRow>
           {takeSec !== undefined && <InspectorRow label="Take length">{takeSec.toFixed(1)}s</InspectorRow>}
         </div>
+        {measurement}
         {selectedClip && (<>
           <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={compact} />
+        {selectedTrack?.kind === "picture" && <PictureMotionInspector key={`motion-${selectedClip.id}`} clip={selectedClip} still={false} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} resetToken={timeline?.revision} />}
+        {selectedClip && selectedTrack?.kind === "picture" && <PictureAppearanceInspector key={selectedClip.id} clip={selectedClip} frameRate={frameRate} disabled={appearanceDisabled ?? commandsDisabled} onCommands={onCommands} resetToken={appearanceRevision ?? timeline?.revision} scopeLabel={appearanceScopeLabel} />}
         {timeline && selectedTrack?.kind === "picture" && <DetachAudio production={production} timeline={timeline} artifacts={artifacts} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} mintClipId={mintClipId} />}
         </>)}
         {selectedShotId && !savedPictureOrder && (
@@ -219,6 +270,7 @@ export function CutInspector({
             figures={`${takeLabel} · ${selectedSpine ? "budget" : "shot"} ${duration.toFixed(1)}s${takeSec !== undefined && !selectedSpine ? ` · take ${takeSec.toFixed(1)}s` : ""}`}
             trim={trim}
             ceiling={ceiling}
+            disabled={commandsDisabled}
           />
         )}
         {selectedClip && clipShotId !== null && !compact && (
@@ -264,7 +316,8 @@ export function CutInspector({
         *does*, not things it reports.
       */}
       {cut !== null && spineCut === null && (() => {
-        const open = (cut as ResolvedPictureCut).entries.filter((entry) => entry.hole !== true && entry.media === null);
+        // Text has no media and needs none: it is drawn, not chosen (SPEC-065 R-3).
+        const open = (cut as ResolvedPictureCut).entries.filter((entry) => entry.hole !== true && entry.media === null && entry.text !== true);
         if (open.length === 0) return null;
         return (
           <div className="fy-cutinspect__decisions" data-testid="needs-decision">

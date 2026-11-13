@@ -18,6 +18,9 @@ import {
   sourceLengthFramesFor,
   spineTimelineFingerprint,
   storyTimelineFingerprint,
+  timelineCarriesEffects,
+  timelineCarriesTransitions,
+  timelineCarriesPictureAppearance,
   undoTimelineHistory,
   type ProductionBundle,
   type ProductionTimeline,
@@ -29,9 +32,14 @@ import {
   type TimelineCommand,
   type TimelineMoveDirection,
   type TimelineSelectionChange,
+  canonicalJson,
+  defaultExportPreset,
+  PRESETS,
 } from "@arke-studio/contracts";
 import { applyTakeAcceptance } from "../takes/review.js";
-import { readRequestFile, requestFileInput } from "./editor-request-file.js";
+import { refuseUnknownEffectAudioBindings, refuseUnsupportedEffectRender } from "./effect-bindings.js";
+import { markEditorRequestHistory, readRequestFile, requestFileInput } from "./editor-request-file.js";
+import { refuseUnpaintableText } from "./editor-text-cache.js";
 import type { WorldStore } from "../world/store.js";
 import type { CommitFileInput } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
@@ -102,18 +110,7 @@ function applySelectionChanges(selections: Selections, changes: readonly Timelin
 }
 
 /** Key-order-independent, because a selection read from disk and one that went through the schema spell their keys differently. */
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record)
-      .sort()
-      .filter((key) => record[key] !== undefined)
-      .map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
+const canonical = (value: unknown) => canonicalJson(value);
 
 function sameSelection(a: ShotSelection | null | undefined, b: ShotSelection | null | undefined): boolean {
   return canonical(a ?? null) === canonical(b ?? null);
@@ -185,10 +182,32 @@ export async function assembleTimelineScene(store: WorldStore, productionId: str
  * Returns what the legacy `cut.json` migration could not carry, when this write was the one that
  * folded it in (SPEC-037 R-30): named placements, never a count, so the caller can say them.
  */
-export async function applyTimelineCommand(
+export function applyTimelineCommand(
   store: WorldStore,
   productionId: string,
   write: TimelineWrite,
+  validate?: (production: ProductionBundle) => Promise<void>,
+): Promise<{ dropped: string[] }> {
+  return writeTimeline(store, productionId, write, "suggestion", validate);
+}
+
+/**
+ * Called only from the authenticated editor command route. This authority is chosen by the
+ * transport owner, never from a command label, request id or model-provided flag (SPEC-053 R-26).
+ */
+export function applyHumanTimelineCommand(
+  store: WorldStore,
+  productionId: string,
+  write: TimelineWrite,
+): Promise<{ dropped: string[] }> {
+  return writeTimeline(store, productionId, write, "human");
+}
+
+async function writeTimeline(
+  store: WorldStore,
+  productionId: string,
+  write: TimelineWrite,
+  effectAuthority: "human" | "suggestion",
   validate?: (production: ProductionBundle) => Promise<void>,
 ): Promise<{ dropped: string[] }> {
   const timelinePath = `productions/${productionId}/timeline.json`;
@@ -322,6 +341,7 @@ export async function applyTimelineCommand(
         refuseUnrenderablePlacements(clipCommands, current, boundedBy, store.getBundle().artifacts);
         refuseUnknownLibraryItems(clipCommands, boundedBy, store.getBundle().artifacts);
         next = applyTimelineCommands(current, clipCommands, {
+          effectAuthority,
           label,
           selections: selectionChanges,
           sourceLength: sourceLengthFramesFor(boundedBy, store.getBundle().artifacts),
@@ -329,10 +349,20 @@ export async function applyTimelineCommand(
           ...(command.requestId !== undefined ? { requestId: command.requestId } : {}),
           ...(command.notes !== undefined ? { notes: command.notes } : {}),
         });
+        refuseUnknownEffectAudioBindings(current, next, boundedBy, store.getBundle().artifacts);
+        refuseUnsupportedEffectRender(next, boundedBy, store.getBundle().artifacts);
+        // Laid out, not painted, at the size the film is delivered at: the painter's own words
+        // refuse new or changed text before anything is written (SPEC-065 R-21). Undo and Redo
+        // below are never asked, since they restore what was once accepted.
+        refuseUnpaintableText(current, next, PRESETS[defaultExportPreset(boundedBy.meta)]);
       } else {
         const entry = current.history[command.kind].at(-1);
         if (entry === undefined) throw new TimelineCommandRefused(`timeline has nothing to ${command.kind}`);
         next = command.kind === "undo" ? undoTimelineHistory(current) : redoTimelineHistory(current);
+        // Generic approval cannot inverse protected authoring or release its rules (SPEC-053/055).
+        if (effectAuthority !== "human" && [current, next].some(value => timelineCarriesEffects(value) || timelineCarriesTransitions(value) || timelineCarriesPictureAppearance(value))) {
+          throw new TimelineCommandRefused("Use the editor's Undo or Redo for effects, transitions or picture appearance.");
+        }
         /*
          * An accepted request whose revision is undone stays accepted and says so (SPEC-039
          * R-36), durably: the redo stack is transient — the next edit clears it — so the mark
@@ -341,15 +371,8 @@ export async function applyTimelineCommand(
         if (entry.kind === "change" && entry.requestId !== undefined) {
           const requestId = entry.requestId;
           const { raw: requestsRaw, file } = await readRequestFile(store, productionId);
-          if (file.requests.some((request) => request.id === requestId)) {
-            const marked = file.requests.map((request) => {
-              if (request.id !== requestId) return request;
-              if (command.kind === "undo") return { ...request, undoneAt: store.now() };
-              const { undoneAt: _redone, ...rest } = request;
-              return rest;
-            });
-            files.push(requestFileInput(productionId, requestsRaw, { ...file, requests: marked }));
-          }
+          const marked = markEditorRequestHistory(file, requestId, sha256(canonical(entry)).slice("sha256:".length), command.kind, store.now());
+          if (marked !== file) files.push(requestFileInput(productionId, requestsRaw, marked));
         }
         // The selection half of a take switch travels with the entry; the review line it appended
         // stays exactly where it is (R-17), which is why nothing here reads reviews.jsonl.
@@ -450,6 +473,13 @@ export function refuseUnrenderablePlacements(
       }
       if (source) sources.set(command.newClipId, source);
     }
+    // Accept applies against live sources and would refuse this; a request says so before its card is staged.
+    if (command.kind === "picture-motion" && command.motion) {
+      const source = sources.get(command.clipId);
+      // Text is drawn into a still and moves as one (SPEC-065 R-17).
+      const still = source?.kind === "text" || source?.kind === "artifact" && artifacts.some(artifact => artifact.id === source.artifactId && (artifact.kind === "image" || artifact.kind === "board"));
+      if (source && !still) refuse("Motion needs a still image");
+    }
     if (command.kind !== "place") continue;
     sources.set(command.clip.id, command.clip.source);
     const kind = kinds.get(command.trackId);
@@ -471,6 +501,10 @@ export function refuseUnrenderablePlacements(
     } else if (source.kind === "performance") {
       const performance = production.performances.find(p => p.id === source.performanceId);
       if (!audio || !performance || performance.target.shotId !== source.shotId || performance.provenance.outputHash !== source.sourceHash) refuse(`${command.clip.id}: choose an existing immutable performance for this dialogue shot`);
+    } else if (source.kind === "text") {
+      // Text needs nothing from the world but its typeface, which the painter checks after the
+      // reducer has stored the words (SPEC-065 R-2, R-7); only the track can be wrong here.
+      if (kind !== undefined && kind !== "picture") refuse("Text belongs on a Picture track");
     } else if (!production.scenes.some((scene) => orderedShots(scene).some((shot) => shot.id === source.shotId))) {
       refuse(`${command.clip.id} cites shot ${source.shotId}, which is not in the story`);
     }

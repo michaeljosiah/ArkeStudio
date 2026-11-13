@@ -15,9 +15,11 @@ import {
   sortScenes,
   type ProductionBundle,
 } from "@arke-studio/contracts";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { NavLink, Outlet, useLocation, useNavigate, useParams } from "react-router";
 import { BodyLayer } from "../components/body-layer.js";
+import { StudioInlineContext } from "../components/production-studio-context.js";
+import { useGlobalChat } from "../components/global-chat-context.js";
 import { AppChrome } from "../components/chrome.js";
 import { ProductionConversation, StagedDecision } from "../components/conversation.js";
 import {
@@ -36,27 +38,31 @@ import {
   Message,
   PanelLeft,
   MenuLines,
+  MusicMark,
   Plus,
   Scroll,
   Sparkle,
   Speaker,
+  Upload,
   Users,
   VideoMark,
 } from "../components/icons.js";
-import { Loading } from "../components/loading.js";
 import { PageSheet } from "../components/page-sheet.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { COARSE_QUERY, useCompact, useMediaQuery, usePhone } from "../lib/media-query.js";
+import { ARKE_HALF_QUERY, useArkeHalfOpen } from "../lib/arke-half.js";
 import { CUT_PHONE_QUERY } from "./editor-responsive.js";
 import { Button } from "../components/ui.js";
 import { cx } from "../components/ui.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
+import { WorldOpening } from "../components/world-opening.js";
 import { productionShelf } from "../lib/artifact-view.js";
 import { editorTimeline } from "../lib/editor-timeline.js";
 import { runtimeSeconds } from "../lib/format.js";
 import { defaultEpisodeFor, productionPages } from "../lib/production-navigation.js";
 import { useRailCollapsed } from "../lib/rail-collapsed.js";
 import { nextEpisodeOrder, useProduction } from "../lib/selectors.js";
-import { createEpisode, useAudiobookDoors } from "../lib/store.js";
+import { dramaCastRoles } from "../lib/audio-drama-cast.js";
+import { createEpisode, useAudiobookDoors, useStoreSelector } from "../lib/store.js";
 import { useAudiobookDoorAsk } from "./audiobook.js";
 import { exportViewFor } from "./editor-export.js";
 import { NewChapterContext, NewSceneContext, useNewChapter, useNewScene } from "./production-story.js";
@@ -92,8 +98,8 @@ function ProductionSwitcher({
 }) {
   const navigate = useNavigate();
   const { worldId } = useParams();
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const phone = usePhone();
+  const compact = useCompact();
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const [at, setAt] = menuState;
@@ -150,11 +156,12 @@ function ProductionSwitcher({
         aria-label={`Switch production. Current production: ${production?.meta.title ?? "loading"}`}
         aria-haspopup={phone ? "dialog" : "menu"}
         aria-expanded={at !== null}
-        title={folded ? `Switch production · ${production?.meta.title ?? "loading"}` : undefined}
+        // The whole title on hover wherever the card cuts it short (issue 1883).
+        title={folded ? `Switch production · ${production?.meta.title ?? "loading"}` : production?.meta.title}
         onClick={() => (at === null ? open() : setAt(null))}
       >
         <span className="fy-prodrail__switchmark" aria-hidden>
-          {compact ? production && productionShape(production.meta).hasChapters ? <BookOpen size={20} /> : <Film size={20} /> : (production?.meta.title ?? "P").trim().charAt(0).toUpperCase() || "P"}
+          {compact ? production && productionShape(production.meta).isMusic ? <MusicMark size={20} /> : production && productionShape(production.meta).isAudioDrama ? <Speaker size={20} /> : production && productionShape(production.meta).hasChapters ? <BookOpen size={20} /> : <Film size={20} /> : (production?.meta.title ?? "P").trim().charAt(0).toUpperCase() || "P"}
         </span>
         <div className="fy-prodrail__switchcopy">
           <div className="fy-prodrail__switchname">{production?.meta.title ?? "…"}</div>
@@ -237,7 +244,7 @@ function ProductionSwitcher({
           const shape = productionShape(candidate.meta);
           const current = candidate.meta.id === production?.meta.id;
           return <button key={candidate.meta.id} type="button" className="fy-production-switch-row" aria-current={current ? "true" : undefined} onClick={() => go(candidate.meta.id)}>
-            <span className="fy-production-switch-row__mark">{shape.hasChapters ? <BookOpen size={18} /> : <Film size={18} />}</span>
+            <span className="fy-production-switch-row__mark">{shape.isMusic ? <MusicMark size={18} /> : shape.isAudioDrama ? <Speaker size={18} /> : shape.hasChapters ? <BookOpen size={18} /> : <Film size={18} />}</span>
             <span className="fy-production-switch-row__copy"><b>{candidate.meta.title}</b><span>{shape.displayLabel.toLowerCase()}{shape.hasChapters ? ` · ${candidate.chapters.filter(chapter => !chapter.retired).length} chapters` : ""}</span></span>
             {current && <Check size={18} />}
           </button>;
@@ -251,66 +258,75 @@ function ProductionSwitcher({
 // ---- the production shell (frames 11a/14a left rail) -----------------------
 
 export function ProductionLayout() {
+  const globalChat = useGlobalChat();
   const { worldId, prodId, episodeId, sceneId, shotId, chapterId } = useParams();
   const { world, production } = useProduction(worldId, prodId);
   const refusal = useWorldOpenRefusal(worldId);
   const location = useLocation();
-  const cutRoute = /\/cut\/?$/.test(location.pathname);
+  const audioStudioRoute = /\/story\/chapters\/[^/]+\/?$/.test(location.pathname) && ["timing", "audio-studio"].includes(new URLSearchParams(location.search).get("view") ?? "");
+  const cutRoute = /\/cut\/?$/.test(location.pathname) || audioStudioRoute;
   const cutPhone = useMediaQuery(CUT_PHONE_QUERY) && cutRoute;
-  const phone = useMediaQuery("(max-width: 599px)");
-  const compact = useMediaQuery("(max-width: 1099px)");
-  const coarse = useMediaQuery("(pointer: coarse)");
+  const phone = usePhone();
+  const compact = useCompact();
+  const coarse = useMediaQuery(COARSE_QUERY);
   const pages = useRef<HTMLElement>(null);
   const drawer = useRef<HTMLDialogElement>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [studioInline, setStudioInline] = useState(false);
   // The switcher changes parents at the phone breakpoint; its open choice survives that move.
   const switchMenu = useState<SwitcherAt | null>(null);
   // The rail is the format's (design 54a): a surface the format cannot use is not present,
   // not greyed. A story production has nothing to dispatch, so its rail never says so.
   const shape = production ? productionShape(production.meta) : null;
   const isStory = shape?.hasChapters === true;
-  let cut: ReturnType<typeof deriveCut> | null = null;
-  /** The record the Cut edits and previews (`lib/editor-timeline.ts`), so the rail measures the same film. */
-  let record: ReturnType<typeof editorTimeline>["timeline"] = null;
-  if (production) {
-    try {
-      const timeline = production.timeline ?? { status: "absent" as const };
-      if (timeline.status === "invalid") throw new Error(timeline.message);
-      record = editorTimeline(production, timeline, world?.artifacts ?? []).timeline;
-      cut = record === null
-        ? deriveCut(production)
-        : resolvePictureTimeline(production, { status: "ready", timeline: record }, world?.artifacts ?? []);
-    } catch {
-      // Invalid timeline state is stated in the editor and Exports; the rail must not substitute
-      // the legacy runtime while those screens correctly block it.
+  // Measured once per production and world, not on every store update: this layout re-renders for
+  // job progress and the like, and each time seeded a timeline and planned the film again (issue 2782).
+  const { cut, mediaOnly, filmSec } = useMemo(() => {
+    let cut: ReturnType<typeof deriveCut> | null = null;
+    /** The record the Cut edits and previews (`lib/editor-timeline.ts`), so the rail measures the same film. */
+    let record: ReturnType<typeof editorTimeline>["timeline"] = null;
+    if (production) {
+      try {
+        const timeline = production.timeline ?? { status: "absent" as const };
+        if (timeline.status === "invalid") throw new Error(timeline.message);
+        record = editorTimeline(production, timeline, world?.artifacts ?? []).timeline;
+        cut = record === null
+          ? deriveCut(production)
+          : resolvePictureTimeline(production, { status: "ready", timeline: record }, world?.artifacts ?? []);
+      } catch {
+        // Invalid timeline state is stated in the editor and Exports; the rail must not substitute
+        // the legacy runtime while those screens correctly block it.
+      }
     }
-  }
-  /*
-   * The rail and the switcher state a length, and it has to be the length the Cut screen states.
-   *
-   * A production with no story keeps its clock in the clips (issue 453), and the derived cut
-   * reads zero there — so both of these advertised a `0s` cut for a film that plays and exports,
-   * one panel away from a header saying how long it actually runs (issue 508).
-   *
-   * Gated exactly as the Cut and Exports screens gate it: a production with a spine is never
-   * this, however unresolved that spine is, or the rail would call the clips the film while the
-   * screen beside it still treated the song as authoritative.
-   */
-  const mediaOnly =
-    cut !== null && isMediaOnly(cut) && exportViewFor(world, production).kind === "scene-order";
-  let filmSec = 0;
-  if (mediaOnly && production && record !== null) {
-    // The plan's length, off the same record the Cut header states — legacy placements folded
-    // in until the first write saves them (issue 1159) — so the two never disagree again.
-    const planned = buildRenderPlan({ production, timeline: { status: "ready", timeline: record }, artifacts: world?.artifacts ?? [], scope: { kind: "production" }, preset: "review-cut" });
-    filmSec = planned.ok ? planned.plan.totalSec : 0;
-  }
+    /*
+     * The rail and the switcher state a length, and it has to be the length the Cut screen states.
+     *
+     * A production with no story keeps its clock in the clips (issue 453), and the derived cut
+     * reads zero there — so both of these advertised a `0s` cut for a film that plays and exports,
+     * one panel away from a header saying how long it actually runs (issue 508).
+     *
+     * Gated exactly as the Cut and Exports screens gate it: a production with a spine is never
+     * this, however unresolved that spine is, or the rail would call the clips the film while the
+     * screen beside it still treated the song as authoritative.
+     */
+    const mediaOnly =
+      cut !== null && isMediaOnly(cut) && exportViewFor(world, production).kind === "scene-order";
+    let filmSec = 0;
+    if (mediaOnly && production && record !== null) {
+      // The plan's length, off the same record the Cut header states — legacy placements folded
+      // in until the first write saves them (issue 1159) — so the two never disagree again.
+      const planned = buildRenderPlan({ production, timeline: { status: "ready", timeline: record }, artifacts: world?.artifacts ?? [], scope: { kind: "production" }, preset: "review-cut" });
+      filmSec = planned.ok ? planned.plan.totalSec : 0;
+    }
+    return { cut, mediaOnly, filmSec };
+  }, [production, world]);
   /*
    * The row's count is its own page's set (design 134): the world's shelf plus what this
    * production owns. It used to count `production === undefined` — the world's number, on a
    * production row, pointing at a world screen that could not have shown the difference.
    */
-  const artifactCount = productionShelf(world?.artifacts ?? [], prodId).length;
+  // The book's own, as the screen opens on: 79 on a book of six pages counted the world's files.
+  const artifactCount = productionShelf(world?.artifacts ?? [], prodId).filter((artifact) => artifact.production === prodId).length;
   /*
    * The rail's read count (turn 146, SPEC-047 R-29): chapters read of those with prose, which
    * only the coordinator can say — a chapter is read when every block's take is current, and
@@ -319,7 +335,11 @@ export function ProductionLayout() {
    * them — and the rail reads the answer.
    */
   const audiobookDoor = useAudiobookDoors()[prodId ?? ""]?.door ?? null;
-  useAudiobookDoorAsk(worldId, prodId, production, world, isStory);
+  // A graphic novel's rail shows Pages, never this count, so it asks for nothing; and the rail asks
+  // without the manuscript, so an autosave does not prepare and price the whole book (issue 2782).
+  // On the Audiobook page the page asks the whole door itself, and the rail reads that answer.
+  const onAudiobookPage = /\/story\/audiobook\/?$/.test(location.pathname);
+  useAudiobookDoorAsk(worldId, prodId, production, world, isStory && shape?.hasPages !== true && !onAudiobookPage, false);
   const audiobookCount = audiobookDoor === null ? "—" : (() => {
     const line = audiobookDoorLine(audiobookDoor.rows);
     return `${line.read}/${line.withProse}`;
@@ -327,7 +347,10 @@ export function ProductionLayout() {
   // What the Cast page lists (design turn 192, 58a's rail): its guests, the guests staged for
   // review, and the world's cast it shares. Counting the guests alone put "Cast 0" over a page of
   // seven people.
-  const castCount = prodId
+  // An audio drama's Cast page lists its roles, not the world's sheets (issue 1883): counting
+  // every sheet put "Cast 12" over a page of three.
+  const castCount = production && productionShape(production.meta).isAudioDrama && world ? dramaCastRoles(world, production).length
+    : prodId
     ? guestsOf(world?.sheets ?? [], prodId).filter((s) => s.retired !== true).length +
       (["character", "location", "faction"] as const).flatMap((kind) =>
         pendingGuestsOf(pendingSheets(world?.proposals ?? [], kind, world?.conversations ?? []), prodId),
@@ -361,13 +384,38 @@ export function ProductionLayout() {
   const chapterRoute = /\/story\/chapters\/[^/]+\/?$/.test(location.pathname);
   const chapterDeep = phone && chapterRoute && production?.chapters.some(chapter => chapter.id === chapterId || chapter.file === chapterId);
   const chapterView = new URLSearchParams(location.search).get("view");
-  const crumbChapter = chapterRoute && !compact && (chapterView === "audiobook" || chapterView === "timing")
+  const crumbChapter = chapterRoute && !compact && (chapterView === "audiobook" || chapterView === "timing" || chapterView === "audio-studio")
     ? production?.chapters.find((chapter) => chapter.id === chapterId || chapter.file === chapterId)
     : undefined;
-  const sceneDeepPhone = !refusal && (chapterDeep || episodeDeep || phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
-  const wantsFold = compact && chapterRoute ? false : compact && (sceneRoute || cutRoute) || (railChoice ?? (cutRoute || sceneDetailDefault));
-  const drawerMode = !phone && wantsFold && (compact || coarse);
-  const folded = !phone && wantsFold && !drawerMode;
+  // The audiobook's show page (design turn 199f) is its own phone page: the backdrop is the top
+  // of the screen under a back press, and the page's own bar takes over once it scrolls away.
+  const audiobookDeep = phone && /\/story\/audiobook\/?$/.test(location.pathname) && production !== undefined && production !== null;
+  // An audio drama's episode script is its own phone page too (230r): its head goes back to Episodes.
+  // Only a real episode (codex on PR 1881): a refused address keeps the shell's way back.
+  const dramaEpisode = Number(/\/script\/(\d+)\/?$/.exec(location.pathname)?.[1] ?? 0);
+  // Its Audio Studio only for an episode with a script (codex on PR 1881): the empty state has no way back.
+  const dramaStudio = new URLSearchParams(location.search).get("view") === "audio-studio";
+  const dramaDeep = phone && dramaEpisode >= 1 && dramaEpisode <= 200 && production !== undefined && production !== null && productionShape(production.meta).isAudioDrama
+    && (!dramaStudio || (production.episodeScripts ?? []).some((entry) => entry.script.episode === dramaEpisode));
+  // An audio drama's show page on a phone (230u): its hero is the top of the screen, full-bleed,
+  // carrying the way back and the drama's pages (issue 1882), as the audiobook's show page does.
+  const dramaHome = phone && /^\/w\/[^/]+\/p\/[^/]+\/?$/.test(location.pathname) && production !== undefined && production !== null && productionShape(production.meta).isAudioDrama;
+  const sceneDeepPhone = !refusal && (chapterDeep || episodeDeep || audiobookDeep || dramaDeep || dramaHome || phone && sceneChrome !== undefined && (shotId === undefined || shotChrome !== undefined) || cutPhone && production !== undefined && production !== null && !productionShape(production.meta).playsAsBeats);
+  const wantsFold = compact && chapterRoute && !audioStudioRoute ? false : compact && (sceneRoute || cutRoute) || (railChoice ?? (cutRoute || sceneDetailDefault));
+  // An open Studio on a Fold or a tablet folds the rail to its marks and keeps it there (design
+  // turn 196o): a drawer would put the production's pages a press away while the canvas is the
+  // page, and the full rail left the canvas a third of the screen. The person's own choice
+  // returns when the Studio closes.
+  const studioFold = !phone && compact && studioInline;
+  const drawerMode = !phone && !studioFold && wantsFold && (compact || coarse);
+  // Arke open as the hinge half on a Fold7 folds the rail to its marks too (design turn 202), so
+  // the page keeps the left half; where the rail is already a drawer it stays one.
+  // The production conversation on a Fold7 folds it as well (202c): the conversation and what it
+  // understood share the rest, which the 206 rail left at 438 and 340.
+  const arkeHalf = useArkeHalfOpen();
+  const fold7 = useMediaQuery(ARKE_HALF_QUERY);
+  const developRoute = /\/p\/[^/]+\/story\/?$/.test(location.pathname);
+  const folded = studioFold || !phone && wantsFold && !drawerMode || !phone && compact && (arkeHalf || fold7 && developRoute) && !drawerMode;
   useEffect(() => { setDrawerOpen(false); }, [location.pathname, location.search]);
   useEffect(() => {
     const node = drawer.current;
@@ -385,7 +433,7 @@ export function ProductionLayout() {
    * One shape, one mark, one count: that is the whole of "standardised".
    */
   const MARKS: Record<string, (p: { size?: number }) => ReactNode> = {
-    "": Home,
+    "": shape?.isMusic ? MusicMark : Home,
     artifacts: Folder,
     cast: Users,
     story: Message,
@@ -400,6 +448,7 @@ export function ProductionLayout() {
     takes: VideoMark,
     generate: Sparkle,
     cut: VideoMark,
+    publish: Upload,
   };
   /*
    * An episode is reached by drilling into the episode tree, and both of its screens live outside
@@ -462,13 +511,20 @@ export function ProductionLayout() {
   const cutFigure = mediaOnly
     ? runtimeSeconds(filmSec)
     : runtimeSeconds((cut?.totalSec ?? 0) - (cut?.uncoveredSec ?? 0));
+  // An audio drama counts the episodes its plan sets out (SPEC-057 R-7) until scripts exist.
+  const dramaEpisodes = production?.audioDrama?.plan.episodes ?? 0;
+  const musicTracks = production?.music?.tracks.length ?? 0;
   // The switch card counts what the format counts: seconds of cut for video, chapters for story.
   const switchSub = production
     ? shape?.isEpisodic
       ? phone ? `${shape.displayLabel.toLowerCase()} · season ${Math.max(1,(world?.series.find(series=>series.seasons.includes(production.meta.id))?.seasons.indexOf(production.meta.id) ?? 0)+1)} · ${Math.max(production.episodes.length, production.season?.defaults?.episodeCount ?? production.episodes.length)} episodes` : `series · ${production.episodes.length} episode${production.episodes.length === 1 ? "" : "s"} · ${production.scenes.length} scene${production.scenes.length === 1 ? "" : "s"}`
+      : shape?.isAudioDrama
+      ? `${shape.displayLabel.toLowerCase()} · ${dramaEpisodes} episode${dramaEpisodes === 1 ? "" : "s"}`
+      : shape?.isMusic
+      ? `${shape.displayLabel.toLowerCase()} · ${musicTracks} track${musicTracks === 1 ? "" : "s"}`
       : isStory
       ? `${shape!.displayLabel.toLowerCase()} · ${production.chapters.length} chapter${production.chapters.length === 1 ? "" : "s"}`
-      : `${shape!.displayLabel.toLowerCase()}${phone ? ` · ${production.scenes.length} scenes` : ""}${cut ? ` · ${cutFigure} cut` : ""}`
+      : `${shape!.displayLabel.toLowerCase()}${phone ? ` · ${production.scenes.length} scenes` : ""}${cut && !shape!.playsAsBeats ? ` · ${cutFigure} cut` : ""}`
     : "";
   const currentEpisodeId =
     episodeId ?? production?.episodes.find((episode) => sceneId !== undefined && episode.scenes.includes(sceneId))?.id;
@@ -580,7 +636,7 @@ export function ProductionLayout() {
                         {open ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
                         <span className="fy-prodrail__episode-name">
                           {duplicateOrder && <span className="fy-dot fy-dot--warn" title="Duplicate number" />}
-                          Episode {index + 1} · {episode.title}
+                          Episode {index + 1}{/^Episode\s+\d+$/i.test(episode.title.trim()) ? "" : ` · ${episode.title}`}
                         </span>
                         <span className="fy-prodrail__episode-count">{episode.scenes.length}</span>
                       </button>
@@ -676,6 +732,27 @@ export function ProductionLayout() {
                 generateActive,
               )}
               {item("cut", "Cut", cut ? railFigure : "0:00")}
+              {item("publish", "Publish")}
+            </>
+          ) : shape?.isMusic ? (
+            /* A music production (design turn 238c): its tracks are the page, and what they are made of. */
+            <>
+              {item("", "Tracks", String(musicTracks))}
+              <span className="fy-prodrail__section-divider" aria-hidden="true" />
+              {item("artifacts", "Artifacts", String(artifactCount))}
+              {item("publish", "Publish")}
+            </>
+          ) : shape?.isAudioDrama ? (
+            /* An audio drama (design turn 230 revision 3): no Develop, Overview or Chapters — its
+               writing happens in its episodes, and Arke is the Chat beside every page. */
+            <>
+              {item("", "Episodes", String(dramaEpisodes))}
+              {/* After Episodes, only for a drama that adapts a story (SPEC-057 R-61). */}
+              {production?.audioDrama?.source && item("adaptation", "Adaptation")}
+              {item("cast", "Cast", String(castCount))}
+              <span className="fy-prodrail__section-divider" aria-hidden="true" />
+              {item("artifacts", "Artifacts", String(artifactCount))}
+              {item("publish", "Publish")}
             </>
           ) : (
             <>
@@ -687,12 +764,17 @@ export function ProductionLayout() {
                 <>
                   {item("story", "Develop", "chat", true)}
                   {item("overview", "Overview", production?.story ? `v${production.story.version}` : "—")}
-                  {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0))}
+                  {item("story/chapters", "Chapters", String(production?.chapters.length ?? 0), undefined, undefined, undefined, undefined, audioStudioRoute ? false : undefined)}
                   {compact && chapterRoute && <div className="fy-prodrail__chapters">{production?.chapters.filter(chapter => !chapter.retired).map(chapter => <NavLink key={chapter.id} to={`${base}/story/chapters/${encodeURIComponent(chapter.id)}`} className="fy-prodrail__chapter">{String(chapter.order).padStart(2,"0")} · {chapter.title}</NavLink>)}</div>}
                   {/* The reading (turn 146, SPEC-047 R-29): chapters read of those with prose, from the door's last answer. */}
-                  {item("story/audiobook", "Audiobook", audiobookCount)}
+                  {/* A graphic novel's pictures are its pages (design turn 247): Pages in place of Audiobook. */}
+                  {shape?.hasPages
+                    ? item("story/pages", "Pages", String(production?.comicScripts?.reduce((count, entry) => count + entry.script.pages.length, 0) ?? 0))
+                    : item("story/audiobook", "Audiobook", audiobookCount, undefined, audioStudioRoute)}
                   <span className="fy-prodrail__section-divider" aria-hidden="true" />
                   {item("artifacts", "Artifacts", String(artifactCount))}
+                  {/* Where every kind publishes from, the rail's last item (design turn 276). */}
+                  {item("publish", "Publish")}
                 </>
               ) : (
                 <>
@@ -717,6 +799,7 @@ export function ProductionLayout() {
                   {item("generate", "Generate", String(production?.takes.length ?? 0))}
                   {/* A visual novel is read as beats, never cut: its preview and package are the branch map's. */}
                   {shape?.playsAsBeats ? null : item("cut", "Cut", cut ? railFigure : "0:00")}
+                  {item("publish", "Publish")}
                 </>
               )}
             </>
@@ -736,7 +819,7 @@ export function ProductionLayout() {
   );
   return (
     <div className="fy-app fy-production-app" data-scene-route={sceneRoute || undefined} data-cut-route={cutRoute || undefined} data-deep-phone={sceneDeepPhone || undefined}>
-      {!sceneDeepPhone && <AppChrome
+      {(!sceneDeepPhone || globalChat) && <AppChrome
         // A chapter's Audiobook and Timing views draw no page head (design turn 194, rule 2): the
         // chapter's title is the bar's last crumb there, as the frames draw it.
         {...(crumbChapter !== undefined ? { menu: <><span className="fy-titlebar__sep" aria-hidden="true">›</span><span className="fy-titlebar__crumb">{crumbChapter.title}</span></> } : {})}
@@ -768,11 +851,13 @@ export function ProductionLayout() {
           {refusal ? (
             <WorldOpenRefusal worldId={worldId!} reason={refusal.reason} />
           ) : !world ? (
-            <Loading label="opening the world" />
+            <WorldOpening worldId={worldId} />
           ) : (
             <NewSceneContext.Provider value={newScene}>
               <NewChapterContext.Provider value={newChapter}>
-                <Outlet />
+                <StudioInlineContext.Provider value={setStudioInline}>
+                  <Outlet />
+                </StudioInlineContext.Provider>
               </NewChapterContext.Provider>
             </NewSceneContext.Provider>
           )}
@@ -796,6 +881,7 @@ export function ProductionChatScreen() {
   const opening = (useLocation().state as { opening?: string } | null)?.opening;
   const { world, production } = useProduction(worldId, prodId);
   const navigate = useNavigate();
+  const thread = useStoreSelector((store) => store.state?.worldChat);
   const shape = production ? productionShape(production.meta) : null;
   const cast = pickableSheets(world?.sheets ?? [], prodId).filter((s) => s.type === "character").length;
   const contextCount = shape?.hasChapters
@@ -823,6 +909,8 @@ export function ProductionChatScreen() {
         ) ?? null);
   const staged = candidate && proposalDecisionOf(candidate.proposal, world?.conversations ?? []).mode === "attended" ? candidate : null;
   const stagedStyle = staged?.proposal.targets.some((t) => t.path.endsWith("/prose-style.json")) ?? false;
+  // A draft with a card in this thread is decided there: two sets of buttons named the same choice twice.
+  const decidedOnCard = staged !== null && (thread?.actions ?? []).some((action) => action.status === "pending" && action.authority.id === staged.proposal.id);
   return (
     <div className="fy-story" data-screen="production-chat">
       <ProductionConversation
@@ -832,22 +920,22 @@ export function ProductionChatScreen() {
         contextSummary={`${contextCount} ${contextUnit}${contextCount === 1 ? "" : "s"}, ${cast} cast${world?.meta.tone ? ", " + world.meta.tone : ""}`}
         stagedTitle={staged ? `${stagedStyle ? "Style" : shape?.isEpisodic ? "Season" : "Story"} v${(staged.proposal.targets[0]?.baseVersion ?? 0) + 1} · waiting on you` : undefined}
         eyebrow={`DEVELOP · ${shape ? shape.displayLabel.toLowerCase() : ""}`}
-        heading={shape?.isEpisodic ? "What is this season?" : "Find the spine together."}
+        heading={shape?.isEpisodic ? "What is this season?" : "Find the story together."}
         placeholder="Say what this is — what happens, who it costs, how it ends…"
         emptyLine={
           shape?.isEpisodic
             ? "Develop this season here. Shape what it answers, how it ends, and what its episodes are."
             : shape?.medium === "video"
               ? "Develop this film here. Its dramatic question, through-line and ending are edited in Overview."
-              : "Develop this story here. Shape the spine, the acts, and what it costs."
+              : "Say what it's about, and Arke will shape it with you."
         }
         footer={
           <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center", flexWrap: "wrap" }}>
             <span className="fy-mono">in context:</span>
-            <span className="fy-pill">
+            {contextCount > 0 && <span className="fy-pill">
               all {contextCount} {contextUnit}{contextCount === 1 ? "" : "s"}
-            </span>
-            <span className="fy-pill">{cast} cast sheets</span>
+            </span>}
+            <span className="fy-pill">{cast} cast sheet{cast === 1 ? "" : "s"}</span>
             {world?.meta.tone && <span className="fy-pill">Tone · {world.meta.tone}</span>}
             <span style={{ flex: 1 }} />
             {/* Where what is being said ends up, named and reachable from where it is said. */}
@@ -865,7 +953,7 @@ export function ProductionChatScreen() {
             ? "New conversation notes appear here. Accepted work is in Season and Episodes."
             : "New conversation notes appear here. Accepted work is in Overview and Scenes."}
         {...(opening ? { openWith: opening } : {})}
-        {...(staged
+        {...(staged && !decidedOnCard
           ? {
               side: (
                 <StagedDecision

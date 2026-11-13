@@ -96,7 +96,7 @@ it("a line sent while the world is still opening is not closed by that open's re
     changeLogPath: join(root, "changes.jsonl"), observeEvent: (event) => events.push(event),
   });
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   await coordinator.start(0);
   const runs = async () => {
     const { events: logged } = await log.read();

@@ -4,7 +4,7 @@ import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ClientMessageSchema } from "@arke-studio/contracts";
 import { MarkdownFile } from "../../src/world/text-files.js";
-import { createChapter, createProduction, editChapterPlan, openChapter, reorderChapters, restoreChapter, saveChapter, setChapterRetired } from "../../src/productions/ops.js";
+import { createChapter, createProduction, editChapterPlan, openChapter, readChapterVersion, reorderChapters, restoreChapter, saveChapter, setChapterRetired } from "../../src/productions/ops.js";
 import { ProposalManager } from "../../src/gate/proposals.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -92,7 +92,7 @@ describe("chapter order through the scanned bundle (issue 399)", () => {
       "the shipped `number` shape reads as order, and the summary carries the stem",
     );
     assert.equal(before[0]?.status, "drafted", "authored status survives");
-    assert.equal(before[0]?.words, 3120, "authored word count survives");
+    assert.equal(before[0]?.words, 291, "summary measures saved prose rather than the declared 3,120");
 
     // The regression this issue exists for: writing `order` into a shipped chapter must not
     // make it fail the read schema and disappear from the bundle.
@@ -119,6 +119,7 @@ describe("chapter order through the scanned bundle (issue 399)", () => {
     assert.equal(data["number"], 1, "the legacy field is left where it was, not rewritten");
     assert.equal(data["order"], 2, "the authority field is written beside it");
     assert.equal(data["version"], 4, "reorder cuts no version");
+    assert.equal(data["words"], 3120, "reading and reordering do not rewrite legacy metadata");
   });
 
   it("ties and invalid orders fall back to filename order, deterministically", async () => {
@@ -232,6 +233,96 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     );
   });
 
+  it("keeps the original non-empty v1 through later autosaves and restores it (#1735)", async () => {
+    const { dir, store } = await open();
+    const file = await createChapter(store, LEDGER, { title: "Original", order: 9 });
+    const original = "The first paragraph.\n\nThe second paragraph.";
+    const first = await saveChapter(store, LEDGER, file, original);
+    assert.equal(first.version, 1, "filling a blank chapter does not cut a version");
+    const unchanged = await saveChapter(store, LEDGER, file, original.replace(/\n/g, "\r\n") + "\r\n\r\n", { baseHash: first.hash });
+    assert.equal(unchanged.version, 1, "serialization-equivalent prose does not cut a version");
+    const path = join("productions", LEDGER, "chapters", `${file}.md`);
+    const originalBytes = await readFile(join(dir, path), "utf8");
+    const history = join(dir, ".history", "productions", LEDGER, "chapters", file);
+
+    const edited = await saveChapter(store, LEDGER, file, "A revision.", { baseHash: unchanged.hash });
+    assert.equal(edited.version, 2);
+    assert.equal(await readFile(join(history, "v1.md"), "utf8"), originalBytes);
+    assert.deepEqual((await openChapter(store, LEDGER, file)).versions, [1]);
+    const next = await saveChapter(store, LEDGER, file, "The finished revision.", { baseHash: edited.hash });
+    assert.equal(next.version, 2, "later autosaves stay in v2");
+    assert.deepEqual((await readdir(history)).sort(), ["v1.md", "v2.md"]);
+    assert.equal(await readFile(join(history, "v1.md"), "utf8"), originalBytes);
+    assert.equal((await readChapterVersion(store, LEDGER, file, 1)).trim(), original);
+
+    assert.equal(await restoreChapter(store, LEDGER, file, 1), 3);
+    const restored = await openChapter(store, LEDGER, file);
+    assert.equal(restored.body.trim(), original);
+    assert.deepEqual(restored.versions, [1, 2]);
+    assert.equal((await readChapterVersion(store, LEDGER, file, 2)).trim(), "The finished revision.");
+  });
+
+  it("refuses a stale first revision without a checkpoint, and preserves v1 when cleared (#1735)", async () => {
+    const { dir, store } = await open();
+    const file = await createChapter(store, LEDGER, { title: "Kept", order: 9 });
+    const first = await saveChapter(store, LEDGER, file, "Keep this original.");
+    const path = join(dir, "productions", LEDGER, "chapters", `${file}.md`);
+    const originalBytes = await readFile(path, "utf8");
+    const history = join(dir, ".history", "productions", LEDGER, "chapters", file);
+    await assert.rejects(saveChapter(store, LEDGER, file, "A stale revision.", { baseHash: "sha256:" + "0".repeat(64) }));
+    assert.equal(await readFile(path, "utf8"), originalBytes);
+    assert.deepEqual(await readdir(history), ["v1.md"]);
+    assert.equal(await readFile(join(history, "v1.md"), "utf8"), originalBytes);
+
+    const cleared = await saveChapter(store, LEDGER, file, "", { baseHash: first.hash });
+    assert.equal(cleared.version, 2);
+    assert.equal((await openChapter(store, LEDGER, file)).body, "");
+    assert.equal(await readFile(join(history, "v1.md"), "utf8"), originalBytes);
+  });
+
+  it("saving new prose starts a planned chapter as a draft and survives reopening", async () => {
+    const { dir, store } = await open();
+    await createProduction(store, { title: "Inkbound", format: "story" });
+    const file = await createChapter(store, "inkbound", { title: "Manual draft", order: 1 });
+    const before = await openChapter(store, "inkbound", file);
+    const blank = await saveChapter(store, "inkbound", file, "  ", { baseHash: before.hash });
+    assert.equal((await chaptersOf(dir, "inkbound"))[0]!.status, "planned");
+    await assert.rejects(saveChapter(store, "inkbound", file, "A stale draft.", { baseHash: "sha256:" + "0".repeat(64) }));
+    assert.equal((await chaptersOf(dir, "inkbound"))[0]!.status, "planned");
+    await saveChapter(store, "inkbound", file, "Maren closed the ledger.", { baseHash: blank.hash });
+    await store.close();
+    const reopened = await WorldStore.open(dir, { clock: CLOCK });
+    closeOnCleanup(() => reopened.close());
+    const production = reopened.getBundle().productions.find(p => p.meta.id === "inkbound")!;
+    assert.equal(production.chapters[0]!.status, "drafted");
+    assert.equal(production.chapters[0]!.words, 4);
+    assert.deepEqual(production.progress, { days: { "2026-08-01": 4 } });
+  });
+
+  it("replaces an outline through a fenced manuscript save without leaving its count at zero", async () => {
+    for (const body of ["", "Maren closed the ledger."]) {
+      const { dir, store } = await open();
+      const file = "04-her-own-hand";
+      const before = await openChapter(store, LEDGER, file);
+      const unchanged = await saveChapter(store, LEDGER, file, before.body, { baseHash: before.hash });
+      let chapter = (await chaptersOf(dir, LEDGER)).find(c => c.file === file)!;
+      assert.equal(chapter.status, "outlined");
+      assert.equal(chapter.words, 0, "saving the same outline does not call it drafted");
+      await assert.rejects(saveChapter(store, LEDGER, file, "A refused draft.", { baseHash: "sha256:" + "0".repeat(64) }));
+      await saveChapter(store, LEDGER, file, body, { baseHash: unchanged.hash });
+      await store.close();
+      const reopened = await WorldStore.open(dir, { clock: CLOCK });
+      closeOnCleanup(() => reopened.close());
+      const production = reopened.getBundle().productions.find(p => p.meta.id === LEDGER)!;
+      chapter = production.chapters.find(c => c.file === file)!;
+      assert.equal(chapter.status, body ? "drafted" : "outlined");
+      assert.equal(chapter.words, body ? 4 : 0);
+      assert.deepEqual(production.progress, body ? { days: { "2026-08-01": 4 } } : undefined, "outline notes are not yesterday's manuscript words");
+      assert.equal(chapter.version, before.version, "the ordinary save still keeps its version");
+      assert.equal((await openChapter(reopened, LEDGER, file)).body.trim(), body);
+    }
+  });
+
   it("the plan saves in place, clears by null, rides on the summary, and keeps the version (turn 127)", async () => {
     const { dir, store } = await open();
     const before = await openChapter(store, LEDGER, "neap");
@@ -267,6 +358,60 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     assert.equal(cleared.pov, "maren-kest", "untouched fields stay");
 
     await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { pov: "the-vigil" }), /not a character/);
+  });
+
+  it("a new chapter takes the point of view of the chapter before it (SPEC-056 D-3)", async () => {
+    const { dir, store } = await open();
+    await editChapterPlan(store, LEDGER, "01-neap", { pov: "maren-kest" });
+    const chapters = await chaptersOf(dir, LEDGER);
+    const last = [...chapters].filter((c) => !c.retired).sort((a, b) => b.order - a.order)[0]!;
+    if (last.id !== "neap") await editChapterPlan(store, LEDGER, last.file, { pov: "maren-kest" });
+    const made = await createChapter(store, LEDGER, { title: "Untitled", order: 99 });
+    assert.equal((await chaptersOf(dir, LEDGER)).find((c) => c.id === made)!.pov, "maren-kest");
+    // A point of view the world no longer holds as a character is not carried.
+    await editChapterPlan(store, LEDGER, made + "", { pov: null });
+    const again = await createChapter(store, LEDGER, { title: "Untitled", order: 100 });
+    assert.equal((await chaptersOf(dir, LEDGER)).find((c) => c.id === again)!.pov, undefined, "nothing before it to carry");
+  });
+
+  it("the chapter before a new one is found by the ranks on disk, past a legacy chapter with none (codex on PR 1799)", async () => {
+    const dir = await makeTempWorld();
+    const first = await WorldStore.open(dir, { clock: CLOCK });
+    await createProduction(first, { title: "Inkbound", format: "story" });
+    const anchor = await createChapter(first, "inkbound", { title: "Anchor", order: 10 });
+    await editChapterPlan(first, "inkbound", anchor, { pov: "maren-kest" });
+    await first.close();
+    // No rank: the summaries number it after Anchor, but a new chapter's rank (11) sorts before it.
+    await writeFile(join(dir, "productions", "inkbound", "chapters", "bare.md"), "---\nid: bare\ntitle: bare\npov: perrin-tallow\nstatus: planned\nversion: 1\n---\n\nProse.\n");
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    closeOnCleanup(() => store.close());
+    await store.reconcileExternalEdit("productions/inkbound/chapters/bare.md");
+    assert.deepEqual((await chaptersOf(dir, "inkbound")).map((c) => c.file), ["anchor", "bare"]);
+    const made = await createChapter(store, "inkbound", { title: "Untitled", order: 3 });
+    assert.equal((await chaptersOf(dir, "inkbound")).find((c) => c.id === made)!.pov, "maren-kest", "Anchor's, the ranked chapter it follows");
+  });
+
+  it("a chapter's goal and picture save with the plan, ride on the summary and keep the version (SPEC-056 R-49/R-50)", async () => {
+    const { dir, store } = await open();
+    const before = await openChapter(store, LEDGER, "neap");
+    await editChapterPlan(store, LEDGER, "01-neap", { goal: 4500, picture: "world-art.png" });
+    const set = (await chaptersOf(dir, LEDGER)).find((c) => c.id === "neap")!;
+    assert.equal(set.goal, 4500);
+    assert.equal(set.picture, "world-art.png");
+    assert.equal(set.version, before.version, "a goal or a picture cuts no version");
+
+    // A picture must be an image the world holds now, never a path out of it.
+    await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { picture: "missing.png" }), /not in this world/);
+    await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { picture: "../outside.png" }), /not a picture/);
+    await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { picture: "changes.jsonl" }), /not a picture/);
+    // Only what the world's media route serves: an AVIF would be saved and never load (codex on PR 1795).
+    await assert.rejects(() => editChapterPlan(store, LEDGER, "01-neap", { picture: "world-art.avif" }), /not a picture/);
+    assert.equal((await chaptersOf(dir, LEDGER)).find((c) => c.id === "neap")!.picture, "world-art.png", "a refused picture writes nothing");
+
+    await editChapterPlan(store, LEDGER, "01-neap", { goal: null, picture: null });
+    const cleared = (await chaptersOf(dir, LEDGER)).find((c) => c.id === "neap")!;
+    assert.equal(cleared.goal, undefined);
+    assert.equal(cleared.picture, undefined);
   });
 
   it("a pressed chapter lands after the highest persisted rank, not after the dense count (codex, PR 879)", async () => {
@@ -316,6 +461,12 @@ describe("the chapter workspace's own commands (turn 126)", () => {
     assert.equal(back.version, 6);
     assert.equal(back.body.trim(), before.body.trim());
     assert.deepEqual(back.versions, [4, 5], "nothing between is lost");
+
+    // Compare reads a kept version's prose without the front matter (SPEC-056 R-13).
+    assert.equal((await readChapterVersion(store, LEDGER, "01-neap", 4)).trim(), before.body.trim());
+    assert.match(await readChapterVersion(store, LEDGER, "01-neap", 5), /Drafted anew/);
+    await assert.rejects(() => readChapterVersion(store, LEDGER, "01-neap", 99), /not kept/, "a version never written");
+    await assert.rejects(() => readChapterVersion(store, LEDGER, "../01-neap", 4), /no longer in this production/, "only the production's own chapters");
   });
 });
 

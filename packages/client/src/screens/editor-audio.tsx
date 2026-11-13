@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { TransitionJoins } from "./editor-transitions.js";
 import { ClipMenu, ClipMenuLabel, ExtractAudioMenuItem } from "./editor-clip-menu.js";
 import {
   artifactPicturePath,
@@ -23,11 +24,11 @@ import {
   type TimelineTrackId,
   PICTURE_TRACK_ID,
 } from "@arke-studio/contracts";
-import { cx } from "../components/ui.js";
+import { cx, IconButton } from "../components/ui.js";
 import { Portrait } from "../components/portrait.js";
-import type { EditorTool } from "./editor-timeline.js";
-import { frameAtPixel, previewTimeline, trackDragCommand, type PictureGesture } from "../lib/picture-edit.js";
-import { fileKindsFromTransfer, laneTakesFiles, type DroppedKind } from "../lib/clip-gesture.js";
+import { TextChip, type EditorTool } from "./editor-timeline.js";
+import { clipSpokenName, frameAtPixel, previewTimeline, trackDragCommand, type PictureGesture } from "../lib/picture-edit.js";
+import { extendsSelection, fileKindsFromTransfer, laneTakesFiles, type DroppedKind } from "../lib/clip-gesture.js";
 import { pointerIsTouch, startClipGesture, type GestureUpdate } from "./editor-gesture.js";
 import { useCutLayout, useCutTouch } from "./editor-responsive.js";
 import { DropTarget, GestureChip, chipSeconds } from "./editor-marks.js";
@@ -41,7 +42,7 @@ import { DropTarget, GestureChip, chipSeconds } from "./editor-marks.js";
  * same one the render plan reads.
  */
 
-import { Film, Mic, MusicMark, TextMark, Waveform, X } from "../components/icons.js";
+import { Eye, EyeOff, Film, Mic, MusicMark, Speaker, SpeakerOff, TextMark, Waveform, X } from "../components/icons.js";
 
 export const ARTIFACT_DRAG_TYPE = "application/x-arke-artifact";
 /**
@@ -128,6 +129,7 @@ export function TypedTrackRows({
   totalFrames,
   frameRate,
   selectedClipId,
+  selectedClipIds,
   onSelect,
   onCommands,
   onPreview,
@@ -143,6 +145,7 @@ export function TypedTrackRows({
   mintClipId,
   nameOf,
   tool = "select",
+  reviewMarks,
 }: {
   production?: ProductionBundle;
   artifacts?: readonly ArtifactSidecar[];
@@ -151,7 +154,10 @@ export function TypedTrackRows({
   totalFrames: number;
   frameRate: FrameRate;
   selectedClipId: string | null;
-  onSelect: (clipId: TimelineClipId) => void;
+  /** Several titles selected together (SPEC-065 R-31): each drawn selected. */
+  selectedClipIds?: ReadonlySet<string>;
+  /** `extend` is a press with Shift, Ctrl or Cmd held, which adds a title to the selection. */
+  onSelect: (clipId: TimelineClipId, extend?: boolean) => void;
   onCommands: (commands: TimelineClipCommand[], label?: string) => void;
   onPreview: (timeline: ProductionTimeline | null) => void;
   /** Bring the viewer to a frame while an edge moves, and park it there on release (issue 1036). */
@@ -173,6 +179,7 @@ export function TypedTrackRows({
   nameOf?: (artifact: ArtifactSidecar) => string;
   /** The toolbar's tool applies to every track (round eight): Blade splits here, Hand pans here. */
   tool?: EditorTool;
+  reviewMarks?: ReadonlyMap<string, string>;
 }) {
   const [hover, setHover] = useState<{ trackId: TimelineTrackId; frame: number; refused: boolean; files: boolean } | null>(null);
   const [drag, setDrag] = useState<(GestureUpdate & { trackId: TimelineTrackId; refused: boolean }) | null>(null);
@@ -210,7 +217,8 @@ export function TypedTrackRows({
    */
   const begin = (track: TimelineTrack, clipId: TimelineClipId, gesture: PictureGesture) => (event: React.PointerEvent) => {
     if (event.button !== 0 || disabled || tool !== "select") return;
-    if (!pointerIsTouch(event)) onSelect(clipId);
+    // A press that extends the selection leaves it to the click, which would otherwise find it collapsed.
+    if (!pointerIsTouch(event) && !extendsSelection(event)) onSelect(clipId);
     const element = event.currentTarget as HTMLElement;
     const lane = element.closest<HTMLElement>(".fy-track__lane");
     const clips = orderedTrackClips(track);
@@ -301,6 +309,9 @@ export function TypedTrackRows({
       onSelect(clipId); setMenu({ clipId, x: box.left, y: box.bottom });
       event.preventDefault(); event.stopPropagation(); return;
     }
+    // One of several selected titles has the focus: Delete goes on to the Cut, which removes them
+    // all in one batch, and the keys that act on one clip do nothing with several marked.
+    if (selectedClipIds !== undefined && selectedClipIds.size > 1 && selectedClipIds.has(clipId)) return;
     if (event.key === "Delete" || event.key === "Backspace") {
       onCommands([{ kind: event.shiftKey ? "ripple-delete" : "delete", clipId }], event.shiftKey ? "Ripple delete clip" : "Delete clip");
     } else if (event.key === "d" || event.key === "D") {
@@ -349,35 +360,35 @@ export function TypedTrackRows({
               <span className="fy-track__name" title={`${track.name} · ${kindLabel}`}>{track.name}</span>
               <span className="fy-trackbtns" role="group" aria-label={`${track.name} controls`}>
                 {removable && (
-                  <button
+                  <IconButton
                     type="button"
                     className="fy-trackbtns__remove"
-                    aria-label={`Remove ${track.name}`}
+                    label={`Remove ${track.name}`}
                     disabled={disabled}
                     onClick={() => onCommands([{ kind: "remove-track", trackId: track.id }], `Remove ${track.name}`)}
                   >
-                    <X size={9} />
-                  </button>
+                    <X size={14} />
+                  </IconButton>
                 )}
-                <button
+                <IconButton
                   type="button"
                   aria-pressed={track.muted}
-                  aria-label={`Mute ${track.name}`}
+                  label={`${audio ? track.muted ? "Unmute" : "Mute" : track.muted ? "Show" : "Hide"} ${track.name}`}
                   disabled={disabled}
-                  onClick={() => onCommands([{ kind: "set-track", trackId: track.id, muted: !track.muted }], track.muted ? `Unmute ${track.name}` : `Mute ${track.name}`)}
+                  onClick={() => onCommands([{ kind: "set-track", trackId: track.id, muted: !track.muted }], `${audio ? track.muted ? "Unmute" : "Mute" : track.muted ? "Show" : "Hide"} ${track.name}`)}
                 >
-                  M
-                </button>
+                  {audio ? track.muted ? <SpeakerOff size={14} /> : <Speaker size={14} /> : track.muted ? <EyeOff size={14} /> : <Eye size={14} />}
+                </IconButton>
                 {audio && (
-                  <button
+                  <IconButton
                     type="button"
                     aria-pressed={track.solo === true}
-                    aria-label={`Solo ${track.name}`}
+                    label={`${track.solo ? "Unsolo" : "Solo"} ${track.name}`}
                     disabled={disabled}
                     onClick={() => onCommands([{ kind: "set-track", trackId: track.id, solo: track.solo !== true }], track.solo === true ? `Unsolo ${track.name}` : `Solo ${track.name}`)}
                   >
                     S
-                  </button>
+                  </IconButton>
                 )}
               </span>
             </span>
@@ -440,6 +451,7 @@ export function TypedTrackRows({
                 <span className="fy-track__empty">{filesOver ? `Drop to add · ${track.name}` : audio ? "drop sound here" : "drop a picture here"}</span>
               )}
               {laneHover !== null && laneHover.refused && <span className="fy-track__refuse">{refuseWords}</span>}
+              {track.kind === "picture" && <TransitionJoins trackId={track.id} totalFrames={span} />}
               {laneHover !== null && !laneHover.refused && (
                 <DropTarget
                   frame={laneHover.frame}
@@ -466,9 +478,10 @@ export function TypedTrackRows({
                 <span className="fy-snapline" style={{ left: percent(laneDrag.snappedTo) }} data-testid="snap-line" aria-hidden="true" />
               )}
               {orderedTrackClips(track).map((clip) => {
-                const selected = clip.id === selectedClipId;
+                const selected = clip.id === selectedClipId || selectedClipIds?.has(clip.id) === true;
                 const name = shownName(clip);
-                const label = `${name}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${silenced ? ", silent" : ""}${clip.gainDb !== undefined && clip.gainDb !== 0 ? `, ${clip.gainDb} dB` : ""}`;
+                // A text chip shows its first line; its name aloud is all its words (SPEC-065 R-33).
+                const label = `${clipSpokenName(clip, name)}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${silenced ? ", silent" : ""}${clip.gainDb !== undefined && clip.gainDb !== 0 ? `, ${clip.gainDb} dB` : ""}`;
                 const isGhost = moving && clip.id === laneDrag.clipId;
                 const artifact = artifactOf(clip);
                 const picture = !audio && artifact !== null ? artifactPicturePath(artifact) : null;
@@ -477,11 +490,14 @@ export function TypedTrackRows({
                     key={clip.id}
                     type="button"
                     data-clip={clip.id}
+                    data-review-change={reviewMarks?.get(clip.id)}
+                    data-source={clip.source.kind === "text" ? "text" : undefined}
                     className={cx("fy-typedclip", audio && "fy-typedclip--audio", picture !== null && "fy-typedclip--picture", selected && "fy-typedclip--selected", isGhost && "fy-typedclip--ghost")}
                     style={{ left: percent(isGhost && ghostStart !== null ? ghostStart : clip.startFrame), width: `${Math.max((clip.durationFrames / span) * 100, 0.6)}%` }}
                     aria-pressed={selected}
                     aria-label={label}
-                    title={label}
+                    // A title's tip is its first line, the words the chip may be too narrow to show (rule 3).
+                    title={clip.source.kind === "text" ? name : label}
                     disabled={disabled}
                     onContextMenu={event => {
                       event.preventDefault(); event.stopPropagation();
@@ -494,7 +510,7 @@ export function TypedTrackRows({
                         blade(track, clip)(event);
                         return;
                       }
-                      onSelect(clip.id);
+                      onSelect(clip.id, extendsSelection(event));
                     }}
                     onPointerDown={begin(track, clip.id, "move")}
                     onKeyDown={onClipKeyDown(clip.id, clip)}
@@ -502,7 +518,7 @@ export function TypedTrackRows({
                     {/* An image overlay shows its image (issue 1037): the picture behind the name, not a text chip. */}
                     {picture !== null && <Portrait worldSlug={slug} path={picture} label="" radius={0} />}
                     <span className="fy-pictclip__grip fy-pictclip__grip--start" onPointerDown={begin(track, clip.id, "trim-start")} aria-hidden="true"><i /></span>
-                    <span className="fy-typedclip__name">{name}</span>
+                    {clip.source.kind === "text" ? <TextChip label={name} /> : <span className="fy-typedclip__name">{name}</span>}
                     {clip.gainDb !== undefined && clip.gainDb !== 0 && <span className="fy-typedclip__gain">{clip.gainDb > 0 ? `+${clip.gainDb}` : clip.gainDb} dB</span>}
                     {clip.audio === "mute" && <span className="fy-typedclip__gain">MUTE</span>}
                     <span className="fy-pictclip__grip fy-pictclip__grip--end" onPointerDown={begin(track, clip.id, "trim-end")} aria-hidden="true"><i /></span>
@@ -532,8 +548,9 @@ export function TypedTrackRows({
                   : { kind: action, clipId };
             onCommands([command], label); setMenu(null);
           }}><ClipMenuLabel action={action}>{label}</ClipMenuLabel></button>)}
-        <ExtractAudioMenuItem production={production} timeline={timeline} artifacts={artifacts} clip={menuClip}
-          disabled={disabled} onCommands={onCommands} mintClipId={mintClipId} onClose={() => setMenu(null)} />
+        {/* Text has no sound to extract (SPEC-065 R-2); the item is not offered rather than refused. */}
+        {menuClip.source.kind !== "text" && <ExtractAudioMenuItem production={production} timeline={timeline} artifacts={artifacts} clip={menuClip}
+          disabled={disabled} onCommands={onCommands} mintClipId={mintClipId} onClose={() => setMenu(null)} />}
       </ClipMenu>}
     </>
   );

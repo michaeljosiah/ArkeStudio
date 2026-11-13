@@ -2,10 +2,9 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { it } from "node:test";
-import { productionExportFingerprint, type ReadinessExport, type DomainEvent, type ClientMessage } from "@arke-studio/contracts";
+import { productionExportFingerprint, type ReadinessExport, type DomainEvent } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { assembleStory } from "./assemble.js";
-import type { ChangeLog } from "../../src/change-log.js";
 import { recordCompletedExport, readCompletedExports } from "../../src/productions/export-receipts.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld, WORLD_ID } from "../world/helpers.js";
@@ -44,17 +43,17 @@ it("publishes native legacy and saved-timeline video completion only after the w
   await store.ownedWrite(()=>rm(join(dir,"productions/saltlight/timeline.json"),{force:true}));
   const coordinator=new Coordinator({provider:{listWorlds:async()=>[],loadWorld:async()=>store.getBundle(),openStore:()=>store},adapter:null,appVersion:"test",changeLogPath:join(dir,".cache/test-events.jsonl"),observeEvent:event=>{events.push(event);},
     ffmpeg:{slateFont:"/font.ttf",run:async(args,onProgress)=>{onProgress(50);await writeFile(args.at(-1)!,"encoded video");}}});
-  const host=coordinator as unknown as {handleClientMessage(message:ClientMessage):Promise<void>;backgroundWork:Set<Promise<unknown>>;changeLog:ChangeLog};
+  const host=coordinator;
   for(const saved of [false,true]) {
     let production=store.getBundle().productions.find(p=>p.meta.id === "saltlight")!;
     if(saved) { await assembleStory(store,production.meta.id); production=store.getBundle().productions.find(p=>p.meta.id === "saltlight")!; }
     const fingerprint=productionExportFingerprint(store.getBundle(),production),before=events.length;
-    await host.handleClientMessage({kind:"export-cut",worldId:WORLD_ID,productionId:production.meta.id,preset:"review-cut",timelineRevision:production.timeline?.status === "ready" ? production.timeline.timeline.revision : null});
-    await Promise.all(host.backgroundWork);
+    await host.dispatch({kind:"export-cut",worldId:WORLD_ID,productionId:production.meta.id,preset:"review-cut",timelineRevision:production.timeline?.status === "ready" ? production.timeline.timeline.revision : null});
+    await Promise.all(host["backgroundWork"]);
     const done=events.slice(before).find((event):event is Extract<DomainEvent,{type:"export.progress"}>=>event.type === "export.progress" && event.status === "done");
     assert.ok(done,JSON.stringify(events.slice(before)));
     const records=await readCompletedExports(store),record=records.find(record=>record.id === done.exportId)!;
     assert.equal(record.sourceFingerprint,fingerprint); assert.equal(record.deliveryKind,"video"); assert.equal(record.output,done.output);
   }
-  await host.changeLog.drain();
+  await host["changeLog"].drain();
 });

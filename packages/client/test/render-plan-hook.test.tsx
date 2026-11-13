@@ -5,10 +5,16 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import {
   applyTimelineCommands,
+  defaultEffectClip,
   seedStoryPictureTimeline,
+  textLabel,
+  textPicturePath,
+  TEXT_PICTURE_PATH,
   type ArtifactSidecar,
   type ClientState,
   type ProductionBundle,
+  type TextLook,
+  type TimelineClip,
 } from "@arke-studio/contracts";
 import { ABSENT_TIMELINE, useRenderPlan, type EditorRenderPlan, type RenderPlanInputs } from "../src/screens/editor-plan.js";
 import { editorTimeline } from "../src/lib/editor-timeline.js";
@@ -70,6 +76,20 @@ function savedStory(): { production: ProductionBundle; artifacts: readonly Artif
   return { production, artifacts: state.world!.artifacts };
 }
 
+/** The fixture's story with one bare title above it: no fade, no blend, nothing but the words (SPEC-065). */
+function storyWithTitle(aspect: "9:16" | "16:9"): { production: ProductionBundle; artifacts: readonly ArtifactSidecar[]; title: TimelineClip } {
+  const { production, artifacts } = savedStory();
+  production.meta.aspect = aspect;
+  assert.equal(production.timeline?.status, "ready");
+  if (production.timeline?.status !== "ready") throw new Error("the saved story did not read");
+  const look: TextLook = { typeface: "geist", weight: "regular", italic: false, size: 0.08, tracking: 0, leading: 1.2, capitals: false, align: "center",
+    x: 0.5, y: 0.5, room: 0.8, fill: { kind: "solid", color: "#ffffff" } };
+  const words = "ADE\nthe one who stayed";
+  const title: TimelineClip = { id: "cl_title", startFrame: 0, durationFrames: 48, sourceInFrames: 0, source: { kind: "text", label: textLabel(words), text: words, look } };
+  production.timeline.timeline.tracks.push({ id: "tr_names", kind: "picture", name: "Names", order: 10, muted: false, clips: [title] });
+  return { production, artifacts, title };
+}
+
 /** The screen's own inputs: the record it edits is projected once per snapshot and catalog, as the screen memoises it. */
 function inputsFor(production: ProductionBundle, artifacts: readonly ArtifactSidecar[], tick: number, more: Partial<RenderPlanInputs> = {}): RenderPlanInputs & { tick: number } {
   const timelineState = production.timeline ?? ABSENT_TIMELINE;
@@ -92,6 +112,91 @@ afterEach(() => {
 });
 
 describe("the editor's render plan (issue 1158)", () => {
+  it("uses the portrait composition for picture appearance without any procedural effect", async () => {
+    const { production, artifacts } = savedStory(); production.meta.aspect = "9:16";
+    assert.equal(production.timeline?.status, "ready"); if (production.timeline?.status !== "ready") return;
+    const timeline = production.timeline.timeline;
+    timeline.tracks[0]!.clips[0]!.visual = { blendMode: "screen", opacity: .5 };
+    assert.ok(timeline.tracks.every(track => !track.effects?.length));
+    const mounted = await mount();
+    try {
+      await mounted.render(inputsFor(production, artifacts, 1));
+      const result = results.at(-1)!.renderPlan; assert.ok(result?.ok);
+      assert.equal(result.plan.preset, "vertical-master");
+      assert.equal(result.plan.effectRender?.width, 1080); assert.equal(result.plan.effectRender?.height, 1920);
+    } finally { await close(mounted); }
+  });
+  it("uses the production's portrait delivery shape for procedural preview", async () => {
+    const { production, artifacts } = savedStory();
+    production.meta.aspect = "9:16";
+    assert.equal(production.timeline?.status, "ready");
+    if (production.timeline?.status !== "ready") return;
+    production.timeline.timeline.tracks.push({ id: "tr_effects", kind: "effect", name: "Effects", order: 20, muted: false, clips: [], effects: [defaultEffectClip({ id: "cl_fx", lineageId: "ef_fx", seed: 42, startFrame: 0, durationFrames: 24 })] });
+    const mounted = await mount();
+    try {
+      await mounted.render(inputsFor(production, artifacts, 1));
+      const result = results.at(-1)!.renderPlan;
+      assert.ok(result?.ok);
+      assert.equal(result.plan.preset, "vertical-master");
+      assert.equal(result.plan.effectRender?.width, 1080);
+      assert.equal(result.plan.effectRender?.height, 1920);
+    } finally { await close(mounted); }
+  });
+  it("plans a portrait film with one bare text clip at its delivery frame, and names its picture", async () => {
+    // Text is named by the frame it is painted for (SPEC-065 R-20), so the Viewer must plan at the
+    // frame the export uses or it would ask for a landscape picture to lay over a portrait film.
+    const { production, artifacts, title } = storyWithTitle("9:16");
+    assert.ok(title.source.kind === "text" && !title.fade && !title.visual);
+    const mounted = await mount();
+    try {
+      await mounted.render(inputsFor(production, artifacts, 1));
+      const result = results.at(-1)!.renderPlan; assert.ok(result?.ok, result && !result.ok ? result.reason : "no plan");
+      assert.equal(result.plan.preset, "vertical-master");
+      const layer = result.plan.effectRender?.pictureLayers.find(picture => picture.clipId === "cl_title");
+      assert.ok(layer, "the title is a layer the compositor places");
+      assert.match(layer.path ?? "", TEXT_PICTURE_PATH);
+      assert.deepEqual(layer.sourceSize, { width: 1080, height: 1920 });
+      const kept = textPicturePath(title.source, { width: 1080, height: 1920 });
+      assert.ok(kept.ok);
+      assert.equal(layer.path, kept.path, "the picture an export at the same frame keeps");
+    } finally { await close(mounted); }
+  });
+  it("plans a moving portrait title at twice its delivery frame, the picture the export keeps", async () => {
+    // A moving text clip is read from a picture painted at the size the export reads a moving
+    // still at (SPEC-065 R-17), so the Viewer asks for that picture and not one it would enlarge.
+    const { production, artifacts, title } = storyWithTitle("9:16");
+    assert.ok(production.timeline?.status === "ready" && title.source.kind === "text");
+    const moving = { ...title, motion: { kind: "push-in" as const, amount: .08 } };
+    const names = production.timeline.timeline.tracks.find(track => track.id === "tr_names")!;
+    names.clips = [moving];
+    const mounted = await mount();
+    try {
+      await mounted.render(inputsFor(production, artifacts, 1));
+      const result = results.at(-1)!.renderPlan; assert.ok(result?.ok, result && !result.ok ? result.reason : "no plan");
+      const layer = result.plan.effectRender?.pictureLayers.find(picture => picture.clipId === "cl_title");
+      const doubled = { width: 2160, height: 3840 }, kept = textPicturePath(title.source, doubled);
+      assert.ok(kept.ok);
+      assert.equal(layer?.path, kept.path);
+      assert.deepEqual(layer?.sourceSize, doubled);
+      assert.deepEqual(layer?.motion, moving.motion);
+    } finally { await close(mounted); }
+  });
+  it("plans a wide production's text at the review frame", async () => {
+    const { production, artifacts, title } = storyWithTitle("16:9");
+    assert.ok(title.source.kind === "text");
+    const mounted = await mount();
+    try {
+      await mounted.render(inputsFor(production, artifacts, 1));
+      const result = results.at(-1)!.renderPlan; assert.ok(result?.ok, result && !result.ok ? result.reason : "no plan");
+      assert.equal(result.plan.preset, "review-cut");
+      assert.equal(result.plan.effectRender?.width, 1280); assert.equal(result.plan.effectRender?.height, 720);
+      const layer = result.plan.effectRender?.pictureLayers.find(picture => picture.clipId === "cl_title");
+      const kept = textPicturePath(title.source, { width: 1280, height: 720 });
+      assert.ok(kept.ok);
+      assert.equal(layer?.path, kept.path);
+      assert.deepEqual(layer?.sourceSize, { width: 1280, height: 720 });
+    } finally { await close(mounted); }
+  });
   it("hands back the same plan while nothing it is made of has changed", async () => {
     const { production, artifacts } = savedStory();
     const mounted = await mount();
@@ -195,7 +300,7 @@ describe("the editor's render plan (issue 1158)", () => {
       await mounted.render(inputsFor(lost, state.world!.artifacts, 4));
       const refused = results.at(-1)!.renderPlan;
       assert.equal(refused?.ok, false);
-      assert.match(refused && !refused.ok ? refused.reason : "", /ov_01J8G0000000000000000000A2 cites artifact ar_01J8G0000000000000000000ZZ, which this world does not have/);
+      assert.match(refused && !refused.ok ? refused.reason : "", /ov_01J8G0000000000000000000A2 cites a file which this world does not have/);
 
       // A song not yet opened on the timeline has no record to draw and no plan of its own.
       const song: ProductionBundle = {

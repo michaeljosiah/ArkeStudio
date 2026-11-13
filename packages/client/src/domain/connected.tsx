@@ -53,8 +53,10 @@ export function ConnectedProposalPanel({
   const worldId = world.meta.worldId;
   const activity = authoring[id];
   const running = activity?.status === "running";
+  const requiresDraft = staged.review?.requiresDraft === true;
+  const blocked = accept?.blocked ?? (requiresDraft ? "This is still the saved brief. Draft the sheet before accepting." : undefined);
   return (
-    <div style={{ display: "grid", gap: "var(--space-2)" }}>
+    <div className="dom-connected-proposal">
       {activity && (
         <div className="dom-authoring" role="log">
           <div className="dom-authoring__head">
@@ -69,11 +71,14 @@ export function ConnectedProposalPanel({
             )}
           </div>
           {activity.lines.length > 0 && (
-            <ul className="dom-authoring__lines">
-              {activity.lines.map((line, i) => (
-                <li key={i}>{line}</li>
-              ))}
-            </ul>
+            <details className="dom-authoring__activity">
+              <summary>Drafting activity</summary>
+              <ul className="dom-authoring__lines">
+                {activity.lines.map((line, i) => (
+                  <li key={i}>{line}</li>
+                ))}
+              </ul>
+            </details>
           )}
         </div>
       )}
@@ -82,7 +87,7 @@ export function ConnectedProposalPanel({
         notice={notices[id]}
         onAccept={running ? undefined : accept?.onAccept ?? ((confirmSignature) => acceptProposal(worldId, id, confirmSignature))}
         {...(accept?.label !== undefined ? { acceptLabel: accept.label } : {})}
-        {...(accept?.blocked !== undefined ? { acceptBlocked: accept.blocked } : {})}
+        {...(blocked !== undefined ? { acceptBlocked: blocked } : {})}
         // A decision already on its way holds the others (codex on PR 1232): a Discard racing it
         // could land after the accept, or make it fail.
         onDiscard={running || accept?.pending === true ? undefined : () => discardProposal(worldId, id)}
@@ -101,9 +106,9 @@ export function ConnectedProposalPanel({
         disabledReason={running ? "the studio is still drafting — cancel first if you need to act now" : undefined}
       />
       {conversationPath !== undefined && (
-        <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-end" }}>
+        <div className="dom-connected-proposal__revise">
           <label style={{ display: "grid", gap: 4, flex: 1 }}>
-            <span className="fy-mono">Keep shaping this draft</span>
+            <span className="fy-mono">{requiresDraft ? "Your brief is saved · optional drafting direction" : "Keep shaping this draft"}</span>
             <textarea
               value={instruction}
               onChange={(event) => setInstruction(event.currentTarget.value)}
@@ -114,15 +119,15 @@ export function ConnectedProposalPanel({
           </label>
           <Button
             variant="outline"
-            disabled={running || instruction.trim().length === 0}
+            disabled={running || (!requiresDraft && instruction.trim().length === 0)}
             onClick={() => {
-              const next = instruction.trim();
+              const next = instruction.trim() || (requiresDraft ? `Draft the full sheet in ${conversationPath} from its saved brief. Replace the instructions with sheet prose, preserve the identity and fill its existing sections.` : "");
               if (!next) return;
               continueStudio(worldId, conversationPath, id, next);
               setInstruction("");
             }}
           >
-            Revise
+            {requiresDraft ? "Draft sheet" : "Revise"}
           </Button>
         </div>
       )}

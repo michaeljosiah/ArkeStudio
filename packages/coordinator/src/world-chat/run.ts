@@ -1,12 +1,18 @@
+import { runVoiceTurn, voiceModelBinding, type VoiceModelBinding } from "./voice-turn.js";
 import {
+  harnessModelFailureReason,
   newId,
   advanceWorldChatInputQueue,
   worldChatInputRouting,
   applyProductionSetupUpdate,
+  productionShape,
   type ProductionSetupDraft,
+  type ProductionSetupUpdate,
   type ProductionSetupState,
   REFUSED_TOOLS_MAX,
   PRODUCTION_READINESS_SCHEMA_VERSION,
+  CONVERSATION_CANDIDATE_READ_SCHEMA_VERSION,
+  CHAPTER_DRAFT_INTENT_SCHEMA_VERSION,
   type ProductionPlanRequest,
   type BibleEdit,
   type CandidateChecks,
@@ -29,14 +35,16 @@ import {
 import type { ModelEditorRequest, ModelSceneEdit, WorldChatContext, WorldChatSubject } from "@arke-studio/contracts";
 import { mergeAttachmentRanges, type AttachmentRange } from "./attachments.js";
 import { BibleEditError, BibleStaleError } from "../world/bible.js";
-import { TURN_CONSTRAINTS_SCHEMA_VERSION } from "../world/commit.js";
+import { AUDIO_DRAMA_SCHEMA_VERSION, TURN_CONSTRAINTS_SCHEMA_VERSION } from "../world/commit.js";
 import { SceneEditRefused } from "../productions/scene-edits.js";
 import { AUTH_FAILURE_REASON, isAuthShapedFailure } from "../harness/vendor-auth.js";
 import { assembleContext, budgetFor, type ContextAttachment } from "./context.js";
 import type { CurrentLook } from "./look.js";
 import { THINKING_LABEL, workingLabel, WRITING_LABEL } from "./project.js";
 import { deriveChecks, planFor } from "./check-plan.js";
-import { correctiveMessage, personLine, validateTurnResult, type TurnProblem } from "./turn-result.js";
+import { correctiveMessage, personLine, preparationProblem, validateTurnResult, type TurnProblem } from "./turn-result.js";
+import { effectOnlyTurnProblem } from "./effect-proposal-scope.js";
+import { chapterDraftResult } from "./chapter-draft.js";
 import type { EvidenceSources } from "./evidence.js";
 import { foldConversation } from "./fold.js";
 import { WorldChatStore } from "./store.js";
@@ -45,6 +53,7 @@ import { foldWorldChatInputs } from "./input-fold.js";
 import { stableJson } from "../arke-actions/digest.js";
 import type { PreparedWorldChatAction, WorldChatActionTurn } from "./actions.js";
 import { refreshConversationSummary, type ConversationSummariser } from "./summarisation.js";
+import { runHarnessTurn } from "../harness/turn.js";
 import { describeCoordinatorError } from "../errors/user-message.js";
 import { actionGuideScopes, renderActionGuide } from "./action-guide.js";
 
@@ -76,10 +85,21 @@ import { actionGuideScopes, renderActionGuide } from "./action-guide.js";
 export const DEFAULT_TURN_TIMEOUT_MS = 15 * 60_000;
 
 export interface RunDeps {
+  assertVoiceOwnership?(): Promise<void>;
   validateProductionPlan?: (input: { request: ProductionPlanRequest; entryContext: WorldChatContext | undefined; receipts: readonly WorldChatCheckReceipt[] }) => Promise<void>;
   /** Closing the owning world retires this runner and aborts every request it admitted. */
   closingSignal?: AbortSignal;
   setupBrief?: (input: { leaseToken: string; draft: ProductionSetupDraft; budgetChars: number }) => Promise<string>;
+  /**
+   * Checks a setup turn's update against the world before it is applied, and raises the world past
+   * the builds that cannot read it (design turn 205): Adapt from named by Arke, as by the rail.
+   */
+  /**
+   * Checks a setup turn's update against the world. `draft` is the draft it would make, and
+   * `receipts` every read the conversation has made, this run's included, so a plan can be held
+   * to what was actually read (SPEC-057 R-5).
+   */
+  checkSetupUpdate?: (update: ProductionSetupUpdate, context: { draft: ProductionSetupDraft; receipts: readonly WorldChatCheckReceipt[] }) => Promise<void>;
   adapter: HarnessAdapter | null;
   /**
    * Mint a lease and produce the scratch directory the session runs in.
@@ -94,7 +114,8 @@ export interface RunDeps {
     attachmentIds: readonly ChatAttachmentId[];
   }) => Promise<{ cwd: string; leaseToken: string }>;
   /** Atomically configure and create the harness session after preparation succeeds. */
-  createSession?: (input: { cwd: string; runId: RunId; model?: string; variant?: string; signal?: AbortSignal }) => Promise<{ sessionId: string }>;
+  createSession?: (input: { cwd: string; runId: RunId; model?: string; variant?: string; signal?: AbortSignal; agent?: "voice-companion";
+    voiceContext?: { conversationId: ConversationId; turnId: TurnId } }) => Promise<{ sessionId: string }>;
   prepareImages?: (input: { leaseToken: string; attachments: readonly WorldChatAttachment[] }) => Promise<{ parts: MessagePart[]; description: string }>;
   /** Resolve an explicit or production language choice without ever substituting another model. */
   resolveLanguageModel?: (input: {
@@ -109,7 +130,7 @@ export interface RunDeps {
   release: (input: { conversationId: ConversationId; runId: RunId }) => Promise<void>;
   /** Receipts this run produced, in order. */
   /** Assemble the selected chapter through the run's leased reads before asking the model. */
-  chapterBrief?: (input: { leaseToken: string; productionId: string; chapterId: string; budgetChars: number }) => Promise<string>;
+  chapterBrief?: (input: { leaseToken: string; productionId: string; chapterId: string; budgetChars: number; draft?: boolean }) => Promise<string>;
   receiptsFor: (runId: RunId) => readonly WorldChatCheckReceipt[];
   /** Run the coordinator's own check plan for one draft and return what it found. */
   runCheckPlan: (input: {
@@ -276,20 +297,13 @@ async function askOnce(
   imageParts: readonly MessagePart[] = [],
 ): Promise<string> {
   if (signal.aborted) throw new Error("cancelled");
-  let finalText = "";
-  const abort = new AbortController();
-  const onAbort = () => abort.abort();
-  signal.addEventListener("abort", onAbort, { once: true });
-
-  const events = adapter.streamEvents(abort.signal);
-  const collected = (async () => {
-    let writing = false;
-    for await (const event of events) {
-      if (!("sessionId" in event) || event.sessionId !== sessionId) continue;
-      if (event.type === "message.completed") {
-        finalText = event.text ?? "";
-        return;
-      }
+  let writing = false;
+  const outcome = await runHarnessTurn(adapter, {
+    sessionId, parts: [{ type: "text", text: prompt }, ...imageParts], timeoutMs, signal,
+    // Releasing an event listener does not stop generation. Keep this conversation's slot until
+    // its requested interruption settles; a queued reply must not overtake native cancellation.
+    awaitInterruption: true,
+    onEvent: (event) => {
       if (event.type === "tool.refused") {
         /*
          * Nothing happened, so nothing is said about it while the turn runs.
@@ -311,42 +325,23 @@ async function askOnce(
         writing = true;
         onProgress?.(WRITING_LABEL);
       }
-      if (event.type === "session.error") throw new Error(event.message);
-      // A turn the harness ended itself, and why (issue 1265). Without this the only trace of a
-      // turn refused for its size was the error a wrapper made of it, and the person was told
-      // "did not go through" and offered a retry that fails the same way.
-      if (event.type === "session.ended" && event.reason === "budget-exceeded") throw new TurnOverBudget(event.detail);
-      if (event.type === "session.ended" && event.reason === "timeout") throw new Error("timeout");
-    }
-  })();
-
-  await adapter.dispatchAsync({ sessionId, parts: [{ type: "text", text: prompt }, ...imageParts] });
-
-  // Refed deliberately: an unref'd deadline never fires in a process with nothing else pending,
-  // which is exactly the case a timeout is for.
-  let deadline: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    deadline = setTimeout(() => reject(new Error("timeout")), timeoutMs);
+    },
   });
-  /**
-   * Cancellation has to arrive as a rejection, not as an empty answer.
-   *
-   * Aborting the stream ends the iterator, so `collected` would otherwise resolve with no text —
-   * and an empty answer is indistinguishable from a bad one, which means a cancelled turn would
-   * spend its corrective retry asking a model nobody is waiting for.
-   */
-  const cancelled = new Promise<never>((_, reject) => {
-    if (signal.aborted) reject(new Error("cancelled"));
-    signal.addEventListener("abort", () => reject(new Error("cancelled")), { once: true });
-  });
-  try {
-    await Promise.race([collected, timeout, cancelled]);
-  } finally {
-    clearTimeout(deadline);
-    abort.abort();
-    signal.removeEventListener("abort", onAbort);
+  switch (outcome.kind) {
+    case "completed": return outcome.text;
+    // Cancellation arrives as a rejection, not as an empty answer: an empty answer is
+    // indistinguishable from a bad one, and would spend the corrective retry asking a model
+    // nobody is waiting for.
+    case "cancelled": throw new Error("cancelled");
+    case "timeout": throw new Error("timeout");
+    // A turn the harness ended itself, and why (issue 1265). Without this the only trace of a
+    // turn refused for its size was the error a wrapper made of it, and the person was told
+    // "did not go through" and offered a retry that fails the same way.
+    case "over-budget": throw new TurnOverBudget(outcome.detail);
+    case "failed": throw new Error(outcome.detail);
+    // A stream that closed with nothing said is an empty answer, as it always was here.
+    case "unanswered": return "";
   }
-  return finalText;
 }
 
 /** A journal-selected queued input, carried into the turn it becomes (SPEC-045 R-16). */
@@ -355,6 +350,26 @@ interface QueuedTurn {
   input: WorldChatInputRecord;
   revision: number;
   routing: WorldChatInputRouting;
+  beforePromote?: () => Promise<void>;
+}
+
+/**
+ * One turn as it was asked for, fixed for the run (issue 2801). It travelled as nine to twelve
+ * positional arguments, where an `undefined` in the wrong place was a retry asked as a send.
+ */
+interface TurnRequest {
+  readonly store: WorldChatStore;
+  readonly conversationId: ConversationId;
+  readonly text: string;
+  readonly attachmentIds: readonly string[];
+  /** Set for a retry: a new run against words already in the log (§10.1.1). */
+  readonly existingTurnId?: TurnId;
+  readonly subject?: WorldChatSubject;
+  readonly modelId?: string;
+  readonly replyOnly: boolean;
+  readonly onAdmitted?: (turnId: TurnId) => void;
+  readonly queued?: QueuedTurn;
+  readonly variant?: string;
 }
 
 export class WorldChatRunner {
@@ -364,6 +379,14 @@ export class WorldChatRunner {
     deps.closingSignal?.addEventListener("abort", () => {
       for (const controller of this.cancelling.values()) controller.abort("world-closed");
     }, { once: true });
+  }
+
+  prepareVoice(store: WorldChatStore, id: ConversationId, signal: AbortSignal): Promise<VoiceModelBinding> {
+    return voiceModelBinding(this.deps, store, id, signal);
+  }
+  voice(store: WorldChatStore, id: ConversationId, text: string, binding: VoiceModelBinding, signal: AbortSignal, delta: (text: string) => void): Promise<TurnOutcome> {
+    return this.runExclusive(id, control => runVoiceTurn(this.deps, store, id, text, binding,
+      AbortSignal.any([signal, control.signal]), delta));
   }
 
   /**
@@ -389,6 +412,18 @@ export class WorldChatRunner {
     // Aborted requests may still be draining, but the cache must give a reopened world a fresh
     // runner. This runner's callbacks belong to the closed owner and can admit no more work.
     return !this.deps.closingSignal?.aborted && this.cancelling.size > 0;
+  }
+
+  /**
+   * Begin condensing a conversation that was just handed over, without waiting for it.
+   *
+   * A world's first turn needs the founding transcript's summary, and asking for it then left the
+   * first message unadmitted and silent for as long as the model took — up to two minutes (issue
+   * 2801). Started at the hand-off, it is usually ready; a turn that still finds it running joins
+   * that pass rather than starting a second.
+   */
+  prepareSummary(store: WorldChatStore): void {
+    if (this.deps.summarise) void refreshConversationSummary(store, this.deps.summarise, this.deps.closingSignal).catch(() => {});
   }
 
   /** Stop a run now. Local and immediate: the log says cancelled without waiting for a model. */
@@ -419,7 +454,7 @@ export class WorldChatRunner {
     /** This turn's effort for the model that answers (design turn 195); absent takes what is kept for it. */
     variant?: string,
   ): Promise<TurnOutcome> {
-    return this.runTurn(store, conversationId, text, attachmentIds, undefined, subject, modelId, replyOnly, onAdmitted, variant);
+    return this.runTurn({ store, conversationId, text, attachmentIds, subject, modelId, replyOnly, onAdmitted, variant });
   }
 
   /**
@@ -433,7 +468,8 @@ export class WorldChatRunner {
    * A promoted turn that fails is retried through ordinary Retry, never promoted again.
    */
   async sendQueued(journal: WorldChatInputJournal, messageId: MessageId,
-    expectedRevision: number, routing: WorldChatInputRouting): Promise<TurnOutcome> {
+    expectedRevision: number, routing: WorldChatInputRouting,
+    onAdmitted?: (turnId: TurnId) => void, beforePromote?: () => Promise<void>): Promise<TurnOutcome> {
     const capturedRouting = structuredClone(routing);
     return this.runExclusive(journal.conversationId, async controller => {
       let queue;
@@ -444,7 +480,7 @@ export class WorldChatRunner {
         throw error;
       }
       const row = queue.inputs.find(one => one.input.messageId === messageId);
-      if (!row || queue.revision !== expectedRevision) {
+      if (!row) {
         return { status: "unavailable", reason: "The queued messages changed. Look again before continuing." };
       }
       // The queue's own rules are asked before any model work (R-16): a paused queue, a later
@@ -457,10 +493,11 @@ export class WorldChatRunner {
         return { status: "unavailable", reason: "The writing engine or model changed. Review the target before continuing." };
       }
       if (controller.signal.aborted) return this.stopQueued(journal, controller, messageId);
-      const queued: QueuedTurn = { journal, input: row.input, revision: expectedRevision, routing: capturedRouting };
-      return this.runRegisteredTurn(controller, journal.log, journal.conversationId, row.input.request.text,
-        row.input.request.attachmentIds, undefined, row.input.constraints.subject,
-        capturedRouting.modelId ?? undefined, row.input.constraints.replyOnly, undefined, queued);
+      const queued: QueuedTurn = { journal, input: row.input, revision: expectedRevision, routing: capturedRouting, beforePromote };
+      return this.runRegisteredTurn(controller, { store: journal.log, conversationId: journal.conversationId,
+        text: row.input.request.text, attachmentIds: row.input.request.attachmentIds, subject: row.input.constraints.subject,
+        modelId: capturedRouting.modelId ?? undefined, replyOnly: row.input.constraints.replyOnly, onAdmitted, queued,
+        variant: row.input.request.variant });
     });
   }
 
@@ -522,27 +559,16 @@ export class WorldChatRunner {
     // the failure, which is the usual reason to press Try again.
     const context = view.entryContext;
     const choosable = context !== undefined && ("productionId" in context || context.kind === "production-setup");
-    return this.runTurn(store, conversationId, original.text, original.attachmentIds, turnId, constraints?.subject, choosable ? previousModel : undefined, constraints?.replyOnly === true);
+    return this.runTurn({ store, conversationId, text: original.text, attachmentIds: original.attachmentIds, existingTurnId: turnId,
+      subject: constraints?.subject, modelId: choosable ? previousModel : undefined, replyOnly: constraints?.replyOnly === true });
   }
 
   /**
    * The turn itself. `existingTurnId` set means this is a retry: a new run against words already
    * in the log, recorded as `run.retry-started` rather than as a second `turn.started`.
    */
-  private async runTurn(
-    store: WorldChatStore,
-    conversationId: ConversationId,
-    text: string,
-    attachmentIds: readonly string[] = [],
-    existingTurnId?: TurnId,
-    subject?: WorldChatSubject,
-    modelId?: string,
-    replyOnly = false,
-    onAdmitted?: (turnId: TurnId) => void,
-    variant?: string,
-  ): Promise<TurnOutcome> {
-    return this.runExclusive(conversationId, controller => this.runRegisteredTurn(controller, store,
-      conversationId, text, attachmentIds, existingTurnId, subject, modelId, replyOnly, onAdmitted, undefined, variant));
+  private async runTurn(request: Omit<TurnRequest, "queued">): Promise<TurnOutcome> {
+    return this.runExclusive(request.conversationId, controller => this.runRegisteredTurn(controller, request));
   }
 
   /** The one admission guard every kind of turn shares: one run per conversation, held to the end. */
@@ -573,20 +599,8 @@ export class WorldChatRunner {
     }
   }
 
-  private async runRegisteredTurn(
-    controller: AbortController,
-    store: WorldChatStore,
-    conversationId: ConversationId,
-    text: string,
-    attachmentIds: readonly string[],
-    existingTurnId: TurnId | undefined,
-    subject: WorldChatSubject | undefined,
-    modelId: string | undefined,
-    replyOnly: boolean,
-    onAdmitted?: (turnId: TurnId) => void,
-    queued?: QueuedTurn,
-    variant?: string,
-  ): Promise<TurnOutcome> {
+  private async runRegisteredTurn(controller: AbortController, request: TurnRequest): Promise<TurnOutcome> {
+    const { store, conversationId, text, attachmentIds, existingTurnId, subject, modelId, replyOnly, onAdmitted, queued, variant } = request;
     const adapter = this.deps.adapter!;
     const at = this.deps.now();
     const turnId = existingTurnId ?? (newId("turn") as TurnId);
@@ -682,9 +696,7 @@ export class WorldChatRunner {
         " The creator has set this conversation to Develop: drive the work forward — surface gaps, propose next candidates unprompted, and keep momentum. Proposing is still all this changes; nothing lands without their explicit acceptance.",
     };
     const window = modelChoice.inputTokenLimit ?? adapter.knownInputTokenLimit?.() ?? undefined;
-    // The harness's own count of what the world-builder spends before this message, where it
-    // keeps one (issue 1265): a 32k local window with the reserve below was refused every time.
-    const budgetChars = budgetFor(window, window !== undefined ? adapter.promptReserveTokens?.("world-builder", window) : undefined);
+    const budgetChars = budgetFor(window, modelChoice.sessionModel);
     const chapterSubject = subject?.kind === "chapter" || subject?.kind === "passage" ? subject : undefined;
     const briefBudget = chapterSubject && this.deps.chapterBrief ? Math.min(60_000, Math.floor(budgetChars / 2)) : 0;
     const setupBudget = view.entryContext?.kind === "production-setup" ? Math.floor(budgetChars * 0.65) : 0;
@@ -699,7 +711,7 @@ export class WorldChatRunner {
       ...(actionGuide.text ? { actionGuide: actionGuide.text } : {}),
       ...(view.entryContext && this.deps.describeEntry
         ? {
-            entryContext: `${this.deps.describeEntry(view.entryContext)}${INITIATIVE_NARRATION[view.initiative ?? "collaborate"]}${subjectNarration(subject)}${replyOnly ? REPLY_ONLY_NARRATION : ""}`,
+            entryContext: `${this.deps.describeEntry(view.entryContext)}${INITIATIVE_NARRATION[view.initiative ?? "collaborate"]}${subjectNarration(subject, view.entryContext !== undefined && "productionId" in view.entryContext ? view.entryContext.productionId : undefined)}${replyOnly ? REPLY_ONLY_NARRATION : ""}`,
           }
         : {}),
       ...(view.summary !== undefined ? { summary: view.summary } : {}),
@@ -738,9 +750,12 @@ export class WorldChatRunner {
     // A chapter subject also survives retry: its drafting brief must name the same chapter.
     // Other selections only colour the narration and are not written.
     // A promotion carries its constraints in the same record as the turn, so it writes none here.
-    const constrained = !queued && !existingTurnId && (replyOnly || subject?.kind === "passage" || subject?.kind === "chapter");
+    const constrained = !queued && !existingTurnId && (replyOnly || subject?.kind === "passage" || subject?.kind === "chapter" || subject?.kind === "effect-arrangement");
     if (constrained) {
-      await this.deps.raiseSchemaBoundary?.(subject?.kind === "chapter" ? 17 : TURN_CONSTRAINTS_SCHEMA_VERSION);
+      if ((subject?.kind === "effect-arrangement" || subject?.kind === "chapter" && subject.intent === "draft") && !this.deps.raiseSchemaBoundary) {
+        return { status: "unavailable", reason: "This host cannot preserve the requested authoring scope." };
+      }
+      await this.deps.raiseSchemaBoundary?.(subject?.kind === "chapter" && subject.intent === "draft" ? CHAPTER_DRAFT_INTENT_SCHEMA_VERSION : subject?.kind === "effect-arrangement" ? 75 : subject?.kind === "chapter" ? 17 : TURN_CONSTRAINTS_SCHEMA_VERSION);
       await store.append(
         { type: "turn.constraints", constraints: { turnId, ...(subject !== undefined ? { subject } : {}), ...(replyOnly ? { replyOnly: true } : {}) } },
         { at },
@@ -758,7 +773,8 @@ export class WorldChatRunner {
       if (controller.signal.aborted) return this.stopQueued(queued.journal, controller, queued.input.messageId);
       if (modelChoice.reason !== undefined) return { status: "unavailable", reason: modelChoice.reason };
       try {
-        await queued.journal.promote(queued.input.messageId, queued.revision, run, queued.routing, runId);
+        await queued.beforePromote?.();
+        await queued.journal.promote(queued.input.messageId, queued.revision, run, queued.routing, runId, true);
       } catch (error) {
         if (error instanceof WorldChatInputError) return { status: "unavailable", reason: error.message };
         throw error;
@@ -794,7 +810,8 @@ export class WorldChatRunner {
       });
       prepared = true;
       let brief = chapterSubject && this.deps.chapterBrief && view.entryContext?.kind === "production"
-        ? await this.deps.chapterBrief({ leaseToken, productionId: view.entryContext.productionId, chapterId: chapterSubject.chapterId, budgetChars: briefBudget })
+        ? await this.deps.chapterBrief({ leaseToken, productionId: view.entryContext.productionId, chapterId: chapterSubject.chapterId, budgetChars: briefBudget,
+          ...(chapterSubject.kind === "chapter" && chapterSubject.intent === "draft" ? { draft: true } : {}) })
         : "";
       if (view.entryContext?.kind === "production-setup") {
         if (!view.productionSetup || !this.deps.setupBrief) throw new Error("Production setup is unavailable. Reopen the draft.");
@@ -847,6 +864,9 @@ export class WorldChatRunner {
       const prompt = renderPrompt(assembled) + (brief ? `\n\n${brief}` : "") + (images?.description ? `\n\n${images.description}` : "");
       let raw = await askOnce(adapter, session.sessionId, prompt, timeoutMs, controller.signal, progress, refused, images?.parts);
 
+      // The page's rewrite (issue 1827): its first answer must be the revision; the corrective one
+      // may instead stage nothing and say why, but never stages anything else (codex on PR 1830).
+      const revising = subject?.kind === "passage" && subject.intent === "revise";
       let outcome = await this.applyResult(
         store,
         conversationId,
@@ -862,6 +882,7 @@ export class WorldChatRunner {
         subject,
         replyOnly,
         view.entryContext?.kind === "production-setup" ? view.productionSetup?.draft.revision : undefined,
+        revising ? "required" : undefined,
       );
       if (!outcome.ok) {
         // The one corrective turn (§8.4). It names the faults and asks for the whole result
@@ -905,6 +926,7 @@ export class WorldChatRunner {
           subject,
           replyOnly,
           view.entryContext?.kind === "production-setup" ? view.productionSetup?.draft.revision : undefined,
+          revising ? "only" : undefined,
         );
       }
 
@@ -1048,6 +1070,8 @@ export class WorldChatRunner {
     /** The line asked for a reply and nothing else (turn 128); any action is refused. */
     replyOnly = false,
     setupRevision?: number,
+    /** The page's rewrite (issue 1827): see ValidateInput's `revise`. */
+    revise?: "required" | "only",
   ): Promise<{ ok: true; reply: string } | { ok: false; problems: readonly TurnProblem[] }> {
     const { events } = await store.read();
     const meta = await store.readMeta();
@@ -1055,7 +1079,9 @@ export class WorldChatRunner {
     // against an empty set would make every turn create new propositions and every retraction
     // fail to suppress anything — the conversation would accumulate contradictions instead of
     // being corrected by talking.
-    const folded = foldConversation(conversationId, meta?.createdAt ?? at, events).view;
+    // Validation must still resolve intent cited by retained drafts after its message leaves the
+    // visible window. This full journal view stays local; prompt assembly keeps its bounded fold.
+    const folded = foldConversation(conversationId, meta?.createdAt ?? at, events, { messageLimit: events.length }).view;
     const messages = folded.messages;
     const checksByDraft = new Map<ModelCandidateDraft, CandidateChecks>();
 
@@ -1066,6 +1092,7 @@ export class WorldChatRunner {
       productionThread: folded.entryContext !== undefined && "productionId" in folded.entryContext,
       draftOnly: folded.entryContext?.kind === "production-setup",
       replyOnly,
+      ...(revise !== undefined ? { revise } : {}),
       raw,
       conversationId,
       messages,
@@ -1083,6 +1110,13 @@ export class WorldChatRunner {
     });
 
     if (!outcome.ok) return { ok: false, problems: outcome.problems };
+    if (subject?.kind === "chapter" && subject.intent === "draft") {
+      const draft = chapterDraftResult(outcome.turn,
+        folded.entryContext?.kind === "production" ? folded.entryContext.productionId : undefined, subject.chapterId);
+      if ("problem" in draft) return { ok: false, problems: [{ code: "chapter-draft", safeMessage: draft.problem }] };
+    }
+    const effectScopeProblem = effectOnlyTurnProblem(subject, outcome.turn);
+    if (effectScopeProblem) return { ok: false, problems: [{ code: "effects-scope", safeMessage: effectScopeProblem }] };
     let productionSetup: ProductionSetupState | undefined;
     if (folded.entryContext?.kind === "production-setup") {
       const state = folded.productionSetup;
@@ -1091,6 +1125,10 @@ export class WorldChatRunner {
       }
       try {
         const draft = outcome.turn.setupUpdate ? applyProductionSetupUpdate(state.draft, outcome.turn.setupUpdate) : state.draft;
+        if (outcome.turn.setupUpdate) await this.deps.checkSetupUpdate?.(outcome.turn.setupUpdate, {
+          draft,
+          receipts: [...events.flatMap(({ event }) => event.type === "turn.completed" ? event.receipts : []), ...this.deps.receiptsFor(runId)],
+        });
         productionSetup = { draft, status: "draft", review: null };
       } catch (error) {
         return { ok: false, problems: [{ code: "setup-update", safeMessage: error instanceof Error ? error.message.slice(0, 500) : "The outline update could not be read." }] };
@@ -1241,6 +1279,10 @@ export class WorldChatRunner {
       try { await this.deps.validateProductionPlan({ request: outcome.turn.productionPlan, entryContext: folded.entryContext, receipts: this.deps.receiptsFor(runId) }); }
       catch { return { ok: false, problems: [{ code: "production-plan", safeMessage: "The production or readiness changed. Read get_readiness again for this thread before proposing a plan." }] }; }
     }
+    if (this.deps.receiptsFor(runId).some(r => r.target?.requirement === "conversation-candidate")) {
+      if (!this.deps.raiseSchemaBoundary) return { ok: false, problems: [{ code: "candidate-read", safeMessage: "This host cannot preserve retained draft receipts." }] };
+      await this.deps.raiseSchemaBoundary(CONVERSATION_CANDIDATE_READ_SCHEMA_VERSION);
+    }
     if (outcome.turn.productionPlan || this.deps.receiptsFor(runId).some(r => r.target?.requirement === "readiness")) {
       if (!this.deps.raiseSchemaBoundary) return { ok: false, problems: [{ code: "production-plan", safeMessage: "This host cannot preserve readiness receipts. Answer without a readiness read or plan." }] };
       await this.deps.raiseSchemaBoundary(PRODUCTION_READINESS_SCHEMA_VERSION);
@@ -1267,11 +1309,15 @@ export class WorldChatRunner {
         replyOnly,
         at,
       }) ?? [];
-    } catch {
-      return {
-        ok: false,
-        problems: [{ code: "action-preparation", safeMessage: "The requested change could not be prepared safely. Answer without it." }],
-      };
+    } catch (error) {
+      return { ok: false, problems: [preparationProblem(error)] };
+    }
+    // An audio drama's create card is written into this turn before it is bound, so the world is
+    // raised first: a build before schema 90 would otherwise approve it as a plain story with no
+    // plan (SPEC-057 R-82, codex on PR 1866).
+    if (actions.some(action => action.payload.kind === "world-chat-production-create" && productionShape(action.payload.plan.production).isAudioDrama)) {
+      if (!this.deps.raiseSchemaBoundary) return { ok: false, problems: [{ code: "action-unavailable", safeMessage: "This host cannot create an audio drama from chat. Answer without creating one." }] };
+      await this.deps.raiseSchemaBoundary(AUDIO_DRAMA_SCHEMA_VERSION);
     }
     await store.append(
       {
@@ -1395,6 +1441,8 @@ function runFrom(events: ReadonlyArray<{ event: { type: string } }>, runId: RunI
  */
 function safeDetail(err: unknown): string {
   if (!(err instanceof Error)) return "the turn did not complete";
+  const modelReason = harnessModelFailureReason(err.message);
+  if (modelReason !== null) return modelReason;
   if (err.message === "timeout") return "the studio took too long to answer";
   // The one cause worth naming (SPEC-030 R-13): a vendor token the harness could not refresh
   // is the person's to fix, and "could not complete" sends them everywhere but Settings. The
@@ -1470,8 +1518,9 @@ ${assembled.actionGuide}`);
  */
 const REPLY_ONLY_NARRATION = " They asked for a reply only — findings, each quoting the passage it names. Propose no action this turn; anything you would change, say instead.";
 
-function subjectNarration(subject: WorldChatSubject | undefined): string {
+function subjectNarration(subject: WorldChatSubject | undefined, productionId?: string): string {
   if (subject === undefined) return "";
+  if (subject.kind === "effect-arrangement") return `\nEffects-only request scope chosen by the person: ${JSON.stringify(subject)}. Broader prose does not change the attached exact scope.`;
   const named = subject.kind === "chapter"
     ? `chapter ${subject.chapterId}`
     : subject.kind === "timeline-clip"
@@ -1489,5 +1538,22 @@ function subjectNarration(subject: WorldChatSubject | undefined): string {
               : subject.kind === "passage"
                 ? `this passage in chapter ${subject.chapterId}${subject.paragraph === undefined ? "" : `, paragraph ${subject.paragraph}`}: «${subject.text}»`
                 : `take ${subject.takeId}`;
-  return ` They have ${named} selected; that is what "this" and "the selected item" mean.`;
+  return ` They have ${named} selected; that is what "this" and "the selected item" mean.${subject.kind === "passage" && subject.intent === "revise" ? reviseNarration(subject, productionId) : ""}${subject.kind === "chapter" && subject.intent === "draft" ? " This is an explicit manuscript-writing operation. Read this chapter in full and the required production sources, then return exactly one production-chapter edit action for this chapter with its complete proposed manuscript in changes.body, optional title and status draft only. Preserve the existing prose when asked to continue. Do not substitute critique or another question, and do not include plan, world-fact or other changes. The author will decide the staged draft separately." : ""}`;
+}
+
+/**
+ * A rewrite pressed on the page (SPEC-056 R-24): its answer is drawn in the prose, so wording
+ * offered in the reply instead reaches nobody — the page sent the ask without opening Chat. Said
+ * to the model here, and held after it by the corrective turn (issue 1827).
+ */
+function reviseNarration(subject: Extract<WorldChatSubject, { kind: "passage" }>, productionId: string | undefined): string {
+  // The shape named whole (issue 1827, measured): told only "changes.passage", GPT-5.4 sent
+  // { replace } and then left out the paragraph, which the passage guard rightly refuses.
+  const paragraph = subject.paragraph === undefined ? "" : `, "paragraph": ${subject.paragraph}`;
+  // And the reads it must cite (actions.ts, production-chapter): the chapters, the quoted chapter
+  // and the story, each complete and current. Measured, the model found them one refusal at a
+  // time and spent the corrective turn on the second, so all three are named before it starts.
+  const production = productionId === undefined ? "this production" : `productionId ${productionId}`;
+  const read = ` Before the edit, read each to its last page: list_chapters (${production}, section plan), get_chapter (${production}, chapterId ${subject.chapterId}, no section) and get_story (${production}; the overview receipt in the brief counts). Cite each read's final receipt in the action's checkReceiptIds.`;
+  return ` They asked for these words rewritten, and the page shows your revision in place.${read} Then answer with one production-chapter edit action for chapter ${subject.chapterId} whose changes are { "passage": { "find": <the selected words, exactly as quoted>, "with": <your revision>${paragraph} } }, and a reply of one line saying what you changed. Do not offer the new wording in the reply instead. If the passage cannot be revised as asked, propose nothing and say why in one sentence.`;
 }

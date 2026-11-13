@@ -190,6 +190,16 @@
   .fy-scene-back > div { flex: 1; min-width: 0; }
   .fy-scene-back span { display: block; font: var(--type-meta); color: var(--muted-foreground); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
   .fy-scene-back h1 { margin: 0; font: 600 var(--text-md)/1.25 var(--font-sans); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* 196q: Stage's way into the conversation is a word in the head, since nothing floats over the picture. */
+  .fy-scene-back > .fy-scene-back__press { width: auto; padding: 0 10px; font: var(--type-ui); }
+  /* 194h's one line: 44 high, the chevron at the 16 edge and the title beside it at 31, the right
+     press's 30 face at the other 16 edge, both quiet. The back press keeps its 44 hit area by
+     reaching under the title's first letters rather than pushing the title out to 48. */
+  .fy-scene-back--line { height: 44px; gap: 0; padding: 0 9px 0 0; }
+  .fy-scene-back--line > button { color: var(--muted-foreground); }
+  .fy-scene-back--line > button:first-child { position: relative; z-index: 1; place-items: center start; padding-left: 10px; margin-right: -13px; }
+  .fy-scene-back--line > button[aria-pressed="true"] { color: var(--foreground); }
+  .fy-scene-back--line h1 { font: var(--type-ui); color: var(--foreground); }
   :is([data-screen="scene-detail"], [data-screen="shot"]) .fy-sw__head { padding: 0; flex: none; }
   :is([data-screen="scene-detail"], [data-screen="shot"]) .fy-sw__breadcrumb, :is([data-screen="scene-detail"], [data-screen="shot"]) .fy-sw__title { display: none; }
   [data-screen="scene-detail"] .fy-sw__head { display: flex; flex-direction: column; }
@@ -289,6 +299,11 @@
   [data-screen="shot"] .fy-swstage { min-height: 0; flex: none; gap: 12px; overflow: visible; }
   [data-screen="shot"] .fy-swstage__construction { flex-wrap: wrap; order: 5; }
   [data-screen="shot"] .fy-swstage__construction input { width: 100%; flex-basis: 100%; min-height: 44px; }
+  /* The draft bar wraps where the line does: its chips a row of their own above Discard and Keep. */
+  [data-screen="shot"] .fy-swstage__draft { flex-wrap: wrap; order: 5; }
+  [data-screen="shot"] .fy-swstage__draft > * { order: 3; }
+  [data-screen="shot"] .fy-swstage__draft > .fy-swstage__who { order: 1; }
+  [data-screen="shot"] .fy-swstage__draft > .fy-swstage__sum { order: 2; flex-basis: 100%; flex-wrap: wrap; }
   [data-screen="shot"] .fy-swstage__timeline { flex: none; }
   .fy-swvariants, .fy-swboard-sheet, .fy-swgen { position: fixed; inset: min(193px, 30dvh) 0 0; margin: 0; width: 100%; max-width: none; height: auto; max-height: none; padding: 0; border-radius: 22px 22px 0 0; }
   .fy-swvariants__panel, .fy-swboard-sheet__panel { width: 100%; max-height: 100%; overflow-y: auto; padding: 16px 20px calc(20px + env(safe-area-inset-bottom, 0px)); }

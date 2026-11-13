@@ -52,11 +52,16 @@ export class BackgroundNotificationController {
   private readonly jobs = new Map<string, Job>();
   private readonly consumed = new Set<string>();
   private readonly paused = new Set<string>();
+  private recoveryOptIn = false;
+  private recoveryMuted = false;
+  private readonly recoveryConsumed = new Set<string>();
 
   constructor(private readonly deps: BackgroundNotificationDeps) {}
 
   arm(state: ClientState): void {
     this.preference = state.app.backgroundNotifications;
+    this.recoveryOptIn = state.app.recoveryHistory?.audit === "available" && state.app.recoveryHistory.preferences.desktopOptIn;
+    this.recoveryMuted = state.app.recoveryHistory?.preferences.transientMuted ?? false;
     for (const job of state.app.jobs) this.jobs.set(job.id, job);
     for (const queue of state.app.queues) if (queue.paused) this.paused.add(queue.provider);
     this.armed = true;
@@ -72,6 +77,24 @@ export class BackgroundNotificationController {
       return;
     }
     if (!this.armed || this.stopped) return;
+    if (event.type === "recovery.history") {
+      this.recoveryOptIn = event.history.audit === "available" && event.history.preferences.desktopOptIn;
+      this.recoveryMuted = event.history.preferences.transientMuted;
+      return;
+    }
+    if (event.type === "recovery.notice") {
+      const key = `${event.notice.incidentId}:${event.notice.at}:${event.notice.reason}`;
+      if (this.recoveryConsumed.has(key)) return;
+      this.recoveryConsumed.add(key);
+      if (this.recoveryConsumed.size > 256) this.recoveryConsumed.delete(this.recoveryConsumed.values().next().value!);
+      if (!this.recoveryOptIn || this.recoveryMuted) return;
+      // Only generic operational copy reaches the lock screen. Clicking opens Activity;
+      // neither a notification nor its deduplication token authorizes a repair.
+      this.notify("issues", key, event.notice.reason === "recovered"
+        ? { title: "Arke Studio capability restored", body: "A local capability is available again. Open Activity to check held work." }
+        : { title: "Arke Studio needs attention", body: "A local service or storage condition needs attention. Open Activity for details." }, false);
+      return;
+    }
     if (event.type === "job.ready") {
       this.jobs.set(event.job.id, event.job);
       this.notify("results", `job:${event.job.id}:ready`, {
@@ -122,9 +145,11 @@ export class BackgroundNotificationController {
     }
   }
 
-  private notify(kind: "results" | "issues", key: string, copy: { title: string; body: string }): void {
-    if (this.consumed.has(key)) return;
-    this.consumed.add(key);
+  private notify(kind: "results" | "issues", key: string, copy: { title: string; body: string }, remember = true): void {
+    if (remember) {
+      if (this.consumed.has(key)) return;
+      this.consumed.add(key);
+    }
     if (
       this.preference === "off" ||
       (kind === "results" && this.preference !== "background-results-and-issues")

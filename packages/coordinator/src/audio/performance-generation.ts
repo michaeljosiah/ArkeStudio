@@ -1,3 +1,4 @@
+import { needsExpressiveDirection, directionSchemaVersion } from "@arke-studio/contracts";
 import { estimateSpeechMicroUsd, ONE_REQUEST_HOLD } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
@@ -62,12 +63,17 @@ export function compilePerformanceGeneration(store: WorldStore, model: ManifestM
 
 export async function retainPerformanceGenerationQuote(store: WorldStore, value: PerformanceGenerationQuote): Promise<void> {
   const quote = PerformanceGenerationQuoteSchema.parse(value);
+  if (needsExpressiveDirection(quote.cadencePlan)) await store.ensureSchemaVersion(directionSchemaVersion(quote.cadencePlan), "voice-direction");
   await store.ownedWrite(async () => atomicWriteFile(await audioWorldPath(store.dir, `.staging/performances/${quote.operationId}/quote.json`, true), JSON.stringify(quote)));
 }
 export async function readPerformanceGenerationQuote(store: WorldStore, operationId: string): Promise<PerformanceGenerationQuote> {
   // The command schema owns UUID validation; the filesystem boundary independently rejects traversal.
   const quote = PerformanceGenerationQuoteSchema.parse(JSON.parse(await readFile(await audioWorldPath(store.dir, `.staging/performances/${operationId}/quote.json`), "utf8")));
-  if (quote.operationId !== operationId || Date.now() - Date.parse(quote.createdAt) > 86_400_000) throw new Error("Prepare a fresh generation estimate.");
+  // The day is counted on the store's clock: the quote was sealed on it, and GenerationQuotes
+  // checks its own expiry against it. When this read the wall clock, a world on a pinned clock
+  // aged its quotes out in real time, and production-audio.test.ts went red on every branch a day
+  // after the date it sealed them on.
+  if (quote.operationId !== operationId || Date.parse(store.now()) - Date.parse(quote.createdAt) > 86_400_000) throw new Error("Prepare a fresh generation estimate.");
   return quote;
 }
 export function validatePerformanceGeneration(store: WorldStore, model: ManifestModel, quote: PerformanceGenerationQuote, confirmedMicroUsd: number) {
@@ -98,6 +104,7 @@ export function performanceGenerationJob(store: WorldStore, quote: PerformanceGe
 export async function finalizeGeneratedPerformance(store: WorldStore, tools: AudioMediaTools | undefined, quote: PerformanceGenerationQuote,
   id: string, bytes: Uint8Array, format: VoiceAudioFormat, cost: TakeCost, jobId?: string, signal = store.closingSignal) {
   PerformanceIdSchema.parse(id);
+  if (needsExpressiveDirection(quote.cadencePlan)) await store.ensureSchemaVersion(directionSchemaVersion(quote.cadencePlan), "voice-direction");
   await requireUnpurgedPerformance(store, quote.target.productionId, id);
   const existing = await readPerformance(store, quote.target.productionId, id).catch(() => null);
   if (existing) {

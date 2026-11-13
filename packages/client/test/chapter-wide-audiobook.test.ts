@@ -97,11 +97,11 @@ const illustrate = readFileSync(join(here, "../src/components/audiobook-illustra
 describe("the Illustrate proposal is a sheet over the main area (turn 193)", () => {
   const rule = (selector: string) => rules(illustrate).filter((candidate) => candidate.selector === selector);
 
-  it("stands in the chapter's grid cell over the centre, not over the dock", () => {
-    const sheet = rule(".fy-ills")[0]!;
-    assert.match(sheet.body, /grid-area: 1 \/ 1/);
-    assert.match(sheet.body, /position: relative/);
-    assert.ok(rule(".fy-sw:has(> .fy-ills) > .fy-sw__centre").some((candidate) => candidate.body === "grid-area: 1 / 1;"), "the centre shares the cell, so the dock keeps its column");
+  it("owns a modal sheet with a backdrop, keeping the proposal separate from dock input", () => {
+    const sheet = rule(".fy-page-sheet.fy-ills-modal")[0]!;
+    assert.match(sheet.body, /inset: 40px/);
+    assert.ok(rule(".fy-ills-modal::backdrop").length > 0);
+    assert.match(rule(".fy-ills-modal > .fy-page-sheet__body")[0]!.body, /overflow: hidden/);
   });
 
   it("is four across, three and two as the sheet narrows, two on a tablet and a list on a phone", () => {
@@ -118,6 +118,52 @@ describe("the Illustrate proposal is a sheet over the main area (turn 193)", () 
     assert.match(rule(".fy-ills__card--off")[0]!.body, /opacity: 0\.5/);
     assert.match(rule(".fy-ills__foot")[0]!.body, /border-top: 1px solid var\(--border\)/);
     assert.ok(rule(".fy-ills__foot .ui-btn--primary").length > 0, "Accept takes the foot on a phone");
+  });
+});
+
+/** The rules inside every `@media (<query>) { … }` block of a sheet, read by brace depth. */
+function inMedia(css: string, query: string): { selector: string; body: string }[] {
+  const found: { selector: string; body: string }[] = [];
+  const opener = `@media (${query}) {`;
+  for (let at = css.indexOf(opener); at !== -1; at = css.indexOf(opener, at + 1)) {
+    let depth = 1, end = at + opener.length;
+    for (; end < css.length && depth > 0; end++) depth += css[end] === "{" ? 1 : css[end] === "}" ? -1 : 0;
+    found.push(...rules(css.slice(at + opener.length, end - 1)));
+  }
+  return found;
+}
+
+describe("the block's panel as a phone sheet stands where 194h draws it", () => {
+  const phone = inMedia(responsive, "max-width: 599px");
+
+  it("rises to 110 under the view switch, the panel alone: Read, Direct and Timing keep the lower top", () => {
+    const panel = phone.find((rule) => rule.selector === ".fy-chapter-block-sheet:has(.fy-abp)");
+    assert.ok(panel, "a phone rule names the sheet that holds the block's panel");
+    assert.equal(panel!.body, "top: calc(110px + env(safe-area-inset-top, 0px));");
+    assert.ok(phone.some((rule) => rule.selector === ".fy-chapter-block-sheet" && rule.body === "top: min(311px, 40dvh);"), "the other block sheets are unchanged");
+    // Only the phone moves it: the tablet's raised sheet and the desktop's docked one keep theirs.
+    const elsewhere = rules(responsive).filter((rule) => rule.selector.includes(".fy-chapter-block-sheet:has(.fy-abp)") && /(^|; )(top|inset):/.test(rule.body));
+    assert.equal(elsewhere.length, 1);
+  });
+
+  it("draws the grab 40 by 4 in neutral 400 with a 2 radius, on the phone alone", () => {
+    const grab = phone.find((rule) => rule.selector === ".fy-chapter-block-sheet:has(.fy-abp) .fy-page-sheet__grab");
+    assert.ok(grab);
+    assert.match(grab!.body, /width: 40px/);
+    assert.match(grab!.body, /border-radius: 2px/);
+    assert.match(grab!.body, /background: var\(--neutral-400\)/);
+    assert.match(grab!.body, /margin-top: 8px/);
+    assert.equal(rules(responsive).filter((rule) => rule.selector.includes(":has(.fy-abp) .fy-page-sheet__grab")).length, 1);
+  });
+
+  it("draws no ring round the title the sheet focuses as it opens: neither an outline nor the global ring's box-shadow (local.18)", () => {
+    // The global :focus-visible ring is a box-shadow (theme/globals.css), and Chromium matches it
+    // on a heading focused after showModal(): clearing the outline alone left the title boxed.
+    const title = rules(responsive).filter((rule) => rule.selector.split(",").map((part) => part.trim()).includes(".fy-abp__title h2:focus"));
+    assert.ok(title.some((rule) => /outline: none/.test(rule.body)));
+    assert.ok(title.some((rule) => /box-shadow: none/.test(rule.body)), "the box-shadow ring is cleared too");
+    const globals = readFileSync(join(here, "../src/theme/globals.css"), "utf8");
+    assert.match(globals, /:focus-visible \{[^}]*box-shadow: var\(--shadow-focus\)/, "the ring this clears is still the global box-shadow");
   });
 });
 

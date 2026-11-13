@@ -90,6 +90,7 @@ it("keeps the same fingerprint for unchanged inputs and changes it for trim or s
   for (let i = 0; i < 4; i++) {
     if (i === 2) {
       f.timeline.tracks[0]!.clips[0]!.sourceInFrames = 30;
+      f.timeline.history = { undo: [], redo: [] }; // External snapshots must remain replayable.
       await f.store.ownedWrite(() => writeFile(f.timelinePath, JSON.stringify(f.timeline)));
     }
     const result = await compileVideoPublication(f.store, { ...f.request, title: i === 3 ? "New title" : f.request.title }, f.options);
@@ -256,6 +257,7 @@ it("refuses changed take bytes even when sound is muted, but allows genuinely un
     probedAt: "2026-09-01T00:00:00Z", mediaInfo: { durationSec: 6, hasVideo: true, hasAudio: true } }));
   f.timeline.tracks[0]!.clips[0]!.source = { kind: "take", takeId, label: "Selected take" };
   f.timeline.tracks[0]!.clips[0]!.audio = "mute";
+  f.timeline.history = { undo: [], redo: [] };
   await f.store.ownedWrite(() => writeFile(f.timelinePath, JSON.stringify(f.timeline)));
   await assert.rejects(compileVideoPublication(f.store, f.request, f.options), /Take bytes no longer match/);
   assert.equal(f.invocations.length, 0);

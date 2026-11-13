@@ -1,7 +1,11 @@
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, rename, rmdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { mingReferenceHash } from "../local-ai/ming-reference.js";
 import { dirname, extname, join } from "node:path";
 import {
+  ARTIFACT_RETRIEVAL_HELD_MESSAGE,
+  ArtifactTransferSettingsSchema,
+  type ArtifactTransferSettings,
   canDeleteJob,
   freeLimitReason,
   GOOGLE_BILLED,
@@ -32,6 +36,8 @@ import {
   type ComfyUiRecoveryDecision,
   type DomainEvent,
   type Job,
+  type JobSummary,
+  type JobStorageWait,
   type JobEngineIdentity,
   type JobTarget,
   type LedgerEntry,
@@ -45,6 +51,18 @@ import { backoffMs, classifyError, isRateLimit, type FailureClass } from "./clas
 import { JobJournal, type JobStateStore } from "./journal.js";
 import { audioFormatOf, imageFormatOf, verifyArtifact } from "./verify.js";
 import { atomicWriteFile } from "../world/atomic.js";
+import { ArtifactCheckpointInvalid, ArtifactResultFiles, artifactFileMatches, ARTIFACT_FILE_OVERHEAD, type SavedArtifactResult } from "./artifact-files.js";
+import { ArtifactStorageHeld, SubmissionStorageHeld, type ArtifactWriteSpace } from "../storage/job-artifacts.js";
+
+/**
+ * Submission holds that mean "could not confirm", as opposed to "measured too little" (space),
+ * "the destination is gone" (destination-unavailable) or "the service is stopping" (stopped).
+ * These become an advisory and the job submits. A hold with no typed detail stays a hold: it is
+ * an unexplained failure, not a known-unknown measurement.
+ */
+const UNVERIFIED_STORAGE: ReadonlySet<string> = new Set(["capacity-unavailable", "capacity-stale", "mapping-changed", "audit-unavailable", "reconciliation-required", "reservation-limit"]);
+const unverifiedStorage = (held: SubmissionStorageHeld) =>
+  held.result?.admission?.status !== "held" && held.detail !== undefined && UNVERIFIED_STORAGE.has(held.detail.code);
 
 /**
  * The dispatch engine (SPEC-009): durable before the network, and never trust silence. Every
@@ -67,6 +85,8 @@ export interface DispatchImageReference {
 }
 
 export interface DispatchVoiceReference {
+  transcript?: string;
+  language?: string;
   name: string;
   contentType: "audio/wav" | "audio/mpeg";
   data: Uint8Array;
@@ -91,7 +111,6 @@ export interface DispatchClient {
   /** The local models this client has sent work to in this run. */
   usedModels?(): ReadonlySet<string>;
   residency?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").ModelResidency[]>;
-  listModels?(signal?: AbortSignal): Promise<import("@arke-studio/contracts").LocalHarnessModel[]>;
   /** Release optional long-lived transports when the queue shuts down. */
   dispose?(): void | Promise<void>;
   submit(
@@ -128,8 +147,10 @@ export interface DispatchClient {
     error?: string;
     /** What the engine is counting, where it counts anything (SPEC-021 D16). */
     step?: { stage: string; done: number; total: number };
+    /** How long a succeeded run took by the engine's own clock, where it keeps one (issue 2401). */
+    engineSec?: number;
   }>;
-  fetchArtifacts(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<DispatchArtifact[]>;
+  fetchArtifacts(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }, options?: { signal?: AbortSignal; transferSettings?: ArtifactTransferSettings }): Promise<DispatchArtifact[]>;
   cancel(key: string, remoteId: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<void>;
   /** The lane has drained after `model`'s job settled: a local engine may put down what it loaded (issue 846). */
   release?(model: string, context?: { jobId?: string; attempt?: number; model?: string }): Promise<void>;
@@ -167,6 +188,14 @@ export interface EnqueueInput {
 }
 
 export interface JobQueueOptions {
+  checkStorageBeforeSubmission?: () => boolean;
+  artifactTransferSettings?: () => ArtifactTransferSettings | undefined;
+  /** Host-resolved result writes and optional unsent headroom checks; no renderer path or replay authority. */
+  artifactSpace?: ArtifactWriteSpace;
+  /** Local result persistence retries never call submit/poll/fetch again. */
+  artifactRetryMs?: number;
+  /** Unsent storage holds yield the lane and recheck without spending an attempt. */
+  submissionStorageRetryMs?: number;
   /** `params` are the job's, for a narration job's coordinator-only binding (SPEC-049 R-12). */
   readDesignedVoice?: (worldId: string, target: string, params?: Record<string, unknown>) => Promise<{ target: string; remoteId: string }>;
   /** Resolve qualified speech pricing at admission and immediately before paid I/O. */
@@ -203,7 +232,7 @@ export interface JobQueueOptions {
    * Run landing under the owning world's lock. False means the destination is temporarily
    * unavailable; provider success stays running and retries locally without another submit.
    */
-  landInWorld: (worldId: string, fn: (worldDir: string) => Promise<void>) => Promise<boolean>;
+  landInWorld: (worldId: string, fn: (worldDir: string, assertOwnership?: () => Promise<void>) => Promise<void>) => Promise<boolean>;
   /** Resolve durable portable paths into ephemeral verified bytes before paid provider I/O. */
   readAudioInputs?: (job: Job) => Promise<PreparedAudioInput[]>;
   readAudioReferences?: (job: Job) => Promise<DispatchVoiceReference[]>;
@@ -296,9 +325,21 @@ interface Lane {
   deferredRecovery: Array<() => Promise<void>>;
 }
 
-interface DurableInlineArtifacts {
-  remoteId: string;
-  artifacts: DispatchArtifact[];
+type DurableInlineArtifacts = SavedArtifactResult;
+
+const POLL_FAST_WINDOW_MS = 20_000;
+const POLL_MAX_MS = 10_000;
+
+/**
+ * The wait before the next poll of a job still running: the base interval for the first 20 s
+ * after any news (a step or state change), then half as long again each poll, up to 10 s. A
+ * five-minute job polled every 1.5 s made about 200 provider calls, each with two flushed call
+ * records, for one answer (issue 2782). Polling itself is unchanged: never a resubmit (R-5).
+ * The cap is also at most seven bases, so a small configured interval stays small.
+ */
+export function nextPollDelay(baseMs: number, previousMs: number, sinceNewsMs: number): number {
+  if (sinceNewsMs < POLL_FAST_WINDOW_MS) return baseMs;
+  return Math.min(Math.max(baseMs, Math.min(POLL_MAX_MS, baseMs * 7)), Math.round(previousMs * 1.5));
 }
 
 const TERMINAL = new Set(["succeeded", "failed", "cancelled"]);
@@ -324,13 +365,14 @@ const FOLLOW_ON_TARGETS = new Set([
   "scene-pass",
   "voice-line",
   "voice-preview",
+  "bench-take",
 ]);
 /**
  * Params the coordinator keeps on the job for itself and never sends. `voiceClipHash` is the
  * recording a cloned voice was made from: part of an audiobook part's durable identity
  * (`priorPartJob`, SPEC-046 R-39), not a control of any reader.
  */
-const COORDINATOR_ONLY_PARAMS = new Set(["frameRun", "frameRunStep", "landing", "request", "engineOperation", "voiceClipHash", "designedBinding", "generationQuoteReferences", "generationQuoteVideoReferences", "generationQuoteProduction", "generationQuoteLocalIdentity", "generationQuotePendingSelection"]);
+const COORDINATOR_ONLY_PARAMS = new Set(["productionWork", "frameRun", "frameRunStep", "landing", "request", "engineOperation", "voiceClipHash", "designedBinding", "generationQuoteReferences", "generationQuoteVideoReferences", "generationQuoteProduction", "generationQuoteLocalIdentity", "generationQuotePendingSelection"]);
 
 /** Attempts that count against the retry bound: refusals waited out as busy never reached the engine. */
 function spentAttempts(job: Job): number {
@@ -421,6 +463,9 @@ function landedName(job: Job, artifact: DispatchArtifact, index: number): string
 export class JobQueue {
   private readonly journal: JobStateStore;
   private readonly jobs = new Map<string, Job>();
+  private readonly storageWaits = new Map<string, JobStorageWait>();
+  /** What the engine's clock said of a run that finished, held until its success is published. */
+  private readonly engineSeconds = new Map<string, number>();
   private readonly usageWrites = new Map<string, Promise<boolean>>();
   private readonly acceptedSubmissions = new Map<string, Job>();
   private readonly lanes = new Map<string, Lane>();
@@ -441,6 +486,12 @@ export class JobQueue {
   private readonly resolvingHeld = new Set<string>();
   private readonly finalizing = new Set<string>();
   private readonly activeRuns = new Set<Promise<void>>();
+  private readonly artifactAborts = new Map<string, AbortController>();
+  private readonly artifactFiles: ArtifactResultFiles;
+  private readonly artifactLimitHeld = new Set<string>();
+  private artifactLimitRetry: Promise<void> | null = null;
+  private readonly artifactAuditHeld = new Set<string>();
+  private readonly artifactReadAbort = new AbortController();
   private readonly sleepTimers = new Map<NodeJS.Timeout, () => void>();
   private readonly retryTimers = new Set<NodeJS.Timeout>();
   /** Submits without a remote id can still be interrupted, notably queue-backed local speech. */
@@ -477,6 +528,7 @@ export class JobQueue {
 
   constructor(private readonly opts: JobQueueOptions) {
     this.journal = opts.journal ?? new JobJournal(opts.journalPath);
+    this.artifactFiles = new ArtifactResultFiles(opts.journalPath, opts.artifactSpace, undefined, opts.artifactTransferSettings);
     this.clock = opts.clock ?? (() => new Date().toISOString());
     this.now = opts.now ?? Date.now;
     this.rng = opts.rng ?? Math.random;
@@ -534,8 +586,57 @@ export class JobQueue {
     await this.journal.append(job);
     if (this.disposed) return true; // killed mid-write: the journal decides on recovery
     this.jobs.set(job.id, job);
-    this.opts.emit({ at: this.clock(), type: "job.updated", job });
+    if (["succeeded", "failed", "cancelled", "needs-reconciliation"].includes(job.status)) this.artifactLimitHeld.delete(job.id);
+    this.publishJob(job);
     return true;
+  }
+
+  /** Typed presentation stays outside the journal, like progress. Never parse error copy. */
+  private jobObservation(job: Job): JobSummary {
+    const wait = this.storageWaits.get(job.id);
+    // An advisory travels with the submitted job; a hold only exists while it keeps the job back.
+    const live = wait?.advisory ? job.status === "queued" || job.status === "submitting" || job.status === "running"
+      : wait?.phase === "submission" ? job.status === "queued" : job.status === "running" || job.status === "submitting";
+    if (wait && live) return { ...job, storageWait: { ...wait } };
+    this.storageWaits.delete(job.id);
+    if (job.status === "queued" || job.status === "submitting" || job.status === "running") return job;
+    // Once, with the success it describes: a finalization publishes this job again, and a measure
+    // read twice would count one run as two.
+    const engineSec = this.engineSeconds.get(job.id);
+    this.engineSeconds.delete(job.id);
+    return engineSec !== undefined && job.status === "succeeded" ? { ...job, engineSec } : job;
+  }
+
+  private publishJob(job: Job): void {
+    this.opts.emit({ at: this.clock(), type: "job.updated", job: this.jobObservation(job) });
+  }
+
+  private storageWaiting(job: Job, phase: JobStorageWait["phase"], error?: unknown): void {
+    if (this.disposed || this.cancelling.has(job.id)) return;
+    const current = this.jobs.get(job.id);
+    if (!current || current.attempt !== job.attempt || current.resultReceiptId !== job.resultReceiptId) return;
+    const before = this.storageWaits.get(job.id);
+    const typed = error instanceof SubmissionStorageHeld || error instanceof ArtifactStorageHeld;
+    if (typed) {
+      const reason = error.result?.admission?.status === "held" ? "space" : "unavailable";
+      if (before?.phase === phase && before.reason === reason && !before.checking && JSON.stringify(before.detail) === JSON.stringify(error.detail)) return;
+      this.storageWaits.set(job.id, { phase, reason, observedAt: this.clock(), ...(error.detail ? { detail: error.detail } : {}) });
+    } else if (!this.storageWaits.delete(job.id)) return;
+    this.publishJob(current);
+  }
+
+  /** The warning that replaces an unverified submission hold: observation only, like a hold. */
+  private storageAdvisory(job: Job, held: SubmissionStorageHeld): void {
+    if (this.disposed || this.cancelling.has(job.id)) return;
+    const current = this.jobs.get(job.id);
+    if (!current || current.attempt !== job.attempt || current.resultReceiptId !== job.resultReceiptId) return;
+    this.storageWaits.set(job.id, { phase: "submission", reason: "unavailable", observedAt: this.clock(), advisory: true, ...(held.detail ? { detail: held.detail } : {}) });
+    this.publishJob(current);
+  }
+
+  private checkingStorage(job: Job): void {
+    const previous = this.storageWaits.get(job.id);
+    if (previous) { this.storageWaits.set(job.id, { ...previous, checking: true }); this.publishJob(this.jobs.get(job.id) ?? job); }
   }
 
   /** Cancellation must retain a response whose usage is already being made durable. */
@@ -565,7 +666,7 @@ export class JobQueue {
     if (this.disposed) return;
     const updated = { ...job, step };
     this.jobs.set(job.id, updated);
-    this.opts.emit({ at: this.clock(), type: "job.updated", job: updated });
+    this.publishJob(updated);
   }
 
   private emitQueueStatus(provider: string): void {
@@ -622,8 +723,32 @@ export class JobQueue {
     return order;
   }
 
-  listJobs(): Job[] {
-    return [...this.jobs.values()];
+  listJobs(): JobSummary[] {
+    return [...this.jobs.values()].map(job => this.jobObservation(job));
+  }
+
+  /**
+   * One job as listJobs shows it. Lookups by id copied every job in the history to find one, and
+   * observed every job on the way (issue 2792); this observes only the job it returns.
+   */
+  get(id: string): JobSummary | undefined {
+    const job = this.jobs.get(id);
+    return job === undefined ? undefined : this.jobObservation(job);
+  }
+
+  /** The first job a test accepts, as listJobs shows it. */
+  find(match: (job: Job) => unknown): JobSummary | undefined {
+    for (const job of this.jobs.values()) if (match(job)) return this.jobObservation(job);
+    return undefined;
+  }
+
+  /** The jobs still queued, submitting or running, as listJobs shows them. */
+  active(): JobSummary[] {
+    const live: JobSummary[] = [];
+    for (const job of this.jobs.values()) {
+      if (job.status === "queued" || job.status === "submitting" || job.status === "running") live.push(this.jobObservation(job));
+    }
+    return live;
   }
 
   /** A cancelled row can still have a submit unwinding or a GPU reservation in flight. */
@@ -692,6 +817,13 @@ export class JobQueue {
     }
     const durableParams = { ...input.params };
     if (input.voiceReference === true) durableParams["voiceReference"] = true;
+    if (input.provider === "ming") {
+      if (input.voiceReference !== true || !this.opts.readVoiceReference) throw new Error("Ming requires a host-resolved saved voice recording.");
+      const reference = await this.opts.readVoiceReference(input.worldId, input.provider, input.model, String(input.params["voiceId"]));
+      const identity = mingReferenceHash(reference);
+      if (input.params["voiceClipHash"] !== undefined && input.params["voiceClipHash"] !== identity) throw new Error("This Ming voice reference changed. Prepare the reading again.");
+      durableParams["voiceClipHash"] = identity;
+    }
     // Admission before durability (SPEC-021 R-16): a dispatch the coordinator knows cannot run
     // is refused with the readiness reason, and nothing is journalled for it.
     const admitted = await this.opts.admit?.(input);
@@ -941,7 +1073,7 @@ export class JobQueue {
         if (!this.disposed && current?.status === "queued") {
           const updated = { ...current, waitingFor: reason ?? undefined };
           this.jobs.set(job.id, updated);
-          this.opts.emit({ at: this.clock(), type: "job.updated", job: updated });
+          this.publishJob(updated);
         }
       });
       if (release) this.gpuReservations.set(this.engineRunKey(job), release);
@@ -975,6 +1107,8 @@ export class JobQueue {
       return;
     }
     if (!this.stillQueued(job)) return;
+
+    if (!await this.checkSubmissionStorage(job) || this.disposed || !this.stillQueued(job) || this.lane(job.provider).paused) return;
 
     let audioInputs: PreparedAudioInput[] | undefined;
     let audioReferences: DispatchVoiceReference[] | undefined;
@@ -1085,6 +1219,7 @@ export class JobQueue {
       this.submitAborts.set(job.id, reading);
       try {
         voiceReference = await this.opts.readVoiceReference(job.worldId, job.provider, job.model, voiceId, reading.signal);
+        if (job.provider === "ming" && job.params["voiceClipHash"] !== mingReferenceHash(voiceReference)) throw new Error("This Ming voice reference changed after it was queued. Prepare the reading again.");
       } catch (error) {
         if (!this.disposed && !this.cancelling.has(job.id) && this.stillQueued(job)) {
           const message = describeCoordinatorError(error);
@@ -1232,19 +1367,24 @@ export class JobQueue {
       await this.terminalize(job, "failed", `${freeLimitReason({ allowed: used.limit ?? 0, resetsAt: used.resetsAt })} · not sent`, undefined, "terminal");
       return;
     }
+    // Preparation and authorization may have taken time or written media. Recheck before the
+    // outbox flush; an earlier headroom observation is not a lasting grant.
+    if (!await this.checkSubmissionStorage(job) || this.disposed || !this.stillQueued(job) || this.lane(job.provider).paused) return;
     // Persist the physical call before I/O. A crash may overcount one authorized call, but the
     // journal can never undercount requests that may have reached a paid provider.
     const submitting: Job = {
       ...job,
       status: "submitting",
       attempt: job.attempt + 1,
+      error: null,
       submissionRejected: undefined,
       providerResultKind: undefined,
+      resultReceiptId: ulid(),
       updatedAt: this.clock(),
     };
     await this.transition(submitting);
     if (this.disposed) return;
-    if (!this.stillSubmitting(submitting)) return;
+    if (this.cancelling.has(job.id) || !this.stillSubmitting(submitting)) return;
 
     const submitAbort = new AbortController();
     this.submitAborts.set(job.id, submitAbort);
@@ -1292,6 +1432,7 @@ export class JobQueue {
       const reported = typeof accepted.costMicroUsd === "number" && Number.isFinite(accepted.costMicroUsd) && accepted.costMicroUsd >= 0
         && Number.isSafeInteger(Math.round(accepted.costMicroUsd)) ? Math.round(accepted.costMicroUsd) : undefined;
       const completedSubmission: Job = { ...submitting, providerJobId: accepted.remoteId,
+        resultReceiptId: submitting.resultReceiptId,
         providerResultKind: accepted.artifacts !== undefined ? "inline" : "remote",
         ...(usage.success ? { speechUsage: usage.data } : {}),
         ...(client.declarations.reportsCost && reported !== undefined ? { providerCostMicroUsd: reported } : {}) };
@@ -1303,23 +1444,22 @@ export class JobQueue {
         return;
       }
       // Usage must survive artifact landing failure and restart, just as the audio does.
-      if (usage.success || completedSubmission.providerCostMicroUsd !== undefined || completedSubmission.providerResultKind === "inline") await this.persistUsage(completedSubmission);
+      if (usage.success || completedSubmission.providerCostMicroUsd !== undefined || completedSubmission.providerResultKind === "inline") {
+        try { await this.persistUsage(completedSubmission); }
+        catch (error) {
+          if (accepted.artifacts === undefined) throw error;
+          // The pre-submit row already flushed this response's nonce. Preserve its exact bytes
+          // and usage in that nonce's private receipt despite an unavailable accepted-facts append.
+          this.artifactAuditHeld.add(job.id);
+        }
+      }
       if (this.disposed || this.cancelling.has(job.id) || !this.stillSubmitting(completedSubmission)) return;
       if (accepted.error !== undefined) {
         await this.terminalize(completedSubmission, "failed", accepted.error, accepted.costMicroUsd, "terminal");
         return;
       }
       if (accepted.artifacts) {
-        try {
-          await this.persistInlineArtifacts(job.id, accepted.remoteId, accepted.artifacts);
-        } catch (error) {
-          await this.terminalize(
-            completedSubmission,
-            "failed",
-            `the provider completed, but its artifact could not be made durable: ${describeCoordinatorError(error)}`,
-          );
-          return;
-        }
+        if (!await this.retainCompletedResult(completedSubmission, accepted.artifacts)) return;
         await this.landDurableInline(
           completedSubmission,
           client,
@@ -1339,12 +1479,67 @@ export class JobQueue {
       // Cancelled by the user, or being cancelled right now: the abort IS the error, and `cancel()`
       // owns the terminal row. Never let it reach handleSubmitError.
       if (this.cancelling.has(job.id) || this.jobs.get(job.id)?.status === "cancelled") return;
+      // Once acceptance was witnessed, local persistence/finalization failure cannot enter
+      // submit retry. A saved result may already exist even if a journal append rejected.
+      if (this.acceptedSubmissions.has(job.id)) return;
       if (!this.stillSubmitting(submitting)) return;
       await this.handleSubmitError(submitting, client, err);
     } finally {
-      if (!this.cancelling.has(job.id)) this.acceptedSubmissions.delete(job.id);
+      if (!this.cancelling.has(job.id) && !this.artifactAuditHeld.has(job.id)) this.acceptedSubmissions.delete(job.id);
       if (this.submitAborts.get(job.id) === submitAbort) this.submitAborts.delete(job.id);
     }
+  }
+
+  private async checkSubmissionStorage(job: Job): Promise<boolean> {
+    if (this.opts.checkStorageBeforeSubmission?.() === false) { this.storageWaiting(job, "submission"); return true; }
+    const check = this.opts.artifactSpace?.checkSubmission;
+    if (!check) { this.storageWaiting(job, "submission"); return true; }
+    const checking = new AbortController(); this.submitAborts.set(job.id, checking);
+    this.checkingStorage(job);
+    try {
+      const directories = [{ directory: join(dirname(this.opts.journalPath), "inline-artifacts"), role: "working-files" as const }];
+      if (job.landing) {
+        let failure: unknown;
+        const available = await this.opts.landInWorld(job.worldId, async (worldDir, assertOwnership) => {
+          try {
+            checking.signal.throwIfAborted(); await assertOwnership?.();
+            await check.call(this.opts.artifactSpace, [...directories,
+              { directory: join(worldDir, ".staging"), role: "generated-media" },
+              { directory: join(worldDir, job.landing!.dir), role: "generated-media" },
+            ], checking.signal);
+            checking.signal.throwIfAborted(); await assertOwnership?.();
+          } catch (error) { failure = error; throw error; }
+        });
+        if (failure) throw failure;
+        if (!available) throw new SubmissionStorageHeld(undefined, { code: "destination-unavailable", roles: ["generated-media"] });
+      } else await check.call(this.opts.artifactSpace, directories, checking.signal);
+      this.storageWaiting(job, "submission");
+      return !this.disposed && !checking.signal.aborted && this.stillQueued(job) && !this.lane(job.provider).paused;
+    } catch (error) {
+      if (this.disposed || checking.signal.aborted || !this.stillQueued(job)) return false;
+      const held = error instanceof SubmissionStorageHeld ? error : new SubmissionStorageHeld();
+      // Unverified is not short (owner, 2026-11-02; SPEC-062 R-5 amendment). A check that could
+      // not confirm capacity or accounting held work for as long as its probe stayed unavailable
+      // (#2239: twelve holds in an evening on a disk with 38 GB free, each cleared only by a
+      // restart), so it now warns and submits. A measured shortage or a lost destination still
+      // holds, and the result's own landing reservation still protects the write itself.
+      if (unverifiedStorage(held)) {
+        this.storageAdvisory(job, held);
+        return !this.disposed && this.stillQueued(job) && !this.lane(job.provider).paused;
+      }
+      this.storageWaiting(job, "submission", held);
+      const message = held.message;
+      const current = this.jobs.get(job.id)!;
+      if (current.error !== message) {
+        // This is observation, like progress: the queued identity/attempt already flushed.
+        // Reporting a full app disk must not require another journal write. Restart rechecks
+        // capacity; this presentation neither authorizes I/O nor changes durable job status.
+        const waiting = { ...current, error: message, updatedAt: this.clock() };
+        this.jobs.set(job.id, waiting); this.publishJob(waiting);
+      }
+      if (!this.disposed && this.stillQueued(job)) this.lane(job.provider).notBefore.set(job.id, Date.now() + (this.opts.submissionStorageRetryMs ?? 30_000));
+      return false;
+    } finally { if (this.submitAborts.get(job.id) === checking) this.submitAborts.delete(job.id); }
   }
 
   private async handleSubmitError(job: Job, client: DispatchClient, err: unknown): Promise<void> {
@@ -1509,7 +1704,7 @@ export class JobQueue {
     if (current?.status !== "queued") return;
     const waiting: Job = { ...current, waitingFor: "Waiting for free memory" };
     this.jobs.set(job.id, waiting);
-    this.opts.emit({ at: this.clock(), type: "job.updated", job: waiting });
+    this.publishJob(waiting);
   }
 
   private async pollToTerminal(job: Job, client: DispatchClient, key: string, reserved = false): Promise<void> {
@@ -1532,6 +1727,8 @@ export class JobQueue {
       return;
     }
     let current = job;
+    // The wait lengthens while nothing changes and resets on news (`nextPollDelay`).
+    let delay = this.pollIntervalMs, newsAt = this.now(), lastState: string | undefined;
     for (;;) {
       if (this.disposed) return;
       if (!this.stillPolling(current)) return;
@@ -1550,7 +1747,8 @@ export class JobQueue {
           return;
         }
         // Transient/offline/unknown poll noise: keep polling — never resubmit (R-5).
-        await this.sleep(this.pollIntervalMs);
+        delay = nextPollDelay(this.pollIntervalMs, delay, this.now() - newsAt);
+        await this.sleep(delay);
         continue;
       }
       if (this.disposed) return;
@@ -1565,6 +1763,13 @@ export class JobQueue {
         }
       }
       if (poll.state === "succeeded") {
+        if (poll.engineSec === undefined) this.engineSeconds.delete(job.id);
+        else this.engineSeconds.set(job.id, poll.engineSec);
+        const cost = poll.costMicroUsd, rounded = typeof cost === "number" ? Math.round(cost) : NaN;
+        if (client.declarations.reportsCost && typeof cost === "number" && Number.isFinite(cost) && Number.isSafeInteger(rounded) && rounded >= 0 && current.providerCostMicroUsd !== rounded) {
+          current = { ...current, providerCostMicroUsd: rounded }; await this.persistUsage(current);
+          if (this.disposed || this.cancelling.has(job.id) || !this.stillPolling(current)) return;
+        }
         await this.landAndSucceed(current, client, key, poll.costMicroUsd);
         return;
       }
@@ -1589,10 +1794,14 @@ export class JobQueue {
       // and re-emitting it would put a frame on the wire per poll rather than per step.
       const step = poll.step ?? null;
       const held = this.jobs.get(job.id)?.step ?? null;
-      if (JSON.stringify(step) !== JSON.stringify(held)) {
+      const moved = JSON.stringify(step) !== JSON.stringify(held);
+      if (moved) {
         this.progressed(this.jobs.get(job.id) ?? current, step);
       }
-      await this.sleep(this.pollIntervalMs);
+      if (moved || poll.state !== lastState) newsAt = this.now();
+      lastState = poll.state;
+      delay = nextPollDelay(this.pollIntervalMs, delay, this.now() - newsAt);
+      await this.sleep(delay);
     }
   }
 
@@ -1630,66 +1839,53 @@ export class JobQueue {
 
   // ---- artifacts (§2.9) ----------------------------------------------------
 
-  private inlineArtifactDir(jobId: string): string {
-    return join(dirname(this.opts.journalPath), "inline-artifacts", jobId);
+  private artifactSignal(job: Job): AbortSignal {
+    const key = `${this.engineRunKey(job)}|${job.attempt}`;
+    let abort = this.artifactAborts.get(key);
+    if (!abort) { abort = new AbortController(); this.artifactAborts.set(key, abort); }
+    if (this.disposed || this.cancelling.has(job.id) || !this.stillActiveRun(job)) abort.abort();
+    return abort.signal;
   }
 
-  /**
-   * Synchronous providers have no remote result to fetch after a restart. Write their bytes into
-   * the queue first, with the manifest written last as the completeness marker; only then may
-   * landing or a recoverable state depend on them.
-   */
-  private async persistInlineArtifacts(
-    jobId: string,
-    remoteId: string,
-    artifacts: readonly DispatchArtifact[],
-  ): Promise<void> {
-    const dir = this.inlineArtifactDir(jobId);
-    const manifest = join(dir, "manifest.json");
-    await rm(toExtendedLength(dir), { recursive: true, force: true });
-    await mkdir(toExtendedLength(dir), { recursive: true });
-    for (const [index, artifact] of artifacts.entries()) {
-      await atomicWriteFile(join(dir, `${index}.bin`), artifact.data);
-    }
-    await atomicWriteFile(
-      manifest,
-      JSON.stringify({
-        remoteId,
-        artifacts: artifacts.map(({ name, contentType }) => ({ name, contentType })),
-      }),
-    );
-  }
-
-  private async readInlineArtifacts(jobId: string): Promise<DurableInlineArtifacts | null> {
-    const dir = this.inlineArtifactDir(jobId);
-    try {
-      const raw = JSON.parse(await readFile(toExtendedLength(join(dir, "manifest.json")), "utf8")) as {
-        remoteId?: unknown;
-        artifacts?: unknown;
-      };
-      if (typeof raw.remoteId !== "string" || !Array.isArray(raw.artifacts) || raw.artifacts.length > 64) {
-        throw new Error("invalid inline artifact manifest");
-      }
-      const artifacts: DispatchArtifact[] = [];
-      for (const [index, value] of raw.artifacts.entries()) {
-        if (
-          typeof value !== "object" || value === null ||
-          typeof (value as { name?: unknown }).name !== "string" ||
-          typeof (value as { contentType?: unknown }).contentType !== "string"
-        ) {
-          throw new Error("invalid inline artifact metadata");
+  /** Accepted facts are already durable. Retry only these exact bytes, never provider work.
+   * A rejected disk append is not evidence that the result or a charge did not exist. */
+  private async retainCompletedResult(job: Job, artifacts: DispatchArtifact[], admittedSettings?: ArtifactTransferSettings): Promise<boolean> {
+    const signal = this.artifactSignal(job);
+    // Callers have witnessed a complete inline response or terminal success plus retrieval
+    // of every result byte. Only local storage remains: holding inference here would block
+    // unrelated engines indefinitely on a full disk. The next GPU owner still performs its
+    // normal unload/handover; result bytes, storage leases and accounting stay with this job.
+    if (!signal.aborted && this.stillActiveRun(job)) this.releaseGpu(job);
+    // An empty response has no result bytes. Its durable job/usage facts cannot stand in for
+    // a missing media result on restart (notably inline-only speech and voice creation).
+    if (artifacts.length === 0) return !signal.aborted && this.stillActiveRun(job);
+    while (!signal.aborted && !this.disposed && this.stillActiveRun(job)) {
+      this.checkingStorage(job);
+      try { await this.artifactFiles.save(job, artifacts, signal, admittedSettings); this.storageWaiting(job, "result"); return !signal.aborted && this.stillActiveRun(job); }
+      catch (error) {
+        if (signal.aborted || this.disposed || !this.stillActiveRun(job)) return false;
+        this.storageWaiting(job, "result", error);
+        const detail = error instanceof ArtifactStorageHeld || error instanceof ArtifactCheckpointInvalid ? error.message
+          : "The provider completed; saving its result is waiting for local storage or folder access. No generation was repeated.";
+        const current = this.jobs.get(job.id)!;
+        if (current.error !== detail || current.status !== "running") {
+          const held: Job = { ...current, ...job, status: "running", error: detail, updatedAt: this.clock() };
+          if (!this.artifactAuditHeld.has(job.id)) {
+            try { await this.transition(held); }
+            catch { this.artifactAuditHeld.add(job.id); }
+          }
+          if (this.artifactAuditHeld.has(job.id) && !this.disposed && !this.cancelling.has(job.id)) {
+            this.jobs.set(job.id, held); this.publishJob(held);
+          }
         }
-        artifacts.push({
-          name: (value as { name: string }).name,
-          contentType: (value as { contentType: string }).contentType,
-          data: new Uint8Array(await readFile(toExtendedLength(join(dir, `${index}.bin`)))),
-        });
+        await this.sleep(this.opts.artifactRetryMs ?? 30_000, signal);
       }
-      return { remoteId: raw.remoteId, artifacts };
-    } catch {
-      await rm(toExtendedLength(dir), { recursive: true, force: true }).catch(() => {});
-      return null;
     }
+    return false;
+  }
+
+  private async readInlineArtifacts(job: Job): Promise<DurableInlineArtifacts | null> {
+    return this.artifactFiles.read(job, this.artifactReadAbort.signal);
   }
 
   private async landDurableInline(
@@ -1700,9 +1896,7 @@ export class JobQueue {
   ): Promise<void> {
     await this.landAndSucceed(job, client, key, job.providerCostMicroUsd, artifacts);
     const settled = this.jobs.get(job.id);
-    if (settled && TERMINAL.has(settled.status)) {
-      await rm(toExtendedLength(this.inlineArtifactDir(job.id)), { recursive: true, force: true }).catch(() => {});
-    }
+    if (settled?.status === "succeeded" && settled.landedFiles?.length && (!settled.finalization || settled.finalization.status === "complete")) await this.artifactFiles.removeFiled(settled);
   }
 
   private async landAndSucceed(
@@ -1713,13 +1907,30 @@ export class JobQueue {
     suppliedArtifacts?: DispatchArtifact[],
     fetchAttempt = 1,
   ): Promise<void> {
+    // A verified legacy inline receipt remains authoritative until filing succeeds. Minting
+    // a nonce here without migrating supplied bytes would hide it on the next restart.
+    if (!job.resultReceiptId && job.landing && suppliedArtifacts === undefined) {
+      job = { ...job, resultReceiptId: ulid() };
+      await this.persistUsage(job); // Legacy accepted work gains a durable local receipt identity, never another submit.
+    }
     let landed: string[] = [];
     if (job.landing) {
       let artifacts: DispatchArtifact[];
+      const transferSettings = ArtifactTransferSettingsSchema.parse(this.opts.artifactTransferSettings?.() ?? {});
       try {
-        artifacts = suppliedArtifacts ?? (await client.fetchArtifacts(key, job.providerJobId!, { jobId: job.id, attempt: job.attempt, model: job.model }));
+        artifacts = suppliedArtifacts ?? (await client.fetchArtifacts(key, job.providerJobId!, { jobId: job.id, attempt: job.attempt, model: job.model }, { signal: this.artifactSignal(job), transferSettings }));
       } catch (err) {
-        if (this.disposed) return;
+        if (this.disposed || !this.stillActiveRun(job)) return;
+        if (err && typeof err === "object" && "artifactRetrievalHeld" in err && err.artifactRetrievalHeld === true) {
+          this.artifactLimitHeld.add(job.id);
+          // A supported-receipt ceiling cannot be repaired by repeatedly downloading the
+          // same oversized result. Keep its durable remote identity; no poll/submit replay.
+          this.releaseGpu(job);
+          const current = this.jobs.get(job.id)!;
+          const waiting = { ...current, error: ARTIFACT_RETRIEVAL_HELD_MESSAGE, updatedAt: this.clock() };
+          this.jobs.set(job.id, waiting); this.publishJob(waiting);
+          return;
+        }
         // An interrupted download restarts the fetch (R-12); nothing partial exists yet.
         const klass = classifyError(err);
         if (klass === "terminal") {
@@ -1736,6 +1947,7 @@ export class JobQueue {
       }
       if (this.disposed) return;
       if (!this.stillActiveRun(job)) return; // cancelled or retired while bytes were in flight
+      if (suppliedArtifacts === undefined && !await this.retainCompletedResult(job, artifacts, transferSettings)) return;
       // Sanitisation before verification (SPEC-021 §2.10): an engine that embeds workflow
       // metadata has it stripped here, and a container the sanitiser cannot process fails the
       // job with the reason — never landed as-is.
@@ -1788,40 +2000,82 @@ export class JobQueue {
       // landing runs inside the world's suppression envelope when one is supplied, so our own
       // writes never trip the external-edit watcher.
       const landing = job.landing;
-      const available = await this.opts.landInWorld(job.worldId, async (worldDir) => {
-        const stagingDir = join(worldDir, ".staging", job.id);
-        const targetDir = join(worldDir, job.landing!.dir);
-        try {
-          await mkdir(toExtendedLength(stagingDir), { recursive: true });
-          await mkdir(toExtendedLength(targetDir), { recursive: true });
-          const staged: Array<{ from: string; to: string; rel: string }> = [];
-          for (const [index, artifact] of artifacts.entries()) {
-            const name = landedName(job, artifact, index);
-            const from = join(stagingDir, name);
-            await writeFile(toExtendedLength(from), artifact.data);
-            staged.push({ from, to: join(targetDir, name), rel: `${landing.dir}/${name}` });
+      for (;;) {
+        landed = [];
+        let storageHold: string | null = null;
+        const available = await this.opts.landInWorld(job.worldId, async (worldDir, assertOwnership) => {
+          const stagingDir = join(worldDir, ".staging", job.id);
+          const targetDir = join(worldDir, job.landing!.dir);
+          const signal = this.artifactSignal(job);
+          let lease: Awaited<ReturnType<ArtifactWriteSpace["reserve"]>> | undefined;
+          let filed = false, ownershipLost = false;
+          const verifyOwner = async () => { try { await assertOwnership?.(); } catch (error) { ownershipLost = true; throw error; } };
+          try {
+            await mkdir(toExtendedLength(stagingDir), { recursive: true });
+            await mkdir(toExtendedLength(targetDir), { recursive: true });
+            const entries = [];
+            for (const [index, artifact] of artifacts.entries()) {
+              const name = landedName(job, artifact, index), from = join(stagingDir, name), to = join(targetDir, name), rel = `${landing.dir}/${name}`;
+              const published = await artifactFileMatches(to, artifact.data, signal);
+              entries.push({ artifact, name, from, to, rel, published, ready: published || await artifactFileMatches(from, artifact.data, signal) });
+            }
+            const remainingBytes = entries.reduce((sum, value) => sum + (value.published ? 0 : ARTIFACT_FILE_OVERHEAD + (value.ready ? 0 : value.artifact.data.length + ARTIFACT_FILE_OVERHEAD)), 0);
+            this.checkingStorage(job);
+            lease = remainingBytes ? await this.opts.artifactSpace?.reserve(job.id, [
+              { directory: stagingDir, remainingBytes, role: "generated-media" },
+              { directory: targetDir, remainingBytes: 0, role: "generated-media" },
+            ], signal, true) : undefined;
+            await verifyOwner();
+            for (const { artifact, from, ready } of entries) {
+              signal.throwIfAborted();
+              if (!ready) {
+                await atomicWriteFile(from, artifact.data);
+                await lease?.consumed(stagingDir, artifact.data.length + ARTIFACT_FILE_OVERHEAD);
+              }
+            }
+            if (this.disposed || !this.stillActiveRun(job)) return; // killed/retired during staging
+            for (const s of entries) {
+              signal.throwIfAborted();
+              await verifyOwner();
+              if (s.published) {
+                // A previous partial rename already occupied these bytes. Verify again at
+                // adoption; it needs neither another payload copy nor a new space grant.
+                if (!await artifactFileMatches(s.to, s.artifact.data, signal)) throw new ArtifactCheckpointInvalid();
+              } else {
+                await rename(toExtendedLength(s.from), toExtendedLength(s.to));
+                await lease?.consumed(stagingDir, ARTIFACT_FILE_OVERHEAD);
+              }
+              landed.push(s.rel);
+            }
+            filed = true;
+          } catch (error) {
+            if (!ownershipLost) lease?.writeFailed();
+            this.storageWaiting(job, "result", ownershipLost ? undefined : error);
+            storageHold = ownershipLost ? null : error instanceof ArtifactStorageHeld || error instanceof ArtifactCheckpointInvalid ? error.message : "The provider completed; local filing is waiting for storage or folder access. Its saved result is retained. No generation was repeated.";
+            throw error;
+          } finally {
+            // Valid completed bytes survive a failed filing. The durable private receipt can
+            // recover them independently; no generic cleanup or resubmission follows.
+            if (filed) await rmdir(toExtendedLength(stagingDir)).catch(() => {});
+            await lease?.settle();
           }
-          if (this.disposed || !this.stillActiveRun(job)) return; // killed/retired during staging
-          for (const s of staged) {
-            await rename(toExtendedLength(s.from), toExtendedLength(s.to));
-            landed.push(s.rel);
-          }
-        } finally {
-          await rm(toExtendedLength(stagingDir), { recursive: true, force: true }).catch(() => {});
+        }).catch(() => false);
+        if (!available) {
+          if (!this.stillActiveRun(job)) return;
+          if (!storageHold) this.storageWaiting(job, "result");
+          const waiting: Job = {
+            ...job,
+            status: "running",
+            error: storageHold ?? "the provider completed; waiting for the owning world to become available for landing",
+            updatedAt: this.clock(),
+          };
+          if (this.jobs.get(job.id)?.error !== waiting.error) await this.transition(waiting);
+          await this.sleep(storageHold ? this.opts.artifactRetryMs ?? 30_000 : this.pollIntervalMs, this.artifactSignal(job));
+          if (this.disposed || this.cancelling.has(job.id) || !this.stillActiveRun(job)) return;
+          job = waiting; continue;
         }
-      });
-      if (!available) {
-        if (!this.stillActiveRun(job)) return;
-        const waiting: Job = {
-          ...job,
-          status: "running",
-          error: "the provider completed; waiting for the owning world to become available for landing",
-          updatedAt: this.clock(),
-        };
-        await this.transition(waiting);
-        await this.sleep(this.pollIntervalMs);
-        if (!this.disposed) await this.landAndSucceed(waiting, client, key, costMicroUsd, artifacts);
-        return;
+        this.storageWaiting(job, "result");
+        break;
       }
     }
     if (this.disposed) return;
@@ -1839,6 +2093,8 @@ export class JobQueue {
       null,
       costMicroUsd,
     );
+    const settled = this.jobs.get(job.id);
+    if (settled?.status === "succeeded" && settled.landedFiles?.length && (!settled.finalization || settled.finalization.status === "complete")) await this.artifactFiles.removeFiled(settled);
   }
 
   // ---- terminal states and the ledger (§2.11) ------------------------------
@@ -1865,6 +2121,8 @@ export class JobQueue {
       updatedAt: this.clock(),
     };
     await this.transition(terminal);
+    const artifactKey = `${this.engineRunKey(job)}|${job.attempt}`;
+    this.artifactAborts.get(artifactKey)?.abort(); this.artifactAborts.delete(artifactKey); this.artifactAuditHeld.delete(job.id);
     if (outcome === "cancelled") {
       // A submit can answer while the cancelled row is flushing. Make its now-known facts
       // durable in another cancelled row before the single ledger settlement.
@@ -2029,6 +2287,7 @@ export class JobQueue {
   }
 
   private async cancelInner(jobId: string, job: Job): Promise<void> {
+    for (const [key, abort] of this.artifactAborts) if (key.startsWith(`${jobId}|`)) abort.abort();
     const lane = this.lane(job.provider);
     lane.fifo = lane.fifo.filter((id) => id !== jobId);
     lane.notBefore.delete(jobId);
@@ -2109,6 +2368,7 @@ export class JobQueue {
     await this.journal.append(tombstone);
     if (this.disposed) return; // killed mid-write: the journal decides on recovery
     this.jobs.delete(jobId);
+    this.storageWaits.delete(jobId);
     this.opts.emit({ at: this.clock(), type: "job.deleted", jobId: tombstone.id });
   }
 
@@ -2116,6 +2376,8 @@ export class JobQueue {
 
   async start(): Promise<ReconcileAction[]> {
     const history = await this.journal.readHistory();
+    try { await this.opts.artifactSpace?.reconcileIdleJobs?.(new Set(history.map(job => job.id))); }
+    catch { /* Unknown storage accounting stays held. It cannot authorize provider replay. */ }
     const folded = foldJobHistory(history);
     // `null` when the ledger exists but could not be read. Not an empty set: an empty snapshot
     // says every terminal job in history was never billed, and the ⑦ completion pass below
@@ -2186,10 +2448,16 @@ export class JobQueue {
           // preparation honestly instead of duplicating takes or mutating domain state.
           await this.failFinalization(job, "finalization was interrupted before completion");
         }
-        await rm(toExtendedLength(this.inlineArtifactDir(job.id)), { recursive: true, force: true }).catch(() => {});
+        if (job.status === "succeeded" && job.landedFiles?.length && (!job.finalization || job.finalization.status === "complete")) await this.artifactFiles.removeFiled(job);
         continue;
       }
-      const inline = await this.readInlineArtifacts(job.id);
+      let inline: DurableInlineArtifacts | null;
+      try { inline = job.status === "queued" ? null : await this.readInlineArtifacts(job); }
+      catch {
+        if (this.disposed) return report;
+        const held = { ...job, status: "needs-reconciliation" as const, error: new ArtifactCheckpointInvalid().message, updatedAt: this.clock() };
+        await this.transition(held); report.push({ jobId: job.id, action: "held-for-user", detail: held.error }); continue;
+      }
       if (inline !== null) {
         const client = this.opts.clients[job.provider];
         if (!client) {
@@ -2201,14 +2469,17 @@ export class JobQueue {
         const recovering: Job = {
           ...job,
           providerJobId: inline.remoteId,
+          ...(inline.resultKind ? { providerResultKind: inline.resultKind } : {}),
+          ...(inline.providerCostMicroUsd !== undefined ? { providerCostMicroUsd: inline.providerCostMicroUsd } : {}),
+          ...(inline.speechUsage ? { speechUsage: inline.speechUsage } : {}),
           error: null,
           updatedAt: this.clock(),
         };
-        report.push({ jobId: job.id, action: "resumed-polling", detail: "resumed durable inline artifacts" });
+        report.push({ jobId: job.id, action: "resumed-polling", detail: job.providerResultKind === "inline" ? "resumed durable inline artifacts" : "resumed durable provider result" });
         this.trackRun(
           this.runAfterRecoveryGate(job.provider, async () => {
             const current = this.jobs.get(job.id);
-            if (!current || TERMINAL.has(current.status) || current.status === "needs-reconciliation") return;
+            if (!current || TERMINAL.has(current.status)) return;
             await this.transition({ ...recovering, status: "running", updatedAt: this.clock() });
             await this.landDurableInline({ ...recovering, status: "running" }, client, "", inline.artifacts);
           }),
@@ -2218,6 +2489,9 @@ export class JobQueue {
       if (job.status === "needs-reconciliation") {
         report.push({ jobId: job.id, action: "held-for-user", detail: job.error ?? "awaiting your answer" });
         continue;
+      }
+      if (job.providerResultKind === "inline" && (job.status === "running" || job.status === "submitting")) {
+        report.push(await this.holdForUser(job)); continue;
       }
       if (job.status === "queued") {
         if (job.failureClass === "provider-fault") {
@@ -2316,6 +2590,26 @@ export class JobQueue {
       return;
     }
     await work();
+  }
+
+  /** A saved human preference retries only witnessed completed remote results, sequentially.
+   * It never submits/polls a generation or adopts an uncertain job. */
+  retryHeldArtifactTransfers(): void {
+    if (this.disposed || this.artifactLimitRetry) return;
+    const ids = [...this.artifactLimitHeld];
+    const task = (async () => {
+      for (const id of ids) {
+        if (this.disposed) return;
+        const job = this.jobs.get(id), client = job && this.opts.clients[job.provider];
+        if (!job || !client || !this.stillActiveRun(job) || !job.providerJobId || job.status !== "running" || this.lane(job.provider).paused) continue;
+        this.artifactLimitHeld.delete(id);
+        const key = await this.opts.getKey(job.provider, job).catch(() => null);
+        if (!key) { this.artifactLimitHeld.add(id); continue; }
+        if (!this.disposed && this.stillActiveRun(job) && !this.lane(job.provider).paused) await this.landAndSucceed(job, client, key, job.providerCostMicroUsd);
+      }
+    })();
+    this.artifactLimitRetry = task;
+    this.trackRun(task.finally(() => { if (this.artifactLimitRetry === task) this.artifactLimitRetry = null; }));
   }
 
   /** A runtime that became ready after a failed startup releases its recovered work. */
@@ -2431,10 +2725,10 @@ export class JobQueue {
       error: job.providerResultKind === "inline"
         ? `The provider accepted this request, but its inline result was not saved before restart. No automatic retry was made. Resubmitting ${duplicateCost}.`
         : usesCodexImagePlan(job)
-        ? `Arke did not witness the image result. Codex may have used your allowance; how much is unknown. No automatic retry was made. Resubmitting ${duplicateCost}.`
+        ? `Arke lost track of this picture. Codex may have used your allowance; how much is unknown. Nothing was retried. Resubmitting ${duplicateCost}.`
         : local
-        ? `Arke did not witness the submission result — the engine kept running while Arke restarted, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}.`
-        : `Arke did not witness the submission result. ${job.provider} may have accepted and charged it, and cannot confirm what happened. No automatic retry was made. Resubmitting ${duplicateCost}; the prior actual cost is unknown.`,
+        ? `Arke restarted while this was running, so it can't tell what happened. Nothing was retried. Resubmitting ${duplicateCost}.`
+        : `Arke lost track of this request. ${job.provider} may have accepted and charged it. Nothing was retried. Resubmitting ${duplicateCost}; the earlier cost is unknown.`,
       updatedAt: this.clock(),
     };
     await this.transition(held);
@@ -2672,11 +2966,13 @@ export class JobQueue {
 
   private stillQueued(job: Job): boolean {
     const current = this.jobs.get(job.id);
-    return current?.status === "queued" && this.engineRunKey(current) === this.engineRunKey(job);
+    return !this.cancelling.has(job.id) && current?.status === "queued" && this.engineRunKey(current) === this.engineRunKey(job);
   }
 
   private stillSubmitting(job: Job): boolean {
     const current = this.jobs.get(job.id);
+    // Accepted responses still need their remote cancellation and usage recorded while the
+    // cancel row is flushing. Pending cancellation gates new I/O, not response identity.
     return current?.status === "submitting" && current.attempt === job.attempt && this.engineRunKey(current) === this.engineRunKey(job);
   }
 
@@ -2693,13 +2989,13 @@ export class JobQueue {
     return `${job.id}|${job.engine?.source ?? "legacy"}|${job.engine?.instanceId ?? "legacy"}|${job.engine?.processEpoch ?? "legacy"}`;
   }
 
-  private sleep(ms: number): Promise<void> {
+  private sleep(ms: number, signal?: AbortSignal): Promise<void> {
     return new Promise((resolve) => {
-      const timer = setTimeout(() => {
-        this.sleepTimers.delete(timer);
-        resolve();
-      }, ms);
-      this.sleepTimers.set(timer, resolve);
+      const finish = () => { clearTimeout(timer); this.sleepTimers.delete(timer); signal?.removeEventListener("abort", finish); resolve(); };
+      const timer = setTimeout(finish, ms);
+      this.sleepTimers.set(timer, finish);
+      signal?.addEventListener("abort", finish, { once: true });
+      if (signal?.aborted) finish();
       timer.unref?.();
     });
   }
@@ -2710,6 +3006,10 @@ export class JobQueue {
     if (this.clientDisposal) return this.clientDisposal;
     this.stopAccepting();
     this.disposed = true;
+    this.storageWaits.clear();
+    this.artifactReadAbort.abort();
+    for (const abort of this.artifactAborts.values()) abort.abort();
+    this.artifactAborts.clear(); this.artifactAuditHeld.clear(); this.artifactLimitHeld.clear();
     this.clientDisposal = Promise.allSettled([...new Set(Object.values(this.opts.clients))]
       .map(client => Promise.resolve().then(() => client.dispose?.()))).then(() => {});
     for (const controller of this.submitAborts.values()) controller.abort();

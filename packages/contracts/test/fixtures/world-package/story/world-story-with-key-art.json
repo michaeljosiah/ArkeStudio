@@ -1,0 +1,75 @@
+{
+  "format": "arke-world-package",
+  "schemaVersion": 6,
+  "id": "the-undersong",
+  "edition": "2026-10-28",
+  "name": "The Undersong",
+  "logline": "A drowned god still sings beneath the harbour of Saltmouth.",
+  "alone": true,
+  "productions": [
+    {
+      "id": "ring-once",
+      "title": "Ring Once",
+      "picture": "cover",
+      "tall": "cover-tall",
+      "story": "story"
+    }
+  ],
+  "assets": {
+    "story": {
+      "path": "ring-once/story.json",
+      "mediaType": "application/vnd.arke.story+json",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "cover": {
+      "path": "ring-once/cover.jpg",
+      "mediaType": "image/jpeg",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "cover-tall": {
+      "path": "ring-once/cover-tall.jpg",
+      "mediaType": "image/jpeg",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "ro-harbour": {
+      "path": "ring-once/clips/sc_harbour.mp4",
+      "mediaType": "video/mp4",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "ro-weigh": {
+      "path": "ring-once/clips/sc_weigh.mp4",
+      "mediaType": "video/mp4",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "ro-bell": {
+      "path": "ring-once/clips/sc_bell.mp4",
+      "mediaType": "video/mp4",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "ro-vault": {
+      "path": "ring-once/clips/sc_vault.mp4",
+      "mediaType": "video/mp4",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "ro-end": {
+      "path": "ring-once/clips/sc_end.mp4",
+      "mediaType": "video/mp4",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "ro-drowned": {
+      "path": "ring-once/clips/sc_drowned.mp4",
+      "mediaType": "video/mp4",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "keyArt": "cover"
+}

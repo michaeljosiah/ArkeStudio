@@ -50,7 +50,7 @@ async function unmount(root: Root, container: HTMLElement): Promise<void> {
   __setBridgeForTest(null);
 }
 const labelled = (container: HTMLElement, label: string) => container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
-async function typeInto(input: HTMLInputElement, value: string): Promise<void> {
+async function typeInto(input: HTMLInputElement | HTMLTextAreaElement, value: string): Promise<void> {
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set;
     if (setter) setter.call(input, value);
@@ -82,6 +82,25 @@ describe("a character's short name on the sheet", () => {
     const { container, root } = await mount(`/w/${WORLD_ID}/locations/the-vigil`, FIXTURE_STATE);
     await act(async () => labelled(container, "Rename")!.click());
     assert.ok(container.querySelector('[data-testid="sheet-short-name"]') === null);
+    assert.ok(container.querySelector('[data-testid="sheet-aliases"]') === null);
     await unmount(root, container);
   });
+});
+
+it("saves explicit identity names through the existing sheet act and rejects oversized entries", async () => {
+  const { container, root, messages } = await mount(`/w/${WORLD_ID}/cast/maren-kest`, FIXTURE_STATE);
+  try {
+    await act(async () => labelled(container, "Rename")!.click());
+    const field = container.querySelector<HTMLTextAreaElement>('[data-testid="sheet-aliases"]')!;
+    assert.ok(field);
+    await typeInto(field, "Rena\nHarbour witness");
+    const save = () => [...container.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.trim() === "Save other names")!;
+    assert.equal(save().disabled, false);
+    await act(async () => save().click());
+    const sent = messages.findLast(message => message.kind === "rename-sheet") as Extract<ClientMessage, { kind: "rename-sheet" }>;
+    assert.deepEqual(sent.aliases, ["Rena", "Harbour witness"]);
+    assert.equal(sent.name, "Maren Kest"); assert.equal(sent.shortName, undefined);
+    await typeInto(field, "x".repeat(121));
+    assert.equal(save().disabled, true); assert.match(container.textContent ?? "", /at most 24 names/);
+  } finally { await unmount(root, container); }
 });

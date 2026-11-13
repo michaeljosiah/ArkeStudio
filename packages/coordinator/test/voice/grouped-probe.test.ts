@@ -53,7 +53,7 @@ it("reads the same blocks as three requests: full style, notes once with deltas,
   assert.deepEqual(turns[1]!.map((turn) => turn.instructions), [NOTES, "Tunde: loud, delighted.", undefined, undefined], "B: the notes once");
   assert.deepEqual(turns[2]!.map((turn) => turn.text), [blocks[0]!.text, blocks[1]!.text, "Nobody believed him.\nAde stood up."], "C: a run under one direction is one turn");
   for (const [index, input] of probe.sent.entries()) {
-    assert.equal(input.params["text"], turns[index]!.map((turn) => turn.text).join(" "));
+    assert.equal(input.params["text"], turns[index]!.map((turn) => turn.text).join("\n\n"));
     assert.equal(input.params["voiceId"], reader.voiceId);
     assert.equal(input.params["hear"], true, "kept out of a run's search for paid parts");
     assert.equal(input.estimatedMicroUsd, quoteGroupedSpeech(geminiSpeechModel("flash"), turns[index]!, { at: "2026-10-03T08:00:00.000Z" }).expectedMicroUsd);

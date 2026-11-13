@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { writeFile } from "node:fs/promises";
-import { ulid, deriveRehearsalLines, legacySceneView, orderedShots, type Job, type ProviderStatus } from "@arke-studio/contracts";
+import { ulid, deriveRehearsalLines, legacySceneView, orderedShots, UlidSchema, type Job, type ProviderStatus, type WorldDesignedVoice } from "@arke-studio/contracts";
 import { WorldStore } from "../../src/world/store.js";
 import { audioWorldPath } from "../../src/audio/storage.js";
-import { planTableRead, finalizeTableReadCache } from "../../src/audio/table-read.js";
+import { designedTableReadNarrator, planTableRead, finalizeTableReadCache } from "../../src/audio/table-read.js";
 import { cachedVoiceAudioLooksRight } from "../../src/voice/service.js";
 import { SHIPPED_MANIFEST } from "../../../providers/src/manifest-data.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -67,6 +67,20 @@ it("Gemini table reads quote bounded WAV jobs, retain cached audio and refuse un
     assert.equal(cached.plan.items.find(item => item.lineId === input.target.id)!.route, "cached");
   }
 });
+it("keys each cloud line as a ULID the job journal accepts, the same for the same plan", async t => {
+  // `table-read/<token>/<n>` failed JobSchema's idempotencyKey on every cloud line, so no table
+  // read with a cloud voice could be queued at all (2026-10-29, First Contact's Gemini voices).
+  const store = await WorldStore.open(await makeTempWorld()); t.after(() => store.close());
+  const production = store.getBundle().productions.find(p => p.scenes.some(s => deriveRehearsalLines(s, store.getBundle().sheets).some(l => l.speakerSheetId === "maren-kest")))!;
+  const scene = production.scenes.find(s => deriveRehearsalLines(s, store.getBundle().sheets).some(l => l.speakerSheetId === "maren-kest"))!;
+  const providers: ProviderStatus[] = [{ id: "elevenlabs", configured: true, validation: "valid", fault: null, probes: [{ capability: "voice-tts", available: true }] }];
+  const first = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], providers);
+  assert.ok(first.cloud.length > 0);
+  for (const job of first.cloud) assert.ok(UlidSchema.safeParse(job.idempotencyKey).success, String(job.idempotencyKey));
+  assert.equal(new Set(first.cloud.map(job => job.idempotencyKey)).size, first.cloud.length, "each line has its own key");
+  const again = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], providers);
+  assert.deepEqual(again.cloud.map(job => job.idempotencyKey), first.cloud.map(job => job.idempotencyKey), "the same plan derives the same keys");
+});
 it("plans exact cache preparation, sees running work, and reuses verified cache without formal performance creation", async t => {
   const store = await WorldStore.open(await makeTempWorld()); t.after(() => store.close());
   const production = store.getBundle().productions.find(p => p.scenes.some(s => deriveRehearsalLines(s, store.getBundle().sheets).some(l => l.speakerSheetId === "maren-kest")))!;
@@ -74,7 +88,7 @@ it("plans exact cache preparation, sees running work, and reuses verified cache 
   const providers: ProviderStatus[] = [{ id: "elevenlabs", configured: true, validation: "valid", fault: null, probes: [{ capability: "voice-tts", available: true }] }];
   const first = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], providers);
   assert.ok(first.cloud.length > 0);
-  assert.equal(first.plan.totalEstimatedMicroUsd, first.cloud.reduce((sum, input) => sum + String(input.params.text).length * 100, 0));
+  assert.equal(first.plan.totalEstimatedMicroUsd, first.cloud.reduce((sum, input) => sum + String(input.params.text).length * 80, 0));
   const input = first.cloud[0]!;
   const queued = { ...input, id: `jb_${ulid()}`, status: "queued" } as Job;
   const running = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [queued], providers);
@@ -137,4 +151,57 @@ it("plans a visual novel's narration in the narrator's voice, and leaves a film'
   assert.equal((voxtral.cloud.find(input => input.target.id === read.lineId)!.params.tableReadSpec as { format: string }).format, "wav");
   const cloned = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], providers, undefined, { provider: "comfyui", model: "x", voiceId: "clone" });
   assert.match(cloned.plan.items.find(i => i.narration)!.reason!, /narrator voice/);
+});
+
+/**
+ * The Arke Player export script has no Settings to read the narrator from, so `--narrator` names
+ * one of the world's designed voices by its target. Resolved here, it must plan the very files the
+ * app's table read prepared in that voice — in the model the narrator read it in, which may not be
+ * the one it was made in (codex on PR 2236) — or a voiced novel's narration would go out as text.
+ */
+it("resolves a designed narrator from the world and finds the narration prepared in it", async t => {
+  const store = await WorldStore.open(await makeTempWorld()); t.after(() => store.close());
+  // In memory only, as above; a copy, so the cache write's rescan cannot put the fixture back.
+  const bundle = structuredClone(store.getBundle());
+  store.getBundle = () => bundle;
+  const production = bundle.productions.find(p => p.scenes.some(s => orderedShots(s).length > 0))!;
+  const scene = production.scenes.find(s => orderedShots(s).length > 0)!;
+  scene.script = { blocks: [{ id: "blk_wash", kind: "action", text: "They hung the washing out the morning the water came." }] };
+  orderedShots(scene)[0]!.covers = [{ blockId: "blk_wash", textDigest: "sha256:12345678" }];
+  production.meta = { ...production.meta, medium: "video", kind: "visual-novel" };
+  const voice: WorldDesignedVoice = { kind: "designed", id: "dv_01M5M1FXVPAGEC8FXAHMK8YS86", revision: 2, name: "Ines Marr", description: "Low and unhurried.",
+    language: "en-GB", provider: "google", model: "gemini-3.8-flash-lite-tts", remoteId: "voice_ines", expiresAt: "2027-10-23T09:28:46Z",
+    created: "2026-10-23T09:28:46Z", origin: "generated", sample: "voices/dv_01M5M1FXVPAGEC8FXAHMK8YS86.wav" };
+  bundle.designedVoices = [voice];
+
+  assert.equal(designedTableReadNarrator(bundle.designedVoices, "designed:dv_01M5M1FXVPAGEC8FXAHMK8YS86:1"), null, "another revision is another voice");
+  assert.equal(designedTableReadNarrator(bundle.designedVoices, "Charon"), null, "a catalogue voice is not resolved here");
+  const target = "designed:dv_01M5M1FXVPAGEC8FXAHMK8YS86:2";
+  assert.deepEqual(designedTableReadNarrator(bundle.designedVoices, target), { provider: "google", model: "gemini-3.8-flash-lite-tts", voiceId: target, label: "Ines Marr" },
+    "with no model named, the one the voice was made in");
+  // Made in Lite, read by the app's narrator in Flash: the catalogue offers it under both.
+  const narrator = designedTableReadNarrator(bundle.designedVoices, target, "gemini-3.8-flash-tts");
+  assert.deepEqual(narrator, { provider: "google", model: "gemini-3.8-flash-tts", voiceId: target, label: "Ines Marr" });
+
+  // Planned as the app plans it, the line is a Gemini read in the narrator's model …
+  const providers: ProviderStatus[] = [{ id: "google", configured: true, validation: "valid", fault: null, probes: [{ capability: "voice-tts", available: true }] }];
+  const priced = await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], providers, undefined, narrator);
+  const line = priced.plan.items.find(i => i.narration)!;
+  const job = priced.cloud.find(input => input.target.id === line.lineId)!;
+  assert.equal(job.model, "gemini-3.8-flash-tts");
+  const bytes = Buffer.alloc(52);
+  bytes.write("RIFF"); bytes.writeUInt32LE(44, 4); bytes.write("WAVE", 8); bytes.write("fmt ", 12);
+  bytes.writeUInt32LE(16, 16); bytes.writeUInt16LE(1, 20); bytes.writeUInt16LE(1, 22);
+  bytes.writeUInt32LE(24000, 24); bytes.writeUInt32LE(48000, 28); bytes.writeUInt16LE(2, 32); bytes.writeUInt16LE(16, 34);
+  bytes.write("data", 36); bytes.writeUInt32LE(8, 40);
+  const file = String(job.params.tableReadCacheFile);
+  await store.ownedWrite(async () => writeFile(await audioWorldPath(store.dir, file, true), bytes));
+  // … and planned as the script plans it — no jobs, no providers, nothing made — that read is found,
+  // in the narrator's model and not in the one the voice was made in.
+  const found = (await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], [], undefined, narrator)).plan.items.find(i => i.lineId === line.lineId)!;
+  assert.equal(found.route, "cached");
+  assert.equal(found.file, file);
+  const madeIn = designedTableReadNarrator(bundle.designedVoices, target);
+  const missed = (await planTableRead(store, production.meta.id, scene.id, SHIPPED_MANIFEST, [], [], undefined, madeIn)).plan.items.find(i => i.lineId === line.lineId)!;
+  assert.equal(missed.file, undefined, "the cache is keyed by the model that read it");
 });

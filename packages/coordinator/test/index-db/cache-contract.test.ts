@@ -12,6 +12,26 @@ import { fixtureBundle, dumpIndex } from "./helpers.js";
 const CLOCK = () => "2026-08-01T12:00:00.000Z";
 
 describe("the cache contract (R-1..R-4, D1)", () => {
+  it("runs as a cache, and a production's delta delete reads indexes, not whole tables (issue 2782)", async () => {
+    const index = WorldIndex.open(await makeTempWorld(), await fixtureBundle());
+    try {
+      assert.deepEqual(index.db.prepare("PRAGMA synchronous").get(), { synchronous: 1 }, "NORMAL: no WAL sync per commit");
+      for (const sql of [
+        "DELETE FROM entities WHERE production_id = ?",
+        "DELETE FROM citations WHERE production_id = ?",
+        "DELETE FROM takes WHERE production_id = ?",
+        "DELETE FROM take_shots WHERE production_id = ?",
+        "DELETE FROM take_sheets WHERE take_id IN (SELECT take_id FROM take_shots WHERE production_id = ?)",
+      ]) {
+        const plan = JSON.stringify(index.db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all("saltlight"));
+        assert.match(plan, /USING (COVERING )?INDEX/, `${sql} scans its table: ${plan}`);
+        assert.doesNotMatch(plan, /"SCAN (entities|citations|takes|take_shots|take_sheets)"/, sql);
+      }
+    } finally {
+      index.close();
+    }
+  });
+
   it("delete-and-rebuild produces identical query results (R-1)", async () => {
     const dir = await makeTempWorld();
     const bundle = await fixtureBundle();

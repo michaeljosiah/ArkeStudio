@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
+import { parseHTML } from "linkedom";
 import {
   activationFor,
+  modelSetupComponent,
   ActivationStateSchema,
   EngineIdSchema,
   comfyUiWeightsComponentId,
@@ -104,6 +106,13 @@ function component(patch: Partial<SetupComponent> & Pick<SetupComponent, "id">):
   };
 }
 
+it("installs Ming through the model leaf so one press includes its runtime and weights", () => {
+  const dependencies = component({id: "ming-runtime-dense", provides: ["ming-3-0.5b"], requires: ["comfyui-runtime"], state: "available"});
+  const weights = component({id: "ming-model-dense", provides: ["ming-3-0.5b"], requires: [dependencies.id], state: "available"});
+  assert.equal(modelSetupComponent([dependencies, weights], "ming-3-0.5b")?.id, weights.id);
+  assert.equal(activationFor("ming", "ming-3-0.5b", {components: [dependencies, {...weights, state: "ready"}]}), "not-installed");
+});
+
 function runtime(over: Partial<LocalRuntimeStatus> = {}): LocalRuntimeStatus {
   return {
     probes: {
@@ -183,6 +192,20 @@ const renderPane = (state: ClientState, engine: EngineId): string =>
 /** SSR splits a text node at every interpolation, so a rendered string is checked without them. */
 const plain = (html: string): string => html.replace(/<!-- -->/g, "").replace(/<[^>]+>/g, " ");
 
+it("groups Ming under its own supplier and keeps each readiness count separate (#2238)", () => {
+  const state = stateWith();
+  state.app.manifest!.models.push({ ...KOKORO, provider: "ming", id: "ming-3-0.5b", displayName: "Ming Tiny" },
+    { ...KOKORO, provider: "comfyui", id: "comfy-voice", displayName: "Comfy voice" });
+  const { document } = parseHTML(render(state, "/settings/models?half=local&kind=voice-tts"));
+  const sections = [...document.querySelectorAll('[data-testid="models-section"]')];
+  const section = (name: string) => sections.find(row => row.querySelector(".fy-by__name")?.textContent === name)!;
+  assert.match(section("Ming 3").textContent!, /Ming Tiny/);
+  assert.match(section("Ming 3").querySelector(".fy-by__state")!.textContent!, /0 of 1 ready/);
+  assert.doesNotMatch(section("ComfyUI").textContent!, /Ming/);
+  assert.match(section("ComfyUI").querySelector(".fy-by__state")!.textContent!, /0 of 1 ready/);
+  assert.match(section("Local speech").textContent!, /Kokoro/);
+});
+
 it("shows persistent model requirements before Install without opening details", () => {
   const state = stateWith({});
   const component = state.app.setup!.components.find(item => item.id === "ollama-gemma4-12b")!;
@@ -244,13 +267,13 @@ describe("AI models: an engine's section, and the models it hosts (SPEC-042 R-12
   });
 
   it("names both providers where one engine hosts two, and neither where it hosts one", () => {
-    // Voxa is the case R-7 exists for, and SPEC-042 R-12 keeps its answer: the section is the
-    // engine, so Kokoro sits under Voxa on the kind it makes, and the engine's name is not
-    // repeated on the row.
+    // The local speech engine is the case R-7 exists for, and SPEC-042 R-12 keeps its answer: the
+    // section is the engine, so Kokoro sits under it on the kind it makes, and the engine's name
+    // is not repeated on the row. Its label is "Local speech" since #2900, whichever backend runs.
     const voxa = plain(renderEngine(stateWith(), "voxa"));
-    assert.match(voxa, /Voxa\s+1 of 1 ready/);
+    assert.match(voxa, /Local speech\s+1 of 1 ready/);
     assert.match(voxa, /Kokoro 82M/);
-    assert.doesNotMatch(plain(rowFor(renderEngine(stateWith(), "voxa"), "Kokoro 82M")), /Voxa|Kokoro\b(?! 82M)/);
+    assert.doesNotMatch(plain(rowFor(renderEngine(stateWith(), "voxa"), "Kokoro 82M")), /Local speech|Voxa|Kokoro\b(?! 82M)/);
   });
 
   it("names no cloud provider in any engine pane, in any state (SPEC-033 R-2)", () => {

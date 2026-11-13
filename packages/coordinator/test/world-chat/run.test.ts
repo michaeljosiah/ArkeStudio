@@ -15,6 +15,7 @@ import { describeEntryContext } from "../../src/world-chat/entry-context.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { WorldChatInputJournal } from "../../src/world-chat/input-journal.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
+import { conversationCandidateFence } from "../../src/world-chat/target-reads.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { FIXTURE_WORLD } from "../world/helpers.js";
 import { tempDir } from "../tmp.js";
@@ -94,11 +95,15 @@ async function setup(
   adapter: HarnessAdapter,
   options: {
     timeoutMs?: number;
+    closingSignal?: AbortSignal;
     summarise?: RunDeps["summarise"];
     entryContext?: import("@arke-studio/contracts").WorldChatContext;
     chapterBrief?: RunDeps["chapterBrief"];
+    prepareActions?: RunDeps["prepareActions"];
+    bindActions?: RunDeps["bindActions"];
     prepareImages?: RunDeps["prepareImages"];
     resolveLanguageModel?: RunDeps["resolveLanguageModel"];
+    worldContext?: RunDeps["worldContext"];
     createdModels?: Array<string | undefined>;
     raiseSchemaBoundary?: RunDeps["raiseSchemaBoundary"];
     validateProductionPlan?: RunDeps["validateProductionPlan"];
@@ -120,11 +125,15 @@ async function setup(
   const released: RunId[] = [];
   const runner = new WorldChatRunner({
     adapter,
+    closingSignal: options.closingSignal,
     ...(options.describeEntry ? { describeEntry: (context: import("@arke-studio/contracts").WorldChatContext) => describeEntryContext(context, bundle) } : {}),
     ...(options.summarise ? { summarise: options.summarise } : {}),
     ...(options.chapterBrief ? { chapterBrief: options.chapterBrief } : {}),
+    ...(options.prepareActions ? { prepareActions: options.prepareActions } : {}),
+    ...(options.bindActions ? { bindActions: options.bindActions } : {}),
     ...(options.prepareImages ? { prepareImages: options.prepareImages } : {}),
     ...(options.resolveLanguageModel ? { resolveLanguageModel: options.resolveLanguageModel } : {}),
+    ...(options.worldContext ? { worldContext: options.worldContext } : {}),
     ...(options.createdModels
       ? {
           createSession: async ({ model }: { model?: string }) => {
@@ -155,7 +164,7 @@ async function setup(
   };
 
   const journal = new WorldChatInputJournal({ dir: worldPath, closingSignal: new AbortController().signal,
-    ownedWrite: async fn => fn(), raiseSchemaBoundary: async () => {} }, conversationId, NOW);
+    operationalWrite: async fn => fn(), raiseSchemaBoundary: async () => {} }, conversationId, NOW);
   return { runner, store, conversationId, view, released, journal };
 }
 
@@ -186,6 +195,99 @@ function goodAnswer(said: string, quote: string, messageId: string): string {
 }
 
 describe("taking a turn", () => {
+  it("corrects editorial advice into a bounded manuscript and retains the explicit drafting intent", async () => {
+    const prompts: string[] = [], raised: number[] = [], prepared: unknown[] = [];
+    const body = "Maren counted the bells.\n\n".repeat(400), check = newId("check");
+    const advice = JSON.stringify({ reply: "Consider a stronger opening.", candidateOperations: [], groupOperations: [] });
+    const draft = JSON.stringify({ reply: "The manuscript is ready for your review.", candidateOperations: [], groupOperations: [],
+      actions: [{ kind: "production-chapter", productionId: "the-ledger-of-nights", change: { operation: "edit", chapterId: "neap", changes: { body } }, checkReceiptIds: [check] }] });
+    const h = await setup(fakeAdapter([advice, draft], { prompts }), {
+      entryContext: { kind: "production", productionId: "the-ledger-of-nights" }, describeEntry: true,
+      raiseSchemaBoundary: async version => { raised.push(version); },
+      chapterBrief: async input => { assert.equal(input.draft, true); return "The complete chapter and plan."; },
+      receiptsFor: runId => [{ id: check, runId, tool: "target-read", status: "complete", consulted: [],
+        target: { requirement: "chapters", id: "the-ledger-of-nights" }, observedRevisionOrDigest: "current", complete: true, nextCursor: null, at: AT }],
+      prepareActions: async turn => { prepared.push(turn.actions); return []; },
+      bindActions: async () => {},
+    });
+    const subject = { kind: "chapter" as const, chapterId: "neap", intent: "draft" as const };
+    const outcome = await h.runner.send(h.store, h.conversationId, "Draft the rest", [], subject);
+    assert.equal(outcome.status, "completed", JSON.stringify(outcome));
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[0]!, /explicit manuscript-writing operation/);
+    assert.match(prompts[1]!, /complete manuscript/);
+    assert.deepEqual(raised, [102]);
+    assert.equal(prepared.length, 1, "editorial response prepares nothing");
+    const events = (await new WorldChatStore(h.store.dir).read()).events;
+    const constraints = events.find(e => e.event.type === "turn.constraints")!.event;
+    assert.equal(constraints.type, "turn.constraints");
+    if (constraints.type === "turn.constraints") assert.deepEqual(constraints.constraints.subject, subject);
+    assert.equal((await h.view()).messages.at(-1)!.text, "The manuscript is ready for your review.");
+  });
+
+  it("does not call two editorial replies a successful draft", async () => {
+    const h = await setup(fakeAdapter([JSON.stringify({ reply: "Try a stronger opening.", candidateOperations: [], groupOperations: [] })]), {
+      entryContext: { kind: "production", productionId: "the-ledger-of-nights" }, raiseSchemaBoundary: async () => {},
+    });
+    assert.equal((await h.runner.send(h.store, h.conversationId, "Draft the opening", [], { kind: "chapter", chapterId: "neap", intent: "draft" })).status, "failed");
+    assert.equal((await h.view()).messages.some(message => message.role === "studio"), false);
+    assert.equal((await h.store.read()).events.filter(e => e.event.type === "run.retry-started").length, 1, "only the existing bounded corrective attempt");
+  });
+  it("keeps every long-draft character through completion and reopening without a corrective rewrite (#1927)", async () => {
+    const reply = "# Warning slip\n\n" + "Maren folded the warning slip and counted the bells.\n\n".repeat(500) + "The final bell rang.\n";
+    const prompts: string[] = [];
+    const h = await setup(fakeAdapter([JSON.stringify({ reply, candidateOperations: [], groupOperations: [] })], { prompts }));
+    assert.equal((await h.runner.send(h.store, h.conversationId, "Draft the full chapter in this conversation.")).status, "completed");
+    assert.equal(prompts.length, 1, "no paid rewrite merely to fit the display");
+    const reopened = new WorldChatStore(h.store.dir), meta = await reopened.readMeta();
+    const events = (await reopened.read()).events;
+    const view = foldConversation(meta!.id, meta!.createdAt, events).view;
+    assert.equal(view.messages.at(-1)!.text, reply);
+    assert.equal(events.filter(e => e.event.type === "turn.completed").length, 1);
+    assert.equal(events.filter(e => e.event.type === "run.retry-started").length, 0);
+    assert.equal(view.candidates.length, 0, "retained conversation prose is not a committed world change");
+  });
+
+  it("validates retained intent after reopening beyond the recent message window", async () => {
+    let original: import("@arke-studio/contracts").WorldChangeCandidate;
+    const h = await setup(fakeAdapter([
+      async () => goodAnswer("Her aunt raised her.", "Her aunt raised her", (await h.view()).messages.find(m => m.role === "user")!.id),
+      () => JSON.stringify({ reply: "The same draft is retained.", groupOperations: [], candidateOperations: [{ op: "update", candidateId: original.id, expectedRevision: original.revision,
+        candidate: { classification: original.classification, title: original.title, rationale: "Reviewed after reopening.", settledness: "settled", evidence: original.evidence, checkReceiptIds: [], draft: original.draft } }] }),
+    ]), { raiseSchemaBoundary: async () => {}, receiptsFor: runId => original ? [{ id: newId("check"), runId, tool: "target-read", status: "complete", consulted: [],
+      target: { requirement: "conversation-candidate", id: `${original.conversationId}:${original.id}` },
+      observedRevisionOrDigest: conversationCandidateFence(original, []), complete: true, nextCursor: null, at: AT }] : [] });
+    assert.equal((await h.runner.send(h.store, h.conversationId, "Her aunt raised her.")).status, "completed");
+    original = (await h.view()).candidates[0]!;
+    const completion = (await h.store.read()).events.find(e => e.event.type === "turn.completed")!.event;
+    if (completion.type !== "turn.completed") throw new Error("Expected completion");
+    for (let n = 0; n < 60; n++) {
+      const turnId = newId("turn");
+      await h.store.append({ ...completion, message: { ...completion.message, id: newId("msg"), turnId, text: "Later history without changes." }, run: { ...completion.run, id: newId("run"), turnId }, candidates: [], groups: [] }, { at: AT });
+    }
+    assert.ok(!(await h.view()).messages.some(m => m.id === original.sourceMessageIds[0]));
+    assert.equal((await h.runner.send(new WorldChatStore(h.store.dir), h.conversationId, "Keep the same draft and original intent.")).status, "completed");
+    const updated = (await h.view()).candidates[0]!;
+    assert.equal(updated.id, original.id); assert.equal(updated.revision, original.revision + 1);
+    assert.deepEqual(updated.evidence, original.evidence); assert.deepEqual(updated.draft, original.draft);
+  });
+  it("fences retained draft receipts before journalling them and refuses a host without that boundary", async () => {
+    const answer = JSON.stringify({ reply: "I read the earlier draft.", candidateOperations: [], groupOperations: [] }), raised: number[] = [];
+    const receiptsFor: NonNullable<RunDeps["receiptsFor"]> = runId => [{ id: newId("check"), runId, tool: "target-read", status: "complete", consulted: [],
+      target: { requirement: "conversation-candidate", id: "retained-draft" }, observedRevisionOrDigest: "current", complete: true, nextCursor: null, at: AT }];
+    const h = await setup(fakeAdapter([answer]), { receiptsFor, raiseSchemaBoundary: async version => {
+      assert.equal((await h.store.read()).events.some(e => e.event.type === "turn.completed"), false); raised.push(version);
+    } });
+    assert.equal((await h.runner.send(h.store, h.conversationId, "Read the earlier draft.")).status, "completed");
+    assert.deepEqual(raised, [100]);
+    const restarted = new WorldChatStore(h.store.dir);
+    const completed = (await restarted.read()).events.find(e => e.event.type === "turn.completed")!;
+    assert.equal(completed.event.type, "turn.completed");
+    if (completed.event.type === "turn.completed") assert.equal(completed.event.receipts[0]!.target!.requirement, "conversation-candidate");
+    const unsupported = await setup(fakeAdapter([answer]), { receiptsFor });
+    assert.notEqual((await unsupported.runner.send(unsupported.store, unsupported.conversationId, "Read it.")).status, "completed");
+    assert.equal((await unsupported.store.read()).events.some(e => e.event.type === "turn.completed"), false);
+  });
   it("raises floor 60 before recording plan suggestions and rebuilds the plan after restart", async () => {
     const receiptId = newId("check"), raised: number[] = [];
     const plan = {productionId:"saltlight",checkReceiptIds:[receiptId],nextSteps:["Select the missing takes."]};
@@ -228,6 +330,27 @@ describe("taking a turn", () => {
     types = (await store.read()).events.map((e) => e.event.type);
     assert.equal(types.filter((type) => type === "turn.constraints").length, 2);
     assert.deepEqual(raised, [12, 12]);
+  });
+
+  it("the page's rewrite spends the corrective turn on a revision, and keeps a reply that says why not (issue 1827)", async () => {
+    const prompts: string[] = [];
+    const prose = JSON.stringify({ reply: "Best clean option: “Six, and the tide was out.”", candidateOperations: [], groupOperations: [] });
+    const why = JSON.stringify({ reply: "It is already as tight as it can be without losing the tide.", candidateOperations: [], groupOperations: [] });
+    const { runner, store, conversationId, view } = await setup(fakeAdapter([prose, why], { prompts }), { describeEntry: true });
+    const result = await runner.send(store, conversationId, "Tighten", [], { kind: "passage", chapterId: "neap", paragraph: 2, text: "Six, and the tide", intent: "revise" });
+    assert.equal(result.status, "completed", "the second answer is not held to a revision");
+    assert.ok(prompts[0]!.includes('answer with one production-chapter edit action for chapter neap whose changes are { "passage": { "find": <the selected words, exactly as quoted>, "with": <your revision>, "paragraph": 2 } }'), "the whole shape, with the paragraph the ask named");
+    assert.ok(prompts[0]!.includes("Before the edit, read each to its last page: list_chapters (this production, section plan), get_chapter (this production, chapterId neap, no section) and get_story (this production; the overview receipt in the brief counts). Cite each read's final receipt in the action's checkReceiptIds."), "and the complete reads the edit must cite, including the plan overview");
+    assert.match(prompts[1]!, /rewrite of the selected passage, shown in the page, not in the reply/, "the corrective turn asks for the revision");
+    assert.ok((await store.read()).events.some((e) => e.event.type === "run.retry-started"));
+    assert.equal((await view()).messages.at(-1)?.text, "It is already as tight as it can be without losing the tide.");
+
+    // An ordinary passage subject is narrated as before and answered by a reply.
+    prompts.length = 0;
+    const plain = await setup(fakeAdapter([prose], { prompts }), { describeEntry: true });
+    assert.equal((await plain.runner.send(plain.store, plain.conversationId, "What is this?", [], { kind: "passage", chapterId: "neap", paragraph: 2, text: "Six, and the tide" })).status, "completed");
+    assert.equal(prompts.length, 1);
+    assert.doesNotMatch(prompts[0]!, /production-chapter edit action for chapter/);
   });
 
   it("a boundary the world refuses ends the turn before it began, and the runner is let go (codex on PR 903, round four)", async () => {
@@ -311,6 +434,40 @@ describe("taking a turn", () => {
     assert.equal(asked, 2, "the first attempt and one correction — never a third");
   });
 
+  it("recovers an independent batch in one correction and persists only the corrected result (#1912)", async () => {
+    const said = "Create Bell House and East Lock.", prompts: string[] = [];
+    const answer = async (invalid: boolean) => {
+      const user = (await h.view()).messages[0]!;
+      const result = JSON.parse(goodAnswer(said, said, user.id));
+      result.candidateOperations = ["Bell House", "East Lock"].map((name, index) => ({
+        op: "create", temporaryId: `location-${index}`, candidate: {
+          ...result.candidateOperations[0].candidate, classification: "sheet.create", title: name,
+          draft: { type: "location", name, sections: [{ heading: "Look", body: `${name} stands beside the harbour.` }], links: [], canonRules: [] },
+        },
+      }));
+      if (invalid) result.candidateOperations[1].candidate.evidence = [{ kind: "message", messageId: user.id, quote: "unread invented source", start: 0, end: 22, purpose: "intent" }];
+      result.reply = "Both locations are ready for review.";
+      return JSON.stringify(result);
+    };
+    const h = await setup(fakeAdapter([() => answer(true), async () => {
+      const before = await h.view();
+      assert.equal(before.candidates.length, 0);
+      assert.equal(before.messages.filter(m => m.role === "studio").length, 0);
+      assert.match(prompts[1]!, /candidateOperations.1.candidate.evidence.0/);
+      assert.match(prompts[1]!, /Keep valid independent records/);
+      return answer(false);
+    }], { prompts }));
+    assert.equal((await h.runner.send(h.store, h.conversationId, said)).status, "completed");
+    assert.equal(prompts.length, 2);
+    const reopened = new WorldChatStore(h.store.dir), meta = await reopened.readMeta();
+    const events = (await reopened.read()).events;
+    const view = foldConversation(meta!.id, meta!.createdAt, events).view;
+    assert.deepEqual(view.candidates.map(c => c.title), ["Bell House", "East Lock"]);
+    assert.equal(events.filter(e => e.event.type === "turn.completed").length, 1);
+    assert.equal(events.filter(e => e.event.type === "run.retry-started").length, 1);
+    assert.equal(view.messages.at(-1)!.text, "Both locations are ready for review.");
+  });
+
   it("records the failure on the run rather than losing it", async () => {
     const { runner, store, conversationId } = await setup(fakeAdapter(["bad", "bad"]));
     await runner.send(store, conversationId, "anything");
@@ -390,6 +547,24 @@ describe("taking a turn", () => {
       (await refused.view()).lastFailedRun?.safeDetail,
       "unavailable: This production still names retired-model, which is no longer available.",
     );
+  });
+
+  it("caps a local model's assembled context at 64,000 tokens, and leaves a hosted one whole (issue 2776)", async () => {
+    const world = "w".repeat(400_000);
+    const promptFor = async (sessionModel: string) => {
+      const prompts: string[] = [];
+      const h = await setup(fakeAdapter([JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] })], { prompts }), {
+        worldContext: () => world,
+        resolveLanguageModel: async () => ({ modelId: sessionModel, sessionModel, inputTokenLimit: 262_144 }),
+      });
+      await h.runner.send(h.store, h.conversationId, "What do we know?");
+      return prompts[0]!;
+    };
+    const local = await promptFor("ollama/gemma4:12b");
+    // The section headings ride outside the budget; the hosted formula would allow about 780,000.
+    assert.ok(local.length <= 64_000 * 3 + 1_000, `a 256k local window is sent ${local.length} characters`);
+    assert.ok(!local.includes(world), "the world context is cut to fit");
+    assert.ok((await promptFor("anthropic/claude-sonnet-5")).includes(world), "a hosted window still takes it whole");
   });
 
   it("asks for the default again when a world conversation's turn is retried (issue 1403)", async () => {
@@ -1048,7 +1223,28 @@ it("summarizes founding history before it exceeds the recent prompt window", asy
   assert.match(prompts[0]!, /The first founding decision must be remembered/);
 });
 
-it("stops founding-summary preflight without waiting for an unresponsive summariser", { timeout: 5000 }, async () => {
+it("a founding summary started at the hand-off is the one the first turn uses (issue 2801)", async () => {
+  const prompts: string[] = [];
+  let calls = 0, asked!: () => void;
+  const asking = new Promise<void>(resolve => { asked = resolve; });
+  const { runner, store, conversationId } = await setup(fakeAdapter(["not json", "not json"], { prompts }), {
+    summarise: async () => { calls++; asked(); return "Started before anyone spoke."; },
+  });
+  for (let index = 0; index < 18; index++) await store.append({ type: "founding.message", message: {
+    id: newId("msg"), turnId: newId("turn"), role: index % 2 ? "studio" : "user",
+    text: `Founding message ${index}`, attachmentIds: [], createdAt: AT,
+  } });
+  runner.prepareSummary(store);
+  await asking;
+  assert.equal(prompts.length, 0, "asked at the hand-off, before any message");
+  // Sent while that pass may still be writing: the turn joins it rather than asking again.
+  await runner.send(store, conversationId, "What did we decide?");
+  assert.equal(calls, 1);
+  assert.match(prompts[0]!, /Started before anyone spoke/);
+});
+
+// The limit catches a hang, not slowness: Windows CI once took over 5 s for what Linux did in 83 ms.
+it("stops founding-summary preflight without waiting for an unresponsive summariser", { timeout: 30_000 }, async () => {
   let started!: () => void;
   let release!: (value: string) => void;
   let signal: AbortSignal | undefined;
@@ -1085,6 +1281,97 @@ async function queueInput(journal: WorldChatInputJournal, text: string, replyOnl
 }
 
 describe("running a durable queued input (SPEC-045 R-16)", () => {
+  it("keeps the first reply preparing when another message joins the FIFO tail", async () => {
+    const state = await setup(fakeAdapter([JSON.stringify({ reply: "Done.", candidateOperations: [], groupOperations: [] })]), {
+      resolveLanguageModel: async () => { await queueInput(state.journal, "Later input"); return {}; },
+    });
+    const first = await queueInput(state.journal, "First input");
+    assert.equal((await state.runner.sendQueued(state.journal, first.id, first.revision, QUEUE_ROUTING)).status, "completed");
+    assert.deepEqual((await state.journal.read()).inputs.map(row => row.status), ["promoted", "queued"]);
+  });
+
+  it("still refuses promotion when a queue control changes during preparation", async () => {
+    const state = await setup(fakeAdapter([]), {
+      resolveLanguageModel: async () => { await state.journal.pause("stopped", "stop-during-preparation"); return {}; },
+    });
+    const first = await queueInput(state.journal, "Retained input");
+    assert.equal((await state.runner.sendQueued(state.journal, first.id, first.revision, QUEUE_ROUTING)).status, "unavailable");
+    assert.equal((await state.journal.read()).inputs[0]!.status, "queued");
+  });
+
+  it("shutdown cancels a queued native reply and waits for interruption to settle", async () => {
+    let dispatched!: () => void, interrupted!: () => void, settle!: () => void;
+    const sending = new Promise<void>(resolve => { dispatched = resolve; });
+    const stopping = new Promise<void>(resolve => { interrupted = resolve; });
+    const stopped = new Promise<void>(resolve => { settle = resolve; });
+    const shutdown = new AbortController(), adapter = fakeAdapter([], { hang: true });
+    adapter.dispatchAsync = async () => { dispatched(); return { ok: true } as never; };
+    adapter.interrupt = async () => { interrupted(); await stopped; };
+    const state = await setup(adapter, { closingSignal: shutdown.signal });
+    const first = await queueInput(state.journal, "Draft");
+    let finished = false;
+    const turn = state.runner.sendQueued(state.journal, first.id, first.revision, QUEUE_ROUTING).then(outcome => { finished = true; return outcome; });
+    await sending; shutdown.abort(); await stopping;
+    await new Promise(resolve => setTimeout(resolve, 10)); assert.equal(finished, false);
+    settle(); assert.equal((await turn).status, "cancelled");
+    assert.equal((await state.runner.sendQueued(state.journal, first.id, first.revision, QUEUE_ROUTING)).status, "unavailable");
+  });
+
+  it("carries the submitted effort into queued model selection", async () => {
+    let effort: string | undefined;
+    const state = await setup(fakeAdapter([JSON.stringify({ reply: "Done.", candidateOperations: [], groupOperations: [] })]), {
+      resolveLanguageModel: async ({ variant }) => { effort = variant; return {}; },
+    });
+    const receipt = await state.journal.record({ submissionId: newId("msg"), text: "Keep it quiet", attachmentIds: [],
+      delivery: "next", expectedRunId: null, variant: "high" }, { routing: QUEUE_ROUTING, constraints: { replyOnly: false } });
+    const row = receipt.queue.inputs[0]!;
+    await state.runner.sendQueued(state.journal, row.input.messageId, receipt.queue.revision, QUEUE_ROUTING);
+    assert.equal(effort, "high");
+  });
+
+  it("keeps the run slot until requested native interruption settles", async () => {
+    let dispatched!: () => void, interrupted!: () => void, settle!: () => void;
+    const sending = new Promise<void>(resolve => { dispatched = resolve; });
+    const stopping = new Promise<void>(resolve => { interrupted = resolve; });
+    const stopped = new Promise<void>(resolve => { settle = resolve; });
+    const adapter = fakeAdapter([], { hang: true });
+    adapter.dispatchAsync = async () => { dispatched(); return { ok: true } as never; };
+    adapter.interrupt = async () => { interrupted(); await stopped; };
+    const state = await setup(adapter);
+    const turn = state.runner.send(state.store, state.conversationId, "Draft");
+    await sending; state.runner.cancel(state.conversationId); await stopping;
+    assert.equal(state.runner.isRunning(state.conversationId), true);
+    settle(); assert.equal((await turn).status, "cancelled");
+    assert.equal(state.runner.isRunning(state.conversationId), false);
+  });
+
+  it("retains the manuscript requirement through queued promotion and explicit retry", async () => {
+    const prompts: string[] = [];
+    const subject = { kind: "chapter" as const, chapterId: "neap", intent: "draft" as const };
+    const state = await setup(fakeAdapter([JSON.stringify({ reply: "Consider a stronger opening.", candidateOperations: [], groupOperations: [] })], { prompts }), {
+      entryContext: { kind: "production", productionId: "the-ledger-of-nights" }, describeEntry: true,
+      chapterBrief: async input => { assert.equal(input.draft, true); return "The complete current manuscript."; },
+    });
+    const receipt = await state.journal.record({ submissionId: newId("msg"), text: "Draft the rest", attachmentIds: [],
+      delivery: "next", expectedRunId: null, replyOnly: false, subject }, { routing: QUEUE_ROUTING, constraints: { replyOnly: false, subject } });
+    assert.equal(receipt.event.type, "input.recorded");
+    if (receipt.event.type !== "input.recorded") throw Error("Expected recorded input");
+    assert.equal((await state.runner.sendQueued(state.journal, receipt.event.input.messageId, receipt.queue.revision, QUEUE_ROUTING)).status, "failed");
+    const row = (await state.journal.read()).inputs[0]!;
+    assert.equal(row.status, "promoted");
+    assert.ok(row.turnId);
+    assert.equal((await state.runner.retry(state.store, state.conversationId, row.turnId)).status, "failed", "Retry must not relax the manuscript contract");
+    assert.equal(prompts.length, 4, "one corrective attempt per explicit run");
+    assert.match(prompts[0]!, /explicit manuscript-writing operation/);
+    assert.match(prompts[2]!, /explicit manuscript-writing operation/);
+    const view = await state.view();
+    assert.equal(view.messages.filter(message => message.role === "user").length, 1);
+    assert.equal(view.messages.some(message => message.role === "studio"), false);
+    const promotion = (await state.store.read()).events.find(one => one.event.type === "input.promoted")!.event;
+    assert.ok(promotion.type === "input.promoted");
+    assert.deepEqual(promotion.constraints.subject, subject);
+  });
+
   it("promotes before dispatch, preserving the message identity used by evidence", async () => {
     const text = "The bells pass sideways.";
     const prompts: string[] = [];
@@ -1269,4 +1556,40 @@ it("renders a recovered earlier action's completed receipt in the next model pro
   assert.match(prompts[0]!, new RegExp(takeId));
   assert.match(prompts[0]!, /"status":"completed"/);
   assert.doesNotMatch(prompts[0]!, /C:\/private/);
+});
+
+describe("an audio drama's create card is fenced before it is durable (SPEC-057 R-82, codex on PR 1866)", () => {
+  it("raises the world to schema 90 before the turn that prepares it is written", async () => {
+    const worldPath = await tempDir("arke-run-drama-");
+    const conversationId = newId("cv") as ConversationId;
+    const store = new WorldChatStore(conversationDir(worldPath, conversationId));
+    await store.create(conversationId, AT);
+    await store.append({ type: "conversation.created", title: "make one", entryContext: { kind: "world" } }, { at: AT });
+    const bundle: WorldBundle = (await scanWorld(FIXTURE_WORLD)).bundle;
+    const raised: Array<{ version: number; turnWritten: boolean }> = [];
+    const checkId = newId("check");
+    const answer = JSON.stringify({ reply: "Here is the card.", candidateOperations: [], groupOperations: [],
+      actions: [{ kind: "production-create", production: { title: "Low Water", medium: "story", productionKind: "audio-drama" }, checkReceiptIds: [checkId] }] });
+    const runner = new WorldChatRunner({
+      adapter: fakeAdapter([answer]),
+      prepare: async () => ({ cwd: worldPath, leaseToken: "t".repeat(64) }),
+      release: async () => {},
+      receiptsFor: (runId) => [{ id: checkId, runId, tool: "target-read", status: "complete", consulted: [], at: AT,
+        target: { requirement: "production-metadata", id: bundle.meta.worldId }, observedRevisionOrDigest: "fence", complete: true }] as never,
+      runCheckPlan: async () => ({ receipts: [], canonRevision: bundle.meta.canonRevision }),
+      evidenceSources: (messages: readonly WorldChatMessage[]) => ({ messages, bundle, attachments: [], attachmentText: new Map() }),
+      prepareActions: () => [{ payload: { kind: "world-chat-production-create",
+        plan: { production: { id: "low-water", title: "Low Water", format: "story", medium: "story", kind: "audio-drama" } } }, intent: {} }] as never,
+      bindActions: async () => {},
+      raiseSchemaBoundary: async (version) => {
+        raised.push({ version, turnWritten: (await store.read()).events.some(({ event }) => event.type === "turn.completed") });
+        // Stop here: what is asserted is that the fence came first, not what the stub intent writes.
+        throw new Error("fenced");
+      },
+      now: NOW,
+    });
+    await runner.send(store, conversationId, "Make an audio drama of Low Water").catch(() => {});
+    assert.deepEqual(raised.find(entry => entry.version === 90), { version: 90, turnWritten: false },
+      JSON.stringify((await store.read()).events.map(({ event }) => event.type === "run.finished" ? event.run : event.type)));
+  });
 });

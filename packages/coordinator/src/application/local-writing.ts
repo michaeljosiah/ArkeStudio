@@ -2,7 +2,7 @@ import { relative, isAbsolute, sep, join } from "node:path";
 import { realpath, readFile } from "node:fs/promises";
 import { MarkdownFile, sha256 } from "../world/text-files.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
-import { ArkeTargetReadPageSchema, countWords, type WorldChatCheckReceipt } from "@arke-studio/contracts";
+import { countWords, type WorldChatCheckReceipt } from "@arke-studio/contracts";
 import { ProposalManager, type StageInput } from "../gate/proposals.js";
 import { ConversationActionLifecycle } from "../arke-actions/lifecycle.js";
 import { WorldChatRunner } from "../world-chat/run.js";
@@ -12,6 +12,7 @@ import { QueryLeaseRegistry } from "../world-chat/lease.js";
 import { WorldChatRetrieval } from "../world-chat/retrieval.js";
 import { WorldChatAttachmentStore } from "../world-chat/attachments.js";
 import { chapterDraftingBrief } from "../world-chat/chapter-brief.js";
+import { chapterDraftResult } from "../world-chat/chapter-draft.js";
 import { prepareWorldChatActions, worldChatActionAdapters } from "../world-chat/actions.js";
 import type { WorldStore, WorldStatePrecondition } from "../world/store.js";
 import { localProse } from "./local-prose.js";
@@ -189,21 +190,7 @@ export function localWriting(store: WorldStore, assertScratch: (path: string) =>
             receipts.push(value.receipt);
             return value;
           };
-          let text = await chapterDraftingBrief(bundle, productionId, chapterId, read, budgetChars, { impliedFacts: false });
-          for (const [tool, args] of [
-            ["list_chapters", { productionId }],
-            ["get_chapter", { productionId, chapterId }],
-          ] as const) {
-            let cursor: string | undefined;
-            do {
-              const value = await read(tool, { ...args, ...(cursor ? { cursor } : {}) });
-              if (value.receipt.status !== "complete" && value.receipt.status !== "empty") throw new Error("The chapter source is unavailable.");
-              text += "\n\n" + JSON.stringify({ result: value.result, receipt: value.receipt,
-                ...(value.receipt.complete && value.receipt.nextCursor === null ? { proposalCheckReceiptId: value.receipt.id } : {}) });
-              const page = ArkeTargetReadPageSchema.safeParse(value.result);
-              cursor = page.success ? page.data.nextCursor ?? undefined : undefined;
-            } while (cursor);
-          }
+          let text = await chapterDraftingBrief(bundle, productionId, chapterId, read, budgetChars, { impliedFacts: false, manuscript: true });
           text += '\n\nThis bounded chapter-writing API supports exactly one edit to the requested chapter. ' +
             'Return its complete body with optional title and status "draft" only. ' +
             'Do not include implies, plan edits, passage edits or other actions; those need separate authoring operations.';
@@ -212,17 +199,10 @@ export function localWriting(store: WorldStore, assertScratch: (path: string) =>
           return text;
         },
         prepareActions: turn => {
-          const action = turn.actions[0];
-          if (turn.candidates.length || turn.groups.length || turn.bibleEdits.length || turn.sceneEdits.length || turn.editorRequests.length ||
-            turn.actions.length !== 1 || action?.kind !== "production-chapter" || action.productionId !== productionId ||
-            action.change.operation !== "edit" || action.change.chapterId !== chapterId ||
-            !action.change.changes.body?.trim() || action.change.changes.body.length > 2000000 ||
-            (action.change.changes.status !== undefined && action.change.changes.status !== "draft") ||
-            Object.keys(action.change.changes).some(key => !["body", "title", "status"].includes(key))) {
-            throw new Error("Return exactly one complete draft for the requested chapter, without other changes.");
-          }
-          body = action.change.changes.body;
-          title = action.change.changes.title ?? initial.title;
+          const draft = chapterDraftResult(turn, productionId, chapterId);
+          if ("problem" in draft) throw new Error(draft.problem);
+          body = draft.body;
+          title = draft.title ?? initial.title;
           return prepareWorldChatActions(store, lifecycle, turn);
         },
         bindActions: async actions => {

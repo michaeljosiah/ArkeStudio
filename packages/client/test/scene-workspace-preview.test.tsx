@@ -145,7 +145,7 @@ describe("Preview lightbox (SPEC-036 R-1, R-19)", () => {
 
     await click(q(mounted, '.fy-swlightbox [aria-label="Next shot"]')!);
     assert.equal(q(mounted, ".fy-swlightbox__label")?.textContent, "shot 13");
-    assert.match(q(mounted, ".fy-arke__name")?.textContent ?? "", /Shot 13/, "the arrows carry the selection with them");
+    assert.match(dom.document.querySelector(".fy-arke__name")?.textContent ?? "", /Scene /, "preview arrows do not retarget the retained chat");
     assert.equal(q(mounted, ".fy-swlightbox__frame img"), null);
     assert.match(q(mounted, ".fy-swlightbox__empty")?.textContent ?? "", /no frame yet/, "a frameless shot lands on its empty state");
     assert.ok(all(mounted, ".fy-swlightbox__empty button").some((button) => button.textContent === "Generate frame"));
@@ -156,6 +156,8 @@ describe("Preview lightbox (SPEC-036 R-1, R-19)", () => {
     assert.equal(q(mounted, ".fy-swlightbox__label")?.textContent, "shot 13", "previous wraps to the last");
 
     await click(q(mounted, '.fy-swlightbox [aria-label="Close"]')!);
+    await click(([...(dom.document.querySelectorAll('button') as unknown as NodeListOf<HTMLButtonElement>)].find(button => button.textContent === 'Use this page') ?? dom.document.querySelector('[data-global-chat-trigger]')) as unknown as HTMLElement);
+    assert.match(dom.document.querySelector(".fy-arke__name")?.textContent ?? "", /Shot 13/, "opening from the page adopts its selection");
     assert.equal(q(mounted, ".fy-swlightbox"), null);
   });
 

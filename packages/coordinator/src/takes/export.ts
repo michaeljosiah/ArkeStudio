@@ -1,7 +1,8 @@
-import { cp, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { ulid } from "@arke-studio/contracts";
 import { toExtendedLength } from "../world/paths.js";
+export { exportWorld, WORLD_EXPORT_EXCLUDED } from "./export-world.js";
 
 /**
  * Exports (SPEC-013 §2.10, §2.11): one local encode over accepted material, staged so a
@@ -12,8 +13,17 @@ import { toExtendedLength } from "../world/paths.js";
 export interface FfmpegRunner {
   /** Host path to the redistributed font every generated slate uses. */
   slateFont: string;
-  /** Run one encode; resolve on success, reject on failure, honour the signal for cancel. */
-  run(args: string[], onProgress: (percent: number) => void, signal: AbortSignal): Promise<void>;
+  /** Stable encoder build identity retained by retryable private editions. */
+  identity?(signal: AbortSignal): Promise<string>;
+  /** Resolve the installed encoder's supported graph-file option before preparing effects. */
+  graphFileOption?(signal: AbortSignal): Promise<"-/filter_complex" | "-filter_complex_script">;
+  /**
+   * Run one encode; resolve on success, reject on failure, honour the signal for cancel.
+   * `onProgress` has only ever had ffmpeg's elapsed seconds, capped at 99; `onSeconds`, where a
+   * runner gives it, is the same clock uncapped, which a caller that knows the length can turn
+   * into a true percent (design turn 197d).
+   */
+  run(args: string[], onProgress: (percent: number) => void, signal: AbortSignal, onSeconds?: (seconds: number) => void): Promise<void>;
 }
 
 export interface ExportHandle {
@@ -28,6 +38,17 @@ export interface ExportHandle {
 export interface ExportSidecar {
   name: string;
   text: string;
+}
+
+/** Host lifecycle for derived rendering that must revalidate sources before publication. */
+export interface ExportLifecycle {
+  signal: AbortSignal;
+  prepare?(): Promise<void>;
+  render(stage: string, signal: AbortSignal): Promise<void>;
+  publish(write: () => Promise<void>, signal: AbortSignal): Promise<void>;
+  cleanup(): Promise<void>;
+  cleanupStaging(): Promise<void>;
+  rollbackOutput(path: string): Promise<void>;
 }
 
 /**
@@ -53,24 +74,31 @@ export function runExport(
    */
   sidecar?: ExportSidecar,
   exportId?: string,
+  lifecycle?: ExportLifecycle,
 ): ExportHandle {
   const id = exportId ?? `ex_${ulid()}`;
   if (!/^ex_[0-9A-HJKMNP-TV-Z]{26}$/.test(id)) throw new Error("invalid export id");
   const controller = new AbortController();
+  const close = () => controller.abort();
+  lifecycle?.signal.addEventListener("abort", close, { once: true });
+  if (lifecycle?.signal.aborted) close();
   const stage = join(worldDir, ".cache", "exports", `${id}.mp4`);
   const output = join(worldDir, "exports", outName);
   const sidecarStage = sidecar === undefined ? null : join(worldDir, ".cache", "exports", `${id}-${sidecar.name}`);
   const sidecarOutput = sidecar === undefined ? null : join(worldDir, "exports", sidecar.name);
   const done = (async () => {
     try {
+      await lifecycle?.prepare?.();
       await mkdir(toExtendedLength(join(worldDir, ".cache", "exports")), { recursive: true });
       await mkdir(toExtendedLength(join(worldDir, "exports")), { recursive: true });
       // A cancel that lands before the encoder starts must still cancel: an already-aborted
       // signal never invokes listeners added later, so the check happens here.
       if (controller.signal.aborted) throw new Error("cancelled before start");
       if (sidecar !== undefined && sidecarStage !== null) await writeFile(toExtendedLength(sidecarStage), sidecar.text, "utf8");
-      await runner.run(buildArgs(stage), onProgress, controller.signal);
+      if (lifecycle) await lifecycle.render(stage, controller.signal);
+      else await runner.run(buildArgs(stage), onProgress, controller.signal);
       if (controller.signal.aborted) throw new Error("cancelled");
+      const publish = async () => {
       await rename(toExtendedLength(stage), toExtendedLength(output));
       if (sidecar !== undefined && sidecarStage !== null && sidecarOutput !== null) {
         try {
@@ -78,49 +106,27 @@ export function runExport(
         } catch (error) {
           // The video is already in exports/. Both or neither: a film without the subtitles it
           // promised is not the export that was asked for, so the video goes too (round three).
-          await rm(toExtendedLength(output), { force: true }).catch(() => {});
+          if (lifecycle) await lifecycle.rollbackOutput(output).catch(() => {});
+          else await rm(toExtendedLength(output), { force: true }).catch(() => {});
           throw error;
         }
-        return { status: "done" as const, output: `exports/${outName}`, sidecar: `exports/${sidecar.name}` };
       }
+      };
+      if (lifecycle) await lifecycle.publish(publish, controller.signal); else await publish();
+      if (sidecar) return { status: "done" as const, output: `exports/${outName}`, sidecar: `exports/${sidecar.name}` };
       return { status: "done" as const, output: `exports/${outName}` };
     } catch (err) {
-      await rm(toExtendedLength(stage), { force: true }).catch(() => {});
-      if (sidecarStage !== null) await rm(toExtendedLength(sidecarStage), { force: true }).catch(() => {});
+      if (lifecycle) await lifecycle.cleanupStaging().catch(() => {});
+      else {
+        await rm(toExtendedLength(stage), { force: true }).catch(() => {});
+        if (sidecarStage !== null) await rm(toExtendedLength(sidecarStage), { force: true }).catch(() => {});
+      }
       if (controller.signal.aborted) return { status: "cancelled" as const };
       return { status: "failed" as const, error: err instanceof Error ? err.message : String(err) };
+    } finally {
+      lifecycle?.signal.removeEventListener("abort", close);
+      await lifecycle?.cleanup().catch(() => {});
     }
   })();
   return { id, cancel: () => controller.abort(), done };
-}
-
-/** What a world export leaves behind (D12): caches and locks; never the version record. */
-export const WORLD_EXPORT_EXCLUDED = [
-  ".index",
-  ".commit",
-  ".proposals",
-  // Unfinished thinking, like .proposals. A world archive carries it; an export does not.
-  ".conversations",
-  // Bench sessions are operational history too (issue 305 §6). What a session KEPT is an
-  // ordinary artifact and exports with the world; the takes it did not keep do not.
-  ".sessions",
-  ".staging",
-  ".cache",
-  "world.lock",
-];
-
-/**
- * Copy the world for another machine (R-22): `.history/` IS included — it is the version
- * record, not a cache, and a world that cannot explain how it got here is not the same world.
- */
-export async function exportWorld(worldDir: string, targetDir: string): Promise<void> {
-  await cp(worldDir, targetDir, {
-    recursive: true,
-    filter: (source) => {
-      const rel = source.slice(worldDir.length).replace(/\\/g, "/").replace(/^\//, "");
-      if (rel === "") return true;
-      const head = rel.split("/")[0]!;
-      return !WORLD_EXPORT_EXCLUDED.includes(head) && !/\.tmp-[0-9A-Z]+$/i.test(rel);
-    },
-  });
 }

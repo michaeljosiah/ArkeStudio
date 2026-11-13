@@ -1,19 +1,19 @@
 import { deriveProductionReadiness, type ProductionPlanCard, type ReadinessCheck } from "@arke-studio/contracts";
-import { useStore } from "../lib/store.js";
+import { useWorld } from "../lib/store.js";
 import { useMemo } from "react";
 
 function Checklist({ checks }: { checks: readonly ReadinessCheck[] }) {
   return <ul className="fy-production-plan__checks">{checks.map(check => <li key={check.key}>
     <span aria-label={check.status === "ready" ? "Complete" : check.status === "not-required" ? "Not required" : check.status === "blocked" ? "Blocked" : "Incomplete"}>
       {check.status === "ready" ? "✓" : check.status === "not-required" ? "—" : "○"}
-    </span>{" "}<span>{check.label}{check.total > 1 ? ` · ${check.completed}/${check.total}` : ""}</span>
-    <small>{check.detail}{check.missingIds.length ? ` Missing: ${check.missingIds.slice(0,4).join(", ")}${check.missingIds.length > 4 ? ", …" : ""}.` : ""}</small>
+    </span>{" "}<span>{check.label}{check.status !== "not-required" && check.total > 1 ? ` · ${check.completed}/${check.total}` : ""}</span>
+    <small>{check.detail}{check.status !== "not-required" && check.missingIds.length ? ` Missing: ${check.missingIds.slice(0,4).join(", ")}${check.missingIds.length > 4 ? ", …" : ""}.` : ""}</small>
   </li>)}</ul>;
 }
 
 /** SPEC-051 R-40: a live checklist and proposed steps, with no execution or approval control. */
 export function ProductionPlanCardView({ card }: { card: ProductionPlanCard }) {
-  const world = useStore().state?.world;
+  const world = useWorld();
   const production = world?.meta.worldId === card.worldId ? world.productions.find(p => p.meta.id === card.productionId) : undefined;
   const readiness = useMemo(() => world && production ? deriveProductionReadiness(world, production, card.exports) : null,
     [world, production, card.exports, card.worldId]);

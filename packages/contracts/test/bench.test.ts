@@ -9,6 +9,8 @@ import {
   BenchSessionSchema,
   BenchSubjectSchema,
   benchSubjectTitle,
+  benchTimingChange,
+  rebuildBenchPrefill,
   benchSessionSummary,
   benchDeleteRefusal,
   BENCH_DELETE_FILED,
@@ -307,6 +309,35 @@ describe("the fold", () => {
     assert.deepEqual(session.composer.activeTokens, ["Image 1", "Image 3"]);
     assert.equal(session.tokenRegistry[1]!.source.source === "artifact" ? session.tokenRegistry[1]!.source.artifactId : null, oldSecond);
     assert.equal(session.tokenRegistry[2]!.source.source === "artifact" ? session.tokenRegistry[2]!.source.artifactId : null, newSecond);
+  });
+
+  it("Rebuild retains manual lanes without token collisions or changing earlier journal semantics", () => {
+    const subject = { kind: "shot" as const, productionId: "pilot", productionTitle: "Pilot", sceneId: "sc_1", sceneNumber: 1, sceneTitle: "Harbour", shotId: "sh_1", shotNumber: 1, shotTitle: "Turn", durationSec: 8, aspect: "16:9" };
+    const composer = { mode: "video" as const, provider: "fal", model: "test-video", params: { kind: "video" as const, durationSec: 8 }, brief: "Follow @Image 1.", activeTokens: ["Image 1"], keyframeTokens: [] };
+    const prefill = { type: "subject-prefill-set" as const, subject, title: "Pilot", composer, references: [ref("Image 1", AR)] };
+    const manual = ref("Image 2", "ar_01JAAAAAAAAAAAAAAAAAAAAAA1");
+    const frame = ref("Image 3", "ar_01JAAAAAAAAAAAAAAAAAAAAAA2");
+    const events = [env(1, prefill), env(2, { type: "reference-added", entry: manual }), env(3, { type: "reference-added", entry: frame, lane: "keyframe" as const })];
+    const before = foldBenchSession({ ...META, subject }, events);
+    const fresh = { ...prefill, subject: { ...subject, durationSec: 5 }, composer: { ...composer, params: { ...composer.params, durationSec: 5 } }, references: [ref("Image 1", "ar_01JAAAAAAAAAAAAAAAAAAAAAA3")] };
+    const event = rebuildBenchPrefill(before, fresh);
+    const after = foldBenchSession({ ...META, subject }, [...events, env(4, event)]);
+    assert.deepEqual(after.composer.activeTokens, ["Image 4", "Image 2"]);
+    assert.deepEqual(after.composer.keyframeTokens, ["Image 3"]);
+    assert.deepEqual(after.subjectTokens, ["Image 4"], "manual references remain user-owned on later rebuilds");
+    assert.equal(after.composer.brief, "Follow @Image 4.");
+    assert.deepEqual(foldBenchSession({ ...META, subject }, [...events, env(4, fresh)]).composer.activeTokens, ["Image 4"], "old prefill records still mean clear");
+    const second = foldBenchSession({ ...META, subject }, [...events, env(4, event), env(5, rebuildBenchPrefill(after, fresh))]);
+    assert.deepEqual(second.composer.activeTokens, after.composer.activeTokens);
+    assert.deepEqual(second.tokenRegistry, after.tokenRegistry, "repeated rebuild does not grow tokens for unchanged sources");
+  });
+
+  it("reports shot timing changes and board redistribution even when totals are unchanged", () => {
+    const subject = { kind: "board" as const, productionId: "pilot", productionTitle: "Pilot", sceneId: "sc_1", sceneNumber: 1, sceneTitle: "Harbour", letter: "A", durationSec: 10, aspect: "16:9", packing: { maxDurationSec: 10 }, members: [{ shotId: "sh_1", number: 1, title: "One", durationSec: 4 }, { shotId: "sh_2", number: 2, title: "Two", durationSec: 6 }] };
+    assert.equal(benchTimingChange(subject, [{ id: "sh_1" }, { id: "sh_2", durationSec: 6 }]), null);
+    assert.deepEqual(benchTimingChange(subject, [{ id: "sh_1", durationSec: 5 }, { id: "sh_2", durationSec: 5 }]), { frozen: 10, current: 10 });
+    assert.equal(benchTimingChange(subject, []), null, "missing subjects use the existing unavailable refusal");
+    assert.deepEqual(benchTimingChange({ ...subject, kind: "shot", shotId: "sh_1", shotNumber: 1, shotTitle: "One", durationSec: 8 }, [{ id: "sh_1", durationSec: 5 }]), { frozen: 8, current: 5 });
   });
 
   it("records production filing without pretending a board parent is an artifact", () => {
@@ -667,6 +698,29 @@ describe("multimedia admission (issue 305 §5.2)", () => {
     assert.equal(formatSeconds(12), "0:12");
     assert.equal(formatSeconds(60), "1:00");
     assert.equal(formatSeconds(134), "2:14");
+  });
+});
+
+describe("review selection (issue 1674)", () => {
+  it("keeps an explicit choice through out-of-order completion, filing and replay", () => {
+    const events: BenchEventEnvelope[] = [env(1, {
+      type: "takes-reserved",
+      takes: [TK, TK2].map((id, index) => ({ id: id as never, n: index + 1, requestId: `r${index}`,
+        request: SNAPSHOT, createdAt: META.createdAt })),
+    })];
+    assert.equal(foldBenchSession(META, events).selectedTakeId, TK2, "a new dispatch shows its latest reservation");
+    events.push(env(2, { type: "take-selected", takeId: TK as never }));
+    for (const id of [TK, TK2]) {
+      events.push(env(events.length + 1, { type: "take-completed", takeId: id as never,
+        media: { file: "take.png", hash: "sha256:beefbeef" }, completedAt: META.createdAt }));
+      assert.equal(foldBenchSession(META, events).selectedTakeId, TK);
+    }
+    events.push(env(5, { type: "take-selected", takeId: TK2 as never }));
+    events.push(env(6, { type: "take-filed", takeId: TK as never, artifactId: AR as never }));
+    const replayed = foldBenchSession(META, events);
+    assert.equal(replayed.selectedTakeId, TK2, "late filing of the previous choice leaves the next review alone");
+    assert.equal(replayed.takes[0]!.disposition, "filed");
+    assert.equal(replayed.takes[1]!.status, "succeeded");
   });
 });
 

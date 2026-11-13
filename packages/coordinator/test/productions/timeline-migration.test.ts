@@ -89,6 +89,6 @@ describe("cut.json migration on the first timeline write", () => {
       ],
     });
     const { dropped } = await libraryFirstWrite(store, PRODUCTION);
-    assert.deepEqual(dropped, ["ov_01J8G0000000000000000000B9 cites artifact ar_01J8G0000000000000000000ZZ, which this world does not have"]);
+    assert.deepEqual(dropped, ["ov_01J8G0000000000000000000B9 cites a file which this world does not have"]);
   });
 });

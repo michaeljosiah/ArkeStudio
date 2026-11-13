@@ -2,9 +2,12 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   ProductionSetupDraftSchema, ProductionSetupStateSchema, ProductionSetupOriginSchema, PRODUCTION_SETUP_SCHEMA_VERSION,
-  applyProductionSetupUpdate, ulid,
-  type ConversationId, type ProductionSetupState, type ProductionSetupUpdate, type WorldChatLoaded,
+  AUDIO_DRAMA_KIND, DEFAULT_AUDIO_DRAMA_PLAN, GRAPHIC_NOVEL_KIND, NEW_COMIC_PLAN, adaptableStories, applyProductionSetupUpdate, ulid,
+  type ConversationId, type ProductionSetupCommand, type ProductionSetupDraft, type ProductionSetupState, type ProductionSetupUpdate,
+  type WorldBundle, type WorldChatCheckReceipt, type WorldChatLoaded,
 } from "@arke-studio/contracts";
+import { chaptersReadWhole } from "../world-chat/source-reads.js";
+import { chapterFence } from "../world-chat/target-reads.js";
 import { WriteQueue } from "../change-log.js";
 import { createProductionFromPlan } from "./ops.js";
 import { planProductionSetup, setupSourceDigest } from "./setup-plan.js";
@@ -12,14 +15,83 @@ import { WorldChatStore, conversationDir } from "../world-chat/store.js";
 import { foldConversation } from "../world-chat/fold.js";
 import { discoverConversations } from "../world-chat/discover.js";
 import { WorldChatService } from "../world-chat/service.js";
-import { CommitStaleError, WORLD_MODELS_SCHEMA_VERSION } from "../world/commit.js";
+import { ADAPT_FROM_SCHEMA_VERSION, AUDIO_DRAMA_SCHEMA_VERSION, COMIC_ADAPTATION_SCHEMA_VERSION, COMIC_ORIGINAL_SCHEMA_VERSION, COMIC_PANELS_SCHEMA_VERSION, COMIC_USUAL_SCHEMA_VERSION, COMIC_PILOT_SCHEMA_VERSION, CommitStaleError, NARRATOR_SAMPLES_SCHEMA_VERSION, PRODUCTION_TARGET_SCHEMA_VERSION, WORLD_MODELS_SCHEMA_VERSION } from "../world/commit.js";
+
+/**
+ * An audio drama's plan rests on the whole story (SPEC-057 R-5, codex on PR 1866): a plan
+ * proposed for a story it adapts is refused until this conversation has read every active chapter
+ * of it whole, and the refusal names what is left, so Arke reads on rather than plans blind.
+ */
+export function assertSourceReadForPlan(
+  bundle: WorldBundle, update: ProductionSetupUpdate, draft: ProductionSetupDraft, receipts: readonly WorldChatCheckReceipt[],
+): void {
+  // A graphic novel can preview just the requested chapters; each planned source still needs a current full read.
+  const plansAudio = !!update.fields?.audioDrama && draft.kind === AUDIO_DRAMA_KIND;
+  const plansPages = !!update.fields?.graphicNovel && update.fields.graphicNovel.chapters.length > 0 && draft.kind === GRAPHIC_NOVEL_KIND;
+  // Said here so the turn can repair it: in a real run Arke put the lines in its reply and left the plan blocked (0.5.103).
+  if (plansPages && !draft.source && update.fields!.graphicNovel!.chapters.some(chapter => chapter.about === undefined)) {
+    throw new Error("Each chapter of an original book says what happens in it: give every chapter in fields.graphicNovel.chapters an about line, and send the whole plan again.");
+  }
+  if ((!plansAudio && !plansPages) || !draft.source) return;
+  const story = bundle.productions.find(production => production.meta.id === draft.source!.productionId);
+  if (!story) return;
+  const selected = plansPages ? new Set(update.fields!.graphicNovel!.chapters.map(chapter => chapter.from)) : null;
+  const chapters = story.chapters.filter(chapter => chapter.retired !== true && (!selected || selected.has(chapter.order))).sort((a, b) => a.order - b.order);
+  const read = chaptersReadWhole(receipts, story.meta.id, chapterId => chapterFence(story, chapterId));
+  const unread = chapters.filter(chapter => !read.has(chapter.id));
+  if (unread.length === 0) return;
+  throw new Error(`${plansPages ? "Read every selected chapter of" : "Read all of"} “${story.meta.title}” before proposing the plan: ${chapters.length - unread.length} of ${chapters.length} chapters read whole. Still to read with get_chapter (no section): ${unread.slice(0, 40).map(chapter => chapter.id).join(", ")}${unread.length > 40 ? ", …" : ""}.`);
+}
+
+/** What a door may say about the production before setup opens (SPEC-057 R-3). */
+export type ProductionSetupSeed = NonNullable<Extract<ProductionSetupCommand["action"], { operation: "start" }>["seed"]>;
 import { WorldStateStaleError, type WorldStore } from "../world/store.js";
 import { toExtendedLength } from "../world/paths.js";
 
-function initialState(worldId: string, setupId: ConversationId): ProductionSetupState {
+/**
+ * Adapt from names a story in this world (SPEC-052 R-1): refused before it is written, whether the
+ * rail or Arke named it, so a draft never holds a source the rail would not have offered.
+ */
+export function assertAdaptableSource(world: WorldStore, update: ProductionSetupUpdate): void {
+  const source = update.fields?.source;
+  if (!source) return;
+  if (!adaptableStories(world.getBundle().productions).some(story => story.id === source.productionId)) {
+    throw new Error("Adapt from names a story with chapters in this world. Choose one from the list.");
+  }
+}
+
+/**
+ * The world is raised past the builds that cannot read a setup's source (design turn 205) before
+ * the first draft naming one is written, as models are (design turn 153).
+ */
+export async function fenceAdaptableSource(world: WorldStore, update: ProductionSetupUpdate): Promise<void> {
+  if (update.fields?.source) await world.ensureSchemaVersion(ADAPT_FROM_SCHEMA_VERSION, "production-setup");
+  // A Target is carried by the draft once it is a micro drama: chosen, or seeded by the change of
+  // format (SPEC-052 R-6). Raised for either, since the seeding happens inside the update.
+  if (update.fields?.target || update.fields?.kind === "microdrama") await world.ensureSchemaVersion(PRODUCTION_TARGET_SCHEMA_VERSION, "production-setup");
+  // The audio-drama kind and its plan are strict draft fields older builds cannot read (SPEC-057).
+  if (update.fields?.kind === AUDIO_DRAMA_KIND || update.fields?.audioDrama) await world.ensureSchemaVersion(AUDIO_DRAMA_SCHEMA_VERSION, "production-setup");
+  if (update.fields?.narratorSamples) await world.ensureSchemaVersion(NARRATOR_SAMPLES_SCHEMA_VERSION, "production-setup");
+  // A graphic novel's kind, plan and question are strict draft fields a build of 114 cannot read (turn 249).
+  if (update.fields?.kind === GRAPHIC_NOVEL_KIND || update.fields?.graphicNovel || update.fields?.comicAsk) await world.ensureSchemaVersion(COMIC_ADAPTATION_SCHEMA_VERSION, "production-setup");
+  if (update.fields?.comicAsk === "usual") await world.ensureSchemaVersion(COMIC_USUAL_SCHEMA_VERSION, "production-setup");
+  if (update.fields?.graphicNovel?.pilotFrom !== undefined) await world.ensureSchemaVersion(COMIC_PILOT_SCHEMA_VERSION, "production-setup");
+  // The mode's question and answer are strict setup fields a build of 122 cannot read (turn 269).
+  // A new graphic novel's plan says Panel by panel from its first revision (turn 272), so its kind raises for it too.
+  if (update.fields?.kind === GRAPHIC_NOVEL_KIND || update.fields?.comicAsk === "mode" || update.fields?.graphicNovel?.mode !== undefined) await world.ensureSchemaVersion(COMIC_PANELS_SCHEMA_VERSION, "production-setup");
+  if (update.fields?.graphicNovel?.noPicture !== undefined || update.fields?.graphicNovel?.chapters.some(chapter => chapter.about !== undefined)) await world.ensureSchemaVersion(COMIC_ORIGINAL_SCHEMA_VERSION, "production-setup");
+}
+
+function initialState(worldId: string, setupId: ConversationId, seed?: ProductionSetupSeed): ProductionSetupState {
+  const kind = seed?.kind ?? "film";
   return { status: "draft", review: null, draft: ProductionSetupDraftSchema.parse({
-    schemaVersion: 1, setupId, worldId, revision: 1, title: "", kind: "film", aspect: "16:9", frameRate: 24,
+    schemaVersion: 1, setupId, worldId, revision: 1, title: seed?.title ?? "", kind, aspect: "16:9", frameRate: 24,
     narrative: {}, arcs: [], references: [], openQuestions: [], episodes: [], scenes: [],
+    ...(seed?.source ? { source: seed.source } : {}),
+    // An audio drama opens on the default plan until Arke has read the story (SPEC-057 D-2).
+    ...(kind === AUDIO_DRAMA_KIND ? { audioDrama: DEFAULT_AUDIO_DRAMA_PLAN } : {}),
+    // A graphic novel opens on the default plan, in the style its door chose (turns 248a, 249b).
+    ...(kind === GRAPHIC_NOVEL_KIND ? { graphicNovel: { ...NEW_COMIC_PLAN, ...(seed?.comicStyle ? { style: seed.comicStyle } : {}) } } : {}),
   }) };
 }
 
@@ -74,9 +146,23 @@ export class ProductionSetupService {
     return state;
   }
 
-  async start(id: ConversationId): Promise<ProductionSetupState> {
+  async start(id: ConversationId, seed?: ProductionSetupSeed): Promise<ProductionSetupState> {
     return this.serial(id, async () => {
       await this.world.ensureSchemaVersion(PRODUCTION_SETUP_SCHEMA_VERSION, "production-setup");
+      // A seed only describes a setup about to begin. A retried start of one that began returns
+      // it, whatever has since become of the story the seed named: the seed is ignored there, so
+      // it must not be judged there either.
+      const begun = await this.log(id).readMeta()
+        && (await this.log(id).read()).events.some(envelope => envelope.event.type === "production-setup.updated");
+      if (begun) return (await this.read(id)).productionSetup!;
+      // A seed is checked and fenced exactly as the same fields arriving in an update would be.
+      if (seed?.source || seed?.kind) {
+        const asUpdate: ProductionSetupUpdate = { expectedRevision: 1, fields: {
+          ...(seed.kind ? { kind: seed.kind } : {}), ...(seed.source ? { source: seed.source } : {}),
+        } };
+        assertAdaptableSource(this.world, asUpdate);
+        await fenceAdaptableSource(this.world, asUpdate);
+      }
       return this.world.ownedWrite(async () => {
         const log = this.log(id);
         const meta = await log.readMeta();
@@ -92,7 +178,7 @@ export class ProductionSetupService {
         if (!current.events.length) await log.append({
           type: "conversation.created", title: "New production", entryContext: { kind: "production-setup", setupId: id },
         }, { at: this.world.now() });
-        const state = initialState(this.world.worldId, id);
+        const state = initialState(this.world.worldId, id, seed);
         await log.append({ type: "production-setup.updated", state }, { at: this.world.now() });
         return state;
       });
@@ -118,6 +204,8 @@ export class ProductionSetupService {
       if (update.fields?.models && Object.keys(update.fields.models).length > 0) {
         await this.world.ensureSchemaVersion(WORLD_MODELS_SCHEMA_VERSION, "production-setup");
       }
+      assertAdaptableSource(this.world, update);
+      await fenceAdaptableSource(this.world, update);
       return this.world.ownedWrite(async () => {
       const view = await this.read(id);
       const state = this.editable(view, update.expectedRevision);
@@ -135,7 +223,7 @@ export class ProductionSetupService {
       const plan = planProductionSetup(bundle, state.draft, this.world.now());
       return this.append(id, view, {
         draft: state.draft, status: "reviewed",
-        review: { id: ulid(), plan, sourceDigest: setupSourceDigest(bundle) },
+        review: { id: ulid(), plan, sourceDigest: setupSourceDigest(bundle, state.draft.source?.productionId) },
       });
     }, () => null));
   }
@@ -191,9 +279,11 @@ export class ProductionSetupService {
       this.uncertain.add(id);
       try {
         const review = state.review!;
+        // A season carrying a Target is past the builds that read season.json without it.
+        if (review.plan.initialSeason?.target) await this.world.ensureSchemaVersion(PRODUCTION_TARGET_SCHEMA_VERSION, "production-setup");
         await createProductionFromPlan(this.world, review.plan, {
           source: "production-setup", requestId: review.id,
-          precondition: () => setupSourceDigest(this.world.getBundle()) === review.sourceDigest
+          precondition: () => setupSourceDigest(this.world.getBundle(), state.draft.source?.productionId) === review.sourceDigest
             ? null : "The world changed after review. Review the outline again.",
         });
       } catch (error) {
@@ -256,7 +346,7 @@ export function productionSetups(world: WorldStore): ProductionSetupService {
 
 export async function recoverProductionSetups(world: WorldStore): Promise<void> {
   const service = productionSetups(world);
-  const found = await world.ownedWrite(() => discoverConversations(world.dir));
+  const found = await world.operationalWrite(() => discoverConversations(world.dir));
   const errors: unknown[] = [];
   for (const summary of found.summaries) {
     if (summary.entryContext?.kind !== "production-setup" && summary.setupStatus !== "creating") continue;

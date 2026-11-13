@@ -1,15 +1,9 @@
 import { createHash } from "node:crypto";
+import { canonicalJson } from "@arke-studio/contracts";
 
-export function stableJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  return `{${Object.entries(value as Record<string, unknown>)
-    .filter(([, one]) => one !== undefined)
-    // Code-unit order is identical on every host; locale collation is not.
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([key, one]) => `${JSON.stringify(key)}:${stableJson(one)}`)
-    .join(",")}}`;
-}
+/** What a value JSON cannot hold is written as null: these digest whatever a payload carries. The
+ * client's history card computes the same receipt with the same rule, from contracts. */
+export const stableJson = (value: unknown) => canonicalJson(value, { unsupported: "null" });
 
 export function conversationActionDigest(value: unknown): string {
   return `sha256:${createHash("sha256").update(stableJson(value), "utf8").digest("hex")}`;

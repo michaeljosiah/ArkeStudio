@@ -34,7 +34,7 @@ const electron = {
     // Never resolves: module scope is all we want, so the app is left waiting on the runtime.
     whenReady: () => new Promise(() => {}),
     on: () => {}, once: () => {}, quit: () => {}, exit: () => {},
-    getPath: () => join(root, "dist"), setPath: () => {}, getName: () => "Arke Studio",
+    getPath: () => join(root, "dist"), setPath: () => {}, setName: () => {}, getName: () => "Arke Studio",
     getVersion: () => "0.0.0-smoke", setAppUserModelId: () => {},
     requestSingleInstanceLock: () => true, disableHardwareAcceleration: () => {},
   },

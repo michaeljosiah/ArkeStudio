@@ -215,3 +215,58 @@
   font: 400 12px var(--font-sans);
   color: var(--muted-foreground);
 }
+
+/* ── Linked names (SPEC-056 R-16, design turn 227b) ──── */
+
+/* The book's speaker colour at 60%, a place dotted and neutral. Paint only: nothing is written. */
+.fy-ln {
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 5px;
+  text-decoration-color: color-mix(in srgb, var(--fy-voice, var(--muted-foreground)) 60%, transparent);
+  text-decoration-skip-ink: auto;
+}
+.fy-ln--place {
+  --fy-voice: var(--muted-foreground);
+  text-decoration-style: dotted;
+}
+.fy-ln.fy-voice--none,
+.fy-ln.fy-voice--narrator {
+  --fy-voice: var(--muted-foreground);
+}
+[data-names="off"] .fy-ln {
+  text-decoration: none;
+}
+
+/* ── The @ menu (227c) ───────────────────────────────── */
+
+.fy-mention {
+  width: 260px;
+}
+.fy-mention__face {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  overflow: hidden;
+  border-radius: 50%;
+  background: var(--muted);
+  color: var(--muted-foreground);
+  font: 500 11px var(--font-sans);
+}
+.fy-mention__face img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 14%;
+}
+.fy-mention__face--place {
+  border-radius: 7px;
+}
+.fy-slash__rule {
+  height: 1px;
+  margin: 5px 4px;
+  border: 0;
+  background: var(--border);
+}

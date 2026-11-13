@@ -1,0 +1,138 @@
+import assert from "node:assert/strict";
+import { it } from "node:test";
+import { ClientMessageSchema } from "../src/frames.js";
+
+it("accepts legacy review commands and nonempty distinct check selections", () => {
+  const command = { kind: "chapter-review-start", worldId: "01K00000000000000000000000", productionId: "book", chapterId: "one", requestId: "01K00000000000000000000001" };
+  for (const checks of [undefined, ["prose"], ["script", "visual", "narration"]]) assert.equal(ClientMessageSchema.safeParse({ ...command, checks }).success, true);
+  for (const checks of [[], ["prose", "prose"], ["unknown"]]) assert.equal(ClientMessageSchema.safeParse({ ...command, checks }).success, false);
+});
+import { ReviewAnswerSchema, ReviewAnswerReadSchema, ChapterReviewSchema, verifiedReviewAnswer, ChapterReviewTargetSchema, chapterReviewSummary, sameReviewFinding, sameChapterReviewSource, validateReviewAssessments, validateReviewGroups, validateReviewConflicts, effectiveReviewVerdict, reviewHasNoCorrection, type ChapterReview } from "../src/chapter-review.js";
+
+it("requires exact prose and supplied images while preserving uncertainty", () => {
+  const finding = { category: "image" as const, certainty: "possible-confusion" as const, quote: "She turned the tablet toward him.", imageBlocks: ["p0.0"], observation: "Screen appears turned away.", impact: "The action is unclear.", correction: "Use a shared view behind the reader." };
+  const answer = ReviewAnswerSchema.parse({ facts: [{ quote: finding.quote, claim: "Tablet is shared", kind: "explicit" }, { quote: "Invented", claim: "No", kind: "explicit" }], findings: [finding, { ...finding, quote: "Paraphrase" }, { ...finding, imageBlocks: ["p9.0"] }, { ...finding, imageBlocks: [] }, { ...finding, category: "continuity", imageBlocks: [] }, { ...finding, category: "narration" }] });
+  const result = verifiedReviewAnswer(finding.quote, answer, ["p0.0"]);
+  assert.equal(result.findings.length, 1);
+  assert.equal(result.findings[0]!.certainty, "possible-confusion");
+  assert.equal(result.facts.length, 1);
+  assert.equal(result.rejected, 6);
+});
+it("refuses oversized answers and unsafe target paths", () => {
+  assert.equal(ReviewAnswerSchema.safeParse({ facts: [], findings: [], extra: "ignored?" }).success, false);
+  assert.equal(ChapterReviewTargetSchema.safeParse({ worldId: "world", productionId: "../other", chapterId: "chapter" }).success, false);
+});
+
+it("reads a model's answer without the keys it added, but never without a field it owes", () => {
+  const finding = { category: "clarity" as const, certainty: "possible-confusion" as const, quote: "She left.", imageBlocks: [], observation: "Exit unclear", impact: "Reader loses her", correction: "Name the door" };
+  const assessment = { findingId: "00000000-0000-4000-a000-000000000001", verdict: "supported" as const, subject: "Door", rationale: "Shown", visibility: "visible" as const, basis: "reader-confusion" as const };
+  const clean = { facts: [{ quote: "She left.", claim: "She leaves", kind: "explicit" as const }], findings: [finding], assessments: [assessment],
+    groups: [{ representativeId: assessment.findingId, memberIds: [assessment.findingId, assessment.findingId], rationale: "Same" }],
+    conflicts: [{ memberIds: [assessment.findingId, assessment.findingId], rationale: "Opposed" }], tells: [{ kind: "pivot" as const, quote: "She left." }] };
+  const added = { summary: "x", facts: [{ ...clean.facts[0], confidence: 1 }], findings: [{ ...finding, claim: "c", certainty_note: "n" }], assessments: [{ ...assessment, note: "n" }],
+    groups: [{ ...clean.groups[0], why: "w" }], conflicts: [{ ...clean.conflicts[0], why: "w" }], tells: [{ ...clean.tells[0], why: "w" }] };
+  assert.deepEqual(ReviewAnswerReadSchema.parse(added), clean);
+  assert.equal(ReviewAnswerSchema.safeParse(added).success, false, "what is checked and stored stays strict");
+  const { impact: _impact, ...missing } = finding;
+  for (const findings of [[missing], [{ ...finding, certainty: "sure" }], [{ ...finding, quote: 4 }], Array(21).fill(finding)])
+    assert.equal(ReviewAnswerReadSchema.safeParse({ facts: [], findings }).success, false);
+  assert.equal(ReviewAnswerReadSchema.safeParse({ facts: [], findings: [], tells: [{ kind: "simile", quote: "x", why: "w" }] }).success, false, "only the six kinds");
+  assert.equal(ReviewAnswerReadSchema.safeParse({ facts: [] }).success, false);
+});
+
+it("bounds long findings to the chat receipt limit while retaining coverage disclosure", () => {
+  const findings = Array.from({ length: 5 }, () => ({ observation: "x".repeat(1600) })) as ChapterReview["findings"];
+  const summary = chapterReviewSummary({ status: "complete", stale: false, findings });
+  assert.ok(summary.length <= 2000); assert.match(summary, /5 findings/); assert.match(summary, /Audio not listened to/);
+});
+
+it("only identical findings share a human decision or deduplication identity", () => {
+  const finding = { category: "clarity" as const, certainty: "possible-confusion" as const, quote: "She left.", imageBlocks: ["p0.0"], observation: "Movement unclear", impact: "Reader loses position", correction: "Name the exit" };
+  assert.equal(sameReviewFinding(finding, structuredClone(finding)), true);
+  for (const changed of [{ category: "continuity" as const }, { certainty: "contradiction" as const }, { quote: "He left." },
+    { imageBlocks: ["p1.0"] }, { observation: "Movement impossible" }, { impact: "Contradicts the next scene" }, { correction: "Change the next scene" }]) {
+    assert.equal(sameReviewFinding(finding, { ...finding, ...changed }), false);
+  }
+});
+
+it("binds carried decisions to the captured prose, context and image versions", () => {
+  const previous = { sourceHash: "source-B", contextHash: "directions-1", images: [{ block: "p0.0", file: "view.png", hash: "pixels-1", textHash: "text-1" }] };
+  const captured = { ...structuredClone(previous), sourceHash: "source-A" };
+  assert.equal(sameChapterReviewSource(previous, captured), false, "restoring live B cannot make captured A match a decided B");
+  assert.equal(sameChapterReviewSource(previous, structuredClone(previous)), true);
+  assert.equal(sameChapterReviewSource(previous, { ...previous, contextHash: "directions-2" }), false);
+  for (const image of [{ ...previous.images[0]!, hash: "pixels-2" }, { ...previous.images[0]!, textHash: "text-2" }]) {
+    assert.equal(sameChapterReviewSource(previous, { ...previous, images: [image] }), false);
+  }
+});
+
+const draft = { category: "image" as const, certainty: "contradiction" as const, quote: "Her fingers were splinted.", imageBlocks: ["p1.0"], observation: "No splint", impact: "Injury lost", correction: "Show the splint" };
+const candidate = { ...draft, id: "00000000-0000-4000-a000-000000000001", taskId: "visual-1", offset: 0 };
+const duplicate = { ...candidate, id: "00000000-0000-4000-a000-000000000002", taskId: "visual-2", observation: "Fingers are unbound" };
+it("requires exactly one evidence assessment for each original candidate", () => {
+  const assessment = { findingId: candidate.id, verdict: "rejected" as const, visibility: "ambiguous" as const, basis: "no-defect" as const, subject: "The patient, not the doctor", rationale: "This quote describes another person." };
+  assert.deepEqual(validateReviewAssessments([candidate], { facts: [], findings: [], assessments: [assessment] }), [{ ...assessment, effectiveVerdict: "rejected" }]);
+  for (const assessments of [undefined, [], [assessment, assessment], [{ ...assessment, findingId: duplicate.id }]]) {
+    assert.throws(() => validateReviewAssessments([candidate], { facts: [], findings: [], assessments }), /every candidate/);
+  }
+});
+it("consolidates paraphrases only with valid disjoint compatible membership", () => {
+  const findings = [candidate, duplicate].map(c => ({ ...c, decision: "open" as const }));
+  const group = { representativeId: candidate.id, memberIds: [candidate.id, duplicate.id], rationale: "Same injured fingers, missing splint and correction" };
+  assert.deepEqual(validateReviewGroups(findings, { facts: [], findings: [], groups: [group] }), [group]);
+  for (const groups of [undefined, [group, group], [{ ...group, memberIds: [candidate.id, candidate.id] }], [{ ...group, representativeId: "unknown" }]]) {
+    assert.throws(() => validateReviewGroups(findings, { facts: [], findings: [], groups }));
+  }
+  for (const change of [{ imageBlocks: ["p2.0"] }, { certainty: "cannot-assess" as const }, { category: "clarity" as const }]) {
+    assert.throws(() => validateReviewGroups([findings[0]!, { ...findings[1]!, ...change }], { facts: [], findings: [], groups: [group] }), /incompatible/);
+  }
+});
+
+it("normalizes omitted image IDs for prose without allowing uncited visual claims", () => {
+  const { imageBlocks: _images, ...withoutImages } = draft;
+  const answer = ReviewAnswerSchema.parse({ facts: [], findings: [{ ...withoutImages, category: "clarity" }] });
+  assert.deepEqual(answer.findings[0]!.imageBlocks, []);
+  assert.equal(verifiedReviewAnswer(draft.quote, answer, []).findings.length, 1);
+  assert.equal(verifiedReviewAnswer(draft.quote, answer, ["p1.0"]).findings.length, 0);
+});
+
+it("persists combined exact and semantic provenance beyond the model response limits", () => {
+  const id = (n: number) => `00000000-0000-4000-a000-${String(n).padStart(12, "0")}`;
+  const groups = Array.from({ length: 201 }, (_, i) => ({ representativeId: id(i * 2), memberIds: [id(i * 2), id(i * 2 + 1)], rationale: "Same finding" }));
+  const stored = ChapterReviewSchema.shape.groups;
+  assert.equal(stored.safeParse(groups).success, true);
+  assert.equal(ReviewAnswerSchema.safeParse({ facts: [], findings: [], groups }).success, false);
+  const expanded = [{ ...groups[0]!, memberIds: Array.from({ length: 79 }, (_, i) => id(i)) }];
+  assert.equal(stored.safeParse(expanded).success, true, "expanding exact script duplicates can exceed 60 members");
+  assert.equal(ReviewAnswerSchema.safeParse({ facts: [], findings: [], groups: expanded }).success, false);
+  assert.equal(stored.safeParse(Array.from({ length: 251 }, () => groups[0])).success, false);
+  assert.equal(stored.safeParse([{ ...groups[0]!, memberIds: Array.from({ length: 501 }, (_, i) => id(i)) }]).success, false);
+});
+
+it("does not upgrade hidden, ambiguous or no-defect observations into supported defects", () => {
+  const a = { findingId: candidate.id, verdict: "supported" as const, subject: "Concealed detail", rationale: "Not visible", visibility: "visible" as const, basis: "observed-contradiction" as const };
+  assert.equal(effectiveReviewVerdict(a), "supported");
+  for (const visibility of ["occluded", "out-of-frame", "ambiguous"] as const) {
+    assert.equal(effectiveReviewVerdict({ ...a, visibility }), "uncertain");
+  }
+  assert.equal(effectiveReviewVerdict({ ...a, basis: "unobservable" }), "uncertain");
+  assert.equal(effectiveReviewVerdict({ ...a, basis: "no-defect" }), "rejected");
+  assert.equal(effectiveReviewVerdict({ ...a, verdict: "rejected" }), "rejected");
+  assert.throws(() => validateReviewAssessments([candidate], { facts: [], findings: [], assessments: [{ ...a, visibility: undefined }] }), /omitted visibility/);
+  assert.equal(reviewHasNoCorrection("No change needed."), true);
+  assert.equal(reviewHasNoCorrection("No change needed to the hand; repair the backwards display."), false);
+  const filtered = verifiedReviewAnswer(draft.quote, { facts: [], findings: [{ ...draft, correction: "No changes are required." }] }, draft.imageBlocks);
+  assert.equal(filtered.findings.length, 0);
+});
+
+it("validates conflicts across supported and contrary verdicts without allowing unrelated images or subjects to be grouped mechanically", () => {
+  const assessments = [candidate, duplicate].map((c, i) => ({ findingId: c.id, taskId: "verify", verdict: i ? "uncertain" as const : "supported" as const, subject: "Hidden brace", rationale: "Opposing conclusions" }));
+  const conflict = { memberIds: [candidate.id, duplicate.id], rationale: "Same brace and image, contradictory support" };
+  const answer = { facts: [], findings: [], conflicts: [conflict] };
+  assert.deepEqual(validateReviewConflicts([candidate, duplicate], assessments, answer), [conflict]);
+  for (const conflicts of [undefined, [conflict, conflict], [{ ...conflict, memberIds: [candidate.id, candidate.id] }]]) {
+    assert.throws(() => validateReviewConflicts([candidate, duplicate], assessments, { ...answer, conflicts }));
+  }
+  assert.throws(() => validateReviewConflicts([candidate, { ...duplicate, imageBlocks: ["p9.0"] }], assessments, answer), /incompatible/);
+  assert.throws(() => validateReviewConflicts([candidate, duplicate], assessments.map(a => ({ ...a, verdict: "supported" })), answer), /contrary/);
+});

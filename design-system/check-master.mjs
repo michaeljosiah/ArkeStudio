@@ -1,6 +1,7 @@
 // Checks over design-system/Arke Studio.dc.html, the design master (issue 1097).
 //
 //   node design-system/check-master.mjs            static checks only
+//   node design-system/check-master.mjs --record   add new turns to turns.json (never removes one)
 //   node design-system/check-master.mjs --render   also render in headless Chrome and prove the
 //                                                  product's face loaded (needs Chrome and, for
 //                                                  the master, network for the dc runtime's React)
@@ -13,7 +14,7 @@
 // Render: the master painted in Segoe UI for months because nothing resolved to the loaded face
 // (Google served "Geist", the tokens named "Geist Sans"). The fonts are vendored now; this proves
 // it every time, by asking the browser rather than trusting the stylesheet.
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -107,6 +108,36 @@ for (const { turn, body } of sections) {
   if (turn < FOOTER_RULE_FROM_TURN) continue;
   const claims = body.match(/All changes saved/g) ?? [];
   if (claims.length) fail(`turn ${turn}: ${claims.length} footer(s) claim "All changes saved" — 138 binds the resting label to "Connected · v<version>", never a claim that local drafts are saved`);
+}
+
+// 6. No turn goes missing. A build slice once rewrote the master from a copy taken before turn 195
+//    merged, and 195's frames and rules vanished with no check noticing (2026-10-04). Every turn the
+//    master has held is listed in turns.json with its count of binding rules; a turn may not drop
+//    out and a turn's rules may not fall. A new turn is added with --record, which only ever adds
+//    turns and raises counts, so the ledger cannot be used to forget one.
+const LEDGER = join(here, "turns.json");
+const ruleCount = (body) => (body.match(/class="dv-rule"/g) ?? []).length;
+const present = new Map(sections.filter((s) => s.turn !== 0).map(({ turn, body }) => [turn, ruleCount(body)]));
+const ledger = existsSync(LEDGER) ? JSON.parse(readFileSync(LEDGER, "utf8")) : { turns: {} };
+if (process.argv.includes("--record")) {
+  const next = { ...ledger.turns };
+  for (const [turn, rules] of present) next[`t${turn}`] = Math.max(rules, next[`t${turn}`] ?? 0);
+  const sorted = Object.fromEntries(Object.entries(next).sort(([a], [b]) => Number(a.slice(1)) - Number(b.slice(1))));
+  const pendingLeft = Object.fromEntries(Object.entries(ledger.pending ?? {}).filter(([id]) => !present.has(Number(id.slice(1)))));
+  writeFileSync(LEDGER, JSON.stringify({ note: "Every turn the design master has held, with its count of dv-rule paragraphs. check-master fails if a turn drops out or its rules fall; add a new turn with node design-system/check-master.mjs --record.", turns: sorted, ...(Object.keys(pendingLeft).length ? { pending: pendingLeft } : {}) }, null, 2) + "\n");
+  console.log(`turns.json: ${Object.keys(sorted).length} turns recorded`);
+} else {
+  // A turn known to be missing while its restore is in flight warns instead of failing, so the
+  // loss stays visible on every run without blocking unrelated work.
+  const pending = ledger.pending ?? {};
+  for (const [id, rules] of Object.entries(ledger.turns)) {
+    const turn = Number(id.slice(1));
+    if (!present.has(turn) && id in pending) console.warn(`design master: ${id} is missing — ${pending[id]}`);
+    else if (!present.has(turn)) fail(`${id} dropped — the ledger (turns.json) holds it with ${rules} rule(s) but the master no longer does; restore it from the commit that last had it`);
+    else if (present.get(turn) < rules) fail(`${id} lost ${rules - present.get(turn)} binding rule(s) (${present.get(turn)} of ${rules}) — a dated rule was dropped`);
+  }
+  const unrecorded = [...present.keys()].filter((turn) => !(`t${turn}` in ledger.turns));
+  if (unrecorded.length) fail(`turn(s) not in turns.json: ${unrecorded.map((t) => `t${t}`).join(", ")} — run node design-system/check-master.mjs --record`);
 }
 
 // ---- render check ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ import {
   ShotIdSchema,
   SlugSchema,
 } from "./ids.js";
+import { canonicalJson } from "./canonical-json.js";
 
 export const DialogueShotFactSnapshotSchema = z
   .object({
@@ -129,12 +130,7 @@ export function dialogueShotFacts(shot: Shot, citedCharacterIds: string[], trans
 
 // Canonical full snapshots make identity collision-free without a platform-specific hash or
 // randomness. Timestamps of assessment are excluded; changes to actual evidence invalidate it.
-function canonical(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  if (value !== null && typeof value === "object") return `{${Object.entries(value).filter(([, v]) => v !== undefined)
-    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(",")}}`;
-  return JSON.stringify(value);
-}
+const canonical = (value: unknown) => canonicalJson(value);
 
 export function assessDialogueShot(input: DialogueAssessmentInput): DialogueAssessmentResult {
   const facts = DialogueShotFactSnapshotSchema.parse(input.facts);

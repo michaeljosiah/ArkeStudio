@@ -104,7 +104,7 @@ async function land(worldDir: string, path: string): Promise<void> {
 }
 
 async function finalize(coordinator: Coordinator, job: Job): Promise<void> {
-  await (coordinator as unknown as { onJobTerminal(terminal: Job): Promise<void> }).onJobTerminal(job);
+  await coordinator["onJobTerminal"](job);
 }
 
 /** Every sidecar under artifacts/, parsed the way the world scan parses them. */

@@ -1,0 +1,12 @@
+.fy-character-narration { display: grid; gap: 12px; min-width: 0; width: 100%; font: var(--type-ui); }
+.fy-character-narration label, .fy-character-narration__book, .fy-character-narration__effective { display: grid; gap: 6px; min-width: 0; }
+.fy-character-narration label > span, .fy-character-narration__effective > span { font-weight: 600; }
+.fy-character-narration textarea { box-sizing: border-box; width: 100%; resize: vertical; min-height: 56px; white-space: pre-wrap; }
+.fy-character-narration small { color: var(--muted-foreground); font: var(--type-meta); white-space: normal; }
+.fy-character-narration button { justify-self: start; min-height: 32px; }
+.fy-character-narration__effective { padding: 10px 12px; border-left: 2px solid var(--border); background: var(--secondary); }
+.fy-character-narration code { white-space: pre-wrap; overflow-wrap: anywhere; font: var(--type-meta); }
+.fy-voice-narration-books { display: grid; gap: 20px; padding: 16px; border-top: 1px solid var(--border); }
+.fy-voice-narration-books > label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.fy-voice-narration-books select { min-height: 32px; max-width: 100%; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: var(--type-ui); }
+@media (pointer: coarse) { .fy-character-narration button, .fy-voice-narration-books select { min-height: 44px; } }

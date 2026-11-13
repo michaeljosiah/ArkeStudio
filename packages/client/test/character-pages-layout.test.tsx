@@ -9,6 +9,20 @@ import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 describe("character pages below the desktop (turn 162)", () => {
+  it("describes missing imagery as never depicted rather than outstanding work", () => {
+    const state = structuredClone(FIXTURE_STATE);
+    state.world!.sheets.find(sheet => sheet.id === "maren-kest")!.neverDepicted = true;
+    state.world!.referenceKits = [];
+    state.world!.referenceTakes = [];
+    __setStateForTest(state);
+    const { document } = parseHTML(renderToString(<MemoryRouter initialEntries={[
+      `/w/${state.world!.meta.worldId}/cast/maren-kest/kit`,
+    ]}><App /></MemoryRouter>));
+    const content = document.querySelector('[data-screen="reference-kit"]')!.textContent!;
+    assert.match(content, /NEVER DEPICTED/);
+    assert.doesNotMatch(content, /OUTSTANDING|WAITING ON MAIN PHOTO|Use this portrait/);
+  });
+
   for (const [route, active] of [["kit", "Reference"], ["looks", "More looks"], ["voice", "Voice"]]) {
     it(`${active} marks just its own character tab`, () => {
       __setStateForTest(FIXTURE_STATE);

@@ -92,3 +92,18 @@ Production capture from manuscript order and selected kept takes, rights checks,
 acceptance, package import, full W3C processing and the app's book/audio profiles remain work
 under #1228. The fixtures do not implement those services. The result provides evidence for
 the format choice before that work, while ordinary EPUB exports retain their existing scope.
+
+
+## Private Publish slice validation (2026-10-13, PR #1751)
+
+The new story compiler's two-chapter fixture was encoded by real FFmpeg and inspected by
+ffprobe: AAC audio, ordered chapter markers, author/title metadata and an attached PNG cover
+passed. The actual EPUB retained emphasis, chapter navigation and cover art. EPUBCheck 5.4.0,
+run locally with OpenJDK 21.0.8 against that generated EPUB, reported zero errors and warnings.
+
+The sandboxed Electron file-page smoke checked the actual component, preload and authenticated
+media headers at 1280×900, 984×900 and 400×860. Its coordinator answers and Save dialog handler
+are fixtures. No provider-generated voice or user story is needed for these reproducible tests.
+
+Kindle import and phone M4B offline/background playback, seeking and resume remain unverified on
+physical devices. These results do not extend the video-v1 player's supported profile set.

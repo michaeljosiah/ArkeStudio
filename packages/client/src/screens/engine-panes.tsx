@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
+import { SetupRepairControl } from "../components/setup-repair-control.js";
 import {
   FIT_LABEL,
   ENGINE_LABEL,
   transferProgress,
+  normalizeOllamaUrl,
   type ComfyUiEngineStatus,
   type EngineId,
   type ComponentHealth,
@@ -29,6 +31,7 @@ import {
   chooseComfyUiModelsDir,
   chooseComfyUiPath,
   chooseVoxaExecutable,
+  setSpeechBackend,
   clearComfyUiEngine,
   clearComfyUiModelsDir,
   clearVoxaExecutable,
@@ -40,7 +43,6 @@ import {
   repairVoiceModels,
   restartVoxa,
   setComfyUiUrl,
-  setupRepair,
   setupRetry,
   setupSkip,
   testLocalVoice,
@@ -49,6 +51,10 @@ import {
   useSetup,
   useStore,
   useVoiceRuntimeTest,
+  setOllamaUrl,
+  useManagedOllama,
+  refreshOllama,
+  updateOllamaRuntime,
 } from "../lib/store.js";
 /**
  * The engine panes of Settings · Providers (SPEC-034 R-5). The machinery, deliberately and
@@ -58,8 +64,7 @@ import {
  * would be the wrong kindness — so the detail is unabridged, and R-5 moves it into a provider
  * pane without taking anything out: version, state, port, model directory, executable, logs,
  * restart, re-verify, repair. Logs opens what the child supervisor kept for an engine Arke
- * spawned (issue 585); for Ollama and a URL ComfyUI, which it never spawns, the row names where
- * that engine keeps its own instead.
+ * spawned (issue 585); for an explicitly selected URL service, the row names its owner's log.
  *
  * It absorbs Components. A component is a thing that must be on this machine — an engine's own
  * concern — so it is stated under the engine that requires it, and the link is declared on the
@@ -114,7 +119,7 @@ export function ComponentRows({ components }: { components: readonly SetupCompon
               </RuntimeStatus>
               <SetupTransferControl component={c} />
               {offered && <Button onClick={() => setupRetry(c.id)}>Download · {sizeMb(c.sizeMb)}</Button>}
-              {!settled && !offered && c.state !== "skipped" && (
+              {c.state === "queued" && (
                 <button type="button" className="fy-set__link" onClick={() => setupSkip(c.id)}>
                   Skip
                 </button>
@@ -126,9 +131,7 @@ export function ComponentRows({ components }: { components: readonly SetupCompon
                 </button>
               )}
               {c.repairRequired === true && (
-                <button type="button" className="fy-set__link" onClick={() => setupRepair(c.id)}>
-                  Repair
-                </button>
+                <SetupRepairControl component={c} />
               )}
             </div>
             {/* Paused bytes remain visible because they are retained for the resume. */}
@@ -170,6 +173,9 @@ export function VoxaDetail({
   health: ComponentHealth | undefined;
   components: readonly SetupComponent[];
 }) {
+  const pipecat = voiceRuntime?.backend === "pipecat";
+  const modelComponents = components.filter(component => pipecat || component.id !== "stt-faster-whisper-base-en").map(component =>
+    pipecat && component.id === "stt-whisper-base-en" ? { ...component, displayName: "Whisper base.en · measured word timing" } : component);
   const voiceTest = useVoiceRuntimeTest();
   const playback = usePlayback();
   const playedTest = useRef<string | null>(null);
@@ -189,7 +195,7 @@ export function VoxaDetail({
       : voiceRuntime?.source === "configured"
         ? "Configured Voxa"
         : voiceRuntime?.source === "bundled"
-          ? "Bundled Voxa"
+          ? pipecat ? "Arke-managed Pipecat" : "Bundled Voxa"
           : "Runtime missing";
   const engineTone = (engine: { state: string } | undefined): RuntimeTone =>
     engine?.state === "ready" ? "ok" : engine?.state === "unknown" || engine === undefined ? "idle" : "warn";
@@ -198,12 +204,20 @@ export function VoxaDetail({
     <>
       <RuntimeHead
         mark="voxa"
-        title={ENGINE_LABEL.voxa}
+        title={pipecat ? "Pipecat" : "Voxa"}
         caps={engineCapabilityWords("voxa")}
         tone={voiceRuntime?.detail === "Ready" ? "ok" : "warn"}
         state={voiceRuntime?.processState ?? "unconfigured"}
       />
       <div className="fy-rt__keyline">
+        <label className="fy-set__field">Local speech engine
+          <select aria-label="Local speech engine" value={pipecat ? "pipecat" : "voxa"}
+            onChange={event => setSpeechBackend(event.target.value === "pipecat" ? "pipecat" : "voxa")}>
+            <option value="pipecat" disabled={voiceRuntime?.expectedArchitecture !== "x64"}>Pipecat · Arke-managed</option>
+            <option value="voxa">Voxa · legacy</option>
+          </select>
+        </label>
+        <div className="fy-set__note">Kokoro voices are shared. Pipecat needs its own recognition model below. Voice dictation inserts editable text and never sends it.</div>
         <div className="fy-rt__eyebrow">ENGINE</div>
         <div className="fy-set__field">
           <span style={{ flex: 1 }}>
@@ -214,17 +228,17 @@ export function VoxaDetail({
                 host already publishes exactly the safe half (SPEC-028 R-4). */}
             {voiceRuntime?.executableName ? ` · ${voiceRuntime.executableName}` : ""}
           </span>
-          <ActionButton icon={<Pencil size={13} />} onClick={() => chooseVoxaExecutable()}>
-            Change
-          </ActionButton>
-          {voiceRuntime?.bundledAvailable && voiceRuntime.source === "configured" && (
+          {!pipecat && <ActionButton icon={<Pencil size={13} />} onClick={() => chooseVoxaExecutable()}>
+            Use an existing install
+          </ActionButton>}
+          {!pipecat && voiceRuntime?.bundledAvailable && voiceRuntime.source === "configured" && (
             <ActionButton icon={<RotateCcw size={13} />} onClick={() => useBundledVoxa()}>
               Use bundled
             </ActionButton>
           )}
-          {voiceRuntime?.configured && (
+          {!pipecat && voiceRuntime?.configured && (
             <ActionButton icon={<Trash size={13} />} danger onClick={() => clearVoxaExecutable()}>
-              Clear
+              Use Arke-managed
             </ActionButton>
           )}
         </div>
@@ -273,12 +287,12 @@ export function VoxaDetail({
           Logs
         </ActionButton>
         <span style={{ flex: 1 }} />
-        <HealthDot label="Voxa local speech" health={health} />
+        <HealthDot label={pipecat ? "Pipecat local speech" : "Voxa local speech"} health={health} />
       </div>
       {/* Kokoro and whisper.cpp are Voxa's own weights, so they are stated here rather than in
           a flat catalogue two panes away from the engine that reads them (R-71). */}
       <RuntimeSection label="COMPONENTS" />
-      <ComponentRows components={components} />
+      <ComponentRows components={modelComponents} />
       {voiceTest && (
         <div className="fy-set__note">
           {voiceTest.detail}
@@ -622,40 +636,47 @@ export function processTone(state: string | undefined): RuntimeTone {
   if (state === undefined || state === "starting" || state === "unconfigured" || state === "untested") return "idle";
   return "warn";
 }
-/**
- * Ollama, as much of it as the product actually knows. It has no supervisor of its own — the
- * installer hands it to the operating system and it answers on its own port — so what there is
- * to state is the runtime component, the models pulled through it, and whether the provider
- * answered when it was last asked. Stating less than that would be an apology; inventing a
- * version string we never read would be worse.
- */
+/** Runtime ownership is explicit: discovery never changes the selected service. */
 export function OllamaDetail({ components }: { components: readonly SetupComponent[] }) {
   const { state } = useStore();
-  const provider = (state?.app.providers ?? []).find((p) => p.id === "ollama");
-  const answered = provider?.probes.some((probe) => probe.available) === true;
-  const refusal = provider?.probes.find((probe) => !probe.available)?.reason;
+  const runtime = state?.app.ollama;
+  const [url, setUrl] = useState("");
+  const managed = runtime?.source !== "user-url";
+  const component = components.find(row => row.id === "ollama-runtime");
+  useEffect(() => { refreshOllama(); }, []);
+  // The switch stops the old service first, about nine seconds with nothing on screen to say it took (issue 2562).
+  const [switching, setSwitching] = useState(false);
+  // A refusal comes back as the old service's status with its reason, so any new word ends the wait.
+  useEffect(() => setSwitching(false), [managed, runtime?.state, runtime?.detail]);
   return (
     <>
       <RuntimeHead
         mark="ollama"
         title={ENGINE_LABEL.ollama}
         caps={engineCapabilityWords("ollama")}
-        tone={processTone(provider?.validation)}
-        state={answered ? "answering" : (provider?.validation ?? "not asked")}
+        tone={processTone(runtime?.state)}
+        state={runtime?.state ?? "unknown"}
       />
-      {/* Only where the probe gave one. A fallback line under a warning dot, beside a head that
-          says `untested` under an idle one, is two dots of different colours about one engine
-          three inches apart — and the fallback was a URL nothing reads. */}
-      {refusal !== undefined && (
+      <RuntimeSection label="ENGINE">
+        <span className="fy-rt__path">{managed ? "Arke-managed" : "Your service"}{runtime?.version ? ` · v${runtime.version}` : ""}{runtime?.url ? ` · ${runtime.url}` : ""}</span>
+        {!managed && <ActionButton icon={<RotateCcw size={13} />} hint="The Studio assistant only runs on Arke's own Ollama" disabled={switching} onClick={() => { setSwitching(true); useManagedOllama(); }}>{switching ? "Switching…" : "Use Arke-managed"}</ActionButton>}
+      </RuntimeSection>
+      {runtime?.detail && (
         <div className="fy-set__why">
           <span className="fy-set__dot fy-set__dot--warn" />
-          <span>{refusal}</span>
+          <span>{runtime.detail}</span>
         </div>
       )}
-      {/* Ollama is handed to the operating system by its installer and answers on its own port:
-          there is no child of ours to keep a log for, so the row names where it keeps its own
-          (SPEC-033 R-70) rather than offering a file this application never wrote. */}
-      <div className="fy-set__caps">Logs · Ollama keeps its own · server.log in its data folder (%LOCALAPPDATA%\Ollama on Windows, ~/.ollama/logs elsewhere)</div>
+      <RuntimeSection label="USE AN EXISTING SERVICE">
+        <input className="fy-set__input" aria-label="Ollama URL" placeholder="http://127.0.0.1:11434" value={url} onChange={event => setUrl(event.target.value)} />
+        <ActionButton icon={<LinkMark size={13} />} disabled={normalizeOllamaUrl(url.trim()) === null} onClick={() => { setOllamaUrl(url.trim()); setUrl(""); }}>Use this URL</ActionButton>
+      </RuntimeSection>
+      <div className="fy-rt__actions">
+        <ActionButton icon={<RefreshCw size={13} />} onClick={refreshOllama}>Refresh</ActionButton>
+        {managed && <ActionButton icon={<FileText size={13} />} onClick={() => openEngineLog("ollama")}>Logs</ActionButton>}
+        {component?.currency === "behind" && <ActionButton icon={<RefreshCw size={13} />} onClick={updateOllamaRuntime}>Update managed runtime</ActionButton>}
+        {!managed && <span className="fy-set__caps">Logs · kept by whoever runs it</span>}
+      </div>
       <RuntimeSection label="COMPONENTS" />
       <ComponentRows components={components} />
     </>

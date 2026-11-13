@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { AudiobookDoor, AudiobookListening, ChapterSummary, ClientMessage, ClientState } from "@arke-studio/contracts";
 import { AudiobookScreen } from "../src/screens/audiobook.js";
-import { bookHasTakes, playerChapters } from "../src/components/audiobook-player.js";
+import { AudiobookPlayerView, bookHasTakes, listenLeads, ListenButton, playerChapters } from "../src/components/audiobook-player.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { claimRead } from "../src/lib/reply-reads.js";
@@ -84,7 +84,7 @@ function listening(made: number): AudiobookListening {
 
 type Mounted = { container: HTMLElement; root: Root; sent: ClientMessage[] };
 const open: Mounted[] = [];
-async function mount(state: ClientState): Promise<Mounted> {
+async function mount(state: ClientState, chapterId?: string, bookStart = false): Promise<Mounted> {
   const sent: ClientMessage[] = [];
   __setBridgeForTest({ appVersion: "test", platform: "test", connect: () => {}, subscribe: () => {}, send: (json: string) => sent.push(JSON.parse(json) as ClientMessage) } as unknown as ArkeBridge);
   const container = dom.document.createElement("div") as unknown as HTMLElement;
@@ -95,7 +95,7 @@ async function mount(state: ClientState): Promise<Mounted> {
     root.render(
       <MemoryRouter initialEntries={[ROUTE]}>
         <Routes>
-          <Route path="/w/:worldId/p/:prodId/story/audiobook" element={<AudiobookScreen />} />
+          <Route path="/w/:worldId/p/:prodId/story/audiobook" element={chapterId === undefined ? <AudiobookScreen /> : bookStart ? <AudiobookPlayerView worldId={FIXTURE_WORLD_ID} production={state.world!.productions.find((production) => production.meta.id === "inkbound")!} chapterId={chapterId} onClose={() => {}} /> : <ListenButton worldId={FIXTURE_WORLD_ID} production={state.world!.productions.find((production) => production.meta.id === "inkbound")!} chapterId={chapterId} />} />
         </Routes>
       </MemoryRouter>,
     );
@@ -127,11 +127,73 @@ async function answer(m: Mounted, plan: AudiobookListening): Promise<void> {
 }
 
 describe("Listen (turn 186)", () => {
+  it("keeps a book Continue position separate from chapter scope", async () => {
+    const state = inkbound(2);
+    state.world!.productions.find((production) => production.meta.id === "inkbound")!.chapters[0]!.status = "outlined";
+    const m = await mount(state, "slack-water", true);
+    assert.equal(asks(m).at(-1)!.scope, undefined, "even an outlined starting position still requests the book");
+  });
+
+  it("does not enable an empty outlined chapter because another chapter has audio", async () => {
+    const state = inkbound(2);
+    state.world!.productions.find((production) => production.meta.id === "inkbound")!.chapters[1]!.status = "outlined";
+    const m = await mount(state, "neap");
+    assert.equal(q(m, '[data-testid="audiobook-listen"]')!.hasAttribute("disabled"), true);
+  });
+
+  it("stops and clears the previous player plan when a refreshed selection is refused", async () => {
+    const m = await mount(inkbound(2));
+    await press(q(m, '[data-testid="audiobook-listen"]'));
+    await answer(m, listening(2));
+    const requestId = asks(m).at(-1)!.requestId;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.listening", requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", listening: null, refused: "That chapter is no longer in this production." }));
+    assert.match(q(m, '.fy-abplayer__wait')?.textContent ?? "", /no longer in this production/);
+    assert.equal(all('.abp-line').length, 0, "the stale chapter is no longer playable");
+  });
+
+  it("keeps outlined takes off the book controls but available from the chapter", async () => {
+    const state = inkbound(2);
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "inkbound")!;
+    production.chapters[0]!.status = "outlined";
+    assert.equal(bookHasTakes(production), false);
+    assert.equal(listenLeads(production, "slack-water"), true);
+    const book = await mount(state);
+    assert.equal(q(book, '[data-testid="audiobook-listen"]'), null);
+    const chapter = await mount(state, "slack-water");
+    assert.equal(q(chapter, '[data-testid="audiobook-listen"]')!.hasAttribute("disabled"), false);
+    await press(q(chapter, '[data-testid="audiobook-listen"]'));
+    assert.deepEqual(asks(chapter).at(-1)!.scope, { kind: "chapter", chapterId: "slack-water" });
+  });
+
+  it("refreshes an open book when only chapter status changes", async () => {
+    const m = await mount(inkbound(2));
+    await press(q(m, '[data-testid="audiobook-listen"]'));
+    await answer(m, listening(2));
+    const state = inkbound(2);
+    state.world!.productions.find((production) => production.meta.id === "inkbound")!.chapters[1]!.status = "outlined";
+    await act(async () => __setStateForTest(state, { connection: "open" }));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 1300)));
+    assert.equal(asks(m).length, 2);
+    assert.equal(asks(m).at(-1)!.scope, undefined, "the book never switches to an outlined chapter");
+    await answer(m, { ...listening(2), chapters: listening(2).chapters.slice(0, 1) });
+    assert.doesNotMatch(q(m, ".abp")?.textContent ?? "", /The counting of bells/);
+  });
+
+  it("offers Listen for imported arrangements with no legacy takes", () => {
+    const rows = chapters(0), chapter = rows[0]!;
+    chapter.audiobook = { ...stamp(0), arranged: true };
+    assert.equal(bookHasTakes({ chapters: rows }), true);
+    assert.equal(listenLeads({ chapters: rows }, chapter.id), true);
+    chapter.retired = true;
+    assert.equal(bookHasTakes({ chapters: rows }), false);
+    assert.equal(listenLeads({ chapters: rows }, chapter.id), false);
+  });
   it("waits for one made block anywhere in the book", async () => {
     assert.equal(bookHasTakes({ chapters: chapters(0) }), false);
     assert.equal(bookHasTakes({ chapters: chapters(2) }), true);
     const m = await mount(inkbound(0));
-    assert.equal(q(m, '[data-testid="audiobook-listen"]')?.hasAttribute("disabled"), true);
+    // Not drawn, not disabled (design turn 199): until a block is made, Read the book leads.
+    assert.equal(q(m, '[data-testid="audiobook-listen"]'), null);
   });
 
   it("opens the player over the window on the coordinator's plan, a chapter read in part included", async () => {
@@ -215,11 +277,13 @@ describe("Listen (turn 186)", () => {
     assert.equal(q(m, '[data-testid="audiobook-player"]'), null, "and gone from the body when closed");
   });
 
-  it("is the head's one primary, with a play icon, once a block is made — Read the book stands back", async () => {
+  it("is the hero's primary, with a play mark, once a block is made — Export follows and Read the book stands back (199)", async () => {
     const none = await mount(inkbound(0));
-    const waiting = q(none, '[data-testid="audiobook-listen"]');
-    assert.equal(waiting?.classList.contains("ui-btn--primary"), false, "a ghost while there is nothing to hear");
-    assert.ok(waiting?.querySelector("svg"), "the play icon either way");
+    const doorAsk0 = none.sent.filter((message): message is Extract<ClientMessage, { kind: "open-audiobook" }> => message.kind === "open-audiobook").at(-1)!;
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: doorAsk0.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", door: DOOR }));
+    assert.equal(q(none, '[data-testid="audiobook-listen"]'), null, "nothing to hear: no Listen");
+    assert.equal(q(none, '[data-testid="audiobook-export-open"]')?.textContent?.trim(), "Publish", "book-only publishing is available before narration");
+    assert.ok(q(none, '[data-testid="read-book"]')?.classList.contains("fy-abshow__btn--pri"), "Read the book leads");
     await act(async () => none.root.unmount());
     open.splice(0);
     none.container.remove();
@@ -227,20 +291,19 @@ describe("Listen (turn 186)", () => {
     const doorAsk = m.sent.filter((message): message is Extract<ClientMessage, { kind: "open-audiobook" }> => message.kind === "open-audiobook").at(-1)!;
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.door", requestId: doorAsk.requestId, worldId: FIXTURE_WORLD_ID, productionId: "inkbound", door: DOOR }));
     const listen = q(m, '[data-testid="audiobook-listen"]');
-    assert.equal(listen?.classList.contains("ui-btn--primary"), true);
-    assert.equal(q(m, '[data-testid="read-book"]')?.classList.contains("ui-btn--secondary"), true, "the read of the rest stands back");
+    assert.equal(listen?.classList.contains("fy-abshow__btn--pri"), true);
+    assert.equal(q(m, '[data-testid="read-book"]')?.classList.contains("fy-abshow__btn--pri"), false, "the read of the rest stands back");
     assert.ok(listen?.querySelector("svg"));
-    const head = listen!.closest(".fy-h1row")!;
+    const head = q(m, '[data-testid="audiobook-presses"]')!;
     const order = [...head.querySelectorAll("button")].map((button) => button.getAttribute("data-testid"));
-    assert.ok(order.indexOf("audiobook-listen") < order.indexOf("audiobook-export-open"), "Listen before Export");
-    assert.equal(q(m, '[data-testid="audiobook-export-open"]')?.classList.contains("ui-btn--ghost"), true);
-    assert.equal(head.querySelectorAll(".ui-btn--primary").length, 1, "one primary in the head");
+    assert.deepEqual(order, ["audiobook-listen", "audiobook-export-open", "read-book", "audiobook-more"], "Listen, Export, Read the book, ⋯");
+    assert.equal(head.querySelectorAll(".fy-abshow__btn--pri").length, 1, "one primary in the hero");
   });
 
   it("serves every file the plan names through the app", () => {
-    const chapters_ = playerChapters({ ...listening(3), chapters: [{ ...listening(3).chapters[0]!, pictures: [{ key: "p1.0", number: 3, file: "artifacts/p.png", at: 14, seconds: 6, short: true }] }] }, (file) => `/media/w/${file}`);
+    const chapters_ = playerChapters({ ...listening(3), chapters: [{ ...listening(3).chapters[0]!, pictures: [{ key: "p1.0", number: 3, file: "artifacts/p.png", at: 14, seconds: 6, focus: { x: 0.7, y: 0.3 } }] }] }, (file) => `/media/w/${file}`);
     assert.equal(chapters_[0]!.blocks[1]!.src, "/media/w/artifacts/a.wav");
-    assert.deepEqual(chapters_[0]!.pictures, [{ at: 14, src: "/media/w/artifacts/p.png" }]);
+    assert.deepEqual(chapters_[0]!.pictures, [{ at: 14, seconds: 6, src: "/media/w/artifacts/p.png", focus: { x: 0.7, y: 0.3 } }]);
     assert.equal(chapters_[0]!.opening, "/media/w/world-art.png");
   });
 });

@@ -23,12 +23,12 @@
   },
   "scripts": {
     "build": "node scripts/build.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "node ../../scripts/tsc.mjs -p tsconfig.json --noEmit",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": {
     "yaml": "^2.6.0",
-    "zod": "^3.23.8",
+    "zod": "^3.25.76",
     "@types/node": "^22.0.0",
     "@types/better-sqlite3": "^7.6.13"
   },

@@ -19,7 +19,7 @@ async function sandboxDir(prefix: string): Promise<string> {
 function draftingAdapter(): HarnessAdapter & { created: string[] } {
   // Declares what the live OpenCode adapters declare: the confinement has to reach the sandbox
   // through the adapter now, and a stub that offered nothing would let this pass by absence.
-  const sessionFiles = () => [{ name: "opencode.json", contents: `${JSON.stringify({ agent: {} }, null, 2)}
+  const sessionFiles = () => [{ name: "opencode.json", contents: `${JSON.stringify({ agents: {} }, null, 2)}
 ` }];
   const subscribers = new Set<{ queue: HarnessEvent[]; wake: (() => void) | null }>();
   const push = (event: HarnessEvent) => {
@@ -242,6 +242,22 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
     await first;
   });
 
+  it("keeps a turn the clock stopped running until the writer says it stopped (codex on PR 2863)", async () => {
+    const dir = await sandboxDir("genesis-drain-");
+    const adapter = muteAdapter();
+    let acknowledge!: () => void, asked!: () => void;
+    const askedToStop = new Promise<void>((resolve) => { asked = resolve; });
+    adapter.interrupt = async () => { asked(); await new Promise<void>((resolve) => { acknowledge = resolve; }); };
+    const genesis = new GenesisService(adapter, () => {}, { sessionInput: (input) => input, wallClockMs: 50 });
+    const turn = genesis.run(dir, "gen-drain", "Draft the harbour.");
+    await askedToStop;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.equal(genesis.isRunning("gen-drain"), true, "the writer may still be writing into the sandbox");
+    acknowledge();
+    await turn;
+    assert.equal(genesis.isRunning("gen-drain"), false);
+  });
+
   it("uses the chosen writing model and restores history when that choice changes", async () => {
     const dir = await sandboxDir("genesis-model-");
     const adapter = talkingAdapter();
@@ -285,7 +301,7 @@ describe("genesis conversations in the sandbox (prototype 12a)", () => {
 
     // The confinement config landed in the sandbox before the session was created.
     const config = JSON.parse(await readFile(join(dir, "opencode.json"), "utf8")) as Record<string, unknown>;
-    assert.ok(config["agent"]);
+    assert.ok(config["agents"]);
 
     // A second turn continues the same session; release forgets it.
     await genesis.run(dir, "gen-abc", "Whose job is it to hear the song?");

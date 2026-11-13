@@ -9,6 +9,7 @@ import type { ArkeBridge } from "../src/arke-bridge.js";
 import { QueueToaster } from "../src/components/queue-toaster.js";
 import { __applyEventForTest, __pendingQueueRequestsForTest, __setBridgeForTest, __setStateForTest, generateMainPhoto } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
+import type { AudiobookActivity, ClientState } from "@arke-studio/contracts";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }) });
@@ -26,7 +27,7 @@ function Page() {
   return <><h1>{useLocation().pathname}</h1><Link to="/settings">Settings</Link></>;
 }
 
-async function mount(t: TestContext) {
+async function mount(t: TestContext, route = "/") {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const tick = async (ms: number) => { await act(async () => t.mock.timers.tick(ms)); };
   __setStateForTest(FIXTURE_STATE);
@@ -42,9 +43,52 @@ async function mount(t: TestContext) {
     __setBridgeForTest(null);
     t.mock.timers.reset();
   });
-  await act(async () => root.render(<MemoryRouter><QueueToaster /><Page /></MemoryRouter>));
+  await act(async () => root.render(<MemoryRouter initialEntries={[route]}><QueueToaster /><Page /></MemoryRouter>));
   return { container, tick };
 }
+
+it("announces a chapter once, never renews the start on request progress, and gives one outcome its own lifetime", async t => {
+  const { container, tick } = await mount(t);
+  const at = "2026-10-10T12:00:00.000Z";
+  const run: AudiobookActivity = { id: "01J8F3K2QW9VZX4N7M0RTYB6HD", worldId: FIXTURE_STATE.world!.meta.worldId, productionId: "bell-watch", chapterId: "crossing", chapterFile: "01-crossing", chapterTitle: "The crossing", productionTitle: "Bell Watch", worldName: "The Undersong", scope: "chapter", phase: "queued", startedAt: at, updatedAt: at, toMake: 20, made: 0, flagged: 0, requests: 4, request: 0, estimatedMicroUsd: 400000, models: ["Gemini"], local: false, jobs: [] };
+  const send = async (patch: Partial<AudiobookActivity>) => {
+    await act(async () => __applyEventForTest({ type: "audiobook.activity", at, run: { ...run, ...patch } }));
+    await tick(0);
+  };
+  await send({});
+  assert.equal(container.querySelectorAll(".fy-abreceipt").length, 1);
+  await tick(4000);
+  await send({ phase: "aligning", request: 1 });
+  assert.match(container.textContent!, /Aligning narration/);
+  await tick(2000); await tick(0); await tick(400);
+  assert.equal(container.querySelectorAll(".fy-abreceipt").length, 0);
+  await send({ phase: "reading", request: 2 });
+  assert.equal(container.querySelectorAll(".fy-abreceipt").length, 0, "another request does not reopen the notice");
+  await send({ phase: "interrupted", made: 6, reason: "Alignment stopped." });
+  assert.match(container.textContent!, /Alignment stopped/);
+  await tick(11999);
+  assert.equal(container.querySelectorAll(".fy-abreceipt").length, 1);
+  await tick(1); await tick(0); await tick(400);
+  assert.equal(container.querySelectorAll(".fy-abreceipt").length, 0);
+  await send({ phase: "interrupted", made: 6, reason: "Alignment stopped." });
+  assert.equal(container.querySelectorAll(".fy-abreceipt").length, 0, "replayed outcome never reannounces");
+  await act(async () => __setStateForTest({ ...FIXTURE_STATE, app: { ...FIXTURE_STATE.app, audiobookActivity: [{ ...run, id: "01J8F3K2QW9VZX4N7M0RTYB6HE", phase: "ready" }] } }));
+  await tick(0);
+  assert.equal(container.querySelectorAll(".fy-abreceipt").length, 0, "snapshot history is quiet");
+});
+
+it("leaves a result to its chat card while that card is on screen (issue 2744)", async t => {
+  const job = { ...FIXTURE_STATE.app.jobs[0]!, status: "succeeded" as const, idempotencyKey: "01J8F3K2QW9VZX4N7M0RTYB6HF" };
+  const withCard = { ...FIXTURE_STATE, worldChat: { actions: [{ generationWork: { jobKeys: [job.idempotencyKey], media: [] } }] } } as unknown as typeof FIXTURE_STATE;
+  const { container, tick } = await mount(t, `/w/${FIXTURE_STATE.world!.meta.worldId}/chat`);
+  await act(async () => __setStateForTest(withCard));
+  await act(async () => __applyEventForTest({ type: "job.ready", at: "2026-09-08T12:00:00Z", job }));
+  await tick(0);
+  assert.doesNotMatch(container.textContent!, /ready/);
+  await act(async () => __applyEventForTest({ type: "job.ready", at: "2026-09-08T12:00:00Z", job: { ...job, id: "jb_01J8F3K2QW9VZX4N7M0RTYB6HG", idempotencyKey: "01J8F3K2QW9VZX4N7M0RTYB6HH" } }));
+  await tick(0);
+  assert.match(container.textContent!, /ready/, "a job with no card here still says so");
+});
 
 it("expires receipts and refusals across navigation even after a pointer is released outside the toaster (issue 1001)", async (t) => {
     const { container, tick } = await mount(t);
@@ -130,4 +174,48 @@ it("announces a failed job after its queued receipt expires without replaying th
   await act(async () => __applyEventForTest({ type: "job.updated", at: job.updatedAt, job: failed }));
   await tick(0);
   assert.equal(container.querySelectorAll(".fy-note").length, 0);
+});
+
+it("raises a file problem's notice once and waits for an answer, past versions never (design turn 268)", async (t) => {
+  const { container, tick } = await mount(t);
+  const sent: { kind: string; paths?: string[] }[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } as ArkeBridge);
+  const state = (problems: NonNullable<ClientState["world"]>["problems"], told?: string[]): ClientState => {
+    const next = structuredClone(FIXTURE_STATE) as ClientState;
+    next.world!.problems = problems;
+    if (told) next.app.activitySeen = { ...next.app.activitySeen, fileProblems: { [next.world!.meta.worldId]: told } };
+    return next;
+  };
+  const show = async (next: ClientState) => { await act(async () => { __setStateForTest(next); }); await tick(0); };
+  const history = { kind: "history" as const, path: ".history/bible/v4.md", label: "Bible · version 4", message: "missing" };
+  await show(state([history]));
+  assert.doesNotMatch(container.textContent!, /could not be read/, "a past version alone raises nothing");
+
+  const broken = { path: "canon/broken.md", message: "front matter" };
+  await show(state([broken, history]));
+  assert.match(container.textContent!, /1 file could not be read/);
+  await tick(60_000);
+  assert.match(container.textContent!, /1 file could not be read/, "it does not time out unanswered");
+
+  const close = container.querySelector<HTMLElement>('[aria-label="Dismiss"]')!;
+  await act(async () => close.click());
+  assert.deepEqual(sent.find(message => message.kind === "settle-file-problems")?.paths, ["canon/broken.md"], "the past version is not announced, so it is not settled");
+
+  await show(state([broken, history], ["canon/broken.md"]));
+  await tick(1000);
+  assert.doesNotMatch(container.textContent!, /could not be read/, "told: it does not return");
+  await show(state([broken, { path: "canon/other.md", message: "front matter" }, history], ["canon/broken.md"]));
+  assert.match(container.textContent!, /1 file could not be read/, "only the new path is counted");
+});
+
+it("forgets a told path once it clears, so its return is news (design turn 268)", async (t) => {
+  const { tick } = await mount(t);
+  const sent: { kind: string; paths?: string[] }[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } as ArkeBridge);
+  const next = structuredClone(FIXTURE_STATE) as ClientState;
+  next.world!.problems = [];
+  next.app.activitySeen = { ...next.app.activitySeen, fileProblems: { [next.world!.meta.worldId]: ["canon/broken.md"] } };
+  await act(async () => { __setStateForTest(next); });
+  await tick(0);
+  assert.deepEqual(sent.find(message => message.kind === "settle-file-problems")?.paths, []);
 });

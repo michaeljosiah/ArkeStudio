@@ -1,4 +1,10 @@
 import { freezeProductionTimeline, productionTimelineBody } from "../../src/world-chat/production-timeline.js";
+import { saveComicScript } from "../../src/productions/graphic-novel.js";
+import { CHAPTER_WORD_COUNT_LABEL, chapterWordTotal, countWords, measuredChapterWords, proposedBatchWords, proposedChapterWords } from "@arke-studio/contracts";
+import { assembleContext } from "../../src/world-chat/context.js";
+import { productionEditorCardPreview, readEditorRequestByAction } from "../../src/productions/editor-requests.js";
+import { ConversationActionService } from "../../src/application/conversation-actions.js";
+import { prepareConversationTakeReview } from "../../src/application/conversation-take-review.js";
 import { applyTimelineCommand } from "../../src/productions/timeline.js";
 import { productionFrameRate, storyTimelineFingerprint } from "@arke-studio/contracts";
 import { wav } from "../audio/helpers.js";
@@ -44,7 +50,9 @@ import { ConversationActionLifecycle, conversationActionDigest } from "../../src
 import { ARKE_CLIENT_COMMAND_REGISTRY, worldChatActionDescriptor } from "../../src/arke-actions/registry.js";
 import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
 import { readEditorRequest } from "../../src/productions/editor-requests.js";
-import { createEpisode, createProduction } from "../../src/productions/ops.js";
+import { createChapter, createEpisode, createProduction, openChapter } from "../../src/productions/ops.js";
+import { addMusicTrack, editMusicTrack, ensureMusicSession, musicRecordFence, readMusicRecord } from "../../src/productions/music.js";
+import { bookAuthoringRefusal } from "../../src/world-chat/production-authoring.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { recordUploadedShotFrameTake } from "../../src/takes/drawn-frame.js";
@@ -54,19 +62,23 @@ import { readKeyArtBrief } from "../../src/references/key-art-references.js";
 import { applyTurnBibleEdits, readBible } from "../../src/world/bible.js";
 import { WorldStore } from "../../src/world/store.js";
 import { readWorldMeta } from "../../src/world/scan.js";
+import { GUIDE_THEMES_SCHEMA_VERSION } from "../../src/world/commit.js";
 import {
   prepareWorldChatActions,
   worldChatActionAdapters,
+  savedStoryProposalPrecondition,
   type WorldChatActionAdapterDeps,
   type WorldChatActionTurn,
 } from "../../src/world-chat/actions.js";
 import { chapterDraftingBrief } from "../../src/world-chat/chapter-brief.js";
+import { projectHumanDecisions } from "../../src/world-chat/human-decisions.js";
 import { sequenceTurnActions } from "../../src/world-chat/action-sequencing.js";
 import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
 import { ConversationImages } from "../../src/world-chat/images.js";
 import { QueryLeaseRegistry } from "../../src/world-chat/lease.js";
 import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
+import { sheetCreationProseFields } from "../../src/world-chat/sheet-card.js";
 import { stageWorldChatProductionAuthoredAction } from "../../src/world-chat/production-authoring.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -105,8 +117,27 @@ const NOW = () => AT;
 const PRODUCTION = "saltlight";
 
 describe("conversational props", () => {
-  async function prepare(w: Awaited<ReturnType<typeof setup>>, input: Record<string, unknown>, reads: ArkeReadRequirement[]) {
-    const receipts = reads.map(read => currentReceipt(w.store, read));
+  it("reports all missing prop reads together, including stale and partial receipts (#1911)", async () => {
+    const w = await setup();
+    const refs = currentReceipt(w.store, "references"), sheets = currentReceipt(w.store, "sheets");
+    refs.observedRevisionOrDigest = "stale";
+    sheets.complete = false;
+    const action = ModelWorldChatActionSchema.parse({ kind: "prop-authoring",
+      change: { operation: "create", name: "Read-check prop", states: ["Intact"] }, checkReceiptIds: [refs.id, sheets.id] });
+    const before = w.store.getBundle().props.length;
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle,
+      turn(w.conversationId, w.entryContext, { actions: [action], receipts: [refs, sheets] })), error => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /requires a complete current references read/);
+      assert.match(error.message, /requires a complete current sheets read/);
+      assert.match(error.message, /references read is no longer current/);
+      assert.match(error.message, /is an earlier page/);
+      return true;
+    });
+    assert.equal(w.store.getBundle().props.length, before);
+  });
+  async function prepare(w: Awaited<ReturnType<typeof setup>>, input: Record<string, unknown>, reads: (ArkeReadRequirement | WorldChatCheckReceipt)[]) {
+    const receipts = reads.map(read => typeof read === "string" ? currentReceipt(w.store, read) : read);
     const action = ModelWorldChatActionSchema.parse({ ...input, checkReceiptIds: receipts.map(receipt => receipt.id) });
     const one = turn(w.conversationId, w.entryContext, { actions: [action], receipts });
     const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
@@ -150,6 +181,27 @@ describe("conversational props", () => {
     assert.equal(w.store.getBundle().referenceTakes.length, 1);
     assert.equal(w.store.getBundle().props[0]!.states[0]!.reference?.sourceTakeId, w.store.getBundle().referenceTakes[0]!.id);
     assert.deepEqual(w.store.getBundle().artifacts.find(one => one.id === artifact.id)!.links, [prop.id]);
+  });
+  it("uses complete exact prop/image receipts without granting them inventory-wide authority", async () => {
+    const w = await setup(), prop = (await createProp(w.store, "Scoped ledger"))!, state = (await addPropState(w.store, prop.id, "Closed"))!;
+    const other = (await createProp(w.store, "Other lantern"))!;
+    const source = join(w.store.dir, "ledger.png"); await writeFile(source, encodePng(solidImage(4, 4, [12, 34, 56, 255])));
+    await fileArtifact(w.store, { sourcePath: source });
+    const artifact = w.store.getBundle().artifacts.find(item => item.file === "ledger.png")!;
+    const input = { kind: "prop-reference", propId: prop.id, stateId: state.id, artifactId: artifact.id };
+    const refs = currentReceipt(w.store, "references", `prop:${prop.id}`), image = currentReceipt(w.store, "artifacts", `artifact:${artifact.id}`);
+    await assert.rejects(prepare(w, input, [currentReceipt(w.store, "references", `prop:${other.id}`), image]), /scoped inventory read/);
+    await assert.rejects(prepare(w, input, [refs, currentReceipt(w.store, "artifacts", `artifact:${newId("ar")}`)]), /scoped inventory read/);
+    await assert.rejects(prepare(w, input, [{ ...refs, complete: false }, image]), /earlier page|complete current/);
+    await assert.rejects(prepare(w, { kind: "prop-authoring", change: { operation: "create", name: "Unsafe shortcut", states: [] } },
+      [refs, "sheets"]), /scoped inventory read/);
+    const card = await prepare(w, input, [refs, image]);
+    await addPropState(w.store, other.id, "Lit");
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed", "unrelated inventory edits do not stale the exact binding");
+    const replacement = await prepare(w, { ...input, replace: true }, [currentReceipt(w.store, "references", `prop:${prop.id}`), currentReceipt(w.store, "artifacts", `artifact:${artifact.id}`)]);
+    await addPropState(w.store, prop.id, "Open");
+    assert.equal((await decide(w.lifecycle, w.log, replacement)).status, "stale", "the reviewed prop remains fenced");
+    assert.equal(w.store.getBundle().referenceTakes.length, 1);
   });
 });
 
@@ -288,7 +340,7 @@ function currentReceipt(
   exportRecords: readonly ArkeExportReadRecord[] = [],
 ): WorldChatCheckReceipt {
   const bundle = store.getBundle();
-  const fence = requirement === "generation-routes" ? productionReadFence([]) : requirement === "bench" ? productionReadFence(benchReadRows(store.dir, target)) : requirement === "founding-build" ? buildItemsFence([]) : requirement === "world-metadata"
+  const fence = requirement === "bible" ? bibleFence(bundle) : requirement === "generation-routes" ? productionReadFence([]) : requirement === "bench" ? productionReadFence(benchReadRows(store.dir, target)) : requirement === "founding-build" ? buildItemsFence([]) : requirement === "world-metadata"
     ? worldMetadataFence(bundle)
     : requirement === "canon"
       ? canonFence(bundle)
@@ -297,9 +349,9 @@ function currentReceipt(
         : requirement === "art-direction"
           ? artDirectionFence(bundle)
           : requirement === "references"
-            ? referencesFence(bundle)
+            ? referencesFence(bundle, target?.startsWith("prop:") ? target.slice(5) : undefined)
             : requirement === "artifacts"
-              ? artifactsFence(bundle)
+              ? artifactsFence(bundle, target?.startsWith("artifact:") ? target.slice(9) : undefined)
               : requirement === "voices"
                 ? voicesFence(bundle)
               : requirement === "takes"
@@ -338,7 +390,7 @@ function currentReceipt(
                 : target && target !== store.worldId
                   ? productionMetadataFence(bundle, target)
                   : productionsFence(bundle);
-  const targetId = target ?? (requirement === "art-direction" ? "art-direction" : store.worldId);
+  const targetId = target ?? (requirement === "bible" ? "bible" : requirement === "art-direction" ? "art-direction" : store.worldId);
   return {
     id: newId("check"),
     runId: newId("run"),
@@ -398,6 +450,138 @@ function candidate(
 }
 
 describe("World Chat authority adapters", () => {
+  for (const authoring of ["candidate", "typed"] as const) it(`reads retained ${authoring} sheet creation cards prose first without changing their approval envelope (#2047)`, async () => {
+    const w = await setup();
+    const points = ["Review harbour", "Review quay"].map(name => candidate(w.conversationId, name, {
+      classification: "sheet.create",
+      draft: { type: "location", name, role: "Harbour watch", region: "Slackwater", canonRules: [], links: [],
+        sections: [{ heading: "Look", body: "Stone steps.\n\nA sheltered doorway." }, { heading: "Sound", body: "A quiet bell." }, { heading: "Customs", body: "Share the warning." }] },
+    }));
+    const receipts = [currentReceipt(w.store, "sheets"), currentReceipt(w.store, "canon")];
+    const one = turn(w.conversationId, w.entryContext, authoring === "candidate" ? { candidates: points } : {
+      receipts, actions: points.map(point => {
+        if (point.classification !== "sheet.create") throw new Error("Expected sheet candidate");
+        return ModelWorldChatActionSchema.parse({ kind: "sheet", checkReceiptIds: receipts.map(read => read.id),
+          change: { operation: "create", sheetType: "location", name: point.draft.name, region: point.draft.region,
+            canonRules: [], links: [], sections: point.draft.sections } });
+      }),
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const journal = await w.log.read();
+    const cards = (await loaded(w.log)).actions;
+    assert.equal((await readWorldMeta(w.store.dir)).schemaVersion, 99);
+    await assert.rejects(readWorldMeta(w.store.dir, { supports: 98 }), /newer|schema/i);
+    const binding = journal.events.find(e => e.event.type === "action.prepared")!.event;
+    if (binding.type !== "action.prepared") throw new Error("Expected binding");
+    assert.equal(ConversationActionBindingSchema.safeParse({ ...binding.binding, sheetCreationProseFields: [10000] }).success, false);
+    assert.equal(ConversationActionBindingSchema.safeParse({ ...binding.binding, sheetCreationProseFields: [11, 11] }).success, false);
+    assert.equal(cards.length, 2);
+    for (const card of cards) {
+      assert.equal(card.shown.body.family, "authored-diff");
+      if (card.shown.body.family !== "authored-diff") throw new Error("Expected sheet review");
+      assert.ok(card.sheetCreationProseFields);
+      assert.deepEqual(card.sheetCreationProseFields.map(index => card.shown.body.family === "authored-diff" && card.shown.body.fields[index]!.label.split(": ").at(-1)), ["Look", "Sound", "Customs"]);
+      assert.equal(card.shown.body.fields[card.sheetCreationProseFields[0]!]!.after, "Stone steps.\n\nA sheltered doorway.");
+      assert.ok(card.shown.body.fields.some(field => field.label.endsWith(": Region") && field.after === "Slackwater"));
+      const candidates = new Map(points.map(point => [point.id, point]));
+      if (authoring === "candidate") assert.deepEqual(sheetCreationProseFields(card, candidates), card.sheetCreationProseFields, "old candidate cards recover the same reading order");
+      const later = new Map(points.map(point => {
+        if (point.classification !== "sheet.create") throw new Error("Expected sheet candidate");
+        return [point.id, { ...point, revision: point.revision + 1, draft: { ...point.draft, sections: point.draft.sections.slice(0, 2) } }] as const;
+      }));
+      assert.equal(sheetCreationProseFields(card, later), undefined, "a later draft removing a section cannot hide frozen prose");
+      assert.equal(sheetCreationProseFields(card, new Map()), undefined, "missing retained evidence stays expanded");
+      const edited = structuredClone(card);
+      if (edited.shown.body.family !== "authored-diff") throw new Error("Expected sheet review");
+      edited.shown.body.fields[0]!.before = "Old value";
+      assert.equal(sheetCreationProseFields(edited, candidates), undefined, "amendments are never folded");
+      const ambiguous = structuredClone(card);
+      if (ambiguous.shown.body.family !== "authored-diff") throw new Error("Expected sheet review");
+      ambiguous.shown.body.fields.push(ambiguous.shown.body.fields[card.sheetCreationProseFields[0]!]!);
+      assert.equal(sheetCreationProseFields(ambiguous, candidates), undefined, "an ambiguous frozen review stays expanded");
+    }
+    assert.deepEqual(await w.log.read(), journal, "projecting a legacy card does not rewrite the journal");
+    let validationUpgrades = 0;
+    const ensureSchema = w.store.ensureSchemaVersion.bind(w.store);
+    w.store.ensureSchemaVersion = async (version, source) => {
+      if (source === "sheet-creation-card-review") validationUpgrades++;
+      await ensureSchema(version, source);
+    };
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed");
+    assert.equal(validationUpgrades, 0, "checking an existing card never requests a layout schema upgrade");
+    assert.equal((await decide(w.lifecycle, w.log, cards[1]!, "deny")).status, "denied");
+    const reopened = await loaded(new WorldChatStore(conversationDir(w.store.dir, w.conversationId)));
+    assert.deepEqual(reopened.actions.map(card => card.status), ["completed", "denied"]);
+    for (const [index, card] of reopened.actions.entries()) {
+      assert.deepEqual(card.shown, cards[index]!.shown);
+      assert.equal(card.previewDigest, cards[index]!.previewDigest);
+      assert.deepEqual(card.sheetCreationProseFields, cards[index]!.sheetCreationProseFields);
+    }
+    assert.ok(w.store.getBundle().sheets.some(sheet => sheet.name === "Review harbour"));
+    assert.ok(!w.store.getBundle().sheets.some(sheet => sheet.name === "Review quay"));
+  });
+
+  for (const decision of ["approve", "deny"] as const) it(`keeps one chapter decision surface through ${decision} and reopening (#2016)`, async () => {
+    const w = await setup({ kind: "production", productionId: "the-ledger-of-nights" });
+    const chapter = () => w.store.getBundle().productions.find(p => p.meta.id === "the-ledger-of-nights")!.chapters.find(c => c.id === "neap")!;
+    const before = structuredClone(chapter());
+    const proposalsBefore = w.store.getBundle().proposals.length;
+    const receipts = [currentReceipt(w.store, "chapters", "the-ledger-of-nights"), currentReceipt(w.store, "story", "the-ledger-of-nights")];
+    const one = turn(w.conversationId, w.entryContext, { receipts, actions: [{
+      kind: "production-chapter", productionId: "the-ledger-of-nights", checkReceiptIds: receipts.map(r => r.id),
+      change: { operation: "edit", chapterId: "neap", changes: { synopsis: "The ledger answers." } },
+    }] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared); await bindAll(w.lifecycle, prepared);
+    const pending = await loaded(w.log), card = pending.actions[0]!;
+    assert.equal(w.store.getBundle().proposals.length, proposalsBefore + 1);
+    assert.ok(card.availableDecisions.includes("approve"));
+    const project = async (view = pending) => (await projectHumanDecisions(w.store, view, w.store.getBundle(), [])).cards.filter(c => c.body.control.kind === "proposal");
+    assert.deepEqual(await project(), [], "the action owns the proposal decision");
+    assert.deepEqual(await project({ ...pending, actions: [{ ...card, availableDecisions: ["deny"], blockedReason: "Wait for the preceding action." }] }), [],
+      "a blocked action retains its own explanation and Deny without a second acceptance path");
+    for (const status of ["approved", "awaiting-host", "queued", "running"] as const) {
+      assert.deepEqual(await project({ ...pending, actions: [{ ...card, status, availableDecisions: [] }] }), []);
+    }
+    for (const status of ["completed", "failed", "cancelled", "denied", "stale", "superseded"] as const) {
+      assert.equal((await project({ ...pending, actions: [{ ...card, status, availableDecisions: [] }] })).length, 1,
+        `a retained proposal with a ${status} action stays recoverable`);
+    }
+    const independent = structuredClone(w.store.getBundle());
+    independent.proposals[0]!.proposal.worldChatOrigins = [{ requestId: ulid(), conversationId: pending.id,
+      candidateId: newId("cand"), candidateRevision: 1, targetPaths: [], fields: [] }];
+    const independentCards = (await projectHumanDecisions(w.store, { ...pending, actions: [] }, independent, [])).cards;
+    assert.equal(independentCards.filter(c => c.body.control.kind === "proposal").length, 1, "a conversation's independent proposal remains reachable");
+    assert.deepEqual(await project(await loaded(new WorldChatStore(w.log.dir))), [], "journal reload keeps one review");
+    assert.equal((await decide(w.lifecycle, w.log, card, decision)).status, decision === "approve" ? "completed" : "denied");
+    assert.equal(w.store.getBundle().proposals.length, proposalsBefore);
+    assert.deepEqual(await project(await loaded(w.log)), []);
+    assert.equal(chapter().synopsis, decision === "approve" ? "The ledger answers." : before.synopsis);
+    assert.equal(chapter().bodyHash, before.bodyHash);
+    assert.equal(chapter().version, before.version + (decision === "approve" ? 1 : 0));
+  });
+
+  it("accepted chapter drafts promote outlines when the optional status is omitted", async () => {
+    for (const status of [undefined, "outlined"] as const) {
+      const w = await setup();
+      const productionId = "the-ledger-of-nights";
+      const chapter = () => w.store.getBundle().productions.find(p => p.meta.id === productionId)!.chapters.find(c => c.id === "her-own-hand")!;
+      const proposal = await stageWorldChatProductionAuthoredAction(w.store, w.gate, { actionId: newId("act"), conversationId: w.conversationId }, {
+        kind: "world-chat-production-chapter", worldId: w.store.worldId,
+        action: { kind: "production-chapter", productionId, checkReceiptIds: [], change: {
+          operation: "edit", chapterId: "her-own-hand", changes: { body: "The bell stopped.", ...(status === undefined ? {} : { status }) },
+        } },
+      });
+      assert.equal(chapter().status, "outlined", "staging does not change the accepted chapter");
+      assert.equal(chapter().words, 0);
+      assert.equal((await w.gate.accept(proposal.id)).status, "accepted");
+      assert.equal(chapter().status, status ?? "drafted");
+      assert.equal(chapter().words, status === undefined ? 3 : 0, "an explicit outline status remains authoritative");
+    }
+  });
+
   it("reserves default episode order after accepted and pending creations", async () => {
     const w = await setup();
     const productionId = await createProduction(w.store, { title: "Ordered season", medium: "video", productionKind: "microdrama", seriesTitle: "Ordered series" });
@@ -1329,6 +1513,11 @@ describe("World Chat authority adapters", () => {
     const card = (await loaded(w.log)).actions[0]!;
     assert.equal(card.shown.body.family, "command");
     assert.match(JSON.stringify(card.shown), /bell-watch-season-one/);
+    assert.equal(card.shown.productionPreview?.kind, "production");
+    if (card.shown.productionPreview?.kind !== "production") assert.fail("expected typed production preview");
+    assert.equal(card.shown.productionPreview.episodes, 8);
+    assert.equal(card.shown.productionPreview.frameRate, 25);
+    assert.equal(w.store.getBundle().meta.schemaVersion, 62);
 
     const result = await decide(w.lifecycle, w.log, card);
     assert.equal(result.status, "completed");
@@ -1336,6 +1525,133 @@ describe("World Chat authority adapters", () => {
     assert.equal(production.meta.frameRate, 25);
     assert.equal(production.season?.defaults?.episodeCount, 8);
     assert.deepEqual(w.store.getBundle().series.find((candidate) => candidate.id === "bell-watch")?.seasons, [production.meta.id]);
+  });
+
+  it("shows an audio drama's card the plan it is created holding (SPEC-057 D-2)", async () => {
+    const w = await setup();
+    const productions = currentReceipt(w.store, "production-metadata");
+    const series = currentReceipt(w.store, "series");
+    const oneTurn = turn(w.conversationId, w.entryContext, {
+      receipts: [productions, series],
+      actions: [{ kind: "production-create", production: { title: "Low Water", medium: "story", productionKind: "audio-drama" }, checkReceiptIds: [productions.id, series.id] }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    const payload = prepared[0]!.payload;
+    if (payload.kind !== "world-chat-production-create") assert.fail("expected a production creation");
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    if (card.shown.body.family !== "command") assert.fail("expected a command card");
+    assert.deepEqual(card.shown.body.commands.find(command => command.label === "Audio drama plan")?.detail,
+      "6 episodes, about 25 minutes each · narrator, pilot and secrets not yet decided");
+    assert.match(card.shown.body.expectedResult, /audio drama plan/);
+    if (card.shown.productionPreview?.kind !== "production") assert.fail("expected typed production preview");
+    assert.equal(card.shown.productionPreview.episodes, 6);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    const drama = w.store.getBundle().productions.find(production => production.meta.id === payload.plan.production.id)!;
+    assert.deepEqual(drama.audioDrama?.plan, { episodes: 6, minutes: 25, keptFromListener: [] }, "what was shown is what was written");
+  });
+
+  it("creates a soundtrack holding its album, the production it is for named on the card (SPEC-060 R-3, R-19)", async () => {
+    const w = await setup();
+    const productions = currentReceipt(w.store, "production-metadata");
+    const series = currentReceipt(w.store, "series");
+    const create = (production: { title: string; medium: "music"; productionKind: string; soundtrackFor?: string }) =>
+      turn(w.conversationId, w.entryContext, { receipts: [productions, series], actions: [{ kind: "production-create", production, checkReceiptIds: [productions.id, series.id] }] });
+    // As the dialog's create does: a soundtrack names what it is for.
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, create({ title: "The Bell Watch", medium: "music", productionKind: "soundtrack" })), /A soundtrack is for one of this world's productions/);
+    const oneTurn = create({ title: "Saltlight Soundtrack", medium: "music", productionKind: "soundtrack", soundtrackFor: PRODUCTION });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    const payload = prepared[0]!.payload;
+    if (payload.kind !== "world-chat-production-create") assert.fail("expected a production creation");
+    await appendTurn(w.log, oneTurn, prepared);
+    assert.ok((await readWorldMeta(w.store.dir)).schemaVersion < GUIDE_THEMES_SCHEMA_VERSION);
+    await bindAll(w.lifecycle, prepared);
+    // A build before music cards would open the world and lose the pending card (codex on PR 2190).
+    assert.ok((await readWorldMeta(w.store.dir)).schemaVersion >= GUIDE_THEMES_SCHEMA_VERSION, "the world is raised before the plan is kept");
+    const card = (await loaded(w.log)).actions[0]!;
+    if (card.shown.body.family !== "command") assert.fail("expected a command card");
+    assert.match(card.shown.body.commands.find((command) => command.label === "Album")?.detail ?? "", /^Soundtrack · for .+ · no tracks yet$/);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    const made = w.store.getBundle().productions.find((production) => production.meta.id === payload.plan.production.id)!;
+    assert.equal(made.meta.kind, "soundtrack");
+    assert.deepEqual(made.music, { version: 1, loudness: -14, tracks: [], for: PRODUCTION }, "what was shown is what was written");
+  });
+
+  it("changes a music production's album through production-music cards, each checked against the album as it is (SPEC-060 R-19)", async () => {
+    const w = await setup();
+    const album = await createProduction(w.store, { title: "Songs of the Drowned Quarter", medium: "music", productionKind: "album" });
+    const BELLS = "ar_01J8G0000000000000000000R1";
+    const card = async (action: Extract<WorldChatActionTurn["actions"][number], { kind: "production-music" }>, receipts: WorldChatCheckReceipt[]) => {
+      const oneTurn = turn(w.conversationId, w.entryContext, { receipts, actions: [{ ...action, checkReceiptIds: receipts.map((receipt) => receipt.id) }] });
+      const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+      assert.equal(prepared[0]!.payload.kind, "world-chat-production-music");
+      await appendTurn(w.log, oneTurn, prepared);
+      await bindAll(w.lifecycle, prepared);
+      return (await loaded(w.log)).actions.at(-1)!;
+    };
+    const metadata = () => currentReceipt(w.store, "production-metadata", album);
+
+    // A track comes from the shelf, so the shelf is read as well as the album.
+    const alone = metadata();
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, w.entryContext, {
+      receipts: [alone],
+      actions: [{ kind: "production-music", productionId: album, command: { kind: "add-track", artifactId: BELLS }, checkReceiptIds: [alone.id] }],
+    })), /artifacts read/);
+    const read = metadata();
+    assert.ok((await readWorldMeta(w.store.dir)).schemaVersion < GUIDE_THEMES_SCHEMA_VERSION);
+    const add = await card({ kind: "production-music", productionId: album, command: { kind: "add-track", artifactId: BELLS }, checkReceiptIds: [] }, [read, currentReceipt(w.store, "artifacts")]);
+    assert.ok((await readWorldMeta(w.store.dir)).schemaVersion >= GUIDE_THEMES_SCHEMA_VERSION, "the world is raised before an album card is kept");
+    assert.equal(add.shown.title, "Add a track to Songs of the Drowned Quarter");
+    assert.equal(add.shown.permissionReason, "authored-change");
+    assert.equal((await decide(w.lifecycle, w.log, add)).status, "completed");
+    const record = () => w.store.getBundle().productions.find((production) => production.meta.id === album)!.music!;
+    assert.deepEqual(record().tracks.map((track) => track.id), ["harbour-bells"]);
+
+    // The album read before the track was added no longer says what the album is.
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, w.entryContext, {
+      receipts: [read],
+      actions: [{ kind: "production-music", productionId: album, command: { kind: "remove-track", trackId: "harbour-bells" }, checkReceiptIds: [read.id] }],
+    })), /no longer current/);
+
+    // Lyrics are Arke's own words, set on the track when the person approves them.
+    const lyrics = await card({ kind: "production-music", productionId: album, command: { kind: "update-track", trackId: "harbour-bells", title: "Saltmouth Bells", lyrics: "[verse]\nRing them low" }, checkReceiptIds: [] }, [metadata()]);
+    if (lyrics.shown.body.family !== "command") assert.fail("expected a command card");
+    assert.deepEqual(lyrics.shown.body.commands.map((command) => command.label), ["Title", "Lyrics"]);
+    assert.equal((await decide(w.lifecycle, w.log, lyrics)).status, "completed");
+    assert.deepEqual([record().tracks[0]!.title, record().tracks[0]!.lyrics], ["Saltmouth Bells", "[verse]\nRing them low"]);
+
+    // Lyrics longer than a card's line are shown whole, over as many lines as they need (codex on PR 2190).
+    const long = Array.from({ length: 350 }, (_, index) => `[verse]\nThe bell rope ${index} hauls the harbour under`).join("\n");
+    assert.ok(long.length > 12_000 && long.length <= 20_000);
+    const whole = await card({ kind: "production-music", productionId: album, command: { kind: "update-track", trackId: "harbour-bells", lyrics: long }, checkReceiptIds: [] }, [metadata()]);
+    if (whole.shown.body.family !== "command") assert.fail("expected a command card");
+    const shown = whole.shown.body.commands.filter((command) => command.label.startsWith("Lyrics"));
+    assert.ok(shown.length > 1 && shown.every((command) => (command.detail ?? "").length <= 4_000));
+    assert.equal(shown.map((command) => command.detail).join(""), long, "what is approved is what is written");
+    assert.equal((await decide(w.lifecycle, w.log, whole)).status, "completed");
+    assert.equal(record().tracks[0]!.lyrics, long);
+
+    // An order that changes nothing is refused as its card is prepared.
+    await assert.rejects(card({ kind: "production-music", productionId: album, command: { kind: "reorder-tracks", order: ["harbour-bells"] }, checkReceiptIds: [] }, [metadata()]), /could not prepare this action/);
+    const remove = await card({ kind: "production-music", productionId: album, command: { kind: "remove-track", trackId: "harbour-bells" }, checkReceiptIds: [] }, [metadata()]);
+    assert.equal((await decide(w.lifecycle, w.log, remove)).status, "completed");
+    assert.deepEqual(record().tracks, []);
+  });
+
+  it("refuses a book's overview or prose style for an audio drama (SPEC-057 R-82)", async () => {
+    const w = await setup();
+    const drama = await createProduction(w.store, { title: "Low Water", medium: "story", productionKind: "audio-drama" });
+    const story = currentReceipt(w.store, "story", drama);
+    for (const action of [
+      { kind: "production-overview" as const, productionId: drama, changes: { logline: "A bell lies." }, checkReceiptIds: [story.id] },
+      { kind: "production-prose-style" as const, productionId: drama, changes: { pov: "close third" }, checkReceiptIds: [story.id] },
+    ]) {
+      assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, w.entryContext, { receipts: [story], actions: [action] })),
+        /Low Water is an audio drama/);
+    }
+    const book = await createProduction(w.store, { title: "Undertow", medium: "story" });
+    assert.equal(bookAuthoringRefusal(w.store.getBundle().productions.find(production => production.meta.id === book)), null);
   });
 
   it("refuses a prepared production creation after its world fences move instead of replanning", async () => {
@@ -1430,12 +1746,24 @@ describe("World Chat authority adapters", () => {
     });
     const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
     await appendTurn(w.log, oneTurn, prepared);
-    await assert.rejects(bindAll(w.lifecycle, prepared), /could not prepare/i);
+    // Its own reason, not "could not prepare" (issue 1883).
+    await assert.rejects(bindAll(w.lifecycle, prepared), /unchanged script block blk_opening must keep its stable id/);
     assert.deepEqual(
       w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!
         .scenes.find((candidate) => candidate.id === current.id)!.script!.blocks,
       current.script!.blocks,
     );
+    const corrected = turn(w.conversationId, context, { receipts: [script], actions: [{ ...action, checkReceiptIds: [script.id],
+      change: { ...action.change, blocks: current.script!.blocks.map(block => ({ ...block, text: `${block.text} The bell rings.` })) } }] });
+    const valid = prepareWorldChatActions(w.store, w.lifecycle, corrected);
+    await appendTurn(w.log, corrected, valid); await bindAll(w.lifecycle, valid);
+    const card = (await loaded(w.log)).actions.find(one => one.actionId === valid[0]!.intent.actionId)!;
+    assert.equal(card.shown.productionPreview?.kind, "scene");
+    if (card.shown.productionPreview?.kind !== "scene") assert.fail("expected frozen screenplay preview");
+    assert.deepEqual(card.shown.productionPreview.before!.script!.blocks, current.script!.blocks);
+    assert.match(card.shown.productionPreview.after.script!.blocks[0]!.text, /The bell rings/);
+    assert.equal((await w.adapters.find(adapter => adapter.actionKind === card.actionKind)!.validate(card)).ok, true);
+    assert.equal(card.status, "pending", "preview validation grants no execution permission");
   });
 
   it("refuses a production frame-rate card after a timeline exists", async () => {
@@ -1840,6 +2168,7 @@ describe("World Chat authority adapters", () => {
     await appendTurn(w.log, compiled.oneTurn, compiled.prepared);
     await bindAll(w.lifecycle, compiled.prepared);
     const compileCard = (await loaded(w.log)).actions[0]!;
+    assert.equal(compileCard.shown.productionPreview?.kind, "scene");
     assert.equal((await decide(w.lifecycle, w.log, compileCard)).status, "completed");
     const compiledScene = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!
       .scenes.find((scene) => scene.id === context.sceneId)!;
@@ -1850,6 +2179,7 @@ describe("World Chat authority adapters", () => {
     await appendTurn(w.log, exported.oneTurn, exported.prepared);
     await bindAll(w.lifecycle, exported.prepared);
     const exportCard = (await loaded(w.log)).actions.at(-1)!;
+    assert.equal(exportCard.shown.productionPreview?.kind, "scene");
     assert.equal(exportCard.shown.body.family, "host-action");
     assert.equal((await decide(w.lifecycle, w.log, exportCard)).status, "completed");
     const artifacts = w.store.getBundle().artifacts;
@@ -1939,6 +2269,49 @@ describe("World Chat authority adapters", () => {
     assert.equal(dispatched, 1, "repeated approval does not dispatch again");
     assert.equal(w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!
       .selections["sh_12"]?.acceptedTakeId, selectedBefore);
+  });
+
+  it("Select prepares one fenced review without accepting, refuses another purchase and remains stale after a selection change", async () => {
+    const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
+    const w = await setup(context, store => ({ productionGenerationQuotes: quotedProduction(store, () => {}) }));
+    const receipts = [currentReceipt(w.store, "scenes", `${PRODUCTION}:sc_04`), currentReceipt(w.store, "takes", PRODUCTION)];
+    const one = turn(w.conversationId, context, { receipts, actions: [{ kind: "production-take-generation", productionId: PRODUCTION,
+      sceneId: "sc_04", target: { kind: "shot", shotId: "sh_12" }, mode: "video", checkReceiptIds: receipts.map(r => r.id) }] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared); await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions.at(-1)!;
+    await decide(w.lifecycle, w.log, card);
+    const source = (await loaded(w.log)).actions.at(-1)!;
+    const quotes = w.actionDeps.productionGenerationQuotes!;
+    const work = (await quotes.project(source))!;
+    const production = w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!;
+    const take = production.takes.find(t => t.kind === "clip" && t.coversShots.includes("sh_12"))!;
+    const jobs: Job[] = [{ id: take.jobId!, idempotencyKey: work.jobKeys[0]!, worldId: w.store.worldId, productionId: PRODUCTION,
+      target: { kind: "shot", id: "sh_12" }, capability: "video", provider: "fal", model: "test-model", params: {}, estimatedMicroUsd: 40_000,
+      status: "succeeded", providerJobId: null, attempt: 1, error: null, createdAt: AT, updatedAt: AT }];
+    const ports = { jobs: () => jobs, project: async (card: ConversationActionCard) => ({ ...card, generationWork: await quotes.project(card) }) };
+    const input = { kind: "conversation-take-review-prepare" as const, worldId: w.store.worldId, conversationId: w.conversationId,
+      sourceActionId: source.actionId, takeId: take.id, shotId: "sh_12", requestId: ulid(), expectedConversationSeq: (await loaded(w.log)).seq };
+    const before = structuredClone(production.selections), reviewCount = production.reviews.length;
+    const [first, duplicate] = await Promise.all([prepareConversationTakeReview(w.store, w.lifecycle, input, ports), prepareConversationTakeReview(w.store, w.lifecycle, input, ports)]);
+    assert.equal(first.actionId, duplicate.actionId);
+    assert.equal((await prepareConversationTakeReview(w.store, w.lifecycle, input, ports)).actionId, first.actionId, "replay reads the bound review before testing the old sequence");
+    assert.deepEqual(w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.selections, before);
+    assert.equal(w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.reviews.length, reviewCount);
+    assert.equal(first.shown.body.family, "take-review");
+    await assert.rejects(prepareConversationTakeReview(w.store, w.lifecycle, { ...input, shotId: "sh_13" }, ports), /another review/);
+    jobs[0]!.idempotencyKey = ulid();
+    await assert.rejects(prepareConversationTakeReview(w.store, w.lifecycle, { ...input, requestId: ulid(), expectedConversationSeq: (await loaded(w.log)).seq }, ports), /another generation/);
+    jobs[0]!.idempotencyKey = work.jobKeys[0]!;
+    assert.equal((await decide(w.lifecycle, w.log, first, "deny")).status, "denied");
+    assert.deepEqual(w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.selections, before);
+    const second = await prepareConversationTakeReview(w.store, w.lifecycle, { ...input, requestId: ulid(), expectedConversationSeq: (await loaded(w.log)).seq }, ports);
+    assert.equal((await decide(w.lifecycle, w.log, second)).status, "completed");
+    assert.equal(w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.selections.sh_12!.acceptedTakeId, take.id);
+    const third = await prepareConversationTakeReview(w.store, w.lifecycle, { ...input, requestId: ulid(), expectedConversationSeq: (await loaded(w.log)).seq }, ports);
+    // Change the take read fence through the existing take authority, after the preview was shown.
+    await recordUploadedShotFrameTake(w.store, PRODUCTION, "sh_12", "new.png", encodePng(solidImage(2, 2, [20, 40, 60, 255])));
+    assert.equal((await decide(w.lifecycle, w.log, third)).reason, "stale");
   });
 
   it("reviews a Bench result before filing and clears only the approved shot frame", async () => {
@@ -2133,6 +2506,8 @@ describe("World Chat authority adapters", () => {
     await appendTurn(w.log, oneTurn, prepared);
     await bindAll(w.lifecycle, prepared);
     const card = (await loaded(w.log)).actions[0]!;
+    assert.equal(card.shown.productionPreview?.kind, "scene");
+    assert.deepEqual(card.shown.productionPreview, { kind: "scene", before: stagedScene, after: stagedScene });
     assert.equal((await decide(w.lifecycle, w.log, card)).status, "awaiting-host");
 
     const hostDir = join(w.store.dir, ".staging", "private-stage-spool");
@@ -2181,6 +2556,9 @@ describe("World Chat authority adapters", () => {
     const filedShot = orderedShots(filedProduction.scenes.find((candidate) => candidate.id === context.sceneId)!)
       .find((candidate) => candidate.id === stagedShot.id)!;
     assert.ok(filedShot.staging?.playblast);
+    assert.equal(settled.receipt?.id, filedShot.staging!.playblast!.artifactId, "host replay retains the exact filed video");
+    const reconciled = await adapter.reconcile!(card);
+    assert.equal(reconciled?.receipt?.id, filedShot.staging!.playblast!.artifactId, "restart returns the same video receipt");
     const events = await readFile(join(w.store.dir, ".conversations", w.conversationId, "events.jsonl"), "utf8");
     assert.equal(events.includes("private-playblast.mp4"), false);
     assert.equal(events.includes("private-opening-frame.png"), false);
@@ -2252,6 +2630,12 @@ describe("World Chat authority adapters", () => {
     const card = (await loaded(w.log)).actions.at(-1)!;
     const shown = JSON.stringify(card.shown);
     assert.equal(card.shown.body.family, "host-action");
+    assert.equal(card.shown.productionPreview?.kind, "export");
+    if (card.shown.productionPreview?.kind !== "export") assert.fail("Expected frozen export preview");
+    assert.equal(card.shown.productionPreview.preset, "review-cut");
+    assert.equal(card.shown.productionPreview.dimensions, "1280 × 720");
+    assert.equal(card.shown.productionPreview.subtitles, "None");
+    assert.equal(w.store.getBundle().meta.schemaVersion, 63);
     assert.match(shown, /Scope:/);
     assert.match(shown, /Preset:/);
     assert.match(shown, /Outputs:/);
@@ -2271,6 +2655,13 @@ describe("World Chat authority adapters", () => {
     const settled = (await loaded(w.log)).actions.at(-1)!;
     assert.equal(settled.receipt?.id, card.authority.id);
     assert.equal(JSON.stringify(settled).includes("C:\\private"), false);
+    const service = new ConversationActionService(w.store, { gate: w.gate, now: NOW, isWorldOpen: () => true, actions: w.actionDeps });
+    exportRecords.push({ id: card.authority.id, worldId: w.store.worldId, productionId: PRODUCTION, status: "done", percent: 100, output: "exports/review.mp4", error: null });
+    assert.deepEqual((await service.project([settled]))[0]!.exportState, { status: "done", percent: 100, output: "exports/review.mp4" });
+    exportRecords[0] = { ...exportRecords[0]!, output: "C:/private/review.mp4" };
+    assert.equal((await service.project([settled]))[0]!.exportState?.output, null);
+    exportRecords[0] = { ...exportRecords[0]!, worldId: ulid() };
+    assert.equal((await service.project([settled]))[0]!.exportState, undefined);
   });
 
   it("keeps partial multi-card delivery outcomes independent without claiming rollback", async () => {
@@ -2505,6 +2896,201 @@ describe("a passage revision is held to the selected passage (turn 128)", () => 
 });
 
 
+describe("authored chapter inventory freshness (#2065)", () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  async function chapterEdit(full = false) {
+    const w = await setup(context);
+    const leases = new QueryLeaseRegistry(() => w.store.worldId);
+    const lease = leases.mint({ worldId: w.store.worldId, conversationId: w.conversationId, runId: newId("run"), allowedAttachmentIds: [] });
+    const retrieval = new WorldChatRetrieval({ leases, getBundle: () => w.store.getBundle(), getIndex: () => null,
+      attachments: new WorldChatAttachmentStore(w.store.dir), findAttachment: async () => null,
+      getChapterBody: async (productionId, file) => (await openChapter(w.store, productionId, file)).body });
+    const read = async (tool: string, args: Record<string, unknown>) => {
+      let outcome = await retrieval.call(lease.token, tool, args);
+      while (outcome.receipt.nextCursor) outcome = await retrieval.call(lease.token, tool, { ...args, cursor: outcome.receipt.nextCursor });
+      return outcome.receipt;
+    };
+    const chapters = await read("list_chapters", { productionId: context.productionId, ...(full ? {} : { section: "plan" }) });
+    const story = await read("get_story", { productionId: context.productionId, section: "overview" });
+    const target = await read("get_chapter", { productionId: context.productionId, chapterId: "neap" });
+    const receipts = [chapters, story, target];
+    const action = { kind: "production-chapter" as const, productionId: context.productionId,
+      change: { operation: "edit" as const, chapterId: "neap", changes: { status: "reviewed" } }, checkReceiptIds: receipts.map(r => r.id) };
+    const one = turn(w.conversationId, context, { receipts, actions: [action] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared); await bindAll(w.lifecycle, prepared);
+    const production = () => w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!;
+    return { ...w, read, one, action, chapters, production, card: (await loaded(w.log)).actions[0]! };
+  }
+
+  for (const full of [false, true]) it(`${full ? "refuses full reads" : "accepts explicit authoring reads"} after another chapter receives narration`, async () => {
+    const w = await chapterEdit(full);
+    const target = w.production().chapters.find(c => c.id === "neap")!;
+    const before = await openChapter(w.store, context.productionId, target.file);
+    const other = w.production().chapters.find(c => c.id !== target.id)!;
+    other.audiobook = { chapterVersion: other.version, hash: other.bodyHash!, updatedAt: AT, takes: 2, flagged: 1 };
+    other.voices = { unreadable: true };
+    other.continuity = { unreadable: true };
+    assert.equal((await decide(w.lifecycle, w.log, w.card)).status, full ? "pending" : "completed");
+    const after = await openChapter(w.store, context.productionId, target.file);
+    assert.equal(after.body, before.body, "a status-only edit preserves every manuscript character");
+    assert.equal(w.production().chapters.find(c => c.id === target.id)!.status, full ? target.status : "reviewed");
+  });
+
+  for (const change of ["prose", "title", "plan", "order", "membership", "retirement", "target-audio"] as const) {
+    it(`refuses changed ${change} after preparing an authoring read`, async () => {
+      const w = await chapterEdit();
+      const chapters = w.production().chapters, target = chapters.find(c => c.id === "neap")!;
+      if (change === "prose") target.hash = "new-file-hash";
+      if (change === "title") target.title += " changed";
+      if (change === "plan") chapters[1]!.synopsis = "A revised neighbouring plan.";
+      if (change === "order") chapters[1]!.order += 10;
+      if (change === "membership") chapters.pop();
+      if (change === "retirement") chapters[1]!.retired = true;
+      if (change === "target-audio") target.audiobook = { chapterVersion: target.version, hash: target.bodyHash!, updatedAt: AT, takes: 1, flagged: 0 };
+      const result = await decide(w.lifecycle, w.log, w.card);
+      const targetChanged = ["prose", "title", "target-audio"].includes(change);
+      assert.equal(result.status, targetChanged ? "stale" : "pending",
+        "target changes stale the card; changed context requires an explicit saved-proposal review");
+      assert.equal(result.disposition, "refused", "changed context never authorizes chat approval");
+    });
+  }
+
+  it("rejects partial, foreign and inappropriate scoped reads, retaining passage requirements", async () => {
+    const w = await chapterEdit();
+    const prepare = (action: unknown, receipts: WorldChatCheckReceipt[]) => prepareWorldChatActions(w.store, w.lifecycle,
+      turn(w.conversationId, context, { receipts, actions: [ModelWorldChatActionSchema.parse(action)] }));
+    const story = w.one.receipts![1]!;
+    const readAction = (chapterRead: WorldChatCheckReceipt) => ({ ...w.action, checkReceiptIds: [chapterRead.id, story.id] });
+    const partial = { ...w.chapters, complete: false };
+    assert.throws(() => prepare(readAction(partial), [partial, story]), /is an earlier page/);
+    const foreign = await w.read("list_chapters", { productionId: "saltlight", section: "plan" });
+    assert.throws(() => prepare(readAction(foreign), [foreign, story]), /requires the complete current chapters read for the-ledger-of-nights/);
+    assert.throws(() => prepare({ kind: "chapter-review", productionId: context.productionId, chapterId: "neap",
+      checkReceiptIds: [w.chapters.id] }, [w.chapters]), /chapter-plan inventory covers chapter authoring and ordering only/);
+    assert.throws(() => prepare({ ...readAction(w.chapters), change: { operation: "edit", chapterId: "neap",
+      changes: { passage: { find: "the ledger", with: "the book" } } } }, [w.chapters, story]), /requires the complete current chapters read for the-ledger-of-nights:neap/);
+  });
+});
+
+it("verifies a fresh optional Bible receipt when preparing and approving a chapter order (#1925)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const leases = new QueryLeaseRegistry(() => w.store.worldId);
+  const lease = leases.mint({ worldId: w.store.worldId, conversationId: w.conversationId, runId: newId("run"), allowedAttachmentIds: [] });
+  const retrieval = new WorldChatRetrieval({ leases, getBundle: () => w.store.getBundle(), getIndex: () => null,
+    attachments: new WorldChatAttachmentStore(w.store.dir), findAttachment: async () => null });
+  const bible = (await retrieval.call(lease.token, "get_bible", {})).receipt;
+  assert.equal(bible.complete, true);
+  assert.equal(bible.observedRevisionOrDigest, bibleFence(w.store.getBundle()));
+  const chapters = currentReceipt(w.store, "chapters", context.productionId);
+  const production = w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!;
+  const orderedIds = [...production.chapters].sort((a, b) => b.order - a.order).map(chapter => chapter.id);
+  const one = turn(w.conversationId, context, { receipts: [chapters, bible], actions: [{
+    kind: "production-chapter-order", productionId: context.productionId, orderedIds, checkReceiptIds: [chapters.id, bible.id],
+  }] });
+  const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+  await appendTurn(w.log, one, prepared);await bindAll(w.lifecycle, prepared);
+  const card = (await loaded(w.log)).actions[0]!;
+  assert.equal(card.shown.consequence, "Reorders the chapters shown below.");
+  assert.equal(card.shown.body.family, "command");
+  if (card.shown.body.family === "command") {
+    assert.deepEqual(card.shown.body.commands.map(command => command.label), orderedIds.map((id, index) =>
+      `${index + 1}. ${production.chapters.find(chapter => chapter.id === id)!.title}`), "#2013: show titles in the proposed order");
+  }
+  assert.deepEqual(card.shown.affectedTargets.map(target => target.id), orderedIds, "#2013: labels do not replace stable identities");
+  assert.deepEqual(card.shown.affectedTargets.map(target => target.label), orderedIds.map(id => production.chapters.find(chapter => chapter.id === id)!.title));
+  assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+  assert.deepEqual([...w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!.chapters].sort((a,b)=>a.order-b.order).map(c=>c.id), orderedIds);
+  assert.equal(bibleFence(w.store.getBundle()), bible.observedRevisionOrDigest, "ordering leaves the Bible unchanged");
+});
+
+it("binds order cards for maximum-length and legacy chapter titles (#2013)", async () => {
+  for (const length of [200, 5_000]) {
+    const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+    const w = await setup(context);
+    const production = w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!;
+    production.chapters[0]!.title = "A".repeat(length);
+    const chapters = currentReceipt(w.store, "chapters", context.productionId);
+    const orderedIds = [...production.chapters].sort((a, b) => b.order - a.order).map(chapter => chapter.id);
+    const one = turn(w.conversationId, context, { receipts: [chapters], actions: [{
+      kind: "production-chapter-order", productionId: context.productionId, orderedIds, checkReceiptIds: [chapters.id],
+    }] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    assert.deepEqual(card.shown.affectedTargets.map(target => target.id), orderedIds);
+    assert.ok(card.shown.affectedTargets.every(target => target.label!.length <= 200));
+    assert.equal(card.shown.body.family, "command");
+    if (card.shown.body.family === "command") {
+      const label = card.shown.body.commands.at(-1)!.label;
+      assert.equal(label.length, 200);
+      assert.match(label, /^4\. A+…$/);
+    }
+  }
+});
+
+it("ignores uncited stale context but diagnoses a cited stale Bible receipt (#1925)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const bible = currentReceipt(w.store, "bible"), chapters = currentReceipt(w.store, "chapters", context.productionId);
+  await applyTurnBibleEdits(w.store, [{ op: "set-section", heading: "Concurrent", text: "Moved." }], {
+    source: "test", baseVersion: (await readBible(w.store.dir)).version,
+  });
+  const orderedIds = [...w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!.chapters]
+    .sort((a, b) => b.order - a.order).map(chapter => chapter.id);
+  const action = { kind: "production-chapter-order" as const, productionId: context.productionId, orderedIds, checkReceiptIds: [chapters.id] };
+  const one = turn(w.conversationId, context, { receipts: [chapters, bible], actions: [action] });
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
+    ...one, actions: [{ ...action, checkReceiptIds: [chapters.id, bible.id] }],
+  }), error => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /bible read is no longer current/);
+    assert.ok(error.message.includes(`receipt ${bible.id}, target bible`));
+    return true;
+  });
+  const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+  assert.deepEqual(prepared[0]!.intent.baseObservations.map(read => read.requirement), ["chapters"]);
+  await appendTurn(w.log, one, prepared);
+  await bindAll(w.lifecycle, prepared);
+  assert.equal((await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!)).status, "completed");
+});
+
+it("refuses chapter ordering when a cited Bible changes after preparation (#1925)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const receipts = [currentReceipt(w.store, "chapters", context.productionId), currentReceipt(w.store, "bible")];
+  const before = [...w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!.chapters]
+    .sort((a, b) => a.order - b.order).map(chapter => chapter.id);
+  const one = turn(w.conversationId, context, { receipts, actions: [{
+    kind: "production-chapter-order", productionId: context.productionId, orderedIds: [...before].reverse(), checkReceiptIds: receipts.map(r => r.id),
+  }] });
+  const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+  await appendTurn(w.log, one, prepared);
+  await bindAll(w.lifecycle, prepared);
+  await applyTurnBibleEdits(w.store, [{ op: "set-section", heading: "Concurrent", text: "Moved." }], {
+    source: "test", baseVersion: (await readBible(w.store.dir)).version,
+  });
+  assert.equal((await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!)).status, "stale");
+  assert.deepEqual([...w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!.chapters]
+    .sort((a, b) => a.order - b.order).map(chapter => chapter.id), before);
+});
+
+it("still requires complete current chapter-list reads for the right production (#1925)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const chapters = currentReceipt(w.store, "chapters", context.productionId);
+  const orderedIds = w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!.chapters.map(chapter => chapter.id);
+  const refused = (receipts: WorldChatCheckReceipt[]) => prepareWorldChatActions(w.store, w.lifecycle,
+    turn(w.conversationId, context, { receipts, actions: [{ kind: "production-chapter-order", productionId: context.productionId,
+      orderedIds, checkReceiptIds: receipts.map(r => r.id) }] }));
+  assert.throws(() => refused([]), /requires a complete current chapters read/);
+  assert.throws(() => refused([{ ...chapters, complete: false }]), /is an earlier page/);
+  assert.throws(() => refused([{ ...chapters, observedRevisionOrDigest: "stale" }]), /chapters read is no longer current/);
+  assert.throws(() => refused([currentReceipt(w.store, "chapters", "saltlight")]), /requires the complete current chapters read for the-ledger-of-nights/);
+});
+
 it("stages a chapter with only the brief's eligible receipts and keeps section reads scoped", async () => {
   const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
   const w = await setup(context);
@@ -2543,7 +3129,7 @@ it("stages a chapter with only the brief's eligible receipts and keeps section r
   assert.equal((await w.gate.listOpen()).length, openBefore + 1);
   assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
     ...oneTurn, actions: [{ ...action, checkReceiptIds: [...action.checkReceiptIds, draws[0]!.id] }],
-  }), /final receipt from a complete target read/);
+  }), new RegExp(`final receipt from a complete target read: ${draws[0]!.id} is a search or draw.*This change needs list_chapters, get_chapter`), "the refusal names the receipt the retry must drop, and the reads that would do");
   assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
     ...oneTurn, actions: [{ kind: "production-overview", productionId: context.productionId, changes: { logline: "Changed" }, checkReceiptIds: eligible }],
   }), /requires the complete current story read/);
@@ -2555,6 +3141,155 @@ it("stages a chapter with only the brief's eligible receipts and keeps section r
   assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, oneTurn), /story read is no longer current/);
 });
 
+
+it("accepts a legacy pending chapter draft without discarding it on upgrade (#1748)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context), body = "An older draft still belongs to its author.";
+  const receipts = [currentReceipt(w.store, "chapters", context.productionId), currentReceipt(w.store, "story", context.productionId)];
+  const one = turn(w.conversationId, context, { receipts, actions: [{ kind: "production-chapter", productionId: context.productionId,
+    change: { operation: "edit", chapterId: "neap", changes: { body } }, checkReceiptIds: receipts.map(receipt => receipt.id) }] });
+  const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+  await appendTurn(w.log, one, prepared);
+  const { intent, payload } = prepared[0]!;
+  const authority = await w.adapters.find(adapter => adapter.actionKind === intent.actionKind)!.prepare!({ intent, payload });
+  const shown = structuredClone(authority.shown);
+  assert.equal(shown.body.family, "authored-diff");
+  if (shown.body.family !== "authored-diff") throw new Error("Wrong review");
+  shown.body.fields = shown.body.fields.filter(field => !field.label.startsWith(CHAPTER_WORD_COUNT_LABEL));
+  const binding = ConversationActionBindingSchema.parse({ ...intent, authority: authority.authority, authorityRevision: authority.authorityRevision,
+    previewDigest: conversationActionDigest(shown), shown, status: "pending", preparedAt: AT });
+  await w.log.append({ type: "action.prepared", binding }, { at: AT });
+  const old = (await loaded(new WorldChatStore(w.log.dir))).actions[0]!;
+  assert.deepEqual(measuredChapterWords(old), []);
+  assert.equal((await decide(w.lifecycle, w.log, old)).status, "completed");
+  assert.equal((await openChapter(w.store, context.productionId, "neap")).body.trim(), body);
+});
+
+it("measures complete chapter proposals before clipping, retaining counts after decisions and reload (#1743, #1748)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const before = await openChapter(w.store, context.productionId, "neap");
+  const otherBefore = await openChapter(w.store, context.productionId, "the-same-ink");
+  const body = "The river lay still.\n\n".repeat(1500) + "The last bell sounded.";
+  const receipts = [currentReceipt(w.store, "chapters", context.productionId), currentReceipt(w.store, "story", context.productionId)];
+  const one = turn(w.conversationId, context, { receipts, actions: [{ kind: "production-chapter", productionId: context.productionId,
+    change: { operation: "edit", chapterId: "neap", changes: { body } }, checkReceiptIds: receipts.map(receipt => receipt.id) },
+    { kind: "production-chapter", productionId: context.productionId, change: { operation: "edit", chapterId: "the-same-ink", changes: { body: "Three new words." } }, checkReceiptIds: receipts.map(receipt => receipt.id) }] });
+  const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+  await appendTurn(w.log, one, prepared); await bindAll(w.lifecycle, prepared);
+  const card = (await loaded(w.log)).actions[0]!;
+  assert.equal(card.shown.body.family, "authored-diff");
+  if (card.shown.body.family !== "authored-diff") throw new Error("Wrong review");
+  assert.ok(card.shown.body.fields.some(field => field.after === body.slice(0, 19_999) + "…"));
+  const full = await w.gate.project(card.authority.id);
+  assert.ok(full.review.targets.some(target => target.fields.some(field => field.proposed === body)));
+  const words = measuredChapterWords(card);
+  assert.equal(words[0]!.before, countWords(before.body));
+  assert.equal(words[0]!.after, 6004, "the count includes prose beyond the 20k excerpt");
+  assert.deepEqual(proposedChapterWords(full.review.targets), words);
+  const cards = (await loaded(new WorldChatStore(w.log.dir))).actions;
+  assert.deepEqual(measuredChapterWords(cards[0]!), words, "journal reload retains exact counts");
+  assert.equal(chapterWordTotal(proposedBatchWords(cards)).after, 6007);
+  const report = assembleContext({ candidates: [], messages: [], tombstones: [], currentUserMessage: "How many words?", currentUserMessageId: newId("msg"), actions: cards }).actionReceipts;
+  assert.match(report, /"after":6004/);
+  assert.match(report, /"proposedBatchWords":\{"before":\d+,"after":6007/);
+  assert.ok(!report.includes("The last bell sounded"), "count receipts add no manuscript text");
+  const large: ConversationActionCard = { ...card, targets: Array.from({ length: 100 }, (_, i) => ({ kind: "chapter", id: `chapter-${i}`, label: "Long title ".repeat(9) })),
+    shown: { ...card.shown, body: { family: "authored-diff", conflicts: [], openChoices: [], fields: Array.from({ length: 100 }, (_, i) => ({
+      label: CHAPTER_WORD_COUNT_LABEL + i + "Long title ".repeat(9), before: "0", after: "100",
+    })) } } };
+  const bounded = assembleContext({ candidates: [], messages: [], tombstones: [], currentUserMessage: "Report?", currentUserMessageId: newId("msg"), actions: [large] }).actionReceipts;
+  assert.ok(bounded.includes(card.actionId), "a large outline must retain the action receipt");
+  assert.match(bounded, /"proposedWordTotal":\{"before":0,"after":10000,"delta":10000\}/);
+  assert.match(bounded, /"omittedChapterCounts":92/);
+  assert.ok(bounded.length <= 12000);
+  assert.equal((await openChapter(w.store, context.productionId, "neap")).body, before.body, "staging leaves saved prose unchanged");
+  assert.equal((await decide(w.lifecycle, w.log, cards[1]!, "deny")).status, "denied");
+  assert.equal(chapterWordTotal(proposedBatchWords((await loaded(w.log)).actions)).after, 6004);
+  assert.equal((await openChapter(w.store, context.productionId, "the-same-ink")).body, otherBefore.body);
+  assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+  assert.equal((await openChapter(w.store, context.productionId, "neap")).body.trim(), body);
+  assert.equal(w.store.getBundle().productions.find(p => p.meta.id === context.productionId)!.chapters.find(c => c.id === "neap")!.words, 6004);
+  assert.deepEqual(measuredChapterWords((await loaded(new WorldChatStore(w.log.dir))).actions[0]!), words);
+});
+
+describe("saved sibling proposal review (#1740)", () => {
+  async function siblings() {
+    const w = await setup();
+    const productionId = await createProduction(w.store, { title: "Sibling review", medium: "story" });
+    const receipts = [currentReceipt(w.store, "story", productionId), currentReceipt(w.store, "chapters", productionId), currentReceipt(w.store, "sheets")];
+    const checkReceiptIds = receipts.map(receipt => receipt.id);
+    const oneTurn = turn(w.conversationId, { kind: "production", productionId }, { receipts, actions: [
+      { kind: "production-overview", productionId, changes: { logline: "A bell rings early." }, checkReceiptIds },
+      { kind: "production-prose-style", productionId, changes: { voice: "Spare and direct." }, checkReceiptIds },
+      { kind: "production-chapter", productionId, change: { operation: "outline", chapters: [{ title: "The bell", synopsis: "A bell rings." }] }, checkReceiptIds },
+    ] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    return { ...w, productionId, cards: (await loaded(w.log)).actions };
+  }
+
+  it("leaves unchanged style and outline ready to approve after overview acceptance (turn 270e)", async () => {
+    const w = await siblings();
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[0]!)).status, "completed");
+    for (const card of w.cards.slice(1)) {
+      assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+      assert.equal((await loaded(w.log)).actions.find(action => action.actionId === card.actionId)!.status, "completed");
+    }
+    const production = w.store.getBundle().productions.find(p => p.meta.id === w.productionId)!;
+    assert.equal(production.proseStyle!.voice, "Spare and direct.");
+    assert.equal(production.chapters[0]!.title, "The bell");
+  });
+
+  it("still discards a draft whose own target changed", async () => {
+    const w = await siblings(), card = w.cards[0]!;
+    const target = (await w.gate.readManifest(card.authority.id)).targets[0]!.path;
+    await w.store.ownedWrite(() => writeFile(join(w.store.dir, target), JSON.stringify({ version: 1, logline: "A human edit." })));
+    assert.equal((await decide(w.lifecycle, w.log, card)).reason, "stale");
+    assert.equal((await w.gate.listOpen()).some(p => p.id === card.authority.id), false);
+  });
+
+  it("still discards a chapter whose cited cast changed", async () => {
+    const w = await siblings(), card = w.cards[2]!;
+    w.store.getBundle().sheets.find(sheet => sheet.id === "maren-kest")!.retired = true;
+    assert.equal((await decide(w.lifecycle, w.log, card)).reason, "stale");
+    assert.equal((await w.gate.listOpen()).some(p => p.id === card.authority.id), false);
+  });
+
+  it("still refuses a sibling when something outside its turn moved the story too", async () => {
+    const w = await siblings();
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[0]!)).status, "completed");
+    await createChapter(w.store, w.productionId, { title: "From elsewhere", order: 9 });
+    assert.notEqual((await decide(w.lifecycle, w.log, w.cards[1]!)).status, "completed");
+  });
+
+  it("still refuses a sibling whose own cited inputs changed, in chat and at native acceptance", async () => {
+    const w = await siblings(), card = w.cards[2]!;
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[0]!)).status, "completed");
+    const precondition = await savedStoryProposalPrecondition(w.store, await w.gate.readManifest(card.authority.id));
+    assert.ok(precondition);
+    await w.store.retire("characters/maren-kest.md", "test");
+    assert.equal((await acceptDecided(w.gate, card.authority.id, precondition)).status, "stale");
+    assert.notEqual((await decide(w.lifecycle, w.log, card)).status, "completed");
+    assert.equal(w.store.getBundle().productions.find(p => p.meta.id === w.productionId)!.chapters.length, 0);
+  });
+});
+
+it("reports sheets and canon together for a chapter with draws (#1911, #1741)", async () => {
+  const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
+  const w = await setup(context);
+  const receipts = [currentReceipt(w.store, "chapters", context.productionId), currentReceipt(w.store, "story", context.productionId)];
+  const action = ModelWorldChatActionSchema.parse({ kind: "production-chapter", productionId: context.productionId,
+    change: { operation: "edit", chapterId: "neap", changes: { draws: { sheets: [], canon: [] } } },
+    checkReceiptIds: receipts.map(receipt => receipt.id) });
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, { receipts, actions: [action] })), error => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /requires the complete current sheets read/);
+    assert.match(error.message, /requires the complete current canon read/);
+    return true;
+  });
+});
 
 it("fences chapter viewpoints and refuses invalid edits before completing the turn (#967)", async () => {
   const context = { kind: "production" as const, productionId: "the-ledger-of-nights" };
@@ -2581,7 +3316,8 @@ it("fences chapter viewpoints and refuses invalid edits before completing the tu
     ...oneTurn, actions: [{ ...action, change: { operation: "outline", chapters: [{ title: "Opening", synopsis: "A plan.", viewpointCharacter: "maren" }] } }],
   }), /sheets read is no longer current/);
   await appendTurn(w.log, oneTurn, prepared);
-  await assert.rejects(bindAll(w.lifecycle, prepared), /could not prepare this action/);
+  // The reason, not "could not prepare" (issue 1883): a stale read is Arke's to read again.
+  await assert.rejects(bindAll(w.lifecycle, prepared), /sheets changed after this action was prepared/);
 });
 
 it("shows every omitted viewpoint beyond the card title limit (#967)", async () => {
@@ -2636,7 +3372,7 @@ describe("turn-local scene action sequencing (#1417)", () => {
     const newShot = orderedShots(first.scenePlan!.after).find(shot => !orderedShots(before).some(old => old.id === shot.id))!;
     assert.equal(second.action.commands![0]!.kind, "set-prompt-override");
     assert.ok(JSON.stringify(second.action).includes(newShot.id));
-    assert.ok(JSON.stringify(cards[1]!.shown.body).includes("Low angle, looking up at the bell."));
+    assert.ok(JSON.stringify(cards[1]!.shown.productionPreview).includes("Low angle, looking up at the bell."));
     assert.deepEqual(scene(w), before, "preparation and binding do not edit the scene");
     assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).reason, "dependency-blocked");
     assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed");
@@ -2652,7 +3388,7 @@ describe("turn-local scene action sequencing (#1417)", () => {
     if (parentCompleted) assert.equal((await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!)).status, "completed");
     const adapter = w.adapters.find(adapter => adapter.actionKind === prepared[1]!.intent.actionKind)!;
     await adapter.prepare!({ intent: prepared[1]!.intent, payload: prepared[1]!.payload });
-    assert.equal(w.store.getBundle().meta.schemaVersion, 55);
+    assert.equal(w.store.getBundle().meta.schemaVersion, 62);
     await assert.rejects(readWorldMeta(w.store.dir, { supports: 54 }), /newer Arke Studio/);
     await w.store.close();
     const reopened = await WorldStore.open(w.store.dir, { clock: NOW });
@@ -2710,7 +3446,7 @@ describe("turn-local scene action sequencing (#1417)", () => {
     assert.equal(prepared.length, 1);
     await appendTurn(w.log, input, prepared); await bindAll(w.lifecycle, prepared);
     const card = (await loaded(w.log)).actions[0]!;
-    assert.ok(JSON.stringify(card.shown.body).includes("The whole room listens."));
+    assert.ok(JSON.stringify(card.shown.productionPreview).includes("The whole room listens."));
     assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
     assert.equal(orderedShots(scene(w))[1]!.id, shots[0]!.id);
     assert.equal(orderedShots(scene(w))[1]!.promptOverride?.text, "A low angle.");
@@ -2865,6 +3601,15 @@ describe("production whole cut from chat (SPEC-051 T-7)", () => {
     const sceneIds = production(w).scenes.slice(0,2).map(s => s.id).reverse();
     const card = await prepare(w, { operation: "assemble", sceneIds });
     assert.equal(card.actionKind, "world-chat-editor-request");
+    const preview = card.shown.productionPreview;
+    assert.equal(preview?.kind, "timeline");
+    if (preview?.kind !== "timeline") assert.fail("Expected frozen timeline preview");
+    assert.ok(preview.after.tracks[0]!.clips.length > 0);
+    const request = await readEditorRequestByAction(w.store, PRODUCTION, card.actionId);
+    assert.ok(request);
+    assert.deepEqual(productionEditorCardPreview(w.store, PRODUCTION, request, "2026-10-05T00:00:00Z"), preview, "the frozen compiler does not depend on projection time");
+    assert.equal(w.store.getBundle().meta.schemaVersion, 63);
+    await assert.rejects(readWorldMeta(w.store.dir, { supports: 62 }), /newer|version|schema/i);
     assert.equal(production(w).timeline?.status ?? "absent", "absent");
     assert.equal(card.shown.body.family, "command");
     if (card.shown.body.family !== "command") throw new Error("Wrong family");
@@ -2876,6 +3621,7 @@ describe("production whole cut from chat (SPEC-051 T-7)", () => {
     const sceneNumber = production(w).scenes.find(s => s.id === sceneIds[0])!.number;
     assert.ok(shotClips[0]!.source.kind === "shot" && shotClips[0]!.source.sceneNumber === sceneNumber);
     assert.equal(state.timeline.history.undo.length,1);
+    assert.deepEqual(state.timeline.tracks, preview.after.tracks, "Approve commits exactly the shown tracks");
     const undo = await prepare(w,{ operation: "undo" });
     assert.match(undo.shown.title,/Undo/);
     assert.equal(production(w).timeline?.status,"ready");
@@ -2983,5 +3729,250 @@ describe("production whole cut from chat (SPEC-051 T-7)", () => {
     await assert.rejects(readFile(quotePath(changed.actionId)),{code:"ENOENT"});
     const offline={kind:"world-chat-production-timeline-transcribe" as const, worldId:w.store.worldId,action:ModelWorldChatActionSchema.parse({kind:"production-timeline-operation",productionId:PRODUCTION,request:{operation:"transcribe",trackId:"tr_subtitles",language:"en"},checkReceiptIds:[newId("check")]}),frozenHash:freezeProductionTimeline(w.store,PRODUCTION)};
     await assert.rejects(productionTimelineBody(w.store,offline as Parameters<typeof productionTimelineBody>[1],{},newId("act")),/unavailable/);
+  });
+});
+
+
+describe("chapter review delegation", () => {
+  it("starts the coordinator review only after approval and reuses the action identity", async () => {
+    const calls: string[][] = [];
+    const deps: WorldChatActionAdapterDeps = { reviewChapter: async (...args) => { calls.push(args); return { id: "review-result", summary: "Review completed with one advisory finding." }; } };
+    const w = await setup({ kind: "world" }, deps);
+    const receipts = [currentReceipt(w.store, "chapters", "the-ledger-of-nights")];
+    const one = turn(w.conversationId, w.entryContext, { actions: [ModelWorldChatActionSchema.parse({ kind: "chapter-review", productionId: "the-ledger-of-nights", chapterId: "neap", checkReceiptIds: receipts.map(r => r.id) })], receipts });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one, deps);
+    await appendTurn(w.log, one, prepared); await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions.find(c => c.actionId === prepared[0]!.intent.actionId)!;
+    assert.equal(calls.length, 0);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    assert.deepEqual(calls, [["the-ledger-of-nights", "neap", card.actionId]]);
+    await decide(w.lifecycle, w.log, card); assert.equal(calls.length, 1);
+  });
+});
+
+describe("Arke's episode scripts reach the score or say why (issue 1883)", () => {
+  it("refuses a draft before the turn completes, and says beside the reply why one was refused after", async () => {
+    const w = await setup();
+    const id = await createProduction(w.store, { title: "Low Water", medium: "story", productionKind: "audio-drama" });
+    const receipts = [currentReceipt(w.store, "production-metadata", id)];
+    const draft = (baseHash: string | null, place: string) => ModelWorldChatActionSchema.parse({
+      kind: "production-episode-script", productionId: id, episode: 1, baseHash, blocks: [{ kind: "heading", place }], checkReceiptIds: receipts.map((receipt) => receipt.id),
+    });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, w.entryContext, { receipts, actions: [draft("sha256:guessed", "The quay")] })),
+      /Episode 1 has no script yet\. Write it with baseHash null/, "a guessed hash for a new episode is told what to send");
+    const one = turn(w.conversationId, w.entryContext, { receipts, actions: [draft(null, "The quay")] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared);
+    // Another draft lands first: staging refuses this one, and says so where the reply is.
+    await stageWorldChatProductionAuthoredAction(w.store, w.gate, { actionId: newId("act"), conversationId: w.conversationId },
+      { kind: "world-chat-production-episode-script", worldId: w.store.worldId, action: { ...draft(null, "Elsewhere"), kind: "production-episode-script" } as never });
+    await assert.rejects(bindAll(w.lifecycle, prepared), /is waiting/);
+    const view = await loaded(w.log);
+    const reply = view.messages.find((message) => message.role === "studio")!;
+    assert.match(view.notPrepared[reply.id]?.[0] ?? "", /^Episode 1 script: A draft of episode 1's script is waiting/);
+  });
+
+  it("shows a drafted script on its card as a radio script, not as JSON (issue 1888)", async () => {
+    const w = await setup();
+    const id = await createProduction(w.store, { title: "Low Water", medium: "story", productionKind: "audio-drama" });
+    const receipts = [currentReceipt(w.store, "production-metadata", id)];
+    const one = turn(w.conversationId, w.entryContext, { receipts, actions: [ModelWorldChatActionSchema.parse({
+      kind: "production-episode-script", productionId: id, episode: 1, baseHash: null,
+      blocks: [{ kind: "heading", place: "The quay" }, { kind: "narration", words: "The tide was out." }], checkReceiptIds: receipts.map((receipt) => receipt.id),
+    })] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared); await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions.find((candidate) => candidate.actionId === prepared[0]!.intent.actionId)!;
+    const body = card.shown.body as { family: string; fields: Array<{ label: string; before: string | null; after: string | null }> };
+    assert.equal(body.family, "authored-diff");
+    assert.ok(body.fields.some((field) => field.label === "Episode 1 script: Script" && field.after === "SCENE · The quay\nNARRATOR: The tide was out."), JSON.stringify(body.fields));
+    assert.ok(body.fields.every((field) => !(field.after ?? "").includes('"kind"')), "never the blocks as JSON");
+  });
+});
+
+describe("a music track from World Chat (SPEC-060 R-9 – R-13)", () => {
+  const BELLS = "ar_01J8G0000000000000000000R1";
+  async function album(w: Awaited<ReturnType<typeof setup>>) {
+    const id = await createProduction(w.store, { title: "Songs of the Drowned Quarter", medium: "music", productionKind: "album" });
+    await addMusicTrack(w.store, id, BELLS);
+    await addMusicTrack(w.store, id, BELLS);
+    return id;
+  }
+
+  it("edits a track and sets the album's sequence only once each card is approved", async () => {
+    const w = await setup();
+    const id = await album(w);
+    const receipt = currentReceipt(w.store, "production-metadata", id);
+    const baseHash = musicRecordFence((await readMusicRecord(w.store, id)).record);
+    const one = turn(w.conversationId, w.entryContext, {
+      receipts: [receipt],
+      actions: [
+        ModelWorldChatActionSchema.parse({ kind: "music-track-edit", productionId: id, trackId: "harbour-bells", trim: { startMs: 0, endMs: 2000 }, fadeInMs: 500, fadeOutMs: 0,
+          sections: [{ label: "Chorus", atMs: 1000 }, { label: "Verse", atMs: 0 }], baseHash, checkReceiptIds: [receipt.id] }),
+      ],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const before = (await readMusicRecord(w.store, id)).record;
+    assert.equal(before.tracks[0]!.trim, undefined, "nothing changes before approval");
+    const [edit] = (await loaded(w.log)).actions;
+    assert.equal(edit!.shown.title, "Edit Harbour bells");
+    assert.equal(edit!.shown.body.family, "command");
+    if (edit!.shown.body.family === "command") assert.deepEqual(edit!.shown.body.commands.map((command) => command.label), ["Trim 0:00 – 0:02", "Fade in 0.5 s · fade out 0 s", "Chorus at 0:01", "Verse at 0:00"]);
+    assert.equal((await decide(w.lifecycle, w.log, edit!)).status, "completed");
+    // The sequence is read against the album as the edit left it.
+    const next = currentReceipt(w.store, "production-metadata", id);
+    const two = turn(w.conversationId, w.entryContext, { receipts: [next], actions: [ModelWorldChatActionSchema.parse({ kind: "music-sequence-set", productionId: id, loudness: -16,
+      joins: [{ trackId: "harbour-bells", next: { crossfadeMs: 1000 } }, { trackId: "harbour-bells-2", next: { gapMs: 2000 } }], baseHash: musicRecordFence((await readMusicRecord(w.store, id)).record), checkReceiptIds: [next.id] })] });
+    const preparedTwo = prepareWorldChatActions(w.store, w.lifecycle, two);
+    await appendTurn(w.log, two, preparedTwo);
+    await bindAll(w.lifecycle, preparedTwo);
+    const sequence = (await loaded(w.log)).actions.find((action) => action.shown.title === "Set the album's sequence")!;
+    assert.equal((await decide(w.lifecycle, w.log, sequence)).status, "completed");
+    const after = (await readMusicRecord(w.store, id)).record;
+    assert.deepEqual([after.tracks[0]!.trim, after.tracks[0]!.fadeInMs, after.tracks[0]!.sections], [{ startMs: 0, endMs: 2000 }, 500, [{ label: "Verse", atMs: 0 }, { label: "Chorus", atMs: 1000 }]]);
+    assert.deepEqual([after.loudness, after.tracks[0]!.next, after.tracks[1]!.next], [-16, { crossfadeMs: 1000 }, undefined], "the last track joins nothing");
+  });
+
+  it("makes a track's takes in the album's own session, as music for that track", async () => {
+    const w = await setup({ kind: "world" }, { getGenerationRouteRows: () => [], getJobs: () => [] });
+    const id = await album(w);
+    const session = await ensureMusicSession(w.store, id, AT);
+    const reads = [currentReceipt(w.store, "jobs"), currentReceipt(w.store, "generation-routes"), currentReceipt(w.store, "bench", session)];
+    const generation = (extra: Record<string, unknown>) => ModelWorldChatActionSchema.parse({
+      kind: "bench-generation", musicTrack: { productionId: id, trackId: "harbour-bells-2" },
+      composer: { mode: "music", provider: "elevenlabs", model: "music_v1", params: { kind: "music", lyrics: "[verse]\nRing them low", count: 2, lengthSec: 180 }, brief: "Slow sea shanty" },
+      checkReceiptIds: reads.map((receipt) => receipt.id), ...extra,
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, w.entryContext, { receipts: reads, actions: [generation({ sessionId: `sess_${ulid()}` })] }), w.actionDeps);
+    const payload = prepared[0]!.payload as { action: { productionId?: string; sessionId?: string } };
+    assert.deepEqual([payload.action.productionId, payload.action.sessionId], [id, session], "the album's session, whatever session the chat named");
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, w.entryContext, { receipts: reads,
+      actions: [generation({ musicTrack: { productionId: id, trackId: "gone" } })] }), w.actionDeps), /no longer on the album/);
+  });
+
+  it("chooses a finished take through the host's Choose, and only one of the album's", async () => {
+    const chosen: string[][] = [];
+    const w = await setup({ kind: "world" }, { chooseMusicTake: async (...args) => { chosen.push(args); } });
+    const id = await album(w);
+    const session = await ensureMusicSession(w.store, id, AT);
+    const reads = [currentReceipt(w.store, "production-metadata", id), currentReceipt(w.store, "bench", session)];
+    const take = `tk_${ulid()}`;
+    const one = turn(w.conversationId, w.entryContext, { receipts: reads, actions: [ModelWorldChatActionSchema.parse({
+      kind: "music-track-choose", productionId: id, trackId: "harbour-bells", sessionId: session, takeId: take, baseHash: musicRecordFence((await readMusicRecord(w.store, id)).record), checkReceiptIds: reads.map((receipt) => receipt.id),
+    })] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    assert.equal(card.shown.title, "Choose a take for Harbour bells");
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    assert.deepEqual(chosen.map((call) => call.slice(0, 4)), [[id, "harbour-bells", session, take]]);
+  });
+
+  it("goes stale rather than write over an edit made after it was read (codex on PR 2191)", async () => {
+    const w = await setup();
+    const id = await album(w);
+    const receipt = currentReceipt(w.store, "production-metadata", id);
+    const baseHash = musicRecordFence((await readMusicRecord(w.store, id)).record);
+    const one = turn(w.conversationId, w.entryContext, { receipts: [receipt], actions: [ModelWorldChatActionSchema.parse({
+      kind: "music-track-edit", productionId: id, trackId: "harbour-bells", trim: null, fadeInMs: 0, fadeOutMs: 0, sections: [], baseHash, checkReceiptIds: [receipt.id],
+    })] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one);
+    await appendTurn(w.log, one, prepared);
+    await bindAll(w.lifecycle, prepared);
+    // The author marks a section on the page while the card waits.
+    await editMusicTrack(w.store, id, "harbour-bells", { trim: null, fadeInMs: 0, fadeOutMs: 0, sections: [{ label: "Verse", atMs: 0 }] });
+    const result = await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!);
+    assert.notEqual(result.status, "completed");
+    assert.deepEqual((await readMusicRecord(w.store, id)).record.tracks[0]!.sections, [{ label: "Verse", atMs: 0 }], "the newer edit stands");
+    // A card read against the old album is refused as it is prepared, too.
+    const late = currentReceipt(w.store, "production-metadata", id);
+    const two = turn(w.conversationId, w.entryContext, { receipts: [late], actions: [ModelWorldChatActionSchema.parse({ kind: "music-sequence-set", productionId: id, loudness: -14, joins: [], baseHash, checkReceiptIds: [late.id] })] });
+    const preparedTwo = prepareWorldChatActions(w.store, w.lifecycle, two);
+    await appendTurn(w.log, two, preparedTwo);
+    await assert.rejects(bindAll(w.lifecycle, preparedTwo), /could not prepare this action/);
+  });
+});
+
+describe("a graphic novel's cards (turn 270)", () => {
+  async function comicBook(deps: WorldChatActionAdapterDeps = {}) {
+    const w = await setup({ kind: "world" }, deps);
+    const productionId = await createProduction(w.store, { title: "Low Water, drawn", medium: "story", productionKind: "graphic-novel" });
+    const chapter = await createChapter(w.store, productionId, { title: "The tide", order: 1 });
+    const page = { id: ulid(), layout: "splash" as const, status: "ready" as const, panels: [{ id: ulid(), description: "Maren.", characters: [], lettering: [] }] };
+    await saveComicScript(w.store, productionId, { chapter, pages: [page], baseHash: null });
+    return { ...w, productionId, chapter, page };
+  }
+  const offer = async (w: Awaited<ReturnType<typeof comicBook>>, actions: Array<Record<string, unknown>>) => {
+    const receipts = [currentReceipt(w.store, "production-metadata", w.productionId)];
+    const checked = actions.map((action) => ModelWorldChatActionSchema.parse({ ...action, productionId: w.productionId, checkReceiptIds: receipts.map((receipt) => receipt.id) }));
+    const one = turn(w.conversationId, { kind: "world" }, { receipts, actions: checked });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, one, w.actionDeps);
+    await appendTurn(w.log, one, prepared);
+    await bindAll(w.lifecycle, prepared);
+    return (await loaded(w.log)).actions;
+  };
+  const ready = { ok: true as const, pages: ["p"], panels: 13, lines: 19, redraws: 6, baseMicroUsd: 2_860_000, capMicroUsd: 4_180_000, unitMicroUsd: 220_000, missing: ["Old Tam"], briefs: "b1", provider: "openai", modelName: "GPT Image 2", costLabel: "Up to $4.18" };
+  const host = (over: Partial<NonNullable<WorldChatActionAdapterDeps["comicMake"]>> = {}): NonNullable<WorldChatActionAdapterDeps["comicMake"]> => ({
+    quote: async () => ready, start: async () => ({ status: "running", detail: "Arke is making the pages." }), running: () => true, exportBook: async () => [{ file: "exports/book.cbz" }], ...over,
+  });
+
+  it("prices a chapter on one card, with the most it can cost as its limit", async () => {
+    const w = await comicBook({ comicMake: host() });
+    const [card] = await offer(w, [{ kind: "production-comic-make", target: { kind: "chapter", chapter: w.chapter } }]);
+    assert.equal(card!.shown.title, "Make chapter 1");
+    const body = card!.shown.body;
+    assert.equal(body.family, "generation");
+    if (body.family !== "generation") return;
+    assert.equal(body.enforceableCapMicroUsd, 4_180_000);
+    assert.equal(body.cost, "Up to $4.18");
+    assert.deepEqual(body.deterministicInputs, ["p", "briefs:b1"]);
+    assert.deepEqual(card!.shown.ripples, ["No picture of Old Tam"]);
+    assert.equal((await decide(w.lifecycle, w.log, card!)).status, "running");
+  });
+
+  it("will not spend on a brief changed since the card was priced", async () => {
+    let briefs = "b1";
+    const w = await comicBook({ comicMake: host({ quote: async () => ({ ...ready, briefs }) }) });
+    const [card] = await offer(w, [{ kind: "production-comic-make", target: { kind: "chapter", chapter: w.chapter } }]);
+    briefs = "b2";
+    assert.notEqual((await decide(w.lifecycle, w.log, card!)).status, "running");
+  });
+
+  it("does not fence a redraw on the brief the card it waits on will change", async () => {
+    let briefs = "b1";
+    const w = await comicBook({ comicMake: host({ quote: async () => ({ ...ready, briefs }) }) });
+    const [mode, make] = await offer(w, [{ kind: "production-comic-mode", ref: "first", mode: "overlay" }, { kind: "production-comic-make", after: ["first"], target: { kind: "page", page: w.page.id } }]);
+    assert.equal((await decide(w.lifecycle, w.log, mode!)).status, "completed");
+    briefs = "b2";
+    assert.equal((await decide(w.lifecycle, w.log, make!)).status, "running");
+  });
+
+  it("will not start a card the book refuses", async () => {
+    const w = await comicBook({ comicMake: host({ quote: async () => ({ ok: false, reason: "This book is Whole page. Arke makes Panel by panel books." }) }) });
+    const [card] = await offer(w, [{ kind: "production-comic-make", target: { kind: "chapter", chapter: w.chapter } }]);
+    assert.notEqual((await decide(w.lifecycle, w.log, card!)).status, "running");
+    assert.match(card!.blockedReason ?? "", /Whole page/);
+  });
+
+  it("sets Mode on a card, and a sibling Make card stays ready to approve", async () => {
+    const seen: boolean[] = [];
+    const w = await comicBook({ comicMake: host({ quote: async (_id, _target, options) => { seen.push(options.afterModeCard); return ready; } }) });
+    const [mode, make] = await offer(w, [{ kind: "production-comic-mode", ref: "mode", mode: "overlay" }, { kind: "production-comic-make", after: ["mode"], target: { kind: "page", page: w.page.id } }]);
+    assert.equal(seen[0], true, "priced for the book as the Mode card it waits on will leave it");
+    assert.equal(mode!.shown.title, "Use Panel by panel");
+    assert.equal((await decide(w.lifecycle, w.log, mode!)).status, "completed");
+    assert.equal(w.store.getBundle().productions.find((candidate) => candidate.meta.id === w.productionId)!.comic!.mode, "overlay");
+    assert.equal((await decide(w.lifecycle, w.log, make!)).status, "running");
+  });
+
+  it("exports only accepted pages", async () => {
+    const w = await comicBook({ comicMake: host() });
+    const [card] = await offer(w, [{ kind: "production-comic-export", chapter: w.chapter, formats: ["cbz"] }]);
+    assert.equal(card!.shown.title, "Export chapter 1");
+    assert.match(card!.blockedReason ?? "", /no accepted take/);
+    assert.notEqual((await decide(w.lifecycle, w.log, card!)).status, "completed");
   });
 });

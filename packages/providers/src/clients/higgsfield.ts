@@ -1,10 +1,14 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CapabilityProbe, ClientDeclarations } from "@arke-studio/contracts";
+import { artifactResultReadLimit, artifactTransferLimits, type CapabilityProbe, type ClientDeclarations } from "@arke-studio/contracts";
+import { readArtifactBody } from "./artifact-body.js";
+import { withArtifactTransfer } from "./artifact-transfer.js";
 import { SHIPPED_MANIFEST } from "../manifest-data.js";
 import {
   ProviderAuthError,
+  type ArtifactFetchOptions,
+  type ProviderCallContext,
   type CommandRunner,
   type FetchedArtifact,
   type FetchLike,
@@ -275,21 +279,30 @@ export class HiggsfieldClient implements ProviderClient {
     }
   }
 
-  async fetchArtifacts(_key: string, remoteId: string): Promise<FetchedArtifact[]> {
+  async fetchArtifacts(_key: string, remoteId: string, _context?: ProviderCallContext, options?: ArtifactFetchOptions): Promise<FetchedArtifact[]> {
+    return withArtifactTransfer(options, (signal, limits) => this.fetchResult(remoteId, signal, limits));
+  }
+
+  private async fetchResult(remoteId: string, signal: AbortSignal, limits: ReturnType<typeof artifactTransferLimits>): Promise<FetchedArtifact[]> {
     const body = await this.json("result fetch", ["generate", "get", remoteId]);
+    // The CLI retains its own bounded command lifetime; cancellation cannot start a later download.
+    signal.throwIfAborted();
     const job = body as (HiggsfieldJob & { result_url?: string }) | null;
     const url = job?.result_url;
     // `min_result_url` is deliberately ignored: it is a webp thumbnail of the result, not the
     // result, and filing it would land a preview where the take should be.
     if (typeof url !== "string" || url.length === 0) return [];
-    const res = await this.fetchImpl(url);
-    if (!res.ok) throw new Error(`higgsfield: result download failed (HTTP ${res.status})`);
+    const res = await this.fetchImpl(url, { signal });
+    if (!res.ok) {
+      void res.body?.cancel().catch(() => {});
+      throw new Error(`higgsfield: result download failed (HTTP ${res.status})`);
+    }
     const contentType = res.headers.get("content-type") ?? "application/octet-stream";
     return [
       {
         name: `output-1.${extensionFor(contentType)}`,
         contentType,
-        data: new Uint8Array(await res.arrayBuffer()),
+        data: await readArtifactBody(res, artifactResultReadLimit(0, limits), signal),
       },
     ];
   }

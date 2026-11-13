@@ -1,0 +1,14 @@
+.fy-effect-review-bar { display: grid; gap: 8px; flex: 0 0 auto; padding: 10px 14px; border-block: 1px solid var(--border); background: var(--surface); min-width: 0; }
+.fy-effect-review-bar__row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.fy-effect-review-bar button { min-height: 36px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); color: inherit; font: inherit; cursor: pointer; }
+.fy-effect-review-bar button:disabled { opacity: .5; cursor: default; }
+.fy-effect-review-bar__compare { display: inline-flex; gap: 3px; }
+.fy-effect-review-bar__compare [aria-pressed="true"] { border-color: var(--foreground); background: var(--secondary); }
+.fy-effect-review-bar__status { flex: 1 1 180px; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+.fy-effect-review-bar .fy-effect-review-bar__apply { background: var(--primary); color: var(--primary-foreground); }
+.fy-effect-review-bar button:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+@media (max-width: 599px) {
+  .fy-effect-review-bar { padding: 8px; font-size: 12px; max-height: 32dvh; overflow: auto; }
+  .fy-effect-review-bar button { min-height: 44px; }
+  .fy-effect-review-bar__row { gap: 6px; }
+}

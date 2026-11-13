@@ -1,0 +1,146 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import {
+  AudioDramaRecordSchema, EpisodeScriptSchema, dramaSourceSnapshotPath, episodeScriptFile, productionShape, unusableSound,
+  type AudioDramaRecord, type DramaChapterDecision, type DramaReviewDecision, type DramaRole, type EpisodeScriptBlock,
+} from "@arke-studio/contracts";
+import { fromPortable, toExtendedLength } from "../world/paths.js";
+import { MarkdownFile, sha256 } from "../world/text-files.js";
+import type { WorldStore } from "../world/store.js";
+
+/**
+ * One read-change-write at a time per file (codex on PR 1873): two edits arriving together would
+ * both read the same bytes, and the later one's fenced write would be refused.
+ */
+const writing = new Map<string, Promise<unknown>>();
+export async function oneAtATime<T>(key: string, work: () => Promise<T>): Promise<T> {
+  const before = writing.get(key) ?? Promise.resolve();
+  const turn = before.catch(() => {}).then(work);
+  writing.set(key, turn);
+  try { return await turn; } finally { if (writing.get(key) === turn) writing.delete(key); }
+}
+
+/** `audio-drama.json`, changed in one write fenced on the file it was read from (SPEC-057 R-85). */
+async function writeDramaRecord(store: WorldStore, productionId: string, change: (record: AudioDramaRecord) => AudioDramaRecord): Promise<void> {
+  const path = `productions/${productionId}/audio-drama.json`;
+  return oneAtATime(`${store.dir}/${path}`, () => writeDramaRecordNow(store, path, change));
+}
+async function writeDramaRecordNow(store: WorldStore, path: string, change: (record: AudioDramaRecord) => AudioDramaRecord): Promise<void> {
+  const live = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8").catch(() => null);
+  if (live === null) throw new Error("that production is not an audio drama");
+  const next = AudioDramaRecordSchema.parse(change(AudioDramaRecordSchema.parse(JSON.parse(live))));
+  await store.commit({ kind: "audio-drama", source: "audio-drama", files: [{
+    path, action: "replace", content: `${JSON.stringify(next, null, 2)}\n`, baseHash: sha256(live),
+  }] });
+}
+
+/** A role as this production plays it (R-55..R-60); null clears it back to the sheet. */
+export async function setDramaRole(store: WorldStore, productionId: string, role: string, value: DramaRole | null): Promise<void> {
+  await writeDramaRecord(store, productionId, (record) => {
+    const cast = { ...record.cast };
+    if (value === null) delete cast[role];
+    else cast[role] = value;
+    const { cast: _was, ...rest } = record;
+    return Object.keys(cast).length > 0 ? { ...rest, cast } : rest;
+  });
+}
+
+/** What became of a source chapter (R-61); null clears it back to what the scripts say. */
+export async function setDramaVerdict(store: WorldStore, productionId: string, chapter: string, value: DramaChapterDecision | null): Promise<void> {
+  await writeDramaRecord(store, productionId, (record) => {
+    // A verdict is for a chapter of the story adapted (codex on PR 1878); clearing one never is refused.
+    const story = record.source ? store.getBundle().productions.find((p) => p.meta.id === record.source!.productionId) : undefined;
+    if (value !== null && !story?.chapters.some((candidate) => candidate.id === chapter)) throw new Error("That chapter is not in the story this drama adapts.");
+    const verdicts = { ...record.verdicts };
+    if (value === null) delete verdicts[chapter];
+    else verdicts[chapter] = value;
+    const { verdicts: _was, ...rest } = record;
+    return Object.keys(verdicts).length > 0 ? { ...rest, verdicts } : rest;
+  });
+}
+
+/** A review note decided (R-53); null opens it again. */
+export async function decideDramaNote(store: WorldStore, productionId: string, key: string, decision: DramaReviewDecision | null): Promise<void> {
+  await writeDramaRecord(store, productionId, (record) => {
+    const review = { ...record.review };
+    if (decision === null) delete review[key];
+    else review[key] = decision;
+    const { review: _was, ...rest } = record;
+    return Object.keys(review).length > 0 ? { ...rest, review } : rest;
+  });
+}
+
+/**
+ * Save an audio drama's episode script whole (SPEC-057 R-83). Fenced like a chapter save: the
+ * base hash is the file the editor read, null for an episode with no script yet, and a save
+ * against a moved base is refused by the committer rather than merged. A direct save keeps the
+ * version; the committer stamps it and keeps the snapshot.
+ */
+export async function saveEpisodeScript(
+  store: WorldStore,
+  productionId: string,
+  input: { episode: number; title: string; blocks: readonly EpisodeScriptBlock[]; baseHash: string | null },
+  options: { source?: string; requestId?: string } = {},
+): Promise<{ version: number; hash: string }> {
+  const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
+  if (!production) throw new Error(`production ${productionId} is not in this world`);
+  if (!productionShape(production.meta).isAudioDrama) throw new Error(`${production.meta.title} is not an audio drama.`);
+  const path = `productions/${productionId}/scripts/${episodeScriptFile(input.episode)}`;
+  // Parsed here so a broken relation (a cut with no line breaking in) is refused before it lands.
+  const record = EpisodeScriptSchema.parse({ version: 1, episode: input.episode, title: input.title, blocks: input.blocks });
+  // A placed sound must be one this production can play (codex on PR 1872): audio, here, not retired.
+  const sound = unusableSound(record.blocks, store.getBundle().artifacts, productionId);
+  if (sound) throw new Error(sound);
+  const result = await store.commit({
+    kind: "episode-script-save",
+    source: options.source ?? "editor",
+    ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    files: [{
+      path,
+      action: input.baseHash === null ? "create" : "replace",
+      content: `${JSON.stringify(record, null, 2)}\n`,
+      baseHash: input.baseHash,
+      preserveVersion: true,
+    }],
+  });
+  const hash = result.hashes?.[path];
+  if (hash === undefined) throw new Error("The script was saved without a hash to save against next.");
+  await keepAdaptedText(store, productionId, record.blocks).catch(() => {});
+  return { version: result.versions[path]!, hash };
+}
+
+/**
+ * The exact text each scene is pinned to, kept by its hash (codex on PR 1878): a chapter edited in
+ * place keeps its version number, so its history cannot say what the scene was made from.
+ */
+export async function keepAdaptedText(store: WorldStore, productionId: string, blocks: readonly EpisodeScriptBlock[]): Promise<void> {
+  const bundle = store.getBundle();
+  for (const block of blocks) {
+    if (block.kind !== "heading" || !block.source?.hash) continue;
+    const snapshot = dramaSourceSnapshotPath(productionId, block.source.hash);
+    if (await readFile(toExtendedLength(join(store.dir, fromPortable(snapshot))), "utf8").then(() => true, () => false)) continue;
+    const chapter = bundle.productions.find((p) => p.meta.id === block.source!.story)?.chapters.find((c) => c.id === block.source!.chapter);
+    if (!chapter || chapter.hash !== block.source.hash) continue;
+    const file = chapter.file.endsWith(".md") ? chapter.file : `${chapter.file}.md`;
+    const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(`productions/${block.source.story}/chapters/${file}`))), "utf8").catch(() => null);
+    if (raw === null || sha256(raw) !== block.source.hash) continue;
+    await store.commit({ kind: "drama-source-snapshot", source: "audio-drama", files: [{ path: snapshot, action: "create", content: MarkdownFile.parse(raw).body, baseHash: null }] });
+  }
+}
+
+/**
+ * Every saved script's adapted text, kept on open (codex on PR 1878): a script saved before
+ * snapshots existed would otherwise lose its evidence to the first edit made in place.
+ */
+export async function keepAllAdaptedText(store: WorldStore): Promise<void> {
+  for (const production of store.getBundle().productions) {
+    for (const entry of production.episodeScripts ?? []) await keepAdaptedText(store, production.meta.id, entry.script.blocks).catch(() => {});
+  }
+}
+
+/** A scene's adapted text, by the hash it was pinned at. */
+export async function readDramaSource(store: WorldStore, productionId: string, hash: string): Promise<string> {
+  const body = await readFile(toExtendedLength(join(store.dir, fromPortable(dramaSourceSnapshotPath(productionId, hash)))), "utf8").catch(() => null);
+  if (body === null) throw new Error("The text this scene was adapted from was not kept.");
+  return body;
+}

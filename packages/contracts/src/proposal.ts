@@ -19,6 +19,10 @@ export const ProposalKindSchema = z.enum([
   "chapter-draft",
   "story-overview",
   "prose-style",
+  /** An audio drama episode's script, rewritten by Arke (SPEC-057 R-9, R-54). */
+  "episode-script",
+  /** A graphic novel chapter's pages, drafted by Arke (SPEC-064 R-13, turn 249d). */
+  "comic-script",
   "scene-draft",
   "scene-edit",
   /** SPEC-023 R-17: the narrative-domain JSON entities, each staged whole through the gate. */
@@ -178,6 +182,8 @@ export const ProposalSchema = z
      * would lose work rather than migrate it.
      */
     draftRevision: z.number().int().min(1).default(1),
+    /** An attended sentence request is a brief until its prose changes; survives failed runs/restart. */
+    sheetSeed: z.object({ path: z.string().min(1), bodyHash: Sha256Schema }).strict().optional(),
     /**
      * The request id of the edit that produced this revision (#70 §11.4.1).
      *

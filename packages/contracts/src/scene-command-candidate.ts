@@ -2,10 +2,14 @@ import { clearBoardOverride, clearBoardPrompt, deleteShot, duplicateShot, editSc
 import { orderedShots, type GraphScene, type SceneRecord } from "./scene-flow.js";
 import { parseMentions } from "./planning.js";
 import { stageProblems, resolvedShotStaging, stagingRetimed } from "./staging.js";
+import { stageReframed } from "./stage-framing.js";
+import { effectiveFraming, ScriptBlockSchema } from "./scene.js";
 import type { SceneBlocking, SceneCastMember, Shot, ShotStageEdit } from "./scene.js";
 import type { WorldBundle } from "./client-state.js";
+import { resolveProductionArtifact } from "./artifact-access.js";
 
 export type SemanticSceneCommand =
+  | { kind: "set-beat-line"; shotId: string; blockId?: string; text: string; speaker?: string; textDigest: string }
   | {
       kind: "edit-scene";
       title?: string;
@@ -13,7 +17,7 @@ export type SemanticSceneCommand =
       inherits?: { location?: string | null; timeOfDay?: string | null; tone?: string | null };
       cast?: Record<string, SceneCastMember | null>;
     }
-  | { kind: "edit-stage"; shotId: string; blocking?: Omit<SceneBlocking, "version"> | null; staging?: ShotStageEdit | null }
+  | { kind: "edit-stage"; shotId: string; blocking?: (Omit<SceneBlocking, "version" | "plate" | "lights" | "atmosphere"> & { plate?: SceneBlocking["plate"] | null; lights?: SceneBlocking["lights"] | null; atmosphere?: SceneBlocking["atmosphere"] | null }) | null; staging?: ShotStageEdit | null }
   | { kind: "insert-shot"; at: ShotAnchor; shot: Omit<Shot, "id" | "number"> }
   | { kind: "move-shot"; shotId: string; to: ShotAnchor }
   | { kind: "duplicate-shot"; shotId: string }
@@ -31,6 +35,36 @@ export type SemanticSceneCommand =
  * Caller supplies the complete production snapshot, including preceding dry-run commands. */
 export function sceneCommandCandidate(bundle: WorldBundle, productionId: string, record: SceneRecord, command: SemanticSceneCommand): GraphScene {
   switch (command.kind) {
+    case "set-beat-line": {
+      const shots = orderedShots(record), shot = shots.find(one => one.id === command.shotId);
+      if (!shot) throw new SceneOperationRefused(["This beat is no longer in the scene."]);
+      const blocks = [...(record.script?.blocks ?? [])];
+      const current = blocks.find(block => block.id === command.blockId);
+      if (command.blockId && (!current || !shot.covers?.some(cover => cover.blockId === command.blockId))) {
+        throw new SceneOperationRefused(["This line no longer belongs to the beat."]);
+      }
+      if (command.speaker && !bundle.sheets.some(sheet => sheet.id === command.speaker && sheet.type === "character" && (!sheet.retired || current?.speaker === sheet.id))) {
+        throw new SceneOperationRefused(["Choose a character in this world."]);
+      }
+      let id = command.blockId;
+      if (!id) {
+        let n = 1;
+        while (blocks.some(block => block.id === `blk_line-${n}`)) n++;
+        id = `blk_line-${n}`;
+      }
+      const block = ScriptBlockSchema.parse({ id, kind: command.speaker ? "dialogue" : "action",
+        text: command.text, ...(command.speaker ? { speaker: command.speaker } : {}) });
+      if (current) blocks[blocks.indexOf(current)] = block;
+      else {
+        // Place new lines with their picture, ahead of the next picture's script blocks.
+        const following = new Set(shots.slice(shots.indexOf(shot) + 1).flatMap(one => one.covers?.map(cover => cover.blockId) ?? []));
+        const at = blocks.findIndex(one => following.has(one.id) && !shot.covers?.some(cover => cover.blockId === one.id));
+        blocks.splice(at < 0 ? blocks.length : at, 0, block);
+      }
+      // Existing citations keep their digest: editing text must still stale the old coverage.
+      return editShot({ ...record, script: { ...record.script, blocks } }, { shotId: shot.id,
+        change: current ? {} : { covers: [...(shot.covers ?? []), { blockId: id, textDigest: command.textDigest }] } });
+    }
     case "edit-scene": {
       return editScene(record, {
         ...(command.title !== undefined ? { title: command.title } : {}),
@@ -48,12 +82,33 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
       if (current === undefined) {
         throw new SceneOperationRefused([`shot ${command.shotId} is not in this scene`]);
       }
+      // A plate is a picture this production may use (SPEC-020 R-13): another production's scoped
+      // image is not its to build from or send, whatever a picker offered (issue 1818).
+      const plateSource = command.blocking?.plate?.source;
+      if (plateSource?.source === "artifact") {
+        const owned = resolveProductionArtifact(bundle.artifacts, plateSource.artifactId, productionId);
+        if (!owned.ok && owned.code === "other-production") throw new SceneOperationRefused([`the plate is ${owned.reason}`]);
+      }
       let next = editScene(record, {});
       if (command.blocking !== undefined) {
         next = editScene(next, {
           blocking: command.blocking === null
             ? undefined
-            : { ...command.blocking, version: (record.blocking?.version ?? 0) + 1 },
+            : (() => {
+                // The plate is the scene's too, but most blocking edits move marks and boxes and never
+                // mention it; leaving it out keeps it, and only an explicit null takes it off (issue 1818).
+                // Lights and the atmosphere (issue 1825) are the scene's in the same way.
+                const { plate, lights, atmosphere, ...marks } = command.blocking;
+                const keep = <T,>(next: T | null | undefined, current: T | undefined) => (next === undefined ? current : next ?? undefined);
+                const kept = { plate: keep(plate, record.blocking?.plate), lights: keep(lights, record.blocking?.lights), atmosphere: keep(atmosphere, record.blocking?.atmosphere) };
+                return {
+                  ...marks,
+                  ...(kept.plate === undefined ? {} : { plate: kept.plate }),
+                  ...(kept.lights === undefined ? {} : { lights: kept.lights }),
+                  ...(kept.atmosphere === undefined ? {} : { atmosphere: kept.atmosphere }),
+                  version: (record.blocking?.version ?? 0) + 1,
+                };
+              })(),
         });
       }
       if (command.staging) {
@@ -114,9 +169,17 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
       const retimed = command.change.durationSec !== undefined && current?.staging !== undefined
         ? stagingRetimed(current.staging, command.change.durationSec, current.durationSec ?? 4)
         : undefined;
-      const change = retimed === undefined || retimed === current?.staging
+      // A camera written in words (issue 1820) is solved again when the shot's length or lens moves,
+      // so it still frames what the words say rather than what the old numbers did.
+      let staging = retimed ?? current?.staging;
+      if (current !== undefined && staging !== undefined && staging.keys.some((key) => key.frame !== undefined) && (retimed !== undefined || command.change.framing !== undefined)) {
+        const lens = effectiveFraming(record, { ...current, ...command.change } as Shot).lens;
+        const reframed = stageReframed(resolvedShotStaging(record, staging), command.change.durationSec ?? current.durationSec ?? 4, "16:9", lens);
+        if (JSON.stringify(reframed.keys) !== JSON.stringify(staging.keys)) staging = { ...staging, keys: reframed.keys };
+      }
+      const change = staging === undefined || staging === current?.staging
         ? command.change
-        : { ...command.change, staging: { ...retimed, version: retimed.version + 1 } };
+        : { ...command.change, staging: { ...staging, version: (current?.staging?.version ?? 0) + 1 } };
       return editShot(record, { shotId: command.shotId, change });
     }
     case "set-prompt-override": {

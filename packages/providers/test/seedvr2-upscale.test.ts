@@ -44,7 +44,7 @@ function engine(history: Record<string, unknown> = {}) {
     throw new Error(`Unexpected request ${url}`);
   };
   const client = new ComfyUiClient(fetch, () => "http://127.0.0.1:8188", async () => ({ ok: true }),
-    undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, async () => {});
+    undefined, undefined, undefined, undefined, async () => {});
   return { client, calls, graphs, uploads };
 }
 
@@ -62,7 +62,7 @@ function request(extra: Partial<SubmitRequest["params"]> = {}, more: Partial<Sub
       sourceDurationSec: 7.3,
       ...extra,
     },
-    videoReferences: [{ name: "reference-01.mp4", contentType: "video/mp4", data: clip }],
+    videoReferences: [{ contentType: "video/mp4", data: clip }],
     ...more,
   };
 }
@@ -148,7 +148,7 @@ test("refuses a changed source, a second input, another size or a prompt before 
     [request({ sourceHash: "sha256:0000000000000000" }), /source has changed/],
     [request({}, { videoReferences: [] }), /exactly one source video/],
     [request({}, { imageReferences: [{ name: "a.png", contentType: "image/png", data: clip }] }), /takes one video and nothing else|takes no reference images/],
-    [request({}, { videoReferences: [{ name: "a.webm", contentType: "video/webm", data: clip }] }), /needs an MP4 source/],
+    [request({}, { videoReferences: [{ contentType: "video/webm", data: clip }] }), /needs an MP4 source/],
     [request({ size: "4k" }), /1080p|must be one of/],
     [request({ aspect: "1:1" }), /16:9 or 9:16|must be one of/],
     [request({ prompt: "make it sharper" }), /takes no prompt/],
@@ -185,10 +185,3 @@ test("only what SaveVideo saved under the recipe's prefix is fetched, never the 
   assert.ok(calls.some((url) => url.includes("arke-upscale_00001_.mp4")));
 });
 
-test("the free-memory floor is what the job adds, so the card it was measured on can dispatch it", () => {
-  // 1,387 MiB in use at dispatch, 7,220 MiB at peak: the job itself took ~5.8 GB. A floor set to
-  // the peak refused every dispatch on that 10 GB card, where the desktop holds 1.5–3.5 GB.
-  const floor = comfyUiRecipeById("comfyui-seedvr2-upscale")!.hardware.minFreeVramMb!;
-  assert.ok(floor >= 7220 - 1387, String(floor));
-  assert.ok(floor <= 10240 - 3500, String(floor));
-});

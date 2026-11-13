@@ -54,6 +54,8 @@ const TOOL_BY_NAME: Record<string, RetrievalTool> = {
   related: "related",
   get_attachment_text: "get-attachment-text",
   view_image: "view-image",
+  inspect_media: "inspect-media", sample_video: "sample-video", analyze_audio_signal: "analyze-audio-signal",
+  transcribe_audio: "transcribe-audio", review_audio_content: "review-audio-content", listen_audio: "listen-audio",
   fetch_url: "fetch-url",
   get_production: "get-production",
   describe_action: "describe-action",
@@ -94,6 +96,7 @@ function summarise(text: string): string {
 
 export interface RetrievalDeps extends TargetReadDeps {
   readImage?: (lease: QueryLease, args: Record<string, unknown>) => Promise<RetrievalOutcome>;
+  readMedia?: (lease: QueryLease, name: import("./media-inspection.js").MediaInspectionName, args: Record<string, unknown>) => Promise<RetrievalOutcome>;
   leases: QueryLeaseRegistry;
   getBundle: () => WorldBundle | null;
   getIndex: () => WorldIndex | null;
@@ -192,7 +195,16 @@ export class WorldChatRetrieval {
     const index = this.deps.getIndex();
 
     if (isTargetReadTool(toolName)) {
+      if (toolName === "get_candidate" && !this.deps.getConversationDrafts) throw new RetrievalError("unavailable", "Conversation drafts are unavailable on this host.");
       const read = await this.targetReads.call(lease, bundle, toolName as ArkeTargetReadTool, args);
+      // Loading a retained journal may outlive world selection or cancellation.
+      this.deps.leases.verify(lease.token, toolName);
+      if (toolName === "get_candidate") {
+        const spent = this.textSpentByRun.get(lease.runId) ?? 0;
+        const size = JSON.stringify(read.result).length;
+        if (spent + size > (this.deps.textBudgetChars?.() ?? MAX_TEXT_PER_RUN_CHARS)) throw new RetrievalError("budget-exhausted", "This run has read as much retained draft and attachment text as it may.");
+        this.textSpentByRun.set(lease.runId, spent + size);
+      }
       return {
         result: read.result,
         receipt: receipt(read.status, {
@@ -210,6 +222,9 @@ export class WorldChatRetrieval {
       case "view_image":
         if (!this.deps.readImage) throw new RetrievalError("unavailable", "view_image: image inspection is unavailable for this adapter.");
         return this.deps.readImage(lease, args);
+      case "inspect_media": case "sample_video": case "analyze_audio_signal": case "transcribe_audio": case "review_audio_content": case "listen_audio":
+        if (!this.deps.readMedia) throw new RetrievalError("unavailable", "Local media inspection is unavailable on this host.");
+        return this.deps.readMedia(lease, toolName, args);
       case "describe_action": {
         const kind = String(args["kind"] ?? "");
         const described = describeAction(kind);

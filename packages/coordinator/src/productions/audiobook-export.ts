@@ -1,19 +1,28 @@
-import { createHash } from "node:crypto";
-import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   AUDIOBOOK_PLAYER_SOURCE,
+  audiobookScopeKey,
+  AudiobookScopeSchema,
+  foldAudiobookCredits,
+  pcm16WavHeader,
+  SlugSchema,
   ulid,
   type AudiobookListening,
   type AudiobookPlayerChapter,
+  type AudiobookScope,
   type ListeningChapter,
+  type MadeAudiobookCredit,
+  type WebPackagesListed,
 } from "@arke-studio/contracts";
+import { speechWavHeader } from "../audio/speech-wav.js";
 import type { FfmpegRunner } from "../takes/export.js";
-import { atomicWriteFile } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
-import { audiobookListening } from "./audiobook-listening.js";
+import { audiobookListening, anyNarrator } from "./audiobook-listening.js";
+import { madeAudiobookCredits } from "./audiobook-credits.js";
 import { containedWorldFile } from "./interactive.js";
+import { hashFile, PackageWriter } from "./package-writer.js";
 
 /**
  * The audiobook as the player (design turn 186e, SPEC-047 R-72): a web package like the visual
@@ -29,18 +38,17 @@ import { containedWorldFile } from "./interactive.js";
  */
 
 export type AudiobookExportResult =
-  | { ok: true; id: string; dir: string; file: string; chapters: number; pictures: number; bytes: number; joined: boolean }
+  | { ok: true; id: string; dir: string; file: string; chapters: number; pictures: number; bytes: number; joined: boolean; scope: AudiobookScope; chapterIds: string[] }
   | { ok: false; blockers: string[] };
 
 const EXPORT_ID = /^ab_[0-9A-HJKMNP-TV-Z]{26}$/;
 
-function fullHash(bytes: Uint8Array): string {
-  return `sha256:${createHash("sha256").update(bytes).digest("hex").slice(0, 16)}`;
-}
+/** How a manifest names a file's bytes: the first sixteen hex digits of its SHA-256. */
+const packageHash = (sha256: string) => `sha256:${sha256.slice(0, 16)}`;
 
 /** What a package's chapter depends on, to read the book again under the gate and compare. */
 function signature(chapters: readonly ListeningChapter[]): string {
-  return JSON.stringify(chapters.map((chapter) => [chapter.chapterId, chapter.title, chapter.mix?.file ?? null, chapter.blocks.map((block) => [block.key, block.file, block.seconds]), chapter.pictures.map((picture) => [picture.key, picture.file, picture.at]), chapter.opening]));
+  return JSON.stringify(chapters.map((chapter) => [chapter.chapterId, chapter.title, chapter.mix?.file ?? null, chapter.blocks.map((block) => [block.key, block.file, block.seconds]), chapter.pictures.map((picture) => [picture.key, picture.file, picture.at, picture.seconds, picture.focus ?? null, picture.motion ?? null, picture.motionProblem ?? null]), chapter.opening]));
 }
 
 const extensionOf = (file: string) => {
@@ -74,17 +82,25 @@ mountAudiobookPlayer(document.getElementById("app"), { title: manifest.title, co
 export async function exportAudiobookPlayer(
   store: WorldStore,
   productionId: string,
-  options: { clock: () => string; ffmpeg?: FfmpegRunner; exportId?: string; signal?: AbortSignal } ,
+  options: { clock: () => string; ffmpeg?: FfmpegRunner; exportId?: string; signal?: AbortSignal; scope?: AudiobookScope } ,
 ): Promise<AudiobookExportResult> {
-  const listening: AudiobookListening = await audiobookListening(store, productionId, options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {});
-  const whole = listening.chapters.filter((chapter) => chapter.state === "read" && chapter.blocks.length > 0);
-  if (whole.length === 0) return { ok: false, blockers: ["no chapter is read whole yet"] };
+  const scope = options.scope ?? { kind: "book" };
+  const listeningOptions = { ...(options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {}), ...(options.signal ? { signal: options.signal } : {}), scope, finalAudio: true };
+  const listening: AudiobookListening = await audiobookListening(store, productionId, listeningOptions);
+  const readWhole = listening.chapters.filter((chapter) => chapter.state === "read" && (chapter.blocks.length > 0 || chapter.audioStudio !== undefined && chapter.mix !== undefined));
+  // The credits inside the first and last chapters (SPEC-047 R-218), for the whole book only.
+  const credits = scope.kind === "book" && readWhole.length > 0 ? await madeAudiobookCredits(store, productionId, await anyNarrator(store, productionId)) : {};
+  const { chapters: whole, audio: creditAudio } = foldAudiobookCredits(readWhole, credits, listening.cover);
+  if (whole.length === 0) return { ok: false, blockers: [scope.kind === "chapter" ? "this chapter is not read whole yet" : "no chapter is read whole yet"] };
   const exportId = options.exportId ?? `ab_${ulid()}`;
   if (!EXPORT_ID.test(exportId)) throw new Error("invalid audiobook export id");
   const signal = options.signal ?? new AbortController().signal;
   const staging = join(store.dir, ".staging", "audiobook-export", exportId);
   const outName = `audiobook-${productionId}-${exportId}`;
   try {
+    // Copies are hashed as they stream and read back only if changed since (issue 2803).
+    const writer = await PackageWriter.stage(staging);
+    // The encoder writes into media/ itself, before any copy has made the folder.
     await mkdir(toExtendedLength(join(staging, "media")), { recursive: true });
     // Every source is resolved to the world's own file before anything is copied: one that leaves
     // the world refuses the package whole, as the interactive export does.
@@ -98,16 +114,17 @@ export async function exportAudiobookPlayer(
     };
     for (const chapter of whole) for (const block of chapter.blocks) await resolve(block.file);
     for (const chapter of whole) if (chapter.mix !== undefined) await resolve(chapter.mix.file);
-    const pictureFiles = [...new Set([...(listening.cover !== null ? [listening.cover] : []), ...whole.flatMap((chapter) => [...chapter.pictures.map((picture) => picture.file), ...(chapter.opening !== null ? [chapter.opening] : [])])])];
+    const motionProblems = whole.flatMap((chapter) => chapter.pictures.filter((p) => p.motionProblem !== undefined).map((p) => `${chapter.title}: ${p.motionProblem} · choose Use still before exporting`));
+    if (motionProblems.length > 0) return { ok: false, blockers: motionProblems };
+    const pictureFiles = [...new Set([...(listening.cover !== null ? [listening.cover] : []), ...whole.flatMap((chapter) => [...chapter.pictures.flatMap((picture) => [picture.file, ...(picture.motion !== undefined ? [picture.motion.file] : [])]), ...(chapter.opening !== null ? [chapter.opening] : [])])])];
     for (const file of pictureFiles) await resolve(file);
     if (outside.length > 0) return { ok: false, blockers: outside.map((file) => `${file} is not a file inside this world — the package would carry something else`) };
 
     // Pictures once each, however many chapters show them.
     const pictureName = new Map<string, string>();
-    await mkdir(toExtendedLength(join(staging, "media", "pictures")), { recursive: true });
     for (const [index, file] of pictureFiles.entries()) {
       const name = `media/pictures/p${String(index + 1).padStart(3, "0")}${extensionOf(file)}`;
-      await copyFile(toExtendedLength(real.get(file)!), toExtendedLength(join(staging, name)));
+      await writer.copyIn(real.get(file)!, name);
       pictureName.set(file, name);
     }
     const picture = (file: string | null) => (file === null ? null : (pictureName.get(file) ?? null));
@@ -123,10 +140,10 @@ export async function exportAudiobookPlayer(
         state: "read" as const,
         seconds: chapter.seconds,
         gaps: [],
-        pictures: chapter.pictures.flatMap((entry) => (pictureName.has(entry.file) ? [{ at: entry.at, src: pictureName.get(entry.file)! }] : [])),
+        pictures: chapter.pictures.flatMap((entry) => (pictureName.has(entry.file) ? [{ at: entry.at, seconds: entry.seconds, src: pictureName.get(entry.file)!, ...(entry.focus !== undefined ? { focus: entry.focus } : {}), ...(entry.motion !== undefined ? { motion: { src: pictureName.get(entry.motion.file)!, seconds: entry.motion.seconds, behavior: entry.motion.behavior } } : {}) }] : [])),
         opening: picture(chapter.opening),
       };
-      const blocks = chapter.blocks.map((block) => ({ key: block.key, at: block.at, seconds: block.seconds, sentences: block.sentences }));
+      const blocks = chapter.blocks.map((block) => ({ key: block.key, at: block.at, seconds: block.seconds, sentences: block.sentences, ...(block.words !== undefined ? { words: block.words } : {}) }));
       // A chapter with timing ships its one mix (design turn 187, R-85): the same render the
       // chapter's Play and the player in the app hear — overlaps, reactions, beds, one loudness —
       // encoded where this machine can, else the render itself. Never its takes joined anew.
@@ -135,33 +152,53 @@ export async function exportAudiobookPlayer(
         let name = `media/chapter-${pad(chapter.order)}.wav`;
         if (options.ffmpeg !== undefined) {
           try {
-            await options.ffmpeg.run(["-y", "-i", real.get(chapter.mix.file)!, "-vn", "-ac", "1", "-ar", "44100", "-c:a", "aac", "-b:a", "128k", join(staging, encoded)], () => {}, signal);
+            await options.ffmpeg.run(["-y", "-i", real.get(chapter.mix.file)!, "-vn", "-ac", chapter.audioStudio ? "2" : "1", "-ar", chapter.audioStudio ? "48000" : "44100", "-c:a", "aac", "-b:a", "128k", join(staging, encoded)], () => {}, signal);
             name = encoded;
           } catch {
             if (signal.aborted) return { ok: false, blockers: ["the export was cancelled"] };
             await rm(toExtendedLength(join(staging, encoded)), { force: true }).catch(() => {});
           }
         }
-        if (name !== encoded) await copyFile(toExtendedLength(real.get(chapter.mix.file)!), toExtendedLength(join(staging, name)));
-        chapters.push({ ...base, audio: [{ src: name, at: 0, seconds: chapter.seconds }], blocks });
+        if (name === encoded) await writer.adopt(encoded);
+        else await writer.copyIn(real.get(chapter.mix.file)!, name);
+        // Credits around the mix (R-218) play as sources of their own before and after it.
+        const around = creditAudio.get(chapter.chapterId);
+        const before = around?.before !== undefined ? credits.opening : undefined;
+        const after = around?.after !== undefined ? credits.closing : undefined;
+        const lead = before?.seconds ?? 0;
+        const copied = async (credit: MadeAudiobookCredit | undefined, at: number) => {
+          if (credit === undefined) return [];
+          const src = `media/chapter-${pad(chapter.order)}-${credit.key}.wav`;
+          await writer.copyIn(real.get(credit.file)!, src);
+          return [{ src, at, seconds: credit.seconds }];
+        };
+        const mixSeconds = around === undefined ? chapter.seconds : chapter.mix.seconds;
+        const audio = [...(await copied(before, 0)), { src: name, at: lead, seconds: mixSeconds }, ...(await copied(after, lead + mixSeconds))];
+        chapters.push({ ...base, audio, blocks });
         continue;
       }
       if (options.ffmpeg !== undefined) {
-        // One file a chapter: each take made uniform, then joined back to back with nothing added.
+        // One file a chapter, the takes back to back with nothing added: joined here and encoded
+        // once when they share a format, else each made uniform by ffmpeg and then joined.
         const name = `media/chapter-${pad(chapter.order)}.m4a`;
         const work = join(staging, "work", chapter.chapterId);
         let made = true;
         await mkdir(toExtendedLength(work), { recursive: true });
         try {
-          const pieces: string[] = [];
-          for (const [index, block] of chapter.blocks.entries()) {
-            const piece = join(work, `${String(index).padStart(4, "0")}.wav`);
-            await options.ffmpeg.run(["-y", "-i", real.get(block.file)!, "-vn", "-ac", "1", "-ar", "44100", "-c:a", "pcm_s16le", piece], () => {}, signal);
-            pieces.push(piece);
+          const takes = join(work, "takes.wav");
+          if (await joinUniformTakes(chapter.blocks.map((block) => real.get(block.file)!), takes)) {
+            await options.ffmpeg.run(["-y", "-i", takes, "-vn", "-ac", "1", "-ar", "44100", "-c:a", "aac", "-b:a", "128k", join(staging, name)], () => {}, signal);
+          } else {
+            const pieces: string[] = [];
+            for (const [index, block] of chapter.blocks.entries()) {
+              const piece = join(work, `${String(index).padStart(4, "0")}.wav`);
+              await options.ffmpeg.run(["-y", "-i", real.get(block.file)!, "-vn", "-ac", "1", "-ar", "44100", "-c:a", "pcm_s16le", piece], () => {}, signal);
+              pieces.push(piece);
+            }
+            const list = join(work, "pieces.txt");
+            await writeFile(toExtendedLength(list), pieces.map((piece) => `file '${piece.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`).join("\n") + "\n", "utf8");
+            await options.ffmpeg.run(["-y", "-f", "concat", "-safe", "0", "-i", list, "-c:a", "aac", "-b:a", "128k", join(staging, name)], () => {}, signal);
           }
-          const list = join(work, "pieces.txt");
-          await writeFile(toExtendedLength(list), pieces.map((piece) => `file '${piece.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`).join("\n") + "\n", "utf8");
-          await options.ffmpeg.run(["-y", "-f", "concat", "-safe", "0", "-i", list, "-c:a", "aac", "-b:a", "128k", join(staging, name)], () => {}, signal);
         } catch (err) {
           if (signal.aborted) return { ok: false, blockers: ["the export was cancelled"] };
           // A join that fails ships the takes as they were made: the same player plays them.
@@ -173,42 +210,32 @@ export async function exportAudiobookPlayer(
           await rm(toExtendedLength(work), { recursive: true, force: true }).catch(() => {});
         }
         if (made) {
+          await writer.adopt(name);
           chapters.push({ ...base, audio: [{ src: name, at: 0, seconds: chapter.seconds }], blocks });
           continue;
         }
       }
       const folder = `media/chapter-${pad(chapter.order)}`;
-      await mkdir(toExtendedLength(join(staging, folder)), { recursive: true });
       const audio: AudiobookPlayerChapter["audio"] = [];
       for (const [index, block] of chapter.blocks.entries()) {
         const name = `${folder}/${String(index + 1).padStart(4, "0")}${extensionOf(block.file)}`;
-        await copyFile(toExtendedLength(real.get(block.file)!), toExtendedLength(join(staging, name)));
+        await writer.copyIn(real.get(block.file)!, name);
         audio.push({ src: name, at: block.at, seconds: block.seconds });
       }
       chapters.push({ ...base, audio, blocks });
     }
     await rm(toExtendedLength(join(staging, "work")), { recursive: true, force: true }).catch(() => {});
 
-    // Every file the package carries, hashed as written, then the page and the manifest.
-    const files: Array<{ file: string; hash: string }> = [];
-    let bytes = 0;
-    const walk = async (rel: string): Promise<void> => {
-      for (const entry of await readdir(toExtendedLength(join(staging, rel)), { withFileTypes: true })) {
-        const child = `${rel}/${entry.name}`;
-        if (entry.isDirectory()) await walk(child);
-        else {
-          const content = await readFile(toExtendedLength(join(staging, child)));
-          bytes += content.byteLength;
-          files.push({ file: child, hash: fullHash(content) });
-        }
-      }
-    };
-    await walk("media");
-    files.sort((a, b) => a.file.localeCompare(b.file));
+    // Every file the package carries, hashed as it was written, then the page and the manifest.
+    const packed = writer.files();
+    const files = packed.map(({ file, sha256 }) => ({ file, hash: packageHash(sha256) }));
+    let bytes = packed.reduce((sum, { bytes: size }) => sum + size, 0);
     const manifest = {
       kind: "audiobook" as const,
       version: 1,
       productionId,
+      scope,
+      chapterIds: chapters.map((chapter) => chapter.id),
       title: listening.title,
       world: store.getBundle().meta.name,
       cover: picture(listening.cover),
@@ -216,31 +243,35 @@ export async function exportAudiobookPlayer(
       files,
       provenance: { exportId, exportedAt: options.clock() },
     };
-    await atomicWriteFile(join(staging, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-    const page = playerHtml({ title: listening.title, cover: manifest.cover, chapters }, `arke-ab-${store.worldId}-${productionId}`);
-    await atomicWriteFile(join(staging, "player.html"), page);
-    bytes += Buffer.byteLength(page);
+    await writer.writeText("manifest.json", `${JSON.stringify(manifest, null, 2)}\n`);
+    const page = playerHtml({ title: listening.title, cover: manifest.cover, chapters }, `arke-ab-${store.worldId}-${productionId}${scope.kind === "chapter" ? `-${audiobookScopeKey(scope)}` : ""}`);
+    bytes += await writer.writeText("player.html", page);
 
-    const problems = await packageProblems(staging, exportId);
+    const problems = await packageProblems(staging, exportId, async (file) => packageHash(await writer.currentSha256(file)));
     if (problems.length > 0) return { ok: false, blockers: problems };
 
     // Under the gate, the book is read again: a take made or a picture moved meanwhile refuses the
     // package rather than shipping it beside the snapshot's.
     return await store.gateOp(async () => {
-      const again = (await audiobookListening(store, productionId, options.ffmpeg !== undefined ? { ffmpeg: options.ffmpeg } : {})).chapters.filter((chapter) => chapter.state === "read" && chapter.blocks.length > 0);
+      const readAgain = (await audiobookListening(store, productionId, listeningOptions)).chapters.filter((chapter) => chapter.state === "read" && (chapter.blocks.length > 0 || chapter.audioStudio !== undefined && chapter.mix !== undefined));
+      const creditsAgain = scope.kind === "book" && readAgain.length > 0 ? await madeAudiobookCredits(store, productionId, await anyNarrator(store, productionId)) : {};
+      const again = foldAudiobookCredits(readAgain, creditsAgain, listening.cover).chapters;
       if (signature(again) !== signature(whole)) return { ok: false as const, blockers: ["the book changed while the package was made — export again"] };
-      await mkdir(toExtendedLength(join(store.dir, "exports")), { recursive: true });
-      await rename(toExtendedLength(staging), toExtendedLength(join(store.dir, "exports", outName)));
-      return { ok: true as const, id: exportId, dir: `exports/${outName}`, file: `exports/${outName}/player.html`, chapters: chapters.length, pictures: pictureFiles.length, bytes, joined };
+      await writer.commit(join(store.dir, "exports", outName));
+      return { ok: true as const, id: exportId, dir: `exports/${outName}`, file: `exports/${outName}/player.html`, chapters: chapters.length, pictures: pictureFiles.length, bytes, joined, scope, chapterIds: manifest.chapterIds };
     });
   } finally {
     await rm(toExtendedLength(staging), { recursive: true, force: true }).catch(() => {});
   }
 }
 
-/** The package re-read as a listener's browser would: the page, the manifest, and every file at its hash. */
-export async function packageProblems(dir: string, exportId: string): Promise<string[]> {
-  let manifest: { kind?: unknown; provenance?: { exportId?: unknown }; files?: Array<{ file: string; hash: string }>; chapters?: AudiobookPlayerChapter[] } | null = null;
+/**
+ * The package re-read as a listener's browser would: the page, the manifest, and every file at its
+ * hash. `hashOf` names a file's bytes as the manifest does; by default they are read again.
+ */
+export async function packageProblems(dir: string, exportId: string,
+  hashOf: (file: string) => Promise<string> = async (file) => packageHash((await hashFile(join(dir, file))).sha256)): Promise<string[]> {
+  let manifest: { kind?: unknown; scope?: unknown; chapterIds?: unknown; provenance?: { exportId?: unknown }; files?: Array<{ file: string; hash: string }>; chapters?: AudiobookPlayerChapter[] } | null = null;
   try {
     manifest = JSON.parse(await readFile(toExtendedLength(join(dir, "manifest.json")), "utf8"));
   } catch {
@@ -248,28 +279,42 @@ export async function packageProblems(dir: string, exportId: string): Promise<st
   }
   if (manifest === null || manifest.kind !== "audiobook" || !Array.isArray(manifest.files) || !Array.isArray(manifest.chapters)) return ["manifest.json is missing or invalid"];
   const problems: string[] = [];
+  if (manifest.scope !== undefined) {
+    const scope = AudiobookScopeSchema.safeParse(manifest.scope);
+    const ids = manifest.chapters.map((chapter) => chapter.id);
+    if (!scope.success || (scope.data.kind === "chapter" && (ids.length !== 1 || ids[0] !== scope.data.chapterId)) || JSON.stringify(manifest.chapterIds) !== JSON.stringify(ids)) problems.push("manifest.json does not match its export scope");
+  }
   if (manifest.provenance?.exportId !== exportId) problems.push("manifest.json names another export");
   const listed = new Set(manifest.files.map((entry) => entry.file));
   for (const entry of manifest.files) {
     try {
-      if (fullHash(await readFile(toExtendedLength(join(dir, entry.file)))) !== entry.hash) problems.push(`${entry.file} does not match its manifest hash`);
+      if (await hashOf(entry.file) !== entry.hash) problems.push(`${entry.file} does not match its manifest hash`);
     } catch {
       problems.push(`${entry.file} is missing from the package`);
     }
   }
   for (const chapter of manifest.chapters) {
     for (const piece of chapter.audio ?? []) if (!listed.has(piece.src)) problems.push(`${piece.src} is not in the package`);
-    for (const shown of chapter.pictures) if (!listed.has(shown.src)) problems.push(`${shown.src} is not in the package`);
+    for (const shown of chapter.pictures) {
+      if (!listed.has(shown.src)) problems.push(`${shown.src} is not in the package`);
+      if (shown.motion !== undefined && !listed.has(shown.motion.src)) problems.push(`${shown.motion.src} is not in the package`);
+    }
   }
   if (!(await stat(toExtendedLength(join(dir, "player.html"))).then((s) => s.isFile(), () => false))) problems.push("player.html is missing from the package");
   return problems;
 }
 
+/** Only a completed audiobook package's player can be opened by the native host. */
+export async function audiobookPlayerFile(store: WorldStore, folder: string): Promise<string | null> {
+  if (!(await listWebPackages(store)).some(entry => entry.kind === "audiobook" && entry.dir === `exports/${folder}`)) return null;
+  return containedWorldFile(store.dir, `exports/${folder}/player.html`);
+}
+
 /** The world's web packages, newest first (turn 186e): the interactive, the visual novel and the audiobook, each by its manifest. */
-export async function listWebPackages(store: WorldStore): Promise<Array<{ kind: "interactive" | "visual-novel" | "audiobook"; productionId: string; title: string; dir: string; exportedAt: string }>> {
+export async function listWebPackages(store: WorldStore): Promise<WebPackagesListed["packages"]> {
   const exportsDir = join(store.dir, "exports");
   const entries = await readdir(toExtendedLength(exportsDir), { withFileTypes: true }).catch(() => []);
-  const out: Array<{ kind: "interactive" | "visual-novel" | "audiobook"; productionId: string; title: string; dir: string; exportedAt: string }> = [];
+  const out: WebPackagesListed["packages"] = [];
   for (const entry of entries) {
     if (!entry.isDirectory() || !/^(interactive|audiobook)-/.test(entry.name)) continue;
     try {
@@ -277,13 +322,50 @@ export async function listWebPackages(store: WorldStore): Promise<Array<{ kind: 
       const provenance = (raw["provenance"] ?? {}) as Record<string, unknown>;
       const productionId = typeof raw["productionId"] === "string" ? raw["productionId"] : typeof provenance["productionId"] === "string" ? provenance["productionId"] : null;
       if (productionId === null || typeof provenance["exportedAt"] !== "string") continue;
-      if (!(await stat(toExtendedLength(join(exportsDir, entry.name, "player.html"))).then((s) => s.isFile(), () => false))) continue;
-      const kind = raw["kind"] === "audiobook" ? "audiobook" : Array.isArray(raw["beats"]) ? "visual-novel" : "interactive";
+      const retail = raw["kind"] === "audiobook-chapters";
+      if (!retail && !(await stat(toExtendedLength(join(exportsDir, entry.name, "player.html"))).then((s) => s.isFile(), () => false))) continue;
+      if (retail && (!Array.isArray(raw.files) || raw.files.length === 0 || raw.schemaVersion !== 1)) continue;
+      const kind = retail ? "audiobook-chapters" : raw["kind"] === "audiobook" ? "audiobook" : Array.isArray(raw["beats"]) ? "visual-novel" : "interactive";
+      const scope = AudiobookScopeSchema.safeParse(raw.scope);
+      const chapterIds = SlugSchema.array().min(1).safeParse(raw.chapterIds);
+      if ((kind === "audiobook" || retail) && raw.scope !== undefined && (!scope.success || !chapterIds.success || (scope.data.kind === "chapter" && (chapterIds.data.length !== 1 || chapterIds.data[0] !== scope.data.chapterId)))) continue;
       const production = store.getBundle().productions.find((candidate) => candidate.meta.id === productionId);
-      out.push({ kind, productionId, title: typeof raw["title"] === "string" ? raw["title"] : (production?.meta.title ?? productionId), dir: `exports/${entry.name}`, exportedAt: provenance["exportedAt"] });
+      out.push({ kind, productionId, title: typeof raw["title"] === "string" ? raw["title"] : (production?.meta.title ?? productionId), dir: `exports/${entry.name}`, exportedAt: provenance["exportedAt"], ...((kind === "audiobook" || retail) && scope.success && chapterIds.success ? { scope: scope.data, chapterIds: chapterIds.data } : {}),
+        ...(retail && chapterIds.success ? { chapters: chapterIds.data.length, pictures: 0, file: `exports/${entry.name}/manifest.json` } : {}) });
     } catch {
       // A folder with no readable manifest is no package.
     }
   }
   return out.sort((a, b) => (a.exportedAt < b.exportedAt ? 1 : -1));
+}
+
+/**
+ * A chapter's takes as one WAV, their samples back to back under one header, when every take is
+ * 16-bit PCM at one rate and channel count; false, writing nothing, when they are not. Making
+ * each take uniform first cost an ffmpeg process a take, about 121 a chapter (issue 2814), for
+ * readers that already return one format; the one encode after resamples the whole.
+ */
+async function joinUniformTakes(files: readonly string[], into: string): Promise<boolean> {
+  const layouts: Array<{ file: string; at: number; size: number }> = [];
+  let format: { rate: number; channels: number } | null = null;
+  for (const file of files) {
+    let header: ReturnType<typeof speechWavHeader>;
+    try { header = speechWavHeader(await readFile(toExtendedLength(file))); } catch { return false; }
+    if (format !== null && (header.rate !== format.rate || header.channels !== format.channels)) return false;
+    format = { rate: header.rate, channels: header.channels };
+    layouts.push({ file, at: header.data.at, size: header.frames * header.channels * 2 });
+  }
+  const bytes = layouts.reduce((sum, layout) => sum + layout.size, 0);
+  if (format === null || bytes === 0 || bytes > 0xffff_ffff - 36) return false;
+  const out = await open(toExtendedLength(into), "w");
+  try {
+    await out.write(pcm16WavHeader(bytes, format.rate, format.channels));
+    for (const layout of layouts) {
+      const take = await readFile(toExtendedLength(layout.file));
+      await out.write(take.subarray(layout.at, layout.at + layout.size));
+    }
+  } finally {
+    await out.close();
+  }
+  return true;
 }

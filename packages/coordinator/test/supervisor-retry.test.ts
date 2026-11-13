@@ -249,15 +249,18 @@ describe("ChildSupervisor CIM retries", () => {
       windowsHide: true,
     });
     const survivorPid = survivor.pid!;
+    const startedAt = Date.now();
+    let mode: "fail" | "missing" | "healthy" = "fail";
     let probes = 0;
     const sup = new ChildSupervisor(healthySpec(), {
       ledger,
       listDescendants: async () => [
-        { pid: survivorPid, parentPid: 0, image: "node.exe", startedAt: Date.now() },
+        { pid: survivorPid, parentPid: 0, image: "node.exe", startedAt },
       ],
       probe: async () => {
         probes += 1;
-        throw new Error("the RPC server is unavailable");
+        if (mode === "fail") throw new Error("the RPC server is unavailable");
+        return mode === "missing" ? new Map() : new Map([[survivorPid, { pid: survivorPid, image: "node.exe", startedAt }]]);
       },
     });
     try {
@@ -268,11 +271,12 @@ describe("ChildSupervisor CIM retries", () => {
         "the survivor's snapshot to land before stopping",
         SETTLE_WAIT_MS,
       );
-      await sup.stop();
+      await assert.rejects(sup.stopAndConfirm(), /descendant exit/);
       // Identity was never established, so nothing may die and the record must survive as
       // the next startup sweep's evidence — the documented contract, now after one retry.
       assert.equal(probes, 2, "exactly the bounded two attempts");
       assert.ok(!processGone(survivorPid), "an unverified survivor is never killed");
+      assert.ok(sup.descendantPids.includes(survivorPid), "the retry/backstop retains its handle");
       await untilAsync(
         async () => {
           const records = await readRecords();
@@ -281,6 +285,13 @@ describe("ChildSupervisor CIM retries", () => {
         "the survivor's record to remain for the sweep",
         SETTLE_WAIT_MS,
       );
+      mode = "missing";
+      await assert.rejects(sup.stopAndConfirm(), /descendant exit/);
+      assert.ok(!processGone(survivorPid), "a partial process-table read is not exit confirmation");
+      mode = "healthy";
+      await sup.stopAndConfirm();
+      assert.ok(processGone(survivorPid));
+      assert.deepEqual(sup.descendantPids, []);
     } finally {
       await sup.stop();
       if (!processGone(survivorPid)) survivor.kill();

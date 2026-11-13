@@ -36,6 +36,9 @@ directories:
   output: release
 files:
   - dist/**
+  - "!dist/local-audio-listener.py"
+  - "!dist/ming-worker.py"
+  - "!dist/ming-MIT.txt"
   - assets/**
   # This TTF is a loose resource below, not duplicated inside app.asar.
   - "!assets/Geist-Regular.ttf"
@@ -53,24 +56,35 @@ files:
 asarUnpack:
   - "**/*.node"
   - "node_modules/better-sqlite3-electron/**"
+  # Node's ESM worker loader and PDF font reads use real files, without virtual asar hooks.
+  - "dist/story-pdf-worker.mjs"
+  - "dist/fonts/**"
+  - "dist/story-pdf-licenses/**"
 extraResources:
-  - from: ../../vendor/comfyui/ArkeQwen21Runtime
-    to: comfyui-nodes/ArkeQwen21Runtime
-    filter: ["__init__.py", "manifest.json"]
+  - from: ../../packages/coordinator/src/local-ai/ming-worker.py
+    to: ming/ming-worker.py
+  - from: ../../licenses/ming-audition-MIT.txt
+    to: ming/ming-MIT.txt
+  # Python cannot read Electron's virtual app.asar filesystem.
+  - from: dist/local-audio-listener.py
+    to: audio-listener/local-audio-listener.py
+  - from: ../../packages/coordinator/src/media/audio-listener-requirements.txt
+    to: audio-listener/requirements.txt
   - from: ../../packages/client/dist
     to: client
   # Runtime preparation is a hard package prerequisite. ${arch} is expanded independently for
   # each target, while the installed path stays stable for main.ts.
   #
-  # The v2 harness (issue 327 §9): pinned, staged by prepare-opencode2, REQUIRED by both
-  # gates. The old build-resources/opencode entry is gone — it was specced but never staged,
-  # so it shipped nothing in any release; v1 remains reachable via PATH or a configured path
-  # as the beta escape hatch, and retires with the beta (§9).
+  # The only supported OpenCode runtime is pinned v2, staged by prepare-opencode2 and
+  # required by both packaging gates. Older generations cannot be launched from PATH either.
   - from: build-resources/opencode2
     to: opencode2
     filter: ["**/*"]
   - from: build-resources/voxa/${arch}
     to: voxa
+    filter: ["**/*"]
+  - from: build-resources/speech/${arch}
+    to: speech
     filter: ["**/*"]
   - from: build-resources/ffmpeg
     to: ffmpeg
@@ -84,13 +98,7 @@ extraResources:
   - from: build-resources/espeak-ng/${arch}
     to: espeak-ng
     filter: ["**/*"]
-  # The sample world (SPEC-016 R-6). Specified as an optional download while it was 31 MB of
-  # full-resolution art; at 12 MB, bundling costs less than the network dependency it removes —
-  # a first run that promises no account, no key and no network should not need one to show
-  # what the application is for.
-  - from: ../../fixtures/worlds/the-undersong
-    to: sample-world
-    filter: ["**/*"]
+  # The story downloads on demand. The lightweight world fixture is test-only (SPEC-016 R-6).
   - from: ../../THIRD-PARTY-NOTICES.md
     to: THIRD-PARTY-NOTICES.md
 win:

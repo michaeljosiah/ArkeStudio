@@ -31,7 +31,7 @@ async function harness(options: { derivedLook?: boolean } = {}) {
     observeEvent: (event) => events.push(event),
   });
   const send = (msg: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(msg: ClientMessage): Promise<void> }).handleClientMessage(msg);
+    coordinator.dispatch(msg);
   return { ...made, provider, events, send };
 }
 
@@ -138,6 +138,15 @@ describe("remaining single-act decisions (SPEC-040)", () => {
     assert.deepEqual(renamed.undo, { kind: "rename-sheet", path, name: original.name });
     await undo(h, renamed);
     assert.equal(store.getBundle().sheets.find((sheet) => sheet.id === original.id)?.name, original.name);
+
+    const aliasId = ulid();
+    await h.send({ kind: "rename-sheet", worldId: WORLD_ID, requestId: aliasId, path, name: original.name, aliases: ["Rena"] });
+    const aliased = resultFor(h.events, aliasId);
+    assert.equal(aliased.disposition, "accepted");
+    assert.deepEqual(aliased.undo, { kind: "rename-sheet", path, name: original.name, aliases: [] });
+    assert.deepEqual(store.getBundle().sheets.find(sheet => sheet.id === original.id)?.aliases, ["Rena"]);
+    await undo(h, aliased);
+    assert.equal(store.getBundle().sheets.find(sheet => sheet.id === original.id)?.aliases, undefined);
 
     const statusId = ulid();
     const nextStatus = original.status === "locked" ? "sketch" : "locked";

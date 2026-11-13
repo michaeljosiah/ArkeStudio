@@ -54,13 +54,13 @@ export function snapMoveDelta(
 
 /** Every edge on the timeline a drag can land against, plus the playhead and zero. */
 export function snapCandidates(
-  tracks: ReadonlyArray<{ clips: readonly TimelineClip[] }>,
+  tracks: ReadonlyArray<{ clips: readonly TimelineClip[]; effects?: ReadonlyArray<{ id: string; startFrame: number; durationFrames: number }> }>,
   playheadFrame: number,
-  except: TimelineClipId | null = null,
+  except: string | null = null,
 ): number[] {
   const edges = new Set<number>([0, playheadFrame]);
   for (const track of tracks) {
-    for (const clip of track.clips) {
+    for (const clip of [...track.clips, ...(track.effects ?? [])]) {
       if (clip.id === except) continue;
       edges.add(clip.startFrame);
       edges.add(clip.startFrame + clip.durationFrames);
@@ -167,4 +167,13 @@ export function fileKindsFromTransfer(transfer: {
  */
 export function laneTakesFiles(kinds: readonly DroppedKind[], wantsSound: boolean): boolean {
   return kinds.length === 0 || kinds.some((kind) => kind === "unknown" || (wantsSound ? kind !== "image" : kind !== "audio"));
+}
+
+/**
+ * Whether a press adds to the selection rather than replacing it: Shift, Ctrl or Cmd held, as
+ * desktop editors read it (SPEC-065 R-31). Touch carries none of them, and a phone never selects
+ * two clips at once (turn 277 rule 14).
+ */
+export function extendsSelection(event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }): boolean {
+  return event.shiftKey || event.ctrlKey || event.metaKey;
 }

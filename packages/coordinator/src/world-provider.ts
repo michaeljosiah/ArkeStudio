@@ -1,6 +1,6 @@
 import type { Capability, WorldBundle, WorldSummary, WorldImageReference } from "@arke-studio/contracts";
 import type { ProposalManager } from "./gate/proposals.js";
-import type { WorldStore } from "./world/store.js";
+import type { WorldStore, WorldStoreOpenProgress } from "./world/store.js";
 
 /**
  * Reads the world model (SPEC-001 §2.6). SPEC-002 replaced the SPEC-001 mock with the real
@@ -14,7 +14,8 @@ export interface WorldProvider {
   listWorlds(): Promise<WorldSummary[]>;
   /** Read-only image catalogue; opens no second store and acquires no world lock. */
   listReferenceImages?(slug: string): Promise<WorldImageReference[]>;
-  loadWorld(worldId: string): Promise<WorldBundle>;
+  /** `onProgress` hears how far opening the store has got, when there is one to open (issue 1844). */
+  loadWorld(worldId: string, opts?: { onProgress?: (progress: WorldStoreOpenProgress) => void }): Promise<WorldBundle>;
   createWorld?(input: {
     creationId?: string;
     name: string;
@@ -32,7 +33,7 @@ export interface WorldProvider {
    * Copy the sample world shipped with this build into the library under a fresh identity
    * (SPEC-016 R-6). Where the build keeps it is the shell's business, not the provider's.
    */
-  installSampleWorld?(sourceDir: string): Promise<{ worldId: string; slug: string; name: string }>;
+  installSampleWorld?(sourceDir: string, signal?: AbortSignal): Promise<{ worldId: string; slug: string; name: string }>;
   reconcileExternalEdit?(worldId: string, path: string): Promise<WorldBundle>;
   /**
    * The open world took newer Bible bytes for an ungated file and needs no decision (R-BIBLE-6).
@@ -45,6 +46,8 @@ export interface WorldProvider {
   gate?(): ProposalManager | null;
   /** The open store itself (SPEC-005: the world-query tool reads through it). */
   openStore?(): WorldStore | null;
+  /** Refresh the selected world's bundle and cached summary without opening or selecting a world. */
+  refreshOpenWorld?(worldId: string): WorldBundle | null;
   /**
    * Run against a world's locked store without changing which world the renderer has open.
    * Used by durable background jobs whose owner may not be the selected world.
@@ -52,6 +55,13 @@ export interface WorldProvider {
    * call provider selection/scoped-store methods from inside the callback.
    */
   withWorldStore?<T>(worldId: string, fn: (store: WorldStore) => Promise<T>): Promise<T>;
+  /** Retain one owned store for a background operation without pinning renderer selection.
+   * Navigation and scoped writes reuse this store; release closes it when no reader owns it.
+   * Shutdown still closes retained stores. Archiving a retained world is refused. An aborted
+   * `signal` stops the wait for the store; a turn reached after that retains nothing. */
+  withBackgroundWorldStore?<T>(worldId: string, fn: (store: WorldStore) => Promise<T>, options?: { signal?: AbortSignal }): Promise<T>;
+  /** True for selected or retained worlds, so reopening does not recover live work as abandoned. */
+  isWorldLoaded?(worldId: string): boolean;
   /**
    * Resolve a world-relative media file for the renderer (design-fidelity pass): read-only,
    * traversal-guarded, media extensions only. Null when the file is not servable.

@@ -75,7 +75,7 @@ async function withHarness(run: (h: Harness) => Promise<void>): Promise<void> {
     },
   });
   const send = (message: ClientMessage) =>
-    (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    coordinator.dispatch(message);
   try {
     await run({ worldDir, events, spoken, send, gate });
   } finally {

@@ -153,8 +153,13 @@ function chunk(type: string, body: Uint8Array): Uint8Array {
   return out;
 }
 
-/** Deterministic encode: RGBA, filter 0 everywhere, fixed deflate settings (R-10). */
-export function encodePng(image: RgbaImage): Uint8Array {
+/**
+ * Deterministic encode: RGBA, filter 0 everywhere, fixed deflate settings (R-10). `level` is for a
+ * picture nobody keeps — a text draft (SPEC-065 R-32) is shown once and replaced on the next
+ * keystroke, and level 3 deflates it in about a third of the time for a third more bytes. Every
+ * picture that is kept or compared is encoded at the default, exactly as it always was.
+ */
+export function encodePng(image: RgbaImage, options: { level?: number } = {}): Uint8Array {
   const { width, height, pixels } = image;
   const ihdr = new Uint8Array(13);
   const view = new DataView(ihdr.buffer);
@@ -168,7 +173,7 @@ export function encodePng(image: RgbaImage): Uint8Array {
     raw[y * (stride + 1)] = 0; // filter: none, everywhere — determinism beats size here
     raw.set(pixels.subarray(y * stride, (y + 1) * stride), y * (stride + 1) + 1);
   }
-  const idat = deflateSync(raw, { level: 9, memLevel: 9, strategy: 0 });
+  const idat = deflateSync(raw, { level: options.level ?? 9, memLevel: 9, strategy: 0 });
   return Uint8Array.from(
     Buffer.concat([
       Buffer.from(SIGNATURE),

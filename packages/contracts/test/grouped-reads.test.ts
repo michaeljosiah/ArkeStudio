@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { CadenceCapabilitiesSchema, GROUPED_READ_CAPS, groupedText, groupReads, packTurns, quoteGroupedSpeech, quoteSpeech, readerGroups, shareByCharacters, soloTurns, turnInputTokens,
+import { CadenceCapabilitiesSchema, GROUPED_READ_CAPS, groupedText, groupedSpeechInputFits, groupReads, packTurns, quoteGroupedSpeech, quoteSpeech, readerGroups, shareByCharacters, soloTurns, turnInputTokens,
   type BlockTurns, type CadenceCapabilities, type ManifestModel } from "../src/index.js";
 
 const model: ManifestModel = {
@@ -69,13 +69,28 @@ describe("grouped reads (design turn 185)", () => {
     assert.deepEqual(groups.map((group) => group.keys), [["a"], ["h"], ["z"]]);
   });
 
+  it("bounds packed multilingual styles by bytes without changing words, style or order (#1335)", () => {
+    const blocks = Array.from({ length: 36 }, (_, i) => block(`p${i}`, 0, { shared: undefined, maxSpeechUtf8Bytes: 7000,
+      parts: [{ text: "海から船が来た。😀", style: "穏やかに".repeat(70) + i }] }));
+    for (const packing of ["full", "deltas", "merged"] as const) {
+      const groups = groupReads(blocks, packing);
+      assert.ok(groups.length > 2, "the former byte/4 estimate allowed more than 23KB in one request");
+      assert.deepEqual(groups.flatMap(group => group.keys), blocks.map(block => block.key));
+      assert.deepEqual(groups.flatMap(group => group.turns).map(turn => [turn.text, turn.instructions]), blocks.map(block => [block.parts[0]!.text, block.parts[0]!.style]));
+      assert.ok(groups.every(group => groupedSpeechInputFits(group.turns, { maxSpeechUtf8Bytes: 7000 })));
+    }
+    assert.equal(groupedSpeechInputFits([{ text: "海", instructions: "😀" }], { maxSpeechUtf8Bytes: 7 }), true);
+    assert.equal(groupedSpeechInputFits([{ text: "海", instructions: "😀" }], { maxSpeechUtf8Bytes: 6 }), false);
+    assert.equal(groupedSpeechInputFits([{ text: "a" }, { text: "b" }], { maxSpeechUtf8Bytes: 4 }), false, "packed separators also occupy the budget");
+  });
+
   it("counts each turn's style in its input and prices a request once, its words and every style", () => {
     assert.ok(turnInputTokens({ text: "Hello.", instructions: "x".repeat(400) }) > turnInputTokens({ text: "Hello." }) + 99);
     const turns = [{ text: "First block.", instructions: "Whisper." }, { text: "Second block." }];
     const at = "2026-10-03T00:00:00.000Z";
     const quote = quoteGroupedSpeech(model, turns, { at });
-    assert.equal(groupedText(turns), "First block. Second block.");
-    assert.deepEqual(quote, quoteSpeech(model, "First block. Second block.", { at, instructions: "Whisper." }));
+    assert.equal(groupedText(turns), "First block.\n\nSecond block.");
+    assert.deepEqual(quote, quoteSpeech(model, "First block.\n\nSecond block.", { at, instructions: "Whisper." }));
     // One lead-in and tail for the request, not one a block: two blocks priced together cost less than apart.
     const apart = turns.reduce((sum, turn) => sum + quoteSpeech(model, turn.text, { at, ...(turn.instructions ? { instructions: turn.instructions } : {}) }).expectedMicroUsd, 0);
     assert.ok(quote.expectedMicroUsd < apart);

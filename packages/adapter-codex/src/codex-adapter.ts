@@ -6,10 +6,10 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import {
   agentPromptFor, confinementFor, findHarnessModel, harnessModelMissingInput, ROSTER, sessionSkillForAgent, LLM_ENV_NAMES, LLM_ENV_PROVIDERS,
   type CreateSessionInput, type HarnessAdapter, type HarnessCapability, type HarnessEvent, type ModelInfo,
-  type Readiness, type SendMessageInput, type SendReceipt, type SessionConfigInput, type SessionRef,
+  type Readiness, type SendMessageInput, type SendReceipt, type SessionConfigInput, type SessionRef, HarnessEventHub, PreparationTable,
 } from "@arke-studio/contracts";
 import { CodexRpc, object, type JsonObject } from "./rpc.js";
-import { captureRootIdentity } from "./confined-files.js";
+import { captureRootIdentity } from "@arke-studio/confined-tools";
 import { ConfinementError, discoverWorldTools, executeTool, resolveRoot, toolsFor, type ToolSession } from "./tools.js";
 
 export interface CodexAdapterOptions {
@@ -63,14 +63,6 @@ export function confinedConfig(prior: JsonObject, researchWeb: boolean, opts: { 
   return config;
 }
 
-class EventQueue {
-  private readonly values: HarnessEvent[] = [];
-  private waiting: ((value: IteratorResult<HarnessEvent>) => void) | null = null;
-  private closed = false;
-  push(value: HarnessEvent): void { if (this.closed) return; if (this.waiting) { const resolve = this.waiting; this.waiting = null; resolve({ value, done: false }); } else this.values.push(value); }
-  close(): void { this.closed = true; this.waiting?.({ value: undefined as never, done: true }); this.waiting = null; }
-  [Symbol.asyncIterator](): AsyncIterator<HarnessEvent> { return { next: () => new Promise(resolve => { const value = this.values.shift(); if (value) resolve({ value, done: false }); else if (this.closed) resolve({ value: undefined as never, done: true }); else this.waiting = resolve; }) }; }
-}
 interface Turn {
   id: string | null;
   startPending: boolean;
@@ -96,9 +88,24 @@ export interface CodexImageResult { bytes: Buffer; mimeType: "image/png" | "imag
 export class CodexImageLimitError extends Error {
   constructor(readonly resetsAt: number | null) { super("The Codex plan's image limit has been reached."); this.name = "CodexImageLimitError"; }
 }
+/**
+ * A turn that finished and made no image: witnessed, not uncertain. OpenAI's safety system
+ * refuses an image at its output stage, Codex's model tries again and then answers in words, and
+ * the turn completes normally. Reported as an unwitnessed result, that held each refused picture
+ * for reconciliation and stalled a chapter's illustration run (Na love or Juju, chapter 4). `said`
+ * is Codex's own last sentence, which names the refusal when there was one.
+ */
+export class CodexImageRefusedError extends Error {
+  constructor(readonly said: string | null) {
+    super(said ? `Codex made no image: ${said}` : "Codex finished without producing an image.");
+    this.name = "CodexImageRefusedError";
+  }
+}
 interface ImageJob {
   turnId: string | null;
   items: JsonObject[];
+  /** Codex's last reply in words, for a turn that ends without an image. */
+  said?: string;
   settle: (error?: Error) => void;
 }
 function imageType(bytes: Buffer): CodexImageResult["mimeType"] | null {
@@ -124,11 +131,11 @@ export class CodexAdapter implements HarnessAdapter {
   private initialization: Promise<void> | null = null;
   private disposed = false;
   private priorConfig: JsonObject = {};
-  private readonly preparations = new Map<string, SessionConfigInput>();
+  private readonly preparations = new PreparationTable<SessionConfigInput>();
   private readonly sessions = new Map<string, Session>();
   private readonly threads = new Map<string, Session>();
   private readonly imageJobs = new Map<string, ImageJob>();
-  private readonly queues = new Set<EventQueue>();
+  private readonly events = new HarnessEventHub<HarnessEvent>();
   private readonly modelLimits = new Map<string, number>();
   private revision = 0;
   private recovery: Promise<void> | null = null;
@@ -148,13 +155,8 @@ export class CodexAdapter implements HarnessAdapter {
   // belong to the matching catalog entry; other models retain the caller's safe fallback.
   knownInputTokenLimit(): null { return null; }
   sessionFiles(): [] { return []; }
-  prepareSession(input: SessionConfigInput): void {
-    if (input.preparationId) {
-      if (this.preparations.has(input.preparationId)) throw new Error("Session preparation token is already in use.");
-      this.preparations.set(input.preparationId, structuredClone(input));
-    }
-  }
-  abandonSessionPreparation(id: string): void { this.preparations.delete(id); }
+  prepareSession(input: SessionConfigInput): void { this.preparations.prepare(input.preparationId || undefined, input); }
+  abandonSessionPreparation(id: string): void { this.preparations.abandon(id); }
 
   /** Key rotation crosses a process boundary; old sessions may not keep an old credential. */
   updateEnvironment(env: NodeJS.ProcessEnv): Promise<void> {
@@ -356,7 +358,8 @@ export class CodexAdapter implements HarnessAdapter {
       if (failed) throw new CodexImageLimitError(typeof failed.resetsAt === "number" ? failed.resetsAt : null);
       const lateError = turnError as Error | null;
       if (lateError) throw lateError;
-      throw new Error(job.items.some(item => typeof item.result === "string" && item.result.length > 0) ? "Codex returned data that is not a supported image." : "Codex finished without producing an image.");
+      if (job.items.some(item => typeof item.result === "string" && item.result.length > 0)) throw new Error("Codex returned data that is not a supported image.");
+      throw new CodexImageRefusedError(job.said ?? null);
     } finally {
       if (threadId) { this.imageJobs.delete(threadId); await this.releaseImageThread(rpc, threadId); }
       await rm(cwd, { recursive: true, force: true }).catch(() => {});
@@ -376,7 +379,11 @@ export class CodexAdapter implements HarnessAdapter {
     const id = typeof params.turnId === "string" ? params.turnId : typeof announced.id === "string" ? announced.id : undefined;
     if (!id || (job.turnId !== null && job.turnId !== id)) return;
     if (job.turnId === null) { if (method !== "turn/started") return; job.turnId = id; }
-    if (method === "item/completed") { const item = object(params.item); if (item.type === "imageGeneration") job.items.push(item); }
+    if (method === "item/completed") {
+      const item = object(params.item);
+      if (item.type === "imageGeneration") job.items.push(item);
+      else if (item.type === "agentMessage" && typeof item.text === "string" && item.text.trim()) job.said = item.text.trim().replace(/\s+/g, " ").slice(0, 300);
+    }
     else if (method === "turn/completed") {
       if (Array.isArray(announced.items)) for (const raw of announced.items) { const item = object(raw); if (item.type === "imageGeneration" && !job.items.some(seen => seen.id === item.id)) job.items.push(item); }
       job.settle(announced.status === "completed" ? undefined : this.imageError(announced.error));
@@ -390,9 +397,7 @@ export class CodexAdapter implements HarnessAdapter {
   }
 
   async createSession(input: CreateSessionInput): Promise<SessionRef> {
-    const prepared = input.preparationId ? this.preparations.get(input.preparationId) : {};
-    if (input.preparationId) this.preparations.delete(input.preparationId);
-    if (!prepared) throw new Error("Session preparation is missing or was already consumed.");
+    const prepared = this.preparations.take(input.preparationId || undefined);
     input.signal?.throwIfAborted();
     const rpc = this.connection();
     const member = ROSTER.find(agent => agent.name === (input.agent ?? "sheet-editor"));
@@ -606,14 +611,8 @@ export class CodexAdapter implements HarnessAdapter {
     catch { this.finish(session, "error", "Codex could not confirm cancellation."); await rpc.dispose(); throw new Error("Codex could not confirm cancellation."); }
     if (session.turn === turn) this.finish(session, "cancelled");
   }
-  private emit(event: HarnessEvent): void { for (const queue of this.queues) queue.push(event); }
-  async *streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent> {
-    if (signal?.aborted || this.disposed) return;
-    const queue = new EventQueue(); this.queues.add(queue);
-    const stop = () => queue.close(); signal?.addEventListener("abort", stop, { once: true });
-    try { for await (const event of queue) yield event; }
-    finally { signal?.removeEventListener("abort", stop); this.queues.delete(queue); }
-  }
+  private emit(event: HarnessEvent): void { this.events.emit(event); }
+  streamEvents(signal?: AbortSignal): AsyncIterable<HarnessEvent> { return this.events.subscribe(signal); }
   async dispose(): Promise<void> {
     this.disposed = true; this.preparations.clear();
     await this.rpc?.dispose(); this.rpc = null;
@@ -622,7 +621,7 @@ export class CodexAdapter implements HarnessAdapter {
     await this.initialization?.catch(() => {});
     await this.environmentUpdate.catch(() => {});
     this.retireImageJobs("Codex adapter disposed.");
-    this.sessions.clear(); this.threads.clear(); this.modelLimits.clear(); for (const queue of this.queues) queue.close(); this.queues.clear();
+    this.sessions.clear(); this.threads.clear(); this.modelLimits.clear(); this.events.close();
     this.ready = { ready: false, reason: "Codex adapter disposed." };
   }
 }

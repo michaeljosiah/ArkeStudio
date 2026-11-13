@@ -12,6 +12,7 @@ import { parseHTML } from "linkedom";
 // Chrome owns hover/pointer emulation; fixture media stays on a private loopback server.
 const root = fileURLToPath(new URL("../", import.meta.url));
 const baseline = process.argv.includes("--baseline");
+const reading = process.argv.includes("--reading");
 const baselineRef = baseline ? process.argv[process.argv.indexOf("--baseline") + 1] : null;
 if (baseline) assert.ok(baselineRef, "--baseline requires a revision");
 const dir = await mkdtemp(join(tmpdir(), "arke-cast-"));
@@ -43,7 +44,10 @@ window.settleLayout=async()=>{await new Promise(r=>setTimeout(r,450));await docu
 window.mountLayout=async(route="cast",mode="normal")=>{
  renderer?.unmount();const state=castLayoutFixture(),world=state.world;
  if(mode==="empty")world.sheets=world.sheets.filter(s=>s.type!=="character");
+ if(mode==="markdown")world.sheets[0].sections=[{heading:"Essence",body:"A **tide-caller** with *quiet resolve*."},{heading:"Appearance",body:["> Keep the passage clear.","","- Oilskin coat","- Work boots","","A \`ledger\` stays dry."].join(String.fromCharCode(10))}];
+ if(mode==="proposal")world.proposals=[{proposal:{id:"pr_01J8E0000000000000000000P1",kind:"new-sheet",summary:"New location: Review Room",targets:[{path:"locations/review-room.md",baseVersion:null,baseHash:null}],baseCanonRevision:42,reservedCanonIds:[],source:"chat:studio",created:"2026-10-20T00:00:00Z",draftRevision:1,decision:{mode:"attended",owner:{kind:"surface",surface:"sheet-list",targetPath:"locations/review-room.md"}}},ripple:null,review:{targets:[{path:"locations/review-room.md",label:"Review Room",kind:"new location sheet",action:"create",fields:[{field:"Look",before:null,proposed:"A public room with a clear passage and a sheltered notice board. ".repeat(180)},{field:"Customs",before:null,proposed:"Keep the passage clear."}]}]}}];
  if(mode==="long")for(const sheet of world.sheets){sheet.name="UnbrokenCharacterName".repeat(12);sheet.role="UnbrokenRole".repeat(20);}
+ if(mode==="prose")world.sheets[0].sections.push(...["Wants","Fears","Truth"].map(heading=>({heading,body:("The harbour keeps a record of every promise. A clear passage remains between the shore and the houses. ").repeat(45)})));
  const sheetRefs=Object.fromEntries(world.sheets.map(s=>[s.id,{tiles:6,productions:["saltlight","ledger"],artifacts:["a1","a2"],scenes:["s1","s2"],takesByVersion:{4:2},incomingLinks:[]}]));
  window.commands=[];const bridge={connect(){},send(raw){window.commands.push(JSON.parse(raw));},subscribe(){return()=>{};},coordinatorHttpBase:()=>location.origin};window.arke=bridge;__setBridgeForTest(bridge);__setStateForTest(state,{sheetRefs});__connectionStatusForTest("open");
  renderer=createRoot(document.getElementById("root"));flushSync(()=>renderer.render(<MemoryRouter initialEntries={["/w/"+world.meta.worldId+"/"+route]}><Navigation/><App/></MemoryRouter>));await window.settleLayout();
@@ -53,16 +57,22 @@ window.measureLayout=()=>{
  const bounds=s=>{const e=document.querySelector(s);if(!e)return null;const b=e.getBoundingClientRect();return{x:b.x,y:b.y,width:b.width,height:b.height};};const page=document.querySelector(".fy-content");
  return{viewport:[innerWidth,innerHeight],overflow:document.documentElement.scrollWidth>innerWidth || !!(page&&page.scrollWidth>page.clientWidth+1),sideways:[...document.querySelectorAll('.fy-content,.fy-sheet,.fy-split')].filter(e=>e.scrollWidth>e.clientWidth+1).map(e=>e.className),geometry:Object.fromEntries(selectors.map(s=>[s,bounds(s)]))};
 };
-` }, bundle:true,platform:"browser",format:"iife",define:{"import.meta.env":"{}"},
+` }, bundle:true,platform:"browser",format:"esm",external:["/*.webp","/*.png"],define:{"import.meta.env":"{}"},
   plugins:[{name:"fixture-cascade",setup(build) {
+    build.onResolve({filter:/\?url$/},async({path,resolveDir,kind})=>{
+      const resolved=await build.resolve(path.slice(0,-4),{resolveDir,kind});
+      return {...resolved,namespace:"url-asset"};
+    });
+    build.onLoad({filter:/.*/,namespace:"url-asset"},async({path})=>({contents:await readFile(path),loader:"file"}));
+    build.onResolve({filter:/^\/.*\.(png|webp)$/},({path})=>({path:join(root,"packages/client/public",path.slice(1))}));
     build.onLoad({filter:/\.(css|tsx)$/}, async ({path}) => {
       const name=relative(root,path).replaceAll("\\","/");
       const old=baseline && ["packages/client/src/App.tsx","packages/client/src/screens/world.tsx","packages/client/src/screens/props.tsx","packages/client/src/screens/fidelity.css","packages/client/src/components/wave.tsx"].includes(name);
       return {loader:path.endsWith(".css")?"css":"tsx",resolveDir:dirname(path),contents:(old?execFileSync("git",["show",baselineRef+":"+name],{cwd:root,encoding:"utf8"}):await readFile(path,"utf8")).replace(/env\(safe-area-inset-bottom(?:,\s*0px)?\)/g,"var(--smoke-safe-bottom, 0px)")};
     });
-  }}],loader:{".woff":"file",".woff2":"file"},outfile:join(dir,"view.js")
+  }}],loader:{".woff":"file",".woff2":"file",".png":"file",".webp":"file"},outfile:join(dir,"view.js")
 });
-await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script src="view.js"></script></body></html>');
+await writeFile(join(dir,"index.html"), '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="view.css"></head><body><div id="root"></div><script type="module" src="view.js"></script></body></html>');
 console.log("Cast layout artifacts: " + dir);
 const chrome=process.env.ARKE_CHROME ?? (process.platform === "win32" ? "C:/Program Files/Google/Chrome/Application/chrome.exe" : process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/google-chrome");
 await access(chrome);
@@ -87,13 +97,13 @@ try {
   socket=new WebSocket(targets.find(t=>t.type === "page").webSocketDebuggerUrl);
   await new Promise((resolve,reject)=>{socket.onopen=resolve;socket.onerror=reject;});
   let seq=0;const pending=new Map();
-  socket.onmessage=({data})=>{const m=JSON.parse(data),p=pending.get(m.id);if(p){pending.delete(m.id);m.error?p.reject(new Error(JSON.stringify(m.error))):p.resolve(m.result);}};
+  socket.onmessage=({data})=>{const m=JSON.parse(data),p=pending.get(m.id);if(m.method==="Runtime.exceptionThrown")console.error("Browser error",m.params.exceptionDetails.exception?.description??m.params.exceptionDetails.text);if(p){pending.delete(m.id);m.error?p.reject(new Error(JSON.stringify(m.error))):p.resolve(m.result);}};
   const cdp=(method,params={})=>new Promise((resolve,reject)=>{const id=++seq;pending.set(id,{resolve,reject});socket.send(JSON.stringify({id,method,params}));});
   const js=async expression=>{const r=await cdp("Runtime.evaluate",{expression,awaitPromise:true,returnByValue:true,userGesture:true});if(r.exceptionDetails)throw new Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
   const size=(width,height,mobile)=>cdp("Emulation.setDeviceMetricsOverride",{width,height,deviceScaleFactor:1,mobile});
   const navigate=async path=>{await cdp("Page.navigate",{url:origin+path});await until(()=>js('document.readyState === "complete"'));};
   const capture=async name=>{await js("document.fonts.ready");await settle();const {data}=await cdp("Page.captureScreenshot",{format:"png",captureBeyondViewport:false});await writeFile(join(dir,name+".png"),Buffer.from(data,"base64"));};
-  await cdp("Page.enable");await cdp("Emulation.setEmulatedMedia",{features:[{name:"prefers-reduced-motion",value:"reduce"}]});
+  await cdp("Page.enable");await cdp("Runtime.enable");await cdp("Emulation.setEmulatedMedia",{features:[{name:"prefers-reduced-motion",value:"reduce"}]});
   await navigate("/");await until(()=>js('typeof window.mountLayout === "function"'));
   const records=[];
   const only=process.argv.includes("--viewport")?process.argv[process.argv.indexOf("--viewport")+1]:null;
@@ -101,35 +111,88 @@ try {
   const click=async selector=>{const point=await js(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.scrollIntoView({block:"nearest",inline:"nearest"});const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`);await cdp("Input.dispatchMouseEvent",{type:"mouseMoved",...point});await cdp("Input.dispatchMouseEvent",{type:"mousePressed",button:"left",clickCount:1,...point});await cdp("Input.dispatchMouseEvent",{type:"mouseReleased",button:"left",clickCount:1,...point});await js("window.settleLayout()");};
   const escape=async()=>{await cdp("Input.dispatchKeyEvent",{type:"keyDown",key:"Escape",code:"Escape",windowsVirtualKeyCode:27});await cdp("Input.dispatchKeyEvent",{type:"keyUp",key:"Escape",code:"Escape",windowsVirtualKeyCode:27});await js("window.settleLayout()");};
 
-  for(const [name,width,height,touch] of [["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["tablet",600,850,true],["fold",984,1060,true],["fold-full",984,1092,true],["desktop",1360,850,false]]){
+  if(reading)for(const width of [320,390,600,984,1024,1200,1536])for(const mode of ["normal","prose"]){
+   await size(width,850,width<1100);await cdp("Emulation.setTouchEmulationEnabled",{enabled:width<1100});
+   await js('document.documentElement.style.zoom="";window.mountLayout("cast/maren-kest",'+JSON.stringify(mode)+')');
+   const original=await js('document.querySelector(".fy-sheet").textContent');
+   const identity=await js('(()=>{const sheet=document.querySelector(".fy-sheet"),side=sheet.querySelector(".fy-sheet__side"),main=sheet.querySelector(".fy-sheet__main"),details=sheet.querySelector(".fy-sheet__details"),nav=document.querySelector(".fy-pillnav");return{sheet:sheet.getBoundingClientRect().toJSON(),main:main.getBoundingClientRect().toJSON(),side:side.getBoundingClientRect().toJSON(),details:details.getBoundingClientRect().toJSON(),nav:nav.getBoundingClientRect().toJSON()}})()');
+   assert.ok(identity.sheet.y>=identity.nav.bottom,"navigation sits outside the reading scroll area");
+   assert.ok(Math.abs(identity.details.x-identity.main.x)<=1 && identity.details.right<=identity.main.right+1,"turn 161: prose stays in the identity column beside the portrait");
+   if(width>=1100&&mode==="normal")assert.ok(identity.details.y<identity.side.bottom,"short prose starts beside the reference images, not below them");
+   await js('document.querySelector(".fy-sheet__grid > div:last-child").scrollIntoView({block:"start"});window.settleLayout()');
+   await check('reading-'+width+'-'+mode);
+   assert.equal(await js('document.querySelector(".fy-sheet").textContent'),original,"scrolling retains every section and control");
+   assert.ok(await js('(()=>{const section=document.querySelector(".fy-sheet__grid > div:last-child"),sheet=document.querySelector(".fy-sheet");return section.getBoundingClientRect().top>=sheet.getBoundingClientRect().top-1})()'),"reached heading remains below navigation");
+   // Text scaling retains the viewport. Browser zoom halves the CSS viewport so media
+   // queries reflow too; CSS zoom would enlarge desktop columns without changing them.
+   await js('document.querySelectorAll(".fy-sheet__secbody").forEach(e=>e.style.fontSize=parseFloat(getComputedStyle(e).fontSize)*2+"px");window.settleLayout()');
+   await check('reading-'+width+'-'+mode+'-large-text');
+   if(width>=640) {
+    await size(Math.round(width/2),425,false);
+    await js('window.mountLayout("cast/maren-kest",'+JSON.stringify(mode)+')');
+    await check('reading-'+width+'-'+mode+'-zoom');
+   }
+  }
+  for(const [name,width,height,touch] of reading?[]:[["phone",390,797,true],["small",360,800,true],["acceptance",375,812,true],["tablet",600,850,true],["fold",984,1060,true],["fold-full",984,1092,true],["desktop",1360,850,false]]){
    if(only&&only!==name)continue;
    await size(width,height,touch);await cdp("Emulation.setTouchEmulationEnabled",{enabled:touch});
    for(const route of ["cast","locations","factions","props","cast/maren-kest"]){
     await cdp("Input.dispatchMouseEvent",{type:"mouseMoved",x:0,y:0});
     await js('window.mountLayout('+JSON.stringify(route)+')');await check(name+'-'+route.replaceAll('/','-'));
+    // Factions had only the narrow-width New, so at 1100px and wider nobody could make one (issue 2774).
+    if(!baseline&&route==="factions")assert.equal(await js('Array.from(document.querySelectorAll("[data-screen=factions] button")).filter(b=>/^New( faction)?$/.test(b.textContent.trim())&&b.getBoundingClientRect().height>0).length'),1,name+" offers one New faction");
     if(!baseline&&width<600&&route==="cast")assert.equal(await js('Math.round(document.querySelector(".fy-feature__frame").getBoundingClientRect().width)'),112);
     if(!baseline&&width<600&&route==="cast/maren-kest"){
      assert.equal(await js('getComputedStyle(document.querySelector(".fy-fan__drift")).animationName'),"none");
      assert.ok(await js('document.querySelector(".fy-sheet__header").getBoundingClientRect().bottom <= document.querySelector(".fy-designcard").getBoundingClientRect().top'));
-     await js('document.querySelector(".fy-content").scrollTop=document.querySelector(".fy-sheet__main").getBoundingClientRect().top-109');await check(name+'-sheet');
-     await js('document.querySelector(".fy-content").scrollTop=document.querySelector(".fy-content").scrollHeight');await check(name+'-sheet-bottom');
+     await js('document.querySelector(".fy-sheet__main").scrollIntoView({block:"start"})');await check(name+'-sheet');
+     await js('document.querySelector(".fy-sheet").scrollTop=document.querySelector(".fy-sheet").scrollHeight');await check(name+'-sheet-bottom');
     }
    }
    if(!baseline&&width<1100){await js('window.mountLayout("props")');assert.equal(await js('document.querySelector(".fy-props-create").getBoundingClientRect().height'),0);await click('.fy-kind-new');assert.ok(await js('document.querySelector(".fy-props-create").getBoundingClientRect().height>0'));await check(name+'-new-prop');}
    if(!baseline&&width<1100){await js('window.mountLayout("cast","empty")');await check(name+"-empty-cast");assert.ok(await js('document.querySelector(".fy-cast-mobile-head .fy-kind-new").getBoundingClientRect().height>=44'));}
    if(!baseline&&width<1100){await js('window.mountLayout("cast/maren-kest","long")');await check(name+'-long-character');}
+   if(!baseline){
+    await js('window.mountLayout("cast/maren-kest","markdown")');
+    assert.equal(await js('document.querySelector(".fy-sheet__lead strong")?.textContent'),"tide-caller");
+    assert.equal(await js('document.querySelector(".fy-sheet__secbody blockquote")?.textContent'),"Keep the passage clear.");
+    assert.equal(await js('document.querySelectorAll(".fy-sheet__secbody li").length'),2);
+    assert.equal(await js('document.querySelectorAll(".fy-sheet [contenteditable]").length'),0);
+    await js('document.querySelector(".fy-sheet__secbody").scrollIntoView({block:"center"})');
+    assert.equal(await js('(()=>{const range=document.createRange();range.selectNodeContents(document.querySelector(".fy-sheet__secbody blockquote"));const selection=getSelection();selection.removeAllRanges();selection.addRange(range);return selection.toString();})()'),"Keep the passage clear.");
+    await check(name+'-sheet-markdown');
+    await js('window.mountLayout("locations","proposal")');await click('.fy-gridcard--pending');
+    assert.equal(await js('document.querySelectorAll(".fy-location-grid .dom-proposal").length'),0);
+    await js('document.querySelector(".fy-sheet-proposal-review .dom-proposal__content").scrollTop=100000');
+    assert.ok(await js('Array.from(document.querySelectorAll(".fy-sheet-proposal-review .dom-proposal__actions button,.fy-sheet-proposal-review .dom-connected-proposal__revise button")).every(e=>{const r=e.getBoundingClientRect();return r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})'));
+    assert.ok(await js('document.querySelector(".fy-sheet-proposal-review").getBoundingClientRect().width<=880'));
+    await check(name+'-location-review');await escape();
+    assert.equal(await js('document.querySelector(".fy-sheet-proposal-review")'),null);
+    assert.ok(await js('document.activeElement.matches(".fy-gridcard--pending")'));
+
+   }
   }
   const masterRecords=[];
-  for(const id of ["cs161a1","cs161a2","cs161a3","cs161b","cs161c1","cs161c2","cs161c3","cs161d"]){const fold=["cs161b","cs161d"].includes(id);await size(fold?984:390,fold?1060:797,true);await navigate('/'+id+'.html');await capture(id);masterRecords.push({id,geometry:await js('Object.fromEntries([".kinds",".lhead",".feat",".feat img",".ledger",".ledger .row",".pcard",".pcard img",".hero",".tabs",".design",".design img",".sheetrow",".voice",".sheet",".secgrid"].map(s=>{const e=document.querySelector(s),r=e?.getBoundingClientRect();return[s,r?{x:r.x,y:r.y,width:r.width,height:r.height}:null]}))')});}
+  for(const id of ["cs161a1","cs161a2","cs161a3","cs161b","cs161c1","cs161c2","cs161c3","cs161d"]){const fold=["cs161b","cs161d"].includes(id);await size(fold?984:390,fold?1060:797,true);await navigate('/'+id+'.html');await capture(id);masterRecords.push({id,chromeHeight:await js('document.querySelector(".cs161 > .bar").getBoundingClientRect().height'),geometry:await js('Object.fromEntries([".kinds",".lhead",".feat",".feat img",".ledger",".ledger .row",".pcard",".pcard img",".hero",".tabs",".design",".design img",".sheetrow",".voice",".sheet",".secgrid"].map(s=>{const e=document.querySelector(s),r=e?.getBoundingClientRect();return[s,r?{x:r.x,y:r.y,width:r.width,height:r.height}:null]}))')});}
   await writeFile(join(dir,'master-measurements.json'),JSON.stringify(masterRecords,null,2));
   if (!baseline) for (const [name,id,pairs] of [
     ["phone-cast","cs161a1",[[".fy-feature",".feat"],[".fy-feature__frame",".feat img"],[".fy-ledger .fy-row",".ledger .row"]]],
     ["phone-locations","cs161a3",[[".fy-kind-grid .fy-gridcard",".pcard"]]],
-    ["phone-cast-maren-kest","cs161c1",[[".fy-designcard",".design"],[".fy-overview-sheet",".sheetrow"]]],
   ]) {
     const actual=records.find(r=>r.name===name),expected=masterRecords.find(r=>r.id===id);
     if(actual) for(const [app,master] of pairs) for(const key of ["x","y","width","height"])
-      assert.ok(Math.abs(actual.geometry[app][key]-expected.geometry[master][key])<.1,`${name} ${app} ${key} differs from master`);
+      // The current shared app titlebar is 48px; turn 161's is 52px. Compare the cast beneath it.
+      assert.ok(Math.abs(actual.geometry[app][key]-expected.geometry[master][key]-(key==="y"?actual.geometry[".fy-titlebar"].height-expected.chromeHeight:0))<.1,`${name} ${app} ${key} differs from master`);
+  }
+  if(!baseline) {
+    const actual=records.find(r=>r.name==="fold-cast-maren-kest")?.geometry[".fy-sheet__grid"];
+    const expected=masterRecords.find(r=>r.id==="cs161d")?.geometry[".secgrid"];
+    // The live sheet has a scrollbar and authored text of different lengths. Its prose must
+    // still occupy the master's identity column; comparing only overflow missed #2020.
+    if(actual&&expected) {
+      assert.ok(Math.abs(actual.x-expected.x)<=1,"character prose starts in the master column");
+      assert.ok(actual.width<=expected.width+1&&actual.width>=expected.width-18,"character prose keeps the master width, allowing its scrollbar");
+    }
   }
   console.log(JSON.stringify({directory:dir,checks:records.length,baseline:baselineRef}));
 }finally{socket?.close();child.kill();await new Promise(r=>server.close(r));}

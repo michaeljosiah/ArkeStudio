@@ -1,0 +1,16 @@
+/* Turn 275 · the Library's select, a picked row's actions and the empty state. The rest is turn 220's. */
+.cb275 .cb275-list{position:relative}
+.cb275 .n-actions button{white-space:nowrap}
+.cb275 .cb275-browse{border-color:var(--foreground)}
+.cb275 .cb275-menu{position:absolute;left:12px;top:138px;z-index:2;width:210px;display:flex;flex-direction:column;padding:6px;border:1px solid var(--border);border-radius:8px;background:var(--popover,var(--background));box-shadow:0 12px 32px #0003}
+.cb275 .cb275-menu .it{display:flex;align-items:center;gap:8px;min-height:30px;padding:0 8px 0 28px;border-radius:5px;font:var(--type-label);font-weight:var(--weight-regular)}
+.cb275 .cb275-menu .it.on{padding-left:8px;background:var(--accent,var(--muted))}
+.cb275 .cb275-menu .it svg{width:12px;height:12px}
+.cb275 .cb275-menu .gp{padding:10px 8px 4px;font:var(--type-meta);letter-spacing:var(--tracking-label);text-transform:uppercase;color:var(--muted-foreground)}
+.cb275 .cb275-picked{background:var(--accent,var(--muted))}
+.cb275 .cb275-acts{display:flex;flex-wrap:wrap;gap:6px;margin-top:-6px;padding:0 4px 4px}
+.cb275 .cb275-acts button{display:inline-flex;align-items:center;gap:5px;min-height:28px;padding:4px 8px}
+.cb275 .cb275-acts svg{width:11px;height:11px}
+.cb275 .cb275-empty{display:flex;flex-direction:column;align-items:center;gap:10px;padding:56px 12px;font:var(--type-label);font-weight:var(--weight-regular);color:var(--muted-foreground)}
+.cb275 .cb275-empty .mk{display:grid;place-items:center;width:34px;height:34px;border:1px solid var(--border);border-radius:8px}
+.cb275 .cb275-empty svg{width:14px;height:14px}

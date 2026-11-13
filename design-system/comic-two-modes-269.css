@@ -1,0 +1,78 @@
+/* Turn 269 · Two ways to make a page. Everything is scoped to .gn269; the rest is 247, 251 and 253. */
+.gn269-styleimg{width:18px;height:24px;object-fit:cover;border-radius:2px}
+.gn269 .gn269-on{outline:2px solid var(--foreground);outline-offset:1px}
+.gn269 .gn247-comic.gn269-fixed{width:320px;height:480px;align-self:center;flex:none}
+.gn269 .gn247-comic.gn269-big{width:500px;height:750px;flex:none;box-shadow:0 0 0 1px var(--border)}
+.gn269 .gn247-comic>img{width:100%;height:100%;object-fit:cover;display:block}
+.gn269 .p.empty{background:var(--secondary);border-color:var(--border)}
+.gn269 .p.picked{outline:3px solid var(--foreground);outline-offset:1px;z-index:2}
+.gn269-spin{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--foreground);border-radius:50%;animation:gn269-spin 1s linear infinite}
+@keyframes gn269-spin{to{transform:rotate(360deg)}}
+.gn269-thumbspin{position:absolute;inset:0;display:grid;place-items:center}
+.gn269-cellstate{height:100%;display:flex;flex-direction:column;gap:5px;align-items:center;justify-content:center;font:var(--type-label);color:var(--foreground)}
+.gn269-cellstate.bad,.gn269-cellstate.bad svg{color:var(--destructive)}
+.gn269-cellstate svg{width:18px;height:18px}
+.gn269-cellstate .m{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+
+.gn269-lines .gn269-steps{margin-left:6px}
+.gn269-steps{align-self:center;display:inline-flex;padding:2px;border:1px solid var(--border);border-radius:8px;flex:none}
+.gn269-steps span{height:26px;padding:0 14px;display:flex;align-items:center;border-radius:6px;font:var(--type-label);color:var(--muted-foreground)}
+.gn269-steps span.on{background:var(--secondary);color:var(--foreground);font-weight:600}
+
+.gn269-mark{width:16px;height:16px;flex:none;display:inline-grid;place-items:center;margin-left:4px;color:var(--muted-foreground)}
+.gn269-mark svg{width:14px;height:14px}
+.gn269-mark.ok{color:var(--success)}
+.gn269-mark.bad{color:var(--destructive)}
+.gn269-mark.none::after{content:"";width:10px;height:10px;border:1.5px solid var(--border);border-radius:50%}
+.gn269-mark .gn269-spin{width:12px;height:12px}
+.gn269 .gn247-panel.gn269-picked{outline:2px solid var(--foreground);outline-offset:-1px}
+.gn269-pricerow,.gn269-taking{display:flex;align-items:center;gap:8px}
+.gn269-pricerow .m{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}
+.gn269 .gn247-take.gn269-wide{width:70px;aspect-ratio:1/1}
+
+.gn269 .gn247-edit h3{display:flex;align-items:center;gap:8px}
+.gn269 .gn247-edit h3 .m{font:var(--type-mono);font-size:var(--text-2xs);font-weight:400;color:var(--muted-foreground)}
+.gn269-lines{border-right:1px solid var(--border)}
+.gn269-lineacts,.gn269-tool,.gn269-verdict,.gn269-placed{display:flex;align-items:center;gap:8px;flex:none}
+.gn269-placed{min-height:40px;padding:5px 8px 5px 12px;border:1px solid var(--border);border-radius:10px;font-size:var(--text-sm);background:var(--secondary)}
+.gn269-placed svg{width:14px;height:14px}
+.gn269-placed b{font-weight:600}
+.gn269-line{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:10px;flex:none}
+.gn269-line.on{outline:2px solid var(--foreground);outline-offset:-1px}
+.gn269-line{align-items:flex-start}
+.gn269-line .body{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.gn269-line .top{display:flex;align-items:center;gap:10px}
+.gn269-line .grow{flex:1}
+.gn269-line .gn247-kind{width:auto}
+.gn269-line .gn247-who{width:auto}
+.gn269-line .gn247-words{display:block;width:100%;box-sizing:border-box;white-space:normal;line-height:1.35;height:auto;padding-top:6px;padding-bottom:6px}
+.gn269-line>.ord,.gn269-bal .ord{width:16px;height:16px;border-radius:50%;display:inline-grid;place-items:center;flex:none;font:var(--type-mono);font-size:var(--text-2xs);font-style:normal;text-transform:none;background:var(--foreground);color:var(--background)}
+.gn269-tool{margin-top:auto;padding-top:12px;border-top:1px solid var(--border)}
+.gn269-verdict{font-size:var(--text-sm)}
+.gn269-verdict b{font-weight:600}
+.gn269-stage{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--secondary);overflow:hidden}
+
+.gn269-bal{position:absolute;z-index:4;padding:7px 10px;background:#fff;color:#111;border:1.5px solid #111;border-radius:50%;font:var(--type-label);font-weight:700;text-align:center;box-sizing:border-box;line-height:1.25}
+.gn269-apart .gn269-bal{padding:3px 5px;font-size:var(--text-2xs);line-height:1.15}
+.gn269-bal.cap{border-radius:2px;background:#f4e7b4;text-align:left}
+.gn269-bal.sfx{border:0;background:none;color:#c2410c;font-size:var(--text-xl);font-weight:800;transform:rotate(-8deg);text-shadow:1.5px 1.5px 0 #111}
+.gn269-bal .ord{position:absolute;left:-8px;top:-8px;transform:none}
+.gn269-bal.picked{outline:1.5px dashed var(--foreground);outline-offset:4px}
+.gn269-bal .h{position:absolute;width:8px;height:8px;background:#fff;border:1.5px solid #111}
+.gn269-bal .h.a{left:-9px;top:-9px}.gn269-bal .h.b{right:-9px;top:-9px}.gn269-bal .h.c{left:-9px;bottom:-9px}.gn269-bal .h.d{right:-9px;bottom:-9px}
+.gn269-tails{position:absolute;inset:0;width:100%;height:100%;z-index:3;overflow:visible}
+.gn269-tails polygon{fill:#fff;stroke:#111;stroke-width:.25}
+.gn269-aim{position:absolute;z-index:5;width:11px;height:11px;margin:-5px 0 0 -5px;border-radius:50%;background:#fff;border:2px solid #111}
+
+.gn269-dim>*{opacity:.35}
+.gn269-sheet{position:absolute;left:50%;top:92px;transform:translateX(-50%);width:660px;padding:20px;background:var(--background);border:1px solid var(--border);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.28);display:flex;flex-direction:column;gap:16px;z-index:9}
+.gn269-sheet h3{margin:0;font:var(--type-ui);font-weight:600;font-size:var(--text-md)}
+.gn269-cards{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.gn269-card{border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
+.gn269-card.on{outline:2px solid var(--foreground);outline-offset:-1px}
+.gn269-card .pic{height:340px;padding:14px;background:var(--secondary);display:flex;align-items:center;justify-content:center}
+.gn269-card .gn247-comic{width:208px;height:312px;flex:none}
+.gn269-card .txt{padding:12px 14px;display:flex;flex-direction:column;gap:3px;font-size:var(--text-sm);color:var(--muted-foreground)}
+.gn269-card .txt b{font:var(--type-ui);font-weight:600;color:var(--foreground);margin-bottom:3px}
+.gn269-sheetfoot{display:flex;align-items:center;gap:8px}
+.gn269-sheetfoot .m{font:var(--type-mono);font-size:var(--text-2xs);color:var(--muted-foreground)}

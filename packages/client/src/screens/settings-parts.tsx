@@ -7,6 +7,7 @@ import {
   type EngineId,
 } from "@arke-studio/contracts";
 import { StatusDot, cx, type StatusDotTone } from "../components/ui.js";
+import { ProviderMark } from "../components/provider-mark.js";
 
 /**
  * The pieces the runtime-facing settings screens are drawn from. They were private to shell.tsx
@@ -49,6 +50,8 @@ export const CAPABILITY_ROWS: readonly CapabilityRow[] = [
   // is the R-47 test: a capability a local provider declares must land in exactly one drawn row,
   // so a local music provider turns that assertion red rather than rendering nowhere.
   { label: "Music", capabilities: ["music"], cloudOnly: true },
+  // Sound effects and ambiences for an audio drama's cues (SPEC-057 R-39): cloud only, as music is.
+  { label: "Sound effects", capabilities: ["sound-effect"], cloudOnly: true },
   { label: "Language", capabilities: ["llm"] },
 ];
 
@@ -62,9 +65,13 @@ export const CAPABILITY_ROWS: readonly CapabilityRow[] = [
  * stops the local/cloud split reading as two halves of one question. Cloud AI kept a map of its
  * own until Local AI's rows were renamed and only one of the two moved.
  */
-export const CAPABILITY_LABEL: Record<Capability, string> = Object.fromEntries(
-  CAPABILITY_ROWS.flatMap((row) => row.capabilities.map((capability) => [capability, row.label])),
-) as Record<Capability, string>;
+export const CAPABILITY_LABEL: Record<Capability, string> = Object.fromEntries([
+  ...CAPABILITY_ROWS.flatMap((row) => row.capabilities.map((capability) => [capability, row.label])),
+  // The one capability no screen draws as a kind: only ElevenLabs' key probe answers for it. It
+  // still needs its word — without one the provider pane read "Text-to-Speech, Voice clone," and
+  // "undefined — this key cannot read the subscription" (2026-10-07).
+  ["voice-conversion", "Voice conversion"],
+]) as Record<Capability, string>;
 
 /**
  * What an engine is used for, in the capability words every surface shares (SPEC-033 R-62, R-89).
@@ -177,37 +184,6 @@ export function kindOf(model: { id: string; capability: Capability }): Capabilit
 /** A kind's address in the URL (SPEC-042 R-11): its first capability, which is unique per row. */
 export function kindId(row: CapabilityRow): Capability {
   return row.capabilities[0]!;
-}
-
-/**
- * The marks under public/marks, by provider or engine (SPEC-042 R-20). Bundled with the client
- * and never fetched from the provider at runtime. Voxa is our own engine, so it carries Arke's.
- */
-const MARK_SRC: Partial<Record<string, string>> = {
-  fal: "./marks/fal.ico",
-  anthropic: "./marks/anthropic.ico",
-  elevenlabs: "./marks/elevenlabs.ico",
-  higgsfield: "./marks/higgsfield.ico",
-  comfyui: "./marks/comfyui.ico",
-  ollama: "./marks/ollama.png",
-  voxa: "./marks/arke.ico",
-};
-
-/**
- * A provider's or engine's mark, on one light plate whatever the theme: half of these are a
- * black glyph on nothing and would disappear against a dark pane. A source with no bundled mark
- * keeps a monogram in the same slot, so nothing in the layout depends on having one.
- */
-export function ProviderMark({ id, label, size = "sm", letter }: { id: string; label: string; size?: "xs" | "sm" | "lg"; /** The monogram, where the name's first letter is not the one drawn. */ letter?: string }) {
-  const src = MARK_SRC[id];
-  return (
-    <span
-      className={cx("fy-mark", size === "lg" && "fy-mark--lg", size === "xs" && "fy-mark--xs", src === undefined && "fy-mark--letter")}
-      aria-hidden="true"
-    >
-      {src !== undefined ? <img src={src} alt="" /> : (letter ?? label.slice(0, 1).toUpperCase())}
-    </span>
-  );
 }
 
 /**

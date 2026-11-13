@@ -2,11 +2,17 @@ import { createHash } from "node:crypto";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  AUDIOBOOK_CREDITS_ID,
+  audiobookBlockPlan,
+  audiobookBlockState,
   audiobookDirectionFor,
   audiobookNoteFor,
+  sheetNarrations,
   freeCreditOverrun,
   freeLimitReason,
   freePlanShortfall,
+  dailyQuotaNotices,
+  dailyQuotaRefusal,
   audiobookTakeDirectionHash,
   audiobookTextHash,
   holdDirection,
@@ -23,15 +29,19 @@ import {
   type ChapterSummary,
   type ClonedVoice,
   type FreePlanShort,
+  type Job,
+  GOOGLE_DAILY_LIMIT,
   type VoiceNames,
   voiceDisplayLabel,
+  worldImageReferences,
 } from "@arke-studio/contracts";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
+import { chapterFirstPicture } from "./audiobook-listening.js";
 import type { WorldStore } from "../world/store.js";
 import { checkDirection } from "../voice/direction.js";
-import { castRefusal, effectiveReader, planAudiobook, readAudiobookBook, readerLanguage, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
+import { castRefusal, effectiveReader, planAudiobook, readAudiobook, readAudiobookBook, readAudiobookCredits, readerLanguage, updateAudiobook, type AudiobookPlan } from "./audiobook.js";
 import { directableBlocks, type DirectableBlock } from "./audiobook-direction.js";
-import { chapterPriceToken, firstReadNotices, groupIdentity, missIdentity, prepareChapter, type ChapterPreparation, type ReadingRoom, type Speaking } from "./audiobook-run.js";
+import { chapterPriceToken, chapterRoom, firstReadNotices, groupIdentity, hasRecoverableAudio, missIdentity, prepareChapter, type ChapterPreparation, type ReadingRoom, type Speaking } from "./audiobook-run.js";
 
 /**
  * The book (design turn 146, SPEC-047 R-15..R-17, R-29): every chapter prepared as its own
@@ -42,16 +52,18 @@ import { chapterPriceToken, firstReadNotices, groupIdentity, missIdentity, prepa
  */
 
 export interface PreparedBook {
-  chapters: Array<{ summary: ChapterSummary; preparation: ChapterPreparation }>;
+  chapters: Array<{ summary: ChapterSummary; preparation: ChapterPreparation | { kind: "planned" } }>;
 }
 
 /** Every chapter of the production, in order, retired ones left out, prepared as a press would. */
-export async function prepareBook(store: WorldStore, productionId: string, room: ReadingRoom, now: () => string): Promise<PreparedBook> {
+export async function prepareBook(store: WorldStore, productionId: string, room: ReadingRoom, now: () => string, only?: string): Promise<PreparedBook> {
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) throw new Error("That production is no longer in this world.");
   const chapters: PreparedBook["chapters"] = [];
-  for (const summary of [...production.chapters].filter((c) => !c.retired).sort((a, b) => a.order - b.order)) {
-    chapters.push({ summary, preparation: await prepareChapter(store, productionId, summary.id, room, now) });
+  for (const summary of [...production.chapters].filter((c) => !c.retired && (only === undefined || c.id === only)).sort((a, b) => a.order - b.order)) {
+    // Outline notes stay visible on the door, but a book read must not purchase their narration.
+    // A chapter with a narrator of its own is prepared in that voice (R-195).
+    chapters.push({ summary, preparation: summary.status === "outlined" ? { kind: "planned" } : await prepareChapter(store, productionId, summary.id, chapterRoom(room, summary.id), now) });
   }
   return { chapters };
 }
@@ -76,12 +88,14 @@ function runningTime(store: WorldStore, plan: Pick<AudiobookPlan, "blocks">, rec
  * its share, each voice on this machine — the narrator's, and a cast voice that reads on the
  * same engine as a line of its own (codex on PR 1187) — with its characters and nothing to
  * pay, and each speaker the narrator stands in for as a line of its own — said in warning on
- * the card, and counted apart from the narrator's own share so the sum is exact.
+ * the card, and counted apart from the narrator's own share so the sum is exact. A book with a
+ * narrator to a part (R-195) names each of them as a narrator.
  */
-export function bookPriceLines(narrator: ReadingRoom["narrator"], speaking: readonly Speaking[], misses: readonly Speaking[], priceOf: (block: Speaking) => number, sheetName: (sheet: string) => string, names: VoiceNames = {}): AudiobookPriceLine[] {
+export function bookPriceLines(narrator: ReadingRoom["narrator"] | readonly ReadingRoom["narrator"][], speaking: readonly Speaking[], misses: readonly Speaking[], priceOf: (block: Speaking) => number, sheetName: (sheet: string) => string, names: VoiceNames = {}): AudiobookPriceLine[] {
   const stoodIn = new Map<string, AudiobookPriceLine>();
   const own: Speaking[] = [];
-  const isNarrator = (reader: Speaking["reader"]) => reader.provider === narrator.provider && reader.model === narrator.model && reader.voiceId === narrator.voiceId;
+  const narrators: readonly ReadingRoom["narrator"][] = Array.isArray(narrator) ? narrator : [narrator as ReadingRoom["narrator"]];
+  const isNarrator = (reader: Speaking["reader"]) => narrators.some((one) => reader.provider === one.provider && reader.model === one.model && reader.voiceId === one.voiceId);
   for (const block of speaking) {
     if (block.refusal !== undefined) continue;
     const substituted = block.substitutedNow ?? block.substituted;
@@ -127,11 +141,17 @@ export function bookPriceLines(narrator: ReadingRoom["narrator"], speaking: read
   return [...lines.values(), ...stoodIn.values()];
 }
 
+/** The book's narrator and every chapter's own (R-195): each reads as a narrator on the price. */
+function bookNarrators(room: ReadingRoom): AudiobookReader[] {
+  return [room.narrator, ...Object.values(room.chapterNarrators ?? {}).map((own) => own.narrator)];
+}
+
 /** What every chapter stands at, who reads, and what a press would spend (R-15, R-29). */
 export async function audiobookDoor(store: WorldStore, productionId: string, room: ReadingRoom, now: () => string): Promise<AudiobookDoor> {
   const book = await prepareBook(store, productionId, room, now);
   const sheets = store.getBundle().sheets;
   const sheetName = (id: string) => sheets.find((sheet) => sheet.id === id)?.name ?? id;
+  const narrations = sheetNarrations(sheets);
   const rows: AudiobookRow[] = [];
   const voices = new Map<string, AudiobookVoiceRow>();
   const narratorRow: AudiobookVoiceRow = {
@@ -148,19 +168,57 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
   // The book's own narrator, when it has one and it speaks now (R-46), is said on its chip.
   const own = bookFile === null || bookFile === "unreadable" ? undefined : bookFile.narrator;
   if (own !== undefined && sameVoice(own, room.narrator)) narratorRow.book = true;
+  // And when it cannot read now, why (issue 1661): the door said `Performed · George` over a
+  // narrator a 402 had silenced, with the reason only in app.jsonl.
+  if (room.unavailable !== undefined) narratorRow.unavailable = room.unavailable;
   // A narrator whose row takes no phrase cannot play a note (R-45): said on each noted speaker
   // before anything is made.
-  const narratorModel = room.models.find((m) => m.provider === room.narrator.provider && m.id === room.narrator.model && m.capability === "voice-tts") ?? null;
-  const narratorLanguage = readerLanguage(store.getBundle().clonedVoices ?? [], room.narrator);
+  const modelOf = (narrator: AudiobookReader) => room.models.find((m) => m.provider === narrator.provider && m.id === narrator.model && m.capability === "voice-tts") ?? null;
+  const narratorModel = modelOf(room.narrator);
+  // A chapter with a narrator of its own (R-195) counts on that narrator's row, one row a voice
+  // with the chapters it reads, so the book's row says only what the book's narrator reads.
+  const chapterRows = new Map<string, AudiobookVoiceRow>();
+  const rowFor = (chapterId: string): AudiobookVoiceRow => {
+    const own = room.chapterNarrators?.[chapterId];
+    if (own === undefined) return narratorRow;
+    const key = `${own.narrator.provider}\n${own.narrator.model}\n${own.narrator.voiceId}`;
+    const label = voiceDisplayLabel(own.narrator, store.getBundle());
+    const row = chapterRows.get(key) ?? { name: label, voice: { label, provider: own.narrator.provider, local: own.narrator.provider === "kokoro" }, state: "narrator" as const, blocks: 0, chapters: [],
+      ...(own.unavailable !== undefined ? { unavailable: own.unavailable } : {}) };
+    if (!row.chapters!.includes(chapterId)) row.chapters!.push(chapterId);
+    chapterRows.set(key, row);
+    return row;
+  };
   const toRead: Array<Extract<ChapterPreparation, { kind: "ready" }>["prepared"]> = [];
+  // The page's cast and thumbnails (design turn 199): every speaker in the order of their first
+  // line whatever the reading, and each chapter's first picture, from the plans read here anyway.
+  const cast = new Map<string, { sheet?: string; name: string }>();
+  const listed = new Set(worldImageReferences(store.getBundle()).map((reference) => reference.file));
   for (const { summary, preparation } of book.chapters) {
-    const base = { chapterId: summary.id, file: summary.file, order: summary.order, title: summary.title, version: summary.version };
+    const base: Pick<AudiobookRow, "chapterId" | "file" | "order" | "title" | "version" | "picture"> = { chapterId: summary.id, file: summary.file, order: summary.order, title: summary.title, version: summary.version };
+    if (preparation.kind === "planned") {
+      rows.push({ ...base, planned: true, total: 0, made: 0, stale: 0, flagged: 0, notMade: 0, seconds: 0 });
+      continue;
+    }
     if (preparation.kind === "unavailable") {
       rows.push({ ...base, planned: false, total: 0, made: 0, stale: 0, flagged: 0, notMade: 0, seconds: null, castTrouble: preparation.reason });
       continue;
     }
     const plan = preparation.kind === "ready" ? preparation.prepared.plan : preparation.plan;
+    const chapter = chapterRoom(room, summary.id);
+    const reads = rowFor(summary.id);
+    const readsModel = modelOf(chapter.narrator);
+    const readsLanguage = readerLanguage(store.getBundle().clonedVoices ?? [], chapter.narrator);
     unattributed += plan.cast !== null && plan.cast !== "unreadable" ? plan.ambiguous : 0;
+    for (const planned of plan.blocks) {
+      for (const turn of planned.block.rows ?? [planned.block]) {
+        if (turn.speaker === undefined) continue;
+        const key = turn.sheet ?? `:${turn.speaker}`;
+        if (!cast.has(key)) cast.set(key, { ...(turn.sheet !== undefined ? { sheet: turn.sheet } : {}), name: turn.sheet !== undefined ? sheetName(turn.sheet) : turn.speaker });
+      }
+    }
+    const picture = await chapterFirstPicture(store, plan, listed);
+    if (picture !== null) base.picture = picture;
     const counts: { total: number; made: number; stale: number; flagged: number; notMade: number; awaiting?: number } = { total: plan.blocks.length, made: 0, stale: 0, flagged: 0, notMade: 0 };
     for (const planned of plan.blocks) {
       if (planned.state === "made") counts.made += 1;
@@ -189,24 +247,25 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
         // One narrator performs the cast (R-44): the narrator reads the block once, and each
         // speaker's row carries the note it is played with. A block that holds several turns
         // (design turn 190) counts each speaker's lines in it.
-        narratorRow.blocks += 1;
+        reads.blocks += 1;
         for (const turn of planned.block.rows ?? [planned.block]) {
           if (turn.speaker === undefined) continue;
           const key = turn.sheet ?? `:${turn.speaker}`;
           const sheet = turn.sheet;
           const held = voices.get(key) ?? { ...(sheet !== undefined ? { sheet } : {}), name: sheet !== undefined ? sheetName(sheet) : turn.speaker, state: "narrator" as const, blocks: 0 };
           held.blocks += 1;
-          const note = planned.block.rows === undefined ? planned.note : audiobookNoteFor({ reading: "performed", notes: plan.book?.notes ?? {} }, turn);
+          // A turn of a block of several is its own speaker's: the book's note, else the character's (R-166).
+          const note = planned.block.rows === undefined ? planned.note : audiobookNoteFor({ reading: "performed", notes: plan.book?.notes ?? {} }, turn, narrations);
           if (note !== undefined) {
             held.note = note;
-            if (narratorModel === null || performanceNote(note, narratorModel, narratorLanguage).mode === "unsupported") held.noteHeld = true;
+            if (readsModel === null || performanceNote(note, readsModel, readsLanguage).mode === "unsupported") held.noteHeld = true;
           }
           voices.set(key, held);
         }
         continue;
       }
       if (planned.block.speaker === undefined || plan.reading !== "cast") {
-        narratorRow.blocks += 1;
+        reads.blocks += 1;
         continue;
       }
       const key = planned.sheet ?? `:${planned.block.speaker}`;
@@ -218,16 +277,16 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
       };
       held.blocks += 1;
       if (planned.substituted === undefined) {
-        const speaks = await effectiveReader(store, planned.assigned, room);
+        const speaks = await effectiveReader(store, planned.assigned, chapter);
         if (speaks !== null && speaks.substitutedNow === undefined) {
           held.state = "reads";
           held.voice = { label: voiceDisplayLabel(planned.assigned, store.getBundle()), provider: planned.assigned.provider, local: planned.assigned.provider === "kokoro" };
         } else {
           held.state = "voice unavailable";
           held.voice = { label: voiceDisplayLabel(planned.assigned, store.getBundle()), provider: planned.assigned.provider, local: planned.assigned.provider === "kokoro" };
-          narratorRow.blocks += 1;
+          reads.blocks += 1;
         }
-      } else narratorRow.blocks += 1;
+      } else reads.blocks += 1;
       voices.set(key, held);
     }
     // The takes made stand whatever the reading (R-13), so a chapter refused under `cast` —
@@ -247,6 +306,7 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
   return {
     reading,
     voices: [narratorRow, ...voices.values()],
+    ...(chapterRows.size > 0 ? { chapterNarrators: [...chapterRows.values()] } : {}),
     unattributed,
     rows,
     price: {
@@ -255,20 +315,21 @@ export async function audiobookDoor(store: WorldStore, productionId: string, roo
       cloudBlocks: misses.length,
       characters: misses.reduce((sum, block) => sum + block.text.length, 0),
       estimatedMicroUsd: toRead.reduce((sum, prepared) => sum + prepared.estimate, 0),
-      voices: bookPriceLines(room.narrator, speaking, misses, priceOf, sheetName, store.getBundle()),
+      voices: bookPriceLines(bookNarrators(room), speaking, misses, priceOf, sheetName, store.getBundle()),
       // Requests counted where reads are priced (design turn 185a), when any chapter groups.
-      ...(toRead.some((prepared) => prepared.groups.length > 0)
+      ...(toRead.some((prepared) => prepared.groups.length > 0 || prepared.groupingUnavailable)
         ? { requests: toRead.reduce((sum, prepared) => sum + prepared.requests, 0), perParagraph: toRead.reduce((sum, prepared) => sum + prepared.perParagraph, 0) }
         : {}),
     },
     // The book's Requests row (design turn 185d) shows only where the narrator's reader groups and this machine can split.
     ...(groupingOffered(narratorModel, room.transcriber === true) ? { requests: bookFile !== null && bookFile !== "unreadable" && bookFile.requests === "per-paragraph" ? "per-paragraph" as const : "grouped" as const } : {}),
+    cast: [...cast.values()],
   };
 }
 
 export type AudiobookBookEvent =
   | { type: "started"; chapters: number; blocks: number }
-  | { type: "priced"; chapters: number; blocks: number; cloudBlocks: number; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: AudiobookPriceLine[]; notices: string[]; freePlan?: FreePlanShort; requests?: number; perParagraph?: number }
+  | { type: "priced"; chapters: number; blocks: number; cloudBlocks: number; characters: number; estimatedMicroUsd: number; confirmationToken: string; voices: AudiobookPriceLine[]; notices: string[]; freePlan?: FreePlanShort; requests?: number; perParagraph?: number; groupingUnavailable?: true }
   | { type: "progress"; chapterId: string; done: number; chapters: number }
   | { type: "finished"; outcome: "read" | "stopped" | "unavailable" | "failed"; chaptersRead: number; chaptersRefused: number; made: number; flagged: number; reason?: string };
 
@@ -277,6 +338,7 @@ export interface AudiobookBookDeps {
   worldId: string;
   productionId: string;
   room: ReadingRoom;
+  findJobs?: () => readonly Job[];
   signal: AbortSignal;
   confirmationToken?: string;
   requireUploadConfirmation: (reader: { provider: string; voice: ClonedVoice }) => boolean | Promise<boolean>;
@@ -296,8 +358,9 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
   const { store, productionId, room, signal, emit } = deps;
   const book = await prepareBook(store, productionId, room, deps.now);
   let refused = 0;
-  const toRead: Array<{ summary: ChapterSummary; prepared: Extract<ChapterPreparation, { kind: "ready" }>["prepared"] }> = [];
+  const toRead: Array<{ summary: Pick<ChapterSummary, "id">; prepared: Extract<ChapterPreparation, { kind: "ready" }>["prepared"] }> = [];
   for (const { summary, preparation } of book.chapters) {
+    if (preparation.kind === "planned") continue;
     if (preparation.kind === "unavailable") {
       emit({ type: "started", chapters: 0, blocks: 0 });
       emit({ type: "finished", outcome: "unavailable", chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0, reason: preparation.reason });
@@ -309,6 +372,16 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
     }
     if (preparation.prepared.toMake.length > 0) toRead.push({ summary, prepared: preparation.prepared });
   }
+  // The credits are read with the chapters (design turn 252, SPEC-047 R-214): after them, on the
+  // book's one answer, when either is not made, once the book has credits of its own — its credits
+  // file, written the first time they are set or opened with Publish's author, or a reading of
+  // them, which drafted credits read from the sheet leave without the file (codex on PR 2274). A
+  // book that has never had credits reads as it always did. The door does not list them as a chapter.
+  const held = await readAudiobookCredits(store, productionId);
+  if (held !== "unreadable" && (held !== null || (await readAudiobook(store, productionId, AUDIOBOOK_CREDITS_ID)) !== null)) {
+    const credits = await prepareChapter(store, productionId, AUDIOBOOK_CREDITS_ID, room, deps.now);
+    if (credits.kind === "ready" && credits.prepared.toMake.length > 0) toRead.push({ summary: { id: AUDIOBOOK_CREDITS_ID }, prepared: credits.prepared });
+  }
   emit({ type: "started", chapters: toRead.length, blocks: toRead.reduce((sum, entry) => sum + entry.prepared.toMake.length, 0) });
   if (toRead.length === 0) {
     emit({ type: "finished", outcome: "read", chaptersRead: 0, chaptersRefused: refused, made: 0, flagged: 0 });
@@ -318,6 +391,13 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
   const clones = new Map<string, { provider: string; voice: ClonedVoice }>();
   for (const entry of toRead) for (const reader of entry.prepared.clones) clones.set(`${reader.provider}\n${reader.voice.id}`, reader);
   const askOrder = [...clones.values()].sort((a, b) => Number(a.provider === "comfyui") - Number(b.provider === "comfyui"));
+  const quotaReads = toRead.flatMap((entry) => entry.prepared.freeReads);
+  const quotaRefusal = dailyQuotaRefusal(quotaReads, room.dailyQuota);
+  const readable = quotaRefusal === null ? toRead : toRead.filter(entry => hasRecoverableAudio(entry.prepared, deps.findJobs?.() ?? [], productionId, deps.worldId));
+  if (quotaRefusal !== null && readable.length === 0) {
+    emit({ type: "finished", outcome: "failed", chaptersRead: 0, chaptersRefused: refused, made: 0, flagged: 0, reason: quotaRefusal });
+    return;
+  }
   for (const reader of askOrder) {
     if (await deps.requireUploadConfirmation(reader)) return;
   }
@@ -360,13 +440,14 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
         characters: misses.reduce((sum, block) => sum + block.text.length, 0),
         estimatedMicroUsd: estimate,
         confirmationToken: token,
-        voices: bookPriceLines(room.narrator, speaking, misses, priceOf, (id) => sheets.find((sheet) => sheet.id === id)?.name ?? id, store.getBundle()),
+        voices: bookPriceLines(bookNarrators(room), speaking, misses, priceOf, (id) => sheets.find((sheet) => sheet.id === id)?.name ?? id, store.getBundle()),
         // Across the book's chapters, each voice and vendor once (SPEC-046 R-40): the first
         // chapter's read is the one that makes the slot, and the book asks once for all of them.
-        notices: firstReadNotices(toRead.flatMap((entry) => entry.prepared.clones)),
+        notices: [...firstReadNotices(toRead.flatMap((entry) => entry.prepared.clones)), ...dailyQuotaNotices(quotaReads, room.dailyQuota)],
         ...(freePlan !== null ? { freePlan: freePlan.short } : {}),
+        ...(toRead.some(entry => entry.prepared.groupingUnavailable) ? { groupingUnavailable: true as const } : {}),
         // Requests counted where reads are priced (design turn 185a).
-        ...(toRead.some((entry) => entry.prepared.groups.length > 0)
+        ...(toRead.some((entry) => entry.prepared.groups.length > 0 || entry.prepared.groupingUnavailable)
           ? { requests: toRead.reduce((sum, entry) => sum + entry.prepared.requests, 0), perParagraph: toRead.reduce((sum, entry) => sum + entry.prepared.perParagraph, 0) }
           : {}),
       });
@@ -377,7 +458,8 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
   let flagged = 0;
   let read = 0;
   let done = 0;
-  for (const entry of toRead) {
+  let heldByQuota = quotaRefusal !== null && readable.length < toRead.length;
+  for (const entry of readable) {
     if (signal.aborted) break;
     // The chapter's price as the book priced it (R-17): the chapter's run reads on it only
     // while the chapter is still what was priced (codex on PR 1187).
@@ -386,6 +468,7 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
     flagged += result.flagged;
     if (result.outcome === "refused") refused += 1;
     else if (result.outcome === "failed" || result.outcome === "unavailable") {
+      if (quotaRefusal !== null && result.reason?.includes(GOOGLE_DAILY_LIMIT)) { heldByQuota = true; continue; }
       emit({ type: "finished", outcome: result.outcome, chaptersRead: read, chaptersRefused: refused, made, flagged, ...(result.reason !== undefined ? { reason: result.reason } : {}) });
       return;
     } else if (result.outcome === "read") read += 1;
@@ -395,7 +478,7 @@ export async function runAudiobookBook(deps: AudiobookBookDeps): Promise<void> {
     done += 1;
     emit({ type: "progress", chapterId: entry.summary.id, done, chapters: toRead.length });
   }
-  emit({ type: "finished", outcome: signal.aborted ? "stopped" : "read", chaptersRead: read, chaptersRefused: refused, made, flagged });
+  emit({ type: "finished", outcome: signal.aborted ? "stopped" : heldByQuota ? "failed" : "read", chaptersRead: read, chaptersRefused: refused, made, flagged, ...(heldByQuota && quotaRefusal !== null ? { reason: quotaRefusal } : {}) });
 }
 
 /**
@@ -445,7 +528,7 @@ export async function conformDirections(store: WorldStore, productionId: string,
       if (Object.keys(current.direction).length === 0) return null;
       let readable: Awaited<ReturnType<typeof directableBlocks>>;
       try {
-        readable = await directableBlocks(store, productionId, summary.id, room);
+        readable = await directableBlocks(store, productionId, summary.id, chapterRoom(room, summary.id));
       } catch {
         // A chapter whose cast is not current, or whose narrator's model is gone, is left as
         // it stands: its run refuses before any direction matters.
@@ -474,66 +557,122 @@ export async function followTakes(store: WorldStore, productionId: string, room:
   const production = store.getBundle().productions.find((p) => p.meta.id === productionId);
   if (!production) return 0;
   let chosen = 0;
-  for (const summary of production.chapters.filter((c) => !c.retired)) {
-    let plan: AudiobookPlan;
-    try {
-      plan = await planAudiobook(store, productionId, summary.id, { narrator: room.narrator });
-    } catch {
-      continue;
-    }
-    if (castRefusal(plan) !== null || plan.record === null || plan.record === "unreadable") continue;
-    const record = plan.record;
-    const picks: Record<string, AudiobookTake> = {};
-    for (const planned of plan.blocks) {
-      if (planned.recorded === true || (planned.state !== "stale" && planned.state !== "not made" && planned.state !== "flagged")) continue;
-      const textHash = audiobookTextHash(planned.block.text);
-      const want = audiobookTakeDirectionHash(audiobookDirectionFor(record, planned.block)?.plan ?? null, planned.note, planned.reading);
-      const candidates = store
-        .getBundle()
-        .artifacts.filter((artifact) => {
-          const g = artifact.generation;
-          return (
-            artifact.retiredAt === undefined &&
-            g?.source === "audiobook" &&
-            g.recording === undefined &&
-            g.productionId === productionId &&
-            g.chapterId === plan.chapter.id &&
-            g.block === planned.block.key &&
-            g.textHash === textHash &&
-            sameVoice(g, planned.assigned) &&
-            g.directionHash === want
-          );
-        })
-        .sort((a, b) => (a.created < b.created ? 1 : -1));
-      for (const artifact of candidates) {
-        if (artifact.id === record.takes[planned.block.key]?.artifactId) break;
-        const there = await stat(toExtendedLength(join(store.dir, "artifacts", fromPortable(artifact.file)))).then((s) => s.isFile(), () => false);
-        if (!there) continue;
-        const g = artifact.generation as Extract<NonNullable<typeof artifact.generation>, { source: "audiobook" }>;
-        const format = artifact.file.toLowerCase().endsWith(".mp3") ? "mp3" : artifact.file.toLowerCase().endsWith(".flac") ? "flac" : "wav";
-        picks[planned.block.key] = {
-          artifactId: artifact.id,
-          textHash,
-          reader: { provider: g.provider, model: g.model, voiceId: g.voiceId, ...(g.voiceLabel !== undefined ? { label: g.voiceLabel } : {}) },
-          ...(g.sheetId !== undefined ? { sheet: g.sheetId } : {}),
-          format,
-          characters: g.characters,
-          parts: g.parts,
-          estimatedMicroUsd: g.estimatedMicroUsd,
-          costMicroUsd: g.costMicroUsd,
-          ...(g.directionHash !== undefined ? { directionHash: g.directionHash } : {}),
-          madeAt: artifact.created,
-        };
-        break;
+  for (const summary of production.chapters.filter((c) => !c.retired)) chosen += await followChapterTakes(store, productionId, summary, chapterRoom(room, summary.id));
+  return chosen;
+}
+
+/**
+ * One chapter's blocks finding their kept takes again (R-48), as `followTakes` does for the book.
+ * A seam changed by hand asks the same (design turn 198, rule 5): a block returned to a shape it
+ * had before — split back, joined back, reset — finds its old take by its key and its words.
+ * An inserted paragraph can move that key: a unique unchanged passage can also recover its
+ * selected take, preserving the original performance and measurements (#2115).
+ */
+export async function followChapterTakes(store: WorldStore, productionId: string, summary: Pick<ChapterSummary, "id" | "file">, room: Pick<ReadingRoom, "narrator">): Promise<number> {
+  let plan: AudiobookPlan;
+  try {
+    plan = await planAudiobook(store, productionId, summary.id, { narrator: room.narrator });
+  } catch {
+    return 0;
+  }
+  if (castRefusal(plan) !== null || plan.record === null || plan.record === "unreadable") return 0;
+  const record = plan.record;
+  const fingerprint = (value: AudiobookPlan) => JSON.stringify({ ...value, present: [...value.present].sort() });
+  const basis = fingerprint(plan);
+  const textCounts = new Map<string, number>();
+  for (const { block } of plan.blocks) {
+    const hash = audiobookTextHash(block.text);
+    textCounts.set(hash, (textCounts.get(hash) ?? 0) + 1);
+  }
+  const artifacts = store.getBundle().artifacts;
+  const picks: Record<string, AudiobookTake> = {};
+  const movedAliases = new Set<string>();
+  for (const planned of plan.blocks) {
+    if (planned.recorded === true || (planned.state !== "stale" && planned.state !== "not made" && planned.state !== "flagged")) continue;
+    const textHash = audiobookTextHash(planned.block.text);
+    if (planned.state !== "flagged" && textCounts.get(textHash) === 1) {
+      const moved = new Map<string, AudiobookTake>();
+      for (const [key, take] of Object.entries(record.takes)) {
+        if (key === planned.block.key || take.source === "recorded" || take.textHash !== textHash ||
+          !plan.present.has(take.artifactId) || (record.flags[key]?.at ?? "") > take.madeAt) continue;
+        const generation = artifacts.find(artifact => artifact.id === take.artifactId)?.generation;
+        if (generation?.source !== "audiobook" || generation.recording !== undefined ||
+          generation.productionId !== productionId || generation.chapterId !== plan.chapter.id ||
+          generation.textHash !== textHash || !sameVoice(generation, take.reader) || generation.directionHash !== take.directionHash) continue;
+        const candidate = { ...record, takes: { ...record.takes, [planned.block.key]: take } };
+        if (audiobookBlockState(planned.block, candidate, planned.assigned, id => plan.present.has(id), false,
+          planned.note, planned.reading, plan.reading === "performed") === "made") moved.set(take.artifactId, take);
+      }
+      // Repeated passages or multiple selected performances cannot identify the author's
+      // choice. Same-key shelf recovery below retains its existing rules in those cases.
+      if (moved.size === 1) {
+        const take = moved.values().next().value!;
+        picks[planned.block.key] = take;
+        // A recovered selection moves with its words. Leaving copies at historical keys
+        // would make an older performance compete after the author replaces this take
+        // and moves the passage again (#2117). Artifacts and their provenance stay put.
+        for (const [key, alias] of Object.entries(record.takes)) {
+          if (key !== planned.block.key && JSON.stringify(alias) === JSON.stringify(take)) movedAliases.add(key);
+        }
+        continue;
       }
     }
-    if (Object.keys(picks).length === 0) continue;
-    await updateAudiobook(store, productionId, { file: summary.file, version: plan.chapter.version, hash: plan.chapter.hash }, (current) => {
-      const flags = Object.fromEntries(Object.entries(current.flags).filter(([key]) => picks[key] === undefined));
-      return { ...current, updatedAt: store.now(), takes: { ...current.takes, ...picks }, flags };
-    });
-    chosen += Object.keys(picks).length;
+    const turns = plan.reading === "performed" && planned.assigned.provider === "elevenlabs" && planned.assigned.model === "eleven_v4" ? planned.block : undefined;
+    const want = audiobookTakeDirectionHash(audiobookBlockPlan(record, planned.block), planned.note, planned.reading, turns);
+    const candidates = artifacts.filter((artifact) => {
+        const g = artifact.generation;
+        return (
+          artifact.retiredAt === undefined &&
+          g?.source === "audiobook" &&
+          g.recording === undefined &&
+          g.productionId === productionId &&
+          g.chapterId === plan.chapter.id &&
+          g.block === planned.block.key &&
+          g.textHash === textHash &&
+          sameVoice(g, planned.assigned) &&
+          g.directionHash === want
+        );
+      })
+      .sort((a, b) => (a.created < b.created ? 1 : -1));
+    for (const artifact of candidates) {
+      if (artifact.id === record.takes[planned.block.key]?.artifactId) break;
+      const there = await stat(toExtendedLength(join(store.dir, "artifacts", fromPortable(artifact.file)))).then((s) => s.isFile(), () => false);
+      if (!there) continue;
+      const g = artifact.generation as Extract<NonNullable<typeof artifact.generation>, { source: "audiobook" }>;
+      const format = artifact.file.toLowerCase().endsWith(".mp3") ? "mp3" : artifact.file.toLowerCase().endsWith(".flac") ? "flac" : "wav";
+      picks[planned.block.key] = {
+        artifactId: artifact.id,
+        textHash,
+        reader: { provider: g.provider, model: g.model, voiceId: g.voiceId, ...(g.voiceLabel !== undefined ? { label: g.voiceLabel } : {}) },
+        ...(g.sheetId !== undefined ? { sheet: g.sheetId } : {}),
+        format,
+        characters: g.characters,
+        parts: g.parts,
+        estimatedMicroUsd: g.estimatedMicroUsd,
+        costMicroUsd: g.costMicroUsd,
+        ...(g.directionHash !== undefined ? { directionHash: g.directionHash } : {}),
+        madeAt: artifact.created,
+      };
+      break;
+    }
   }
+  if (Object.keys(picks).length === 0) return 0;
+  let chosen = 0;
+  await updateAudiobook(store, productionId, { file: summary.file, version: plan.chapter.version, hash: plan.chapter.hash }, (current) => {
+    if (JSON.stringify(current) !== JSON.stringify(record)) return null;
+    const flags = Object.fromEntries(Object.entries(current.flags).filter(([key]) => picks[key] === undefined));
+    chosen = Object.keys(picks).length;
+    // Remove aliases before applying all picks: another moved passage can own the same key.
+    const takes = Object.fromEntries(Object.entries(current.takes).filter(([key]) => !movedAliases.has(key)));
+    return { ...current, updatedAt: store.now(), takes: { ...takes, ...picks }, flags };
+  }, { requireReadable: true, beforeWrite: async () => {
+    const fresh = await planAudiobook(store, productionId, summary.id, { narrator: room.narrator });
+    if (fingerprint(fresh) !== basis || Object.values(picks).some(take =>
+      JSON.stringify(store.getBundle().artifacts.find(artifact => artifact.id === take.artifactId)) !==
+      JSON.stringify(artifacts.find(artifact => artifact.id === take.artifactId)))) {
+      throw new Error("The chapter or its narration changed; review its kept takes again.");
+    }
+  } });
   return chosen;
 }
 
@@ -545,11 +684,12 @@ function sameVoice(g: { provider: string; model: string; voiceId: string }, read
  * What a narrator switch would do, before it is made (R-46): the blocks made now that the new
  * narrator would leave stale or unmade, the direction controls it would hold of all those that
  * stand, the price of reading the book again as `Read the book` would price it, and the takes
- * of the narrator now kept on the shelf. Nothing written.
+ * of the narrator now kept on the shelf. Nothing written. `only` is a chapter's own switch
+ * (R-195): that chapter weighed alone.
  */
-export async function quoteNarrator(store: WorldStore, productionId: string, now: ReadingRoom, next: ReadingRoom, at: () => string): Promise<{ stale: number; held: number; directed: number; estimatedMicroUsd: number; kept: number }> {
-  const before = await prepareBook(store, productionId, now, at);
-  const after = await prepareBook(store, productionId, next, at);
+export async function quoteNarrator(store: WorldStore, productionId: string, now: ReadingRoom, next: ReadingRoom, at: () => string, only?: string): Promise<{ stale: number; held: number; directed: number; estimatedMicroUsd: number; kept: number }> {
+  const before = await prepareBook(store, productionId, now, at, only);
+  const after = await prepareBook(store, productionId, next, at, only);
   const ready = (book: PreparedBook) => book.chapters.flatMap((chapter) => (chapter.preparation.kind === "ready" ? [chapter.preparation.prepared] : []));
   const toMake = (book: PreparedBook) => ready(book).reduce((sum, prepared) => sum + prepared.toMake.length, 0);
   const stale = Math.max(0, toMake(after) - toMake(before));
@@ -560,11 +700,13 @@ export async function quoteNarrator(store: WorldStore, productionId: string, now
   const clonedVoices = store.getBundle().clonedVoices ?? [];
   for (const prepared of ready(after)) {
     const record = prepared.record;
-    for (const take of Object.values(record.takes)) if (sameVoice(take.reader, now.narrator)) kept += 1;
+    // Each chapter weighed against its own narrator, before and after (R-195).
+    const reading = chapterRoom(now, prepared.plan.chapter.id).narrator;
+    for (const take of Object.values(record.takes)) if (sameVoice(take.reader, reading)) kept += 1;
     for (const planned of prepared.plan.blocks) {
       const direction = audiobookDirectionFor(record, planned.block);
       if (direction === null) continue;
-      const speaks = await effectiveReader(store, planned.assigned, next);
+      const speaks = await effectiveReader(store, planned.assigned, chapterRoom(next, prepared.plan.chapter.id));
       if (speaks === null) continue;
       const controls = (direction.plan.delivery !== undefined ? 1 : 0) + (direction.plan.speed !== 1 ? 1 : 0) + (direction.plan.note !== undefined ? 1 : 0) + direction.plan.cues.length;
       directed += controls;

@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { lookViewFor, pictureLookChanged, ridingPicks, type AudiobookLook, type ClientMessage, type DomainEvent, type ManifestModel, type WorldBundle } from "@arke-studio/contracts";
 import { BenchStore, sessionDir } from "../../src/bench/store.js";
-import { AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION } from "../../src/world/commit.js";
+import { AUDIOBOOK_LOOK_SCHEMA_VERSION, AUDIOBOOK_PICTURE_SHOT_SCHEMA_VERSION, AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { readAudiobook } from "../../src/productions/audiobook.js";
 import { buildPicturePrompt, clipPrompt, pictureAspect, pictureQuote, pictureWho, promptRoom, type PictureDeriverInput } from "../../src/productions/audiobook-picture-suggest.js";
 import { acceptCharacterLook } from "../../src/references/kit.js";
@@ -34,6 +34,95 @@ const suggestion = (events: DomainEvent[]): SuggestionEvent => {
 const madeEvents = (events: DomainEvent[]): MadeEvent[] => events.filter((event): event is MadeEvent => event.type === "audiobook.picture-made");
 
 describe("Suggest picture (R-99)", () => {
+  it("returns an unfamiliar place as visible unlinked evidence through the public suggestion command (#1948)", () =>
+    withHarness(async ({ events, send, enqueued }) => {
+      await suggest(send);
+      const answer = suggestion(events);
+      assert.equal(answer.refused, undefined);
+      assert.deepEqual(answer.suggestion!.who, [
+        { key: "north salt", name: "North Salt", kind: "place", reference: null, carried: false },
+      ]);
+      assert.equal(enqueued.length, 0, "preparing evidence does not spend on an image");
+    }, { picture: async () => ({
+      frame: "Wide", inFrame: [], place: "North Salt", prompt: "Wide shot of the shelter's enclosed hall and trestle tables.",
+    }) }));
+
+  it("retains checks against their exact prompt when an edited picture is made and reopened (#2011)", () => {
+    const prompt = "Detail shot of Maren's hand on the ledger.";
+    return withHarness(async ({ events, send, store, schemaVersion, enqueued }) => {
+      await suggest(send);
+      const picked = suggestion(events).suggestion!;
+      assert.equal(picked.shot!.checkedPrompt, prompt);
+      assert.equal(picked.shot!.checks.find(check => check.id === "expression")!.ok, false);
+      const edited = `${prompt} No face in frame.`;
+      await send({ kind: "make-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER,
+        chapterFile: CHAPTER, block: "p0.0", requestId: REQUEST, prompt: edited,
+        who: picked.who.map(person => person.key), frame: picked.shot!.frame,
+        shot: picked.shot!, confirmedMicroUsd: picked.estimatedMicroUsd });
+      assert.equal(madeEvents(events).at(-1)!.state, "made");
+      assert.equal(enqueued.length, 1);
+      assert.match(String(enqueued[0]!.params.prompt), /No face in frame/);
+      assert.equal(schemaVersion(), AUDIOBOOK_PICTURE_CHECK_PROMPT_SCHEMA_VERSION);
+      const record = await readAudiobook(store()!, LEDGER, CHAPTER);
+      assert.ok(record !== null && record !== "unreadable");
+      assert.deepEqual(record.pictures!["p0.0"]!.shot, picked.shot, "the receipt is historical, not silently rechecked");
+      await send({ kind: "open-world", worldId: WORLD_ID });
+      const reopened = await readAudiobook(store()!, LEDGER, CHAPTER);
+      assert.ok(reopened !== null && reopened !== "unreadable");
+      assert.deepEqual(reopened.pictures!["p0.0"], record.pictures!["p0.0"]);
+    }, { picture: async () => ({ frame: "Detail shot", inFrame: [], details: [{ of: "maren-kest", part: "hand" }], prompt }) });
+  });
+
+  it("keeps a leather ledger in the suggestion and makes the reviewed picture (#1942)", () => {
+    const prompt = "Medium shot, Maren Kest at the desk, eyes down on the page. On the far corner sits a broad, worn leather volume under a folded rag.";
+    return withHarness(async ({ events, send, enqueued, store }) => {
+      await suggest(send);
+      const picked = suggestion(events).suggestion!;
+      assert.equal(picked.prompt, prompt);
+      assert.equal(picked.shot!.checks.find(check => check.id === "garments")!.ok, true);
+      assert.equal(enqueued.length, 0, "review alone does not make a picture");
+      await send({ kind: "make-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER,
+        chapterFile: CHAPTER, block: "p0.0", requestId: REQUEST, prompt: picked.prompt,
+        who: picked.who.map(person => person.key), frame: picked.shot!.frame,
+        shot: picked.shot!, confirmedMicroUsd: picked.estimatedMicroUsd });
+      assert.equal(madeEvents(events).at(-1)!.state, "made");
+      assert.equal(enqueued.length, 1);
+      const record = await readAudiobook(store()!, LEDGER, CHAPTER);
+      assert.ok(record !== null && record !== "unreadable" && record.pictures?.["p0.0"]);
+      assert.match(String(enqueued[0]!.params.prompt), /worn leather volume/);
+    }, { picture: async () => ({ frame: "Medium shot", inFrame: ["maren-kest"],
+      expressions: { "maren-kest": "eyes down on the page" }, prompt }) });
+  });
+
+  it("returns long multi-character checks through the normal suggestion command without losing expressions (#1946)", () => {
+    const expression = "eyes fixed on the doorway, mouth closed, brows raised with quiet concern, chin lifted toward the dim window, waiting for an answer without turning away";
+    const prompt = `Medium shot. Maren Kest: ${expression}. Bray Half-Hitch: ${expression}.`;
+    return withHarness(async ({ events, send, enqueued }) => {
+      await suggest(send);
+      const answer = suggestion(events);
+      assert.equal(answer.refused, undefined);
+      assert.equal(answer.requestId, REQUEST);
+      assert.equal(answer.suggestion!.prompt, prompt);
+      assert.equal(answer.suggestion!.shot!.expressions["maren-kest"], expression);
+      assert.equal(answer.suggestion!.shot!.expressions["bray-half-hitch"], expression);
+      assert.ok(answer.suggestion!.shot!.checks.find(c => c.id === "expression")!.note!.endsWith("…"));
+      assert.equal(enqueued.length, 0);
+    }, { picture: async () => ({ frame: "Medium shot", inFrame: ["maren-kest", "bray-half-hitch"], expressions: { "maren-kest": expression, "bray-half-hitch": expression }, prompt }) });
+  });
+
+  it("keeps a failed suggestion correlated and permits a targeted retry without generating an image (#1946)", () => {
+    let calls = 0;
+    return withHarness(async ({ events, send, enqueued }) => {
+      await suggest(send);
+      assert.equal(suggestion(events).requestId, REQUEST);
+      assert.match(suggestion(events).refused!, /gave no picture/);
+      await suggest(send);
+      assert.equal(suggestion(events).refused, undefined);
+      assert.equal(suggestion(events).suggestion!.block, "p0.0");
+      assert.equal(enqueued.length, 0);
+    }, { picture: async () => ({ prompt: calls++ === 0 ? "" : "Wide shot of the harbour at dawn.", inFrame: [] }) });
+  });
+
   it("carries the included-plan identity into a zero-dollar picture authorization", () =>
     withHarness(async ({ events, send, enqueued }) => {
       await suggest(send);
@@ -61,11 +150,11 @@ describe("Suggest picture (R-99)", () => {
       assert.equal(schemaVersion(), AUDIOBOOK_LOOK_SCHEMA_VERSION);
       assert.deepEqual(seen[0]!.lines.map((line) => line.label), ["Place", "Maren Kest", "Bray Half-Hitch"]);
       assert.deepEqual(picked.lines.map((line) => line.label), ["Place", "Maren Kest", "Bray Half-Hitch"], "the look lines it used");
-      // Who is in it: the model's own names, held to the chapter — "nobody" is no one.
-      assert.deepEqual(picked.who.map((who) => [who.key, who.carried, who.reference !== null]), [["maren-kest", true, true], ["bray-half-hitch", false, false]]);
+      // Unknown identities remain visible and unchecked, never silently converted to nobody.
+      assert.deepEqual(picked.who.map((who) => [who.key, who.carried, who.reference !== null]), [["maren-kest", true, true], ["bray-half-hitch", false, false], ["nobody", false, false]]);
       // The price: one picture and the one reference that rides, from the manifest's own figures.
       assert.equal(picked.estimatedMicroUsd, 45_000);
-      assert.equal(picked.look?.who.join(","), "maren-kest,bray-half-hitch");
+      assert.equal(picked.look?.who.join(","), "maren-kest,bray-half-hitch,nobody");
       // Nothing was made or spent.
       assert.equal(madeEvents(events).length, 0);
     }));
@@ -135,7 +224,7 @@ describe("the art direction gives light and mood only (design turn 193, rule 9, 
         const session = await new BenchStore(sessionDir(worldDir, done.sessionId as never)).fold();
         const brief = session!.takes[0]!.request.brief;
         assert.doesNotMatch(brief, /agbada|lace/);
-        assert.match(brief, /Light and mood: .*sodium orange/i);
+        assert.match(brief, /Visual treatment: .*sodium orange/i);
       },
       { prepare: withArt, look: async () => ({ place: { text: "The rail desk at dawn." }, mood: "Sodium orange and generator blue-green, lace-trimmed agbada catching the light, fine grain.", characters: [{ who: "maren-kest", text: "Oilskin coat." }] }) },
     ));
@@ -147,7 +236,8 @@ describe("the art direction gives light and mood only (design turn 193, rule 9, 
         assert.equal(suggestion(events).refused, undefined);
         assert.ok(seen[0]!.mood !== undefined);
         assert.doesNotMatch(seen[0]!.mood!, /agbada|lace/);
-        assert.match(seen[0]!.mood!, /^Lagos at night/);
+        assert.doesNotMatch(seen[0]!.mood!, /Lagos at night/i);
+        assert.match(seen[0]!.mood!, /sodium orange.*Fine grain/s);
       },
       { prepare: withArt },
     ));
@@ -187,7 +277,7 @@ describe("the brief's answer, held and checked (design turn 193k, R-120, R-121)"
         const session = await new BenchStore(sessionDir(h.worldDir, done.sessionId as never)).fold();
         const brief = session!.takes[0]!.request.brief;
         assert.match(brief, /Maren Kest is shown in @Image 1\. Keep each person's identity, hair and clothes as in the references; the expression is as written above, not the reference's\./);
-        assert.match(brief, /No text in the picture\.$/);
+        assert.match(brief, /No added captions, subtitles or text overlays\. Keep writing, markings and maps on objects in the scene when the prompt calls for them\.$/);
         assert.deepEqual(done.record!.pictures!["p0.0"]!.look?.looks, { "maren-kest": { lookId: LOOK_ID, view: "close" } });
       },
       { prepare: prepareLook, picture: async () => CLOSE },
@@ -230,18 +320,19 @@ describe("the brief's answer, held and checked (design turn 193k, R-120, R-121)"
     );
   });
 
-  it("carries no reference for a detail shot, and Generate sends none", () =>
+  it("carries the detail owner's chosen look through the quote and Generate", () =>
     withHarness(
       async (h) => {
         await chooseMarensLook(h);
         await suggest(h.send);
         const picked = suggestion(h.events).suggestion!;
-        assert.deepEqual(picked.who, [], "a detail shot carries no reference");
-        assert.equal(picked.estimatedMicroUsd, 40_000, "one picture and no reference");
-        assert.equal(picked.shot?.checks.find((check) => check.id === "reference")?.label, "Detail");
-        await h.send({ kind: "make-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, block: "p0.0", prompt: picked.prompt, who: [], frame: picked.shot!.frame, confirmedMicroUsd: picked.estimatedMicroUsd, requestId: "01J0000000000000000000000A" });
+        assert.deepEqual(picked.who.map((who) => who.key), ["maren-kest"]);
+        assert.equal(picked.who[0]?.look?.view, "full");
+        assert.equal(picked.estimatedMicroUsd, 45_000, "one picture with the detail reference");
+        assert.equal(picked.shot?.checks.find((check) => check.id === "reference")?.label, "1 of 1 shown in detail has a reference");
+        await h.send({ kind: "make-audiobook-picture", worldId: WORLD_ID, productionId: LEDGER, chapterFile: CHAPTER, block: "p0.0", prompt: picked.prompt, who: picked.who.map((who) => who.key), frame: picked.shot!.frame, confirmedMicroUsd: picked.estimatedMicroUsd, requestId: "01J0000000000000000000000A" });
         assert.equal(madeEvents(h.events).at(-1)!.state, "made");
-        assert.deepEqual((h.enqueued[0]!.params as { references?: string[] }).references ?? [], []);
+        assert.equal((h.enqueued[0]!.params as { references?: string[] }).references?.length, 1);
       },
       { prepare: prepareLook, picture: async () => ({ frame: "Detail, her hand on the ledger", inFrame: [], expressions: {}, details: [{ of: "maren-kest", part: "hand", state: "still" }], notInFrame: [], place: null, prompt: "Detail shot, tight on a hand flat on the open ledger, the oilskin cuff dark with salt. Her face is out of frame. Grey dawn light." }) },
     ));
@@ -385,13 +476,17 @@ describe("Generate (R-99)", () => {
       // The Bench's own gate planned it: one job, the price of one picture and one reference.
       assert.equal(enqueued.length, 1);
       assert.equal(enqueued[0]!.estimatedMicroUsd, 45_000);
+      assert.match(String(enqueued[0]!.params.prompt), /No added captions, subtitles or text overlays\. Keep writing, markings and maps on objects in the scene when the prompt calls for them\.$/, "the provider receives the physical-writing policy");
+      assert.ok(!String(enqueued[0]!.params.prompt).includes("No text in the picture."));
+      assert.match(String(enqueued[0]!.params.prompt), /main photo does not fix the outfit/, "the provider receives the identity-only role of the portrait");
+      assert.doesNotMatch(String(enqueued[0]!.params.prompt), /hair and clothes as in the references/);
       assert.deepEqual((enqueued[0]!.params as { references?: string[] }).references, ["references/maren-kest/head-front.png"], "Maren by her sheet's main picture; Bray has none and is not sent");
       const session = await new BenchStore(sessionDir(worldDir, done.sessionId as never)).fold();
       const take = session!.takes[0]!;
       assert.equal(take.request.references.length, 1);
       assert.match(take.request.brief, /Maren on the rail at dawn\./);
       assert.match(take.request.brief, /Maren Kest is shown in @Image 1\./);
-      assert.match(take.request.brief, /Light and mood: /);
+      assert.match(take.request.brief, /Visual treatment: /);
       assert.equal(take.disposition, "filed", "kept as an artifact of the world");
       assert.ok(store()!.getBundle().artifacts.some((artifact) => `artifacts/${artifact.file}` === picture.file));
       // The look has since changed: the picture is marked, never remade.
@@ -415,7 +510,7 @@ describe("Generate (R-99)", () => {
       const artifact = store()!.getBundle().artifacts.find((candidate) => `artifacts/${candidate.file}` === picture.file)!;
       const brief = artifact.generation?.source === "bench" ? artifact.generation.brief : "";
       assert.equal(brief.split("\n\n")[0], "Maren on the rail at dawn.");
-      assert.match(brief, /No text in the picture\.$/);
+      assert.match(brief, /No added captions, subtitles or text overlays\. Keep writing, markings and maps on objects in the scene when the prompt calls for them\.$/);
     }));
 
   it("keeps no shot when the press sends none, and leaves the world where the look put it", () =>

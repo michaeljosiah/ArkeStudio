@@ -1,0 +1,440 @@
+import assert from "node:assert/strict";
+import { afterEach, describe, it } from "node:test";
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { parseHTML } from "linkedom";
+import { MemoryRouter, Route, Routes } from "react-router";
+import { ulid, type ClientMessage, type ClientState, type EpisodeScriptBlock } from "@arke-studio/contracts";
+import { EpisodeScriptScreen } from "../src/screens/episode-script.js";
+import { dramaSpeakerLabel } from "@arke-studio/contracts";
+import { bedMarks, directionText, joinBlock, mendRelations, parseParagraphs, scriptAsText, scriptSaveProblem, speakerLabel, splitBlock, unnamedSpeaker } from "../src/lib/episode-script.js";
+import { parkDraft, takeParked } from "../src/lib/episode-script-drafts.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import type { ArkeBridge } from "../src/arke-bridge.js";
+import { FIXTURE_STATE } from "./fixture-state.js";
+import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+
+/** The episode script as a score (design turn 230d–f, SPEC-057 R-11..R-24). */
+const dom = parseHTML("<!doctype html><html><body></body></html>");
+Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1360, innerHeight: 900 });
+Object.assign(dom.HTMLElement.prototype, { focus() {}, scrollIntoView() {}, setSelectionRange() {} });
+Object.assign(globalThis, {
+  window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node,
+  Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true,
+  requestAnimationFrame: (cb: (t: number) => void) => setTimeout(() => cb(0), 0),
+});
+
+const AT = "2026-10-18T12:00:00.000Z";
+const line = (speaker: string, words: string, extra: object = {}): EpisodeScriptBlock => ({ id: ulid(), kind: "dialogue", speaker, words, ...extra });
+
+describe("the score's pure parts", () => {
+  it("draws a bed down its lane from its cue to the block it stops before, with a foot", () => {
+    const a = line("maren", "One."), b = line("bray", "Two."), c = line("maren", "Three.");
+    const bed: EpisodeScriptBlock = { id: ulid(), kind: "music", heard: "Drone", until: c.id };
+    const marks = bedMarks([bed, a, b, c]);
+    assert.deepEqual(marks.map(row => row.map(mark => `${mark.lane}:${mark.at}:${mark.stops}`)),
+      [["music:start:true"], ["music:run:true"], ["music:end:true"], []], "exactly over the rows it plays under");
+  });
+
+  it("runs a bed with no until to the end of its scene, with no foot", () => {
+    const heading: EpisodeScriptBlock = { id: ulid(), kind: "heading", place: "Next" };
+    const marks = bedMarks([{ id: ulid(), kind: "ambience", heard: "Rain" }, line("maren", "One."), heading, line("bray", "Two.")]);
+    assert.deepEqual(marks.map(row => row.map(mark => `${mark.at}:${mark.stops}`)), [["start:false"], ["end:false"], [], []]);
+  });
+
+  it("split keeps the first part's id and gives the rest a new one; join takes the lower id away", () => {
+    const original = line("maren", "Bray. Bray, look.", { direction: "breathless" });
+    const split = splitBlock([original], original.id, 5);
+    assert.equal(split.length, 2);
+    assert.equal(split[0]!.id, original.id);
+    assert.notEqual(split[1]!.id, original.id);
+    assert.deepEqual(split.map(block => block.kind === "dialogue" ? [block.speaker, block.words, block.direction ?? null] : null),
+      [["maren", "Bray.", "breathless"], ["maren", "Bray, look.", null]]);
+    const joined = joinBlock(split, split[1]!.id)!;
+    assert.deepEqual(joined.map(block => block.id), [original.id]);
+    assert.equal(joined[0]!.kind === "dialogue" && joined[0]!.words, "Bray. Bray, look.");
+    assert.equal(joinBlock([line("maren", "a"), line("bray", "b")], "x"), null);
+  });
+
+  it("an edit that strands an interruption mends it rather than saving a broken relation", () => {
+    const cut = line("maren", "He said it was", { cut: true });
+    assert.equal((mendRelations([cut])[0] as { cut?: boolean }).cut, undefined);
+  });
+
+  it("reads paragraph numbers as typed, and exports a numbered radio script", () => {
+    assert.deepEqual(parseParagraphs("14-17, 20 x"), [14, 15, 16, 17, 20]);
+    const text = scriptAsText("The tide turns", 1, [
+      { id: ulid(), kind: "heading", place: "The bell tower", time: "Night" },
+      line("maren", "Bray, look.", { direction: "breathless" }),
+      { id: ulid(), kind: "sound", heard: "The bell." },
+      { id: ulid(), kind: "narration", words: "She climbed." },
+    ], slug => slug === "maren" ? "Maren Kest" : slug);
+    assert.match(text, /^EPISODE 1 · The tide turns/);
+    assert.match(text, /1\. THE BELL TOWER — Night/);
+    assert.match(text, /  1  MAREN KEST \(breathless\)\n     Bray, look\./);
+    assert.match(text, /SOUND: The bell\./);
+    assert.match(text, /  2  NARRATOR\n     She climbed\./);
+  });
+});
+
+function withScript(blocks: EpisodeScriptBlock[]): ClientState {
+  const state = structuredClone(FIXTURE_STATE);
+  const base = state.world!.productions[0]!;
+  const novel = { ...structuredClone(base), meta: { ...base.meta, id: "low-water", title: "Low Water", format: "story", medium: "story", kind: undefined },
+    chapters: [{ id: "the-bell-tower", order: 3, title: "The bell tower", file: "03-the-bell-tower.md", words: 900, version: 14, hash: "sha256:now", status: "drafted" }],
+    scenes: [], episodes: [], takes: [] };
+  const drama = { ...structuredClone(base), meta: { ...base.meta, id: "low-water-drama", title: "Low Water", format: "story", medium: "story", kind: "audio-drama" },
+    chapters: [], scenes: [], episodes: [], takes: [],
+    audioDrama: { version: 1, source: { productionId: "low-water" }, plan: { episodes: 6, minutes: 25, keptFromListener: [] } },
+    episodeScripts: [{ file: "episode-001.json", hash: "sha256:base", script: { version: 2, episode: 1, title: "The tide turns", blocks } }] };
+  state.world!.productions = [...state.world!.productions, novel, drama] as never;
+  return state;
+}
+
+let root: Root | null = null;
+afterEach(async () => {
+  await act(async () => root?.unmount());
+  // A draft left unsent by a test's score is parked; the next test's score must not take it back.
+  takeParked(FIXTURE_WORLD_ID, "low-water-drama", 1);
+  root = null; __setBridgeForTest(null); __setStateForTest(FIXTURE_STATE);
+  dom.document.body.innerHTML = "";
+});
+async function mount(state: ClientState) {
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => { sent.push(JSON.parse(json)); } } satisfies ArkeBridge);
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  root = createRoot(container);
+  await act(async () => {
+    __setStateForTest(state, { connection: "open" });
+    root!.render(<MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/p/low-water-drama/script/1`]}>
+      <Routes><Route path="/w/:worldId/p/:prodId/script/:episode" element={<EpisodeScriptScreen />} /></Routes>
+    </MemoryRouter>);
+  });
+  return { container, sent };
+}
+const props = (el: Element) => (el as unknown as Record<string, Record<string, any>>)[Object.keys(el).find(key => key.startsWith("__reactProps$"))!]!;
+
+describe("the score (230e)", () => {
+  const heading: EpisodeScriptBlock = { id: ulid(), kind: "heading", place: "The bell tower", source: { story: "low-water", chapter: "the-bell-tower", version: 14, paragraphs: [2, 3] } };
+  const drone: EpisodeScriptBlock = { id: ulid(), kind: "music", heard: "Low drone enters, under." };
+  const maren = line("maren", "Bray, look.", { direction: "breathless, delighted", paragraphs: [2] });
+  const bray = line("bray", "The log's wrong.");
+  const blocks = [heading, drone, maren, bray];
+
+  it("sets only the spoken words large, with direction above them and never inside", async () => {
+    const m = await mount(withScript(blocks));
+    const row = m.container.querySelector(`[data-block="${maren.id}"]`)!;
+    assert.equal(row.querySelector(".fy-ad-score__line textarea")!.getAttribute("aria-label"), "Maren's line");
+    // linkedom keeps a controlled textarea's value in React's props, not on the node.
+    assert.equal(props(row.querySelector(".fy-ad-score__line textarea")!).value, "Bray, look.");
+    assert.equal(props(row.querySelector(".fy-ad-score__direction")!).value, "breathless, delighted");
+    assert.equal(row.querySelector(".fy-ad-score__line .fy-ad-score__direction"), null, "direction is not part of the line");
+    assert.ok(m.container.querySelector(`[data-block="${bray.id}"] .fy-ad-score__new`), "a line with no source paragraph is marked new");
+    assert.equal(m.container.querySelector(`[data-block="${maren.id}"] .fy-ad-score__new`), null);
+    // The drone runs from its row to the scene's end, in the music lane only.
+    assert.ok(m.container.querySelector(`[data-block="${drone.id}"] [data-lane="music"] .fy-ad-score__bed--start`));
+    assert.ok(m.container.querySelector(`[data-block="${maren.id}"] [data-lane="music"] .fy-ad-score__bed--run`));
+    assert.ok(m.container.querySelector(`[data-block="${bray.id}"] [data-lane="music"] .fy-ad-score__bed--end`));
+    assert.equal(m.container.querySelector(`[data-block="${maren.id}"] [data-lane="ambience"] .fy-ad-score__bed`), null);
+    assert.match(m.container.textContent!, /Saved · script v2/);
+  });
+
+  it("draws two beds that overlap in one lane, each with its own start (codex on PR 1870)", async () => {
+    const rain: EpisodeScriptBlock = { id: ulid(), kind: "ambience", heard: "Rain" };
+    const wind: EpisodeScriptBlock = { id: ulid(), kind: "ambience", heard: "Wind" };
+    const m = await mount(withScript([heading, rain, maren, wind, bray]));
+    const beds = [...m.container.querySelectorAll(`[data-block="${bray.id}"] [data-lane="ambience"] .fy-ad-score__bed`)].map(bed => bed.getAttribute("data-bed"));
+    assert.deepEqual(beds, [rain.id, wind.id], "both beds run under the last line");
+    assert.ok(m.container.querySelector(`[data-block="${wind.id}"] [data-bed="${wind.id}"].fy-ad-score__bed--start`), "the later bed's start is not hidden");
+  });
+
+  it("an edit not yet saved when the score is left is still saved (codex on PR 1870)", async () => {
+    const m = await mount(withScript(blocks));
+    const words = m.container.querySelector(`[data-block="${bray.id}"] .fy-ad-score__line textarea`)!;
+    await act(async () => props(words).onChange!({ target: { value: "The log is wrong." } }));
+    await act(async () => root!.unmount());
+    root = null;
+    const save = m.sent.find((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script")!;
+    assert.ok(save, "left inside the pause, the edit is sent rather than dropped");
+    assert.equal(save.blocks.find(block => block.id === bray.id)!.kind === "dialogue" && (save.blocks.find(block => block.id === bray.id) as { words: string }).words, "The log is wrong.");
+    assert.equal(save.baseHash, "sha256:base");
+  });
+
+  it("shows the pinned chapter version in Source and marks the selected line's passage", async () => {
+    const m = await mount(withScript(blocks));
+    const source = [...m.container.querySelectorAll("button")].find(button => button.textContent?.includes("Source"))!;
+    await act(async () => source.dispatchEvent(new dom.Event("click", { bubbles: true })));
+    await act(async () => m.container.querySelector(`[data-block="${maren.id}"]`)!.dispatchEvent(new dom.Event("click", { bubbles: true })));
+    const read = m.sent.find((message): message is Extract<ClientMessage, { kind: "read-chapter-version" }> => message.kind === "read-chapter-version")!;
+    assert.deepEqual([read.productionId, read.chapterFile, read.version], ["low-water", "03-the-bell-tower.md", 14], "the version the scene pinned");
+    await act(async () => __applyEventForTest({ type: "chapter.version-result", at: AT, requestId: read.requestId, worldId: FIXTURE_WORLD_ID,
+      productionId: "low-water", chapterFile: "03-the-bell-tower.md", version: 14, disposition: "read",
+      body: "The stairs went up.\n\n“Climb,” Bray said.\n\n“Climb,” Bray said." }));
+    const paragraphs = [...m.container.querySelectorAll(".fy-ad-source__paras li")];
+    assert.equal(paragraphs.length, 3);
+    assert.deepEqual(paragraphs.map(li => li.className.includes("--on")), [false, true, false],
+      "paragraph 2 by number, though paragraph 3 reads the same");
+    assert.match(m.container.querySelector(".fy-ad-source")!.textContent!, /Low Water v14/);
+  });
+
+  it("Enter splits a line keeping its id, and the script saves whole against the base it read", async () => {
+    const m = await mount(withScript(blocks));
+    const words = m.container.querySelector(`[data-block="${maren.id}"] .fy-ad-score__line textarea`) as HTMLTextAreaElement;
+    await act(async () => {
+      Object.defineProperty(words, "selectionStart", { value: 5, configurable: true });
+      Object.defineProperty(words, "selectionEnd", { value: 5, configurable: true });
+      props(words).onKeyDown!({ key: "Enter", shiftKey: false, preventDefault() {}, currentTarget: words });
+    });
+    const rows = [...m.container.querySelectorAll("[data-block]")].map(row => row.getAttribute("data-block"));
+    assert.equal(rows.length, 5);
+    assert.equal(rows[2], maren.id, "the first part keeps the line's id");
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 800)); });
+    const save = m.sent.find((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script")!;
+    assert.ok(save, "the edit is saved");
+    assert.equal(save.baseHash, "sha256:base");
+    assert.equal(save.blocks.length, 5);
+    assert.deepEqual(save.blocks.slice(2, 4).map(block => block.kind === "dialogue" ? block.words : ""), ["Bray,", "look."]);
+    await act(async () => __applyEventForTest({ type: "episode-script.save-result", at: AT, requestId: save.requestId, worldId: FIXTURE_WORLD_ID,
+      productionId: "low-water-drama", episode: 1, disposition: "saved", version: 2, hash: "sha256:next" }));
+    assert.match(m.container.textContent!, /Saved · script v2/);
+  });
+});
+
+describe("Hear (230g/h, SPEC-057 R-25..R-28)", () => {
+  const a = line("maren", "The log said two hours.");
+  const b = line("bray", "The log's wrong.");
+  const wait = (ms: number) => act(async () => { await new Promise(resolve => setTimeout(resolve, ms)); });
+  const click = (el: Element, shiftKey = false) => act(async () => { const event = new dom.Event("click", { bubbles: true }); Object.assign(event, { shiftKey }); el.dispatchEvent(event); });
+  const hearSent = (sent: ClientMessage[]) => sent.filter((message): message is Extract<ClientMessage, { kind: "hear-drama-lines" }> => message.kind === "hear-drama-lines");
+  const request = (block: string, extra: object = {}) => ({ block, speaker: "Maren", voice: "Low tide", model: "Multilingual v2", text: "x", estimatedMicroUsd: 1840, cached: false, ...extra });
+
+  it("prices the selection on the button and makes it in one press, against the quoted token", async () => {
+    const m = await mount(withScript([a, b]));
+    await click(m.container.querySelector(`[data-block="${a.id}"]`)!);
+    await click(m.container.querySelector(`[data-block="${b.id}"]`)!, true);
+    await wait(350);
+    const asked = hearSent(m.sent).at(-1)!;
+    assert.deepEqual([asked.blocks, asked.quoteOnly], [[a.id, b.id], true], "shift extends the run; the first ask only prices it");
+    await act(async () => __applyEventForTest({ type: "drama.heard", at: AT, requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama",
+      episode: 1, disposition: "quoted", quote: { token: "tok", estimatedMicroUsd: 3680, requests: [request(a.id), request(b.id)] }, missing: [] }));
+    const hear = [...m.container.querySelectorAll(".fy-ad-hear button")].find(button => (button.textContent ?? "").startsWith("Hear 2 lines · "))!;
+    assert.ok(hear, "the price is on the button");
+    assert.equal(hear.querySelector(".fy-ad-hear__dot"), null, "nothing waits on the author");
+    await click(hear);
+    const made = hearSent(m.sent).at(-1)!;
+    assert.deepEqual([made.quoteToken, made.quoteOnly, made.scriptHash], ["tok", undefined, "sha256:base"], "fenced on the saved script");
+  });
+
+  it("prices nothing while the line is unsaved, then the saved words (codex on PR 1871)", async () => {
+    const m = await mount(withScript([a]));
+    await click(m.container.querySelector(`[data-block="${a.id}"]`)!);
+    const words = m.container.querySelector(`[data-block="${a.id}"] .fy-ad-score__line textarea`)!;
+    await act(async () => props(words).onChange!({ target: { value: "The log said three hours." } }));
+    const before = hearSent(m.sent).length;
+    await wait(350);
+    assert.equal(hearSent(m.sent).length, before, "an unsaved line is not priced");
+    await wait(400);
+    const save = m.sent.find((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script")!;
+    await act(async () => __applyEventForTest({ type: "episode-script.save-result", at: AT, requestId: save.requestId, worldId: FIXTURE_WORLD_ID,
+      productionId: "low-water-drama", episode: 1, disposition: "saved", version: 2, hash: "sha256:saved" }));
+    await wait(350);
+    assert.equal(hearSent(m.sent).at(-1)!.scriptHash, "sha256:saved");
+  });
+
+  it("an uncast speaker always opens the decision; nothing substitutes on its own", async () => {
+    const m = await mount(withScript([a, b]));
+    await click(m.container.querySelector(`[data-block="${b.id}"]`)!);
+    await wait(350);
+    const asked = hearSent(m.sent).at(-1)!;
+    await act(async () => __applyEventForTest({ type: "drama.heard", at: AT, requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama",
+      episode: 1, disposition: "quoted", quote: { token: "tok", estimatedMicroUsd: 0, requests: [] }, missing: [{ speaker: "bray", name: "Bray", blocks: [b.id] }] }));
+    const hear = [...m.container.querySelectorAll(".fy-ad-hear button")].find(button => /Hear 1 line/.test(button.textContent ?? ""))!;
+    assert.ok(hear.querySelector(".fy-ad-hear__dot"), "the amber dot says a decision waits");
+    const before = hearSent(m.sent).length;
+    await click(hear);
+    assert.equal(hearSent(m.sent).length, before, "pressed, it asks rather than makes");
+    assert.match(dom.document.body.textContent!, /Bray has no voice/);
+    const standIn = [...dom.document.body.querySelectorAll("button")].find(button => button.textContent === "Narrator stands in")!;
+    await click(standIn);
+    await wait(350);
+    assert.deepEqual(hearSent(m.sent).at(-1)!.decisions, { bray: "narrator" }, "the choice is the author's, sent with the next quote");
+  });
+});
+
+describe("issue 1883: the selection and the Hear dialog", () => {
+  const a = line("maren", "The log said two hours.");
+  const b = line("bray", "The log's wrong.");
+  const wait = (ms: number) => act(async () => { await new Promise(resolve => setTimeout(resolve, ms)); });
+  const click = (el: Element) => act(async () => { el.dispatchEvent(new dom.Event("click", { bubbles: true })); });
+  const request = (block: string) => ({ block, speaker: "Maren", voice: "Low tide", model: "Multilingual v2", text: "x", estimatedMicroUsd: 1840, cached: false });
+
+  it("picks a line to hear without opening its editor, and offers Ask Arke, Source and Cast beside Hear", async () => {
+    const m = await mount(withScript([a, b]));
+    await click(m.container.querySelector(`[data-block="${a.id}"]`)!);
+    const row = m.container.querySelector(`[data-block="${a.id}"]`)!;
+    assert.ok(row.className.includes("fy-ad-score__row--picked"), "the picked line is marked");
+    assert.equal(row.querySelector("select[aria-label='Speaker']"), null, "and its editor stays closed");
+    const bar = [...m.container.querySelectorAll(".fy-ad-hear button")].map(button => button.textContent);
+    for (const label of ["Source", "Cast", "Done"]) assert.ok(bar.includes(label), `${label} is on the selection bar`);
+  });
+
+  it("waits above the one-press limit the author set (issue 1882)", async () => {
+    const state = withScript([a]);
+    state.app.spend = { settings: { thresholdMicroUsd: 0, periodDays: 7, onePressMicroUsd: 1_000 }, rollingMicroUsd: 0, alerted: false, ledgerUnavailable: false };
+    const m = await mount(state);
+    await click(m.container.querySelector(`[data-block="${a.id}"]`)!);
+    await wait(350);
+    const asked = m.sent.filter((message): message is Extract<ClientMessage, { kind: "hear-drama-lines" }> => message.kind === "hear-drama-lines").at(-1)!;
+    await act(async () => __applyEventForTest({ type: "drama.heard", at: AT, requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama",
+      episode: 1, disposition: "quoted", quote: { token: "tok", estimatedMicroUsd: 1840, requests: [request(a.id)] }, missing: [] }));
+    const hear = [...m.container.querySelectorAll(".fy-ad-hear button")].find(button => (button.textContent ?? "").startsWith("Hear 1 line"))!;
+    assert.ok(hear.querySelector(".fy-ad-hear__dot"), "a press over the limit asks first");
+  });
+
+  it("titles the dialog with the lines the button named, and Choose a voice stays in the episode", async () => {
+    const m = await mount(withScript([a, b]));
+    await click(m.container.querySelector(`[data-block="${a.id}"]`)!);
+    await act(async () => { const event = new dom.Event("click", { bubbles: true }); Object.assign(event, { shiftKey: true }); m.container.querySelector(`[data-block="${b.id}"]`)!.dispatchEvent(event); });
+    await wait(350);
+    const asked = m.sent.filter((message): message is Extract<ClientMessage, { kind: "hear-drama-lines" }> => message.kind === "hear-drama-lines").at(-1)!;
+    await act(async () => __applyEventForTest({ type: "drama.heard", at: AT, requestId: asked.requestId, worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama",
+      episode: 1, disposition: "quoted", quote: { token: "tok", estimatedMicroUsd: 1840, requests: [request(a.id)] }, missing: [{ speaker: "bray", name: "Bray", blocks: [b.id] }] }));
+    const hear = [...m.container.querySelectorAll(".fy-ad-hear button")].find(button => (button.textContent ?? "").startsWith("Hear 2 lines"))!;
+    assert.ok(hear, "the button counts both lines");
+    await click(hear);
+    assert.ok(dom.document.body.querySelector(".fy-editordialog__title")!.textContent === "Hear 2 lines", "and so does the dialog");
+    await click([...dom.document.body.querySelectorAll("button")].find(button => button.textContent === "Choose a voice")!);
+    assert.equal(dom.document.body.querySelector(".fy-editordialog"), null, "the dialog closes");
+    const role = [...m.container.querySelectorAll(".fy-ad-castcol__role h3 button")].find(button => /^bray/i.test(button.textContent ?? ""));
+    assert.equal(role?.getAttribute("aria-expanded"), "true", "Bray opens in the episode's Cast column");
+  });
+});
+
+describe("issue 1883: a direction's parentheses are the score's", () => {
+  it("drops a typed pair round the whole direction, and keeps one inside it (codex on PR 1884)", () => {
+    assert.equal(directionText("((quietly))"), "quietly");
+    assert.equal(directionText("(quietly)"), "quietly");
+    assert.equal(directionText("quiet (but urgent)"), "quiet (but urgent)");
+    assert.equal(directionText("(quiet) (but urgent)"), "(quiet) (but urgent)");
+    assert.equal(directionText("(quietly"), "quietly", "an opener typed first, before its closer");
+    assert.equal(directionText("quietly)"), "quietly");
+    assert.equal(directionText("quiet (but"), "quiet (but", "typing toward a closer");
+    assert.equal(directionText("quiet "), "quiet ", "a space before the next word stays");
+    assert.equal(directionText("("), undefined);
+  });
+});
+
+describe("issue 1888: a direction saved with its own parentheses", () => {
+  it("is shown without them, and a crowd is named, not keyed", async () => {
+    const line: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "maren", words: "Same ink.", direction: "(quietly, to herself)" };
+    const crowd: EpisodeScriptBlock = { id: ulid(), kind: "dialogue", speaker: "crowd", words: "Slack water!" };
+    const m = await mount(withScript([{ id: ulid(), kind: "heading", place: "The archive" }, line, crowd]));
+    const direction = m.container.querySelector<HTMLInputElement>(`[data-block="${line.id}"] input[aria-label="Direction"]`)!;
+    assert.equal(direction.value, "quietly, to herself", "the score draws the parentheses once");
+    assert.equal(dramaSpeakerLabel("crowd"), "Crowd");
+  });
+});
+
+describe("issue 1883: speakers no sheet carries (R-55)", () => {
+  it("names them from their keys, and numbers each new unnamed speaker", () => {
+    assert.equal(speakerLabel("crowd"), "Crowd");
+    assert.equal(speakerLabel("someone-2"), "Someone 2");
+    assert.equal(speakerLabel("a-dockhand"), "A dockhand");
+    assert.equal(unnamedSpeaker(["maren"]), "someone");
+    assert.equal(unnamedSpeaker(["someone", "someone-2"]), "someone-3");
+  });
+
+  it("never mints a key a sheet or a cast role already holds (codex on PR 1884)", async () => {
+    const a = line("maren", "Climb.");
+    const state = withScript([a]);
+    state.world!.productions.find((p) => p.meta.id === "low-water-drama")!.audioDrama!.cast = { someone: {} } as never;
+    const m = await mount(state);
+    await act(async () => { m.container.querySelector(`[data-block="${a.id}"] .fy-ad-score__line textarea`)!.dispatchEvent(new dom.Event("click", { bubbles: true })); });
+    await act(async () => props(m.container.querySelector(`[data-block="${a.id}"] select[aria-label='Speaker']`)!).onChange!({ target: { value: "@unnamed" } }));
+    await new Promise(resolve => setTimeout(resolve, 800));
+    const save = m.sent.filter((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script").at(-1)!;
+    assert.equal((save.blocks.find(block => block.id === a.id) as { speaker: string }).speaker, "someone-2", "the role kept in the cast is not reused");
+  });
+
+  it("offers a crowd and someone unnamed beside the world's characters, and the script's own", async () => {
+    const a = line("maren", "Climb."), b = line("a-dockhand", "Rope!");
+    const m = await mount(withScript([a, b]));
+    const words = m.container.querySelector(`[data-block="${a.id}"] .fy-ad-score__line textarea`)!;
+    await act(async () => { words.dispatchEvent(new dom.Event("click", { bubbles: true })); });
+    const select = m.container.querySelector<HTMLSelectElement>(`[data-block="${a.id}"] select[aria-label='Speaker']`)!;
+    const labels = [...select.options].map(option => option.textContent);
+    for (const label of ["A dockhand", "Crowd", "Someone unnamed"]) assert.ok(labels.includes(label), `${label} is offered`);
+    await act(async () => props(select).onChange!({ target: { value: "@unnamed" } }));
+    await new Promise(resolve => setTimeout(resolve, 800));
+    const save = m.sent.filter((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script").at(-1)!;
+    assert.equal((save.blocks.find(block => block.id === a.id) as { speaker: string }).speaker, "someone", "an unnamed speaker is a key of its own");
+  });
+});
+
+describe("codex round 2 on PR 1870", () => {
+  it("keeps parked drafts apart by world, and parks a draft it cannot send yet", () => {
+    __setBridgeForTest(null);
+    const draft = { productionId: "story", episode: 1, title: "", blocks: [line("maren", "Unsent.")], baseHash: null };
+    parkDraft({ ...draft, worldId: "01J8F3K2QW9VZX4N7M0RTYB6HA" }, null);
+    assert.equal(takeParked("01J8F3K2QW9VZX4N7M0RTYB6HB", "story", 1), null, "another world's story:1 does not take it");
+    assert.equal(takeParked("01J8F3K2QW9VZX4N7M0RTYB6HA", "story", 1)?.blocks[0]!.id, draft.blocks[0]!.id);
+  });
+
+  it("says an incomplete draft cannot be saved rather than sending what would go unanswered", async () => {
+    assert.equal(scriptSaveProblem("", [{ id: ulid(), kind: "heading", place: "" }]), "A scene needs a place.");
+    assert.equal(scriptSaveProblem("", [{ id: ulid(), kind: "sound", heard: " " }]), "A cue needs what is heard.");
+    assert.equal(scriptSaveProblem("", [line("maren", "Fine.")]), null);
+    const heading: EpisodeScriptBlock = { id: ulid(), kind: "heading", place: "The bell tower" };
+    const m = await mount(withScript([heading, line("maren", "Bray.")]));
+    const place = m.container.querySelector(`[data-block="${heading.id}"] input[aria-label="Place"]`)!;
+    await act(async () => props(place).onChange!({ target: { value: "" } }));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 800)); });
+    assert.equal(m.sent.some(message => message.kind === "save-episode-script"), false, "nothing sent that the transport would drop");
+    assert.match(m.container.textContent!, /Not saved · A scene needs a place\./);
+  });
+
+  it("marks a scene changed when its chapter was rewritten under the same version", async () => {
+    const pinned = (hash: string): EpisodeScriptBlock => ({ id: ulid(), kind: "heading", place: "The bell tower", source: { story: "low-water", chapter: "the-bell-tower", version: 14, hash } });
+    const same = await mount(withScript([pinned("sha256:now")]));
+    assert.doesNotMatch(same.container.textContent!, /changed v14/);
+    await act(async () => root?.unmount()); root = null;
+    takeParked(FIXTURE_WORLD_ID, "low-water-drama", 1);
+    const moved = await mount(withScript([pinned("sha256:then")]));
+    assert.match(moved.container.textContent!, /Chapter 3 · changed v14/, "the version alone would not have said it");
+  });
+});
+
+describe("codex round 3 on PR 1870", () => {
+  it("exports where a bed stops", () => {
+    const stop = line("maren", "Two. Climb.");
+    const text = scriptAsText("", 1, [{ id: ulid(), kind: "music", heard: "Low drone", until: stop.id }, line("bray", "One."), stop], slug => slug);
+    assert.match(text, /MUSIC: Low drone[\s\S]*BRAY[\s\S]*MUSIC ENDS: Low drone[\s\S]*MAREN/);
+  });
+
+  it("keeps the author's text after a refused save, and Keep mine saves it over the newer script", async () => {
+    const first = line("maren", "Bray. Bray, look.");
+    const state = withScript([first]);
+    const m = await mount(state);
+    const words = m.container.querySelector(`[data-block="${first.id}"] .fy-ad-score__line textarea`)!;
+    await act(async () => props(words).onChange!({ target: { value: "Mine." } }));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 800)); });
+    const save = m.sent.find((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script")!;
+    await act(async () => __applyEventForTest({ type: "episode-script.save-result", at: AT, requestId: save.requestId, worldId: FIXTURE_WORLD_ID,
+      productionId: "low-water-drama", episode: 1, disposition: "refused", reason: "The script changed." }));
+    // The newer script arrives in the bundle: it does not replace what the author wrote.
+    const newer = structuredClone(state);
+    const drama = newer.world!.productions.find(p => p.meta.id === "low-water-drama")!;
+    drama.episodeScripts = [{ file: "episode-001.json", hash: "sha256:theirs", script: { version: 3, episode: 1, title: "", blocks: [line("bray", "Theirs.")] } }];
+    await act(async () => __setStateForTest(newer, { connection: "open" }));
+    assert.equal((m.container.querySelector(`[data-block="${first.id}"] .fy-ad-score__line textarea`) as HTMLTextAreaElement | null)?.value, "Mine.");
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 800)); });
+    assert.equal(m.sent.filter(message => message.kind === "save-episode-script").length, 1, "not sent again on its own");
+    const keep = [...m.container.querySelectorAll("button")].find(button => button.textContent === "Keep mine")!;
+    await act(async () => props(keep).onClick!({}));
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 800)); });
+    const again = m.sent.filter((message): message is Extract<ClientMessage, { kind: "save-episode-script" }> => message.kind === "save-episode-script").at(-1)!;
+    assert.equal(again.baseHash, "sha256:theirs");
+    assert.equal(again.blocks[0]!.kind === "dialogue" && again.blocks[0]!.words, "Mine.");
+  });
+});

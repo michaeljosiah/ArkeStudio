@@ -1,6 +1,9 @@
 import { z } from "zod";
+import { isDeepStrictEqual } from "node:util";
 import {
   newId,
+  TURN_RESULT_BOUNDS,
+  ModelWorldChatActionSchema,
   WorldChatEntityRefSchema,
   type BibleEdit,
   type ModelEditorRequest,
@@ -25,11 +28,12 @@ import {
 import {
   normaliseEvidence,
   safeEvidenceMessage,
-  verifyAllEvidence,
+  verifyEvidence,
   type EvidenceSources,
 } from "./evidence.js";
 import { findByStructure, payloadDigest, structuralKey, suppressedByTombstone } from "./identity.js";
-import { WorldChatModelTurnResultSchema, ProductionChatModelTurnResultSchema } from "./model-action-input.js";
+import { WorldChatModelTurnResultSchema, ProductionChatModelTurnResultSchema, modelActionInputRefusal } from "./model-action-input.js";
+import { conversationCandidateFence } from "./target-reads.js";
 
 /**
  * Turning one model message into propositions, or into nothing at all (#70 §8.3, §8.4).
@@ -50,6 +54,8 @@ export interface TurnProblem {
   code: string;
   /** Safe to send to the model in the one corrective turn. Never carries world content. */
   safeMessage: string;
+  /** Coordinator-built location, shown only in the correction, never in the person's reply. */
+  path?: string;
 }
 
 export interface ValidateInput {
@@ -57,6 +63,14 @@ export interface ValidateInput {
   draftOnly?: boolean;
   /** The ask was for a reply only (turn 128): nothing structured may come back with it. */
   replyOnly?: boolean;
+  /**
+   * The ask was the page's rewrite of a passage (SPEC-056 R-24, issue 1827). `required` on its
+   * first answer: one without a passage revision spends the corrective turn on asking for it.
+   * `only` on the corrective answer, which may stage nothing and say why the passage cannot be
+   * revised as asked. Either way nothing but the revision is staged: an unrelated action would
+   * leave the page waiting for a revision that is not coming (codex on PR 1830).
+   */
+  revise?: "required" | "only";
   /** The assistant's entire completed message. */
   raw: string;
   conversationId: ConversationId;
@@ -115,6 +129,11 @@ export function personLine(problems: readonly TurnProblem[]): string {
   const lines = problems.map((p) =>
     p.code === "not-json"
       ? "the reply came back in a form the studio could not read"
+      : p.code === "reply-too-long"
+        ? "the answer ran longer than one reply can be. Ask for it shorter, or a part at a time"
+      : p.code === "action-preparation"
+        // The reason is the person's too; the instruction after it is the model's.
+        ? p.safeMessage.replace(/\. If a read is missing[\s\S]*$/, "")
       : p.code === "schema"
         ? "the reply was not in the shape the studio needs"
         : p.safeMessage.replace(/[.!?\s]+$/, "") || p.code,
@@ -122,8 +141,8 @@ export function personLine(problems: readonly TurnProblem[]): string {
   return [...new Set(lines)].join(" · ");
 }
 
-function problem(code: string, safeMessage: string): TurnProblem {
-  return { code, safeMessage };
+function problem(code: string, safeMessage: string, path?: string): TurnProblem {
+  return { code, safeMessage, ...(path ? { path } : {}) };
 }
 
 const NO_EVIDENCE: readonly CandidateEvidence[] = [];
@@ -138,6 +157,8 @@ const NO_EVIDENCE: readonly CandidateEvidence[] = [];
 const MAX_KEYS_NAMED = 8;
 const MAX_PROBLEMS = 8;
 const MAX_PROBLEM_CHARS = 300;
+// Preparation names several missing reads at once; cutting it at 300 hid the next prerequisite.
+const MAX_PREPARATION_CHARS = 1_200;
 const MAX_CORRECTIVE_CHARS = 4_000;
 
 /** Whether these reasons include the one that cannot be substituted (§8.4, and wrap-up's gate). */
@@ -189,6 +210,9 @@ function schemaIssueLine(issue: z.ZodIssue): string {
     case z.ZodIssueCode.invalid_enum_value:
       return `${path} must be one of ${issue.options.map((o) => JSON.stringify(o)).join(" | ")}`;
     case z.ZodIssueCode.invalid_union:
+      if (/^candidateOperations\.\d+\.(?:candidate|replacements\.\d+)\.draft\.links\.\d+$/.test(path)) {
+        return `${path} must be a typed link: {kind:"sheet",sheetId}, {kind:"canon",entryId}, or {kind:"pending-entity",ref:{temporaryId}} for a create in this result. Copy existing ids from current reads; do not use a string, title or URL.`;
+      }
       return `${path} matches none of the allowed shapes for that field`;
     case z.ZodIssueCode.too_small: {
       const unit = issue.type === "string" ? " characters" : issue.type === "array" ? " items" : "";
@@ -205,6 +229,44 @@ function schemaIssueLine(issue: z.ZodIssue): string {
     default:
       return `${path} does not match the required shape`;
   }
+}
+
+/**
+ * Why a turn's changes could not be prepared, as a problem the one corrective turn can act on.
+ *
+ * Every refusal from preparation was one sentence — "could not be prepared safely. Answer without
+ * it." — and that sentence failed live on 2026-10-07: a 17,600-character chapter draft was refused,
+ * the model was told to drop it, the author got a reply saying no draft could be made, and the
+ * reason was recorded nowhere. The reasons preparation throws are the coordinator's own sentences
+ * ("requires a complete current story read", "is no longer current") and a model can act on them:
+ * read again and return the change. A schema refusal is worded the way the turn's own are, by
+ * path and expectation, never by echoing a value.
+ */
+export function preparationProblem(error: unknown): TurnProblem {
+  const reason = error instanceof z.ZodError
+    ? [...new Set(error.issues.slice(0, 3).map(schemaIssueLine))].join("; ")
+    : error instanceof Error ? error.message : "";
+  const why = reason.trim() === "" ? "" : `: ${truncate(reason.trim().replace(/[.\s]+$/, ""), MAX_PREPARATION_CHARS)}`;
+  return problem(
+    "action-preparation",
+    // "Say so" (issue 1888): told only to answer without it, the corrective reply described the
+    // draft it had meant to make, beside a page that still had no script.
+    `${REFUSED_CHANGE}${why}. If a read is missing or no longer current, read it again and return the complete result with the change; otherwise answer without it, and say plainly that nothing was written.`,
+  );
+}
+
+const REFUSED_CHANGE = "The requested change could not be prepared";
+
+/**
+ * Why a turn's change was refused, read back from its corrective run's detail: the first sentence
+ * of the reason `preparationProblem` gave, or undefined when the retry was for something else.
+ */
+export function refusedChangeReason(detail: string | undefined): string | undefined {
+  const at = detail?.indexOf(REFUSED_CHANGE) ?? -1;
+  if (!detail || at < 0) return undefined;
+  const rest = detail.slice(at + REFUSED_CHANGE.length);
+  const reason = rest.startsWith(": ") ? rest.slice(2).split(/\. (?:If a read|Cite only)/)[0]!.replace(/[.\s]+$/, "") : "";
+  return reason === "" ? "the change was refused." : `${reason}.`;
 }
 
 /**
@@ -252,12 +314,45 @@ export function turnResultJson(raw: string): unknown {
 }
 
 /**
+ * A reply over the bound, said in terms a model can actually aim at.
+ *
+ * The bound alone ("reply allows at most 8000 characters") was the corrective line, and it failed
+ * live on 2026-10-07: asked for notes on a 26-chapter outline, the model wrote past it, was told
+ * the bound, and wrote past it again — two minutes of a considered answer thrown away twice. A
+ * model cannot count characters; it can aim at a word count, and it can see how far over it was.
+ * The length is the reply's own size, never its content, so it is safe to send back.
+ */
+function replyTooLongProblem(json: unknown): TurnProblem {
+  const reply = json !== null && typeof json === "object" ? (json as Record<string, unknown>)["reply"] : undefined;
+  const length = typeof reply === "string" ? reply.length : undefined;
+  // Six characters a word is English prose with its spaces; aim at three quarters of the bound so
+  // a model that undershoots its own estimate by a little still lands inside it.
+  const words = Math.floor((TURN_RESULT_BOUNDS.reply * 0.75) / 6 / 50) * 50;
+  return problem(
+    "reply-too-long",
+    `reply allows at most ${TURN_RESULT_BOUNDS.reply} characters${length ? `; this one was ${length}` : ""}. Write it again in under ${words} words: keep every point, cut restatement and examples, and offer the rest for the next turn.`,
+  );
+}
+
+function misplacedActionLine(issue: z.ZodIssue, json: unknown): string | null {
+  if (issue.code !== z.ZodIssueCode.invalid_union_discriminator || issue.path[0] !== "candidateOperations" || issue.path.at(-1) !== "classification") return null;
+  let value: unknown = json;
+  for (const key of issue.path) {
+    if (value === null || typeof value !== "object") return null;
+    value = (value as Record<string, unknown>)[key];
+  }
+  // Only schema-owned vocabulary is reflected; unknown provider values keep the ordinary error.
+  const kind = ModelWorldChatActionSchema.options.find(option => option.shape.kind.value === value)?.shape.kind.value;
+  return kind && !modelActionInputRefusal({ kind }) ? `${kind} is an action kind, never a candidate classification. Put it in actions with kind, using describe_action for its fields and required reads. Keep the requested change when correcting the complete result; do not substitute advice.` : null;
+}
+
+/**
  * Parse the model's message as the strict turn-result schema.
  *
  * Separate from the rest so a malformed message fails before anything else is attempted — there
  * is nothing useful to say about the evidence in a result that is not a result.
  */
-export function parseTurnResult(raw: string, productionThread = false): { ok: true; value: WorldChatTurnResult } | { ok: false; problems: TurnProblem[] } {
+export function parseTurnResult(raw: string, productionThread = false, allowActionRecovery = true): { ok: true; value: WorldChatTurnResult } | { ok: false; problems: TurnProblem[] } {
   const json = turnResultJson(raw);
   if (json === undefined) {
     return {
@@ -281,11 +376,16 @@ export function parseTurnResult(raw: string, productionThread = false): { ok: tr
      * answer was, at the moment there is least time to spare.
      */
     const lines = new Set<string>();
+    let replyTooLong: TurnProblem | undefined;
     for (const issue of parsed.error.issues) {
-      lines.add(truncate(schemaIssueLine(issue), MAX_PROBLEM_CHARS));
+      if (issue.code === z.ZodIssueCode.too_big && issue.path.length === 1 && issue.path[0] === "reply") {
+        replyTooLong = replyTooLongProblem(json);
+        continue;
+      }
+      lines.add(truncate((allowActionRecovery ? misplacedActionLine(issue, json) : null) ?? schemaIssueLine(issue), MAX_PROBLEM_CHARS));
       if (lines.size >= MAX_PROBLEMS) break;
     }
-    return { ok: false, problems: [...lines].map((line) => problem("schema", line)) };
+    return { ok: false, problems: [...(replyTooLong ? [replyTooLong] : []), ...[...lines].map((line) => problem("schema", line))] };
   }
   return { ok: true, value: parsed.data };
 }
@@ -304,7 +404,8 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
   if (input.replyOnly && structuredChannelsIn(input.raw)) {
     return { ok: false, problems: [problem("reply-only", REPLY_ONLY_PROBLEM)] };
   }
-  const parsed = parseTurnResult(input.raw, input.productionThread);
+  // Setup cannot stage actions; passage rewrites have a narrower contract than an action kind.
+  const parsed = parseTurnResult(input.raw, input.productionThread, !input.draftOnly && input.revise === undefined);
   if (!parsed.ok) return parsed;
   const result = parsed.value;
   if (input.draftOnly && (
@@ -318,6 +419,12 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
   }
 
   const problems: TurnProblem[] = [];
+  if (input.revise === "required" && !result.actions.some(isPassageRevision)) problems.push(problem("revise", REVISE_PROBLEM));
+  if (input.revise !== undefined && (
+    result.actions.some((action) => !isPassageRevision(action)) || result.actions.length > 1 ||
+    result.candidateOperations.length || result.groupOperations.length || result.bibleEdits.length ||
+    result.editorRequests.length || result.sceneEdits.length || result.productionPlan
+  )) problems.push(problem("revise-only", REVISE_ONLY_PROBLEM));
   if (result.productionPlan) {
     if (!input.productionThread) problems.push(problem("production-plan", "A production plan belongs only to a production thread."));
     const cited = result.productionPlan.checkReceiptIds.map(id => input.receiptsThisRun.find(r => r.id === id));
@@ -329,15 +436,27 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
   const byId = new Map(input.existing.map((c) => [c.id, c]));
   const receiptIds = new Set(input.receiptsThisRun.map((r) => r.id));
   const at = input.now();
+  const requireDraftRead = (candidate: WorldChangeCandidate, path: string) => {
+    const digest = conversationCandidateFence(candidate, input.groups);
+    if (candidate.conversationId !== input.conversationId || !input.receiptsThisRun.some(receipt =>
+      receipt.tool === "target-read" && receipt.status === "complete" && receipt.complete === true && receipt.nextCursor === null &&
+      receipt.target?.requirement === "conversation-candidate" && receipt.target.id === `${input.conversationId}:${candidate.id}` &&
+      receipt.observedRevisionOrDigest === digest
+    )) problems.push(problem("candidate-read-required", "Read the proposition with get_candidate at its current registry revision through complete=true before replacing it. Preserve unchanged authored fields, evidence and groups.", path));
+  };
 
   // Step 3 and 4: identity, revisions and payloads.
   const temporaryIds = new Set<string>();
-  for (const op of result.candidateOperations) {
+  for (const [index, op] of result.candidateOperations.entries()) {
+    const path = `candidateOperations.${index}`;
     if (op.op === "create") {
       if (temporaryIds.has(op.temporaryId)) {
         problems.push(problem("duplicate-temporary-id", "Two operations used the same temporary id."));
       }
       temporaryIds.add(op.temporaryId);
+      // Re-emitting a retained create becomes a replacement below; it must not bypass the read.
+      const duplicate = findByStructure(op.candidate, input.existing);
+      if (duplicate && !suppressedByTombstone(op.candidate, input.tombstones)) requireDraftRead(duplicate, path);
       continue;
     }
     const existing = byId.get(op.candidateId);
@@ -354,9 +473,10 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
       // Accepted propositions are immutable history; a later change is a new proposition
       // against accepted world state (§6.3).
       problems.push(
-        problem("immutable-candidate", "A proposition that has already been carried into a proposal cannot be changed."),
+        problem("immutable-candidate", "A proposition that has already been carried into a proposal cannot be changed.", path),
       );
     }
+    if (op.op === "update" || op.op === "split") requireDraftRead(existing, path);
   }
 
   for (const { draft } of draftsWithOperations(result)) {
@@ -377,18 +497,25 @@ export function validateTurnResult(input: ValidateInput): ValidationOutcome {
    * a required intent citation could not be written, and both the turn and its one retry would
    * fail on a proposition the user was actively trying to fix.
    */
-  const drafts = result.candidateOperations.flatMap((op) => {
-    if (op.op === "create") return [{ draft: op.candidate, inherited: NO_EVIDENCE }];
-    if (op.op === "update") return [{ draft: op.candidate, inherited: intentEvidenceOf(byId.get(op.candidateId)) }];
+  const drafts = result.candidateOperations.flatMap((op, index) => {
+    const path = `candidateOperations.${index}`;
+    if (op.op === "create") return [{ draft: op.candidate, retained: findByStructure(op.candidate, input.existing), path: `${path}.candidate` }];
+    if (op.op === "update") return [{ draft: op.candidate, retained: byId.get(op.candidateId) ?? null, path: `${path}.candidate` }];
     if (op.op === "split") {
-      const inherited = intentEvidenceOf(byId.get(op.candidateId));
-      return op.replacements.map((draft) => ({ draft, inherited }));
+      return op.replacements.map((draft, replacement) => ({ draft, retained: byId.get(op.candidateId) ?? null, path: `${path}.replacements.${replacement}` }));
     }
     return [];
   });
-  for (const { draft, inherited } of drafts) {
-    for (const evidenceProblem of verifyAllEvidence(draft.evidence, input.evidenceSources)) {
-      problems.push(problem(evidenceProblem.kind, safeEvidenceMessage(evidenceProblem)));
+  for (const { draft, retained, path } of drafts) {
+    const inherited = intentEvidenceOf(retained ?? undefined);
+    for (const [index, evidence] of draft.evidence.entries()) {
+      // Exact stored source citations retain their historical provenance. New/changed citations
+      // still verify against current sources; intent still verifies against the full local log.
+      // This does not carry old checks: fresh() always uses this run's coordinator check plan.
+      if (evidence.kind !== "message" && retained?.evidence.some(stored => isDeepStrictEqual(stored, evidence))) continue;
+      for (const evidenceProblem of verifyEvidence(evidence, input.evidenceSources)) {
+        problems.push(problem(evidenceProblem.kind, safeEvidenceMessage(evidenceProblem), `${path}.evidence.${index}`));
+      }
     }
     if (draft.evidence.length === 0) {
       problems.push(problem("no-evidence", "Every proposition needs evidence of what it is based on."));
@@ -829,7 +956,7 @@ function buildGroups(
 function dedupeProblems(problems: readonly TurnProblem[]): TurnProblem[] {
   const seen = new Set<string>();
   return problems.filter((p) => {
-    const key = `${p.code}|${p.safeMessage}`;
+    const key = `${p.code}|${p.path ?? ""}|${p.safeMessage}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -844,21 +971,39 @@ function dedupeProblems(problems: readonly TurnProblem[]): TurnProblem[] {
  * return the third one.
  */
 export function correctiveMessage(problems: readonly TurnProblem[]): string {
-  const lines = problems.slice(0, MAX_PROBLEMS).map((p) => `- ${truncate(p.safeMessage, MAX_PROBLEM_CHARS)}`);
+  const lines = problems.slice(0, MAX_PROBLEMS).map((p) => `- ${truncate(`${p.path ? `${p.path}: ` : ""}${p.safeMessage}`, p.code === "action-preparation" ? MAX_PREPARATION_CHARS : MAX_PROBLEM_CHARS)}`);
   const message = [
     "The previous result was not accepted:",
-    ...lines,
-    "",
     "Return the complete result again, as a single JSON object matching the required shape.",
     'The exact shape, with examples, is under "The result shape, exactly" in your instructions.',
+    // The failed location batch (#1912) became an offer to try next turn. Preserve the ask in
+    // the one correction; validation still accepts one complete result, never a salvaged subset.
+    "If the ask requests changes, repair and retain that work; do not replace it with advice or an offer to do it later. Keep valid independent records. If a record cannot be repaired, omit it together with its dependents and atomic group, explain what is missing and why in reply, and return the remaining requested work. Never split an atomic group or claim omitted work is ready.",
+    ...(problems.some(p => p.code === "immutable-candidate") ? [
+      'For an already-carried proposition, leave its history unchanged. Read current world state and use a fresh create operation with a new temporaryId for a still-needed change; use sheet.edit if the sheet already exists. Do not create a duplicate sheet.',
+    ] : []),
+    ...(problems.some(p => /^(message-|world-|attachment-)/.test(p.code)) ? [
+      "Repair evidence at the named path: read the cited source again and copy an exact quotation and its citation metadata. Do not paraphrase a quote or cite Bible prose as a sheet or canon entry. Preserve the user's intent quotation and required current-read receipts; never invent evidence.",
+    ] : []),
     // Said every time (issue 1295): listing an invalid action's faults reads as "fix it", and a
     // question that needed no change is answered best by dropping it.
     "If the ask needs no change to the world, leave every action and candidate list empty: the reply alone is a complete answer.",
+    "",
+    ...lines,
   ].join("\n");
   return truncate(message, MAX_CORRECTIVE_CHARS);
 }
 
 const REPLY_ONLY_PROBLEM = "This ask was for a reply only. Return the reply with every list empty — no actions, candidates, groups, bible edits, scene edits or editor requests. Say in the reply anything you would change.";
+const REVISE_PROBLEM = "This ask was a rewrite of the selected passage, shown in the page, not in the reply. Return the whole result again with one production-chapter edit action whose changes are { \"passage\": { \"find\": the selected words exactly as quoted, \"with\": your revision, \"paragraph\": the paragraph the ask named } }, citing the final receipts of complete list_chapters (section plan), get_chapter (that chapter, no section) and get_story reads, and a reply of one line saying what changed. If the passage cannot be revised as asked, return no action and say why in one sentence.";
+
+const REVISE_ONLY_PROBLEM = "This ask was a rewrite of the selected passage. Return only the one production-chapter passage edit, or no action at all with a one-sentence reason; leave every other list empty.";
+
+/** A revision of a selected passage: what a page's rewrite is answered by. */
+function isPassageRevision(action: { kind: string; change?: unknown }): boolean {
+  const change = action.change as { operation?: unknown; changes?: { passage?: unknown } } | undefined;
+  return action.kind === "production-chapter" && change?.operation === "edit" && change.changes?.passage !== undefined;
+}
 
 /** Whether a result names anything but its reply, read before its shape is checked. */
 function structuredChannelsIn(raw: string): boolean {

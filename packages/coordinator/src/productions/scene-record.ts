@@ -1,4 +1,4 @@
-import { orderedShots, VISUAL_NOVEL_KIND } from "@arke-studio/contracts";
+import { orderedShots, VISUAL_NOVEL_KIND, type StageConstructionDraft } from "@arke-studio/contracts";
 import {
   isGraphScene,
   linearizeSceneFlow,
@@ -392,6 +392,76 @@ export function carriesStageConstruction(raw: string): boolean {
       shot.staging.keys.some(k => k.anchorSpace !== undefined || k.roll !== undefined || k.focalMm !== undefined)
     ));
   } catch { return false; }
+}
+
+/** A location plate on the scene's strict blocking needs schema 84; an older reader would drop the scene (issue 1818). */
+export const STAGE_PLATE_SCHEMA_VERSION = 84;
+/** A board animatic pinned on the scene's strict boards needs schema 89 (issue 1824). */
+export const STAGE_ANIMATIC_SCHEMA_VERSION = 89;
+export function carriesStageAnimatic(raw: string): boolean {
+  try { return (parseSceneRecord(raw).boards?.animatics?.length ?? 0) > 0; }
+  catch { return false; }
+}
+
+/** A mark with a named pose beyond stand/sit/lie, a hand or a look needs schema 88 (issue 1821). */
+export const STAGE_POSE_SCHEMA_VERSION = 88;
+export function carriesStagePose(raw: string): boolean {
+  try {
+    return orderedShots(parseSceneRecord(raw)).some(shot => shot.staging?.performances?.some(track => track.keys.some(key =>
+      key.hand !== undefined || key.look !== undefined || (key.pose !== undefined && key.pose !== "stand" && key.pose !== "sit" && key.pose !== "lie"))));
+  } catch { return false; }
+}
+
+/** A camera key carrying its words needs schema 87 (issue 1820). */
+export const STAGE_WORDS_SCHEMA_VERSION = 87;
+export function carriesStageWords(raw: string): boolean {
+  try { return orderedShots(parseSceneRecord(raw)).some(shot => shot.staging?.keys.some(key => key.frame !== undefined)); }
+  catch { return false; }
+}
+
+/**
+ * The schema a retained Stage review's draft needs (issue 1820). The draft is held in
+ * `.staging/stage-reviews` before Keep, in the same strict shapes a scene carries, so it is fenced
+ * as the scene that keeps it would be, before it is durable: otherwise an older build opens the
+ * world and then fails to parse the pending review instead of refusing the world at open.
+ */
+export function stageDraftSchemaVersion(draft: StageConstructionDraft): number | null {
+  const needed = Math.max(
+    draft.plateCamera !== undefined ? STAGE_PLATE_SCHEMA_VERSION : 0,
+    draft.sets.some(set => set.kit !== undefined) ? STAGE_KIT_SCHEMA_VERSION : 0,
+    draft.sets.some(set => set.material !== undefined || set.surfaces !== undefined || set.colour !== undefined)
+      || draft.lights !== undefined || draft.atmosphere !== undefined ? STAGE_LOOK_SCHEMA_VERSION : 0,
+    draft.staging.keys.some(key => key.frame !== undefined) ? STAGE_WORDS_SCHEMA_VERSION : 0,
+    draft.staging.performances?.some(track => track.keys.some(key =>
+      key.hand !== undefined || key.look !== undefined || (key.pose !== undefined && key.pose !== "stand" && key.pose !== "sit" && key.pose !== "lie"))) ? STAGE_POSE_SCHEMA_VERSION : 0,
+  );
+  return needed === 0 ? null : needed;
+}
+
+/** Materials, lights, atmosphere or a look-tagged playblast need schema 86 (issue 1825). */
+export const STAGE_LOOK_SCHEMA_VERSION = 86;
+export function carriesStageLook(raw: string): boolean {
+  try {
+    const scene = parseSceneRecord(raw);
+    const shots = orderedShots(scene);
+    const sets = [scene.blocking?.sets, ...shots.map(shot => shot.staging?.sets)].flatMap(list => list ?? []);
+    return sets.some(set => set.material !== undefined || set.surfaces !== undefined || set.colour !== undefined)
+      || scene.blocking?.lights !== undefined || scene.blocking?.atmosphere !== undefined
+      || shots.some(shot => shot.staging?.playblast?.look !== undefined);
+  } catch { return false; }
+}
+
+/** A kit item on any set entry — the scene's or a shot's override — needs schema 85 (issue 1819). */
+export const STAGE_KIT_SCHEMA_VERSION = 85;
+export function carriesStageKit(raw: string): boolean {
+  try {
+    const scene = parseSceneRecord(raw);
+    return [scene.blocking?.sets, ...orderedShots(scene).map(shot => shot.staging?.sets)].some(sets => sets?.some(set => set.kit !== undefined));
+  } catch { return false; }
+}
+export function carriesStagePlate(raw: string): boolean {
+  try { return parseSceneRecord(raw).blocking?.plate !== undefined; }
+  catch { return false; }
 }
 
 /** Evaluator-versioned playblast pins must not make a scene disappear in older readers (#1128). */

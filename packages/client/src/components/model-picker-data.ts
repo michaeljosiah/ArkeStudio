@@ -57,6 +57,8 @@ const HARNESS_PROVIDER_NAMES: Readonly<Record<string, string>> = {
  * beside it is `O` too.
  */
 export function providerMarkLetter(provider: string, name: string): string {
+  // A lone G is Google's mark everywhere else.
+  if (provider === "github-copilot") return "GH";
   return provider === "opencode" ? "Z" : name.slice(0, 1).toUpperCase();
 }
 

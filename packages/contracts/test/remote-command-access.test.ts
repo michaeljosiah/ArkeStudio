@@ -23,8 +23,15 @@ it("every prepared action has an explicit policy and native work cannot hide in 
 });
 it("host installers, deletion, native folders and chooser payloads stay on the PC", () => {
   const cases: ClientMessage[] = [
+    { kind: "install-sample-world" },
+    { kind: "cancel-sample-world-download" },
+    { kind: "discard-sample-world-download" },
+    { kind: "refresh-sample-world-download" },
+    { kind: "creator-publishing-list", worldId: "01ARZ3NDEKTSV4RRFFQ69G5FAV", requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV" },
+    { kind: "creator-publishing-prepare", worldId: "01ARZ3NDEKTSV4RRFFQ69G5FAV", requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV", productionId: "story", exportId: "ap_01ARZ3NDEKTSV4RRFFQ69G5FAV" },
+    { kind: "creator-publishing-control", worldId: "01ARZ3NDEKTSV4RRFFQ69G5FAV", requestId: "01ARZ3NDEKTSV4RRFFQ69G5FAV", id: "11111111-1111-4111-8111-111111111111", action: "resume" },
     { kind: "setup-remove", componentId: "kokoro-82m" }, { kind: "setup-install", componentId: "kokoro-82m" },
-    { kind: "setup-repair", componentId: "kokoro-82m" }, { kind: "comfyui-update-runtime" },
+    { kind: "setup-repair", componentId: "kokoro-82m", revision: "a".repeat(64) }, { kind: "comfyui-update-runtime" },
     { kind: "repair-voice-models" }, { kind: "open-model-folder" }, { kind: "open-engine-log", engine: "voxa" },
     { kind: "download-update" }, { kind: "adapter-command", command: { action: "install", releaseIds: ["sample"] } },
     { kind: "adapter-command", command: { action: "remove", releaseId: "sample", deleteOwnedFile: true } },

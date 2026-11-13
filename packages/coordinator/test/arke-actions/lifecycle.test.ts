@@ -133,6 +133,29 @@ function decision(
 }
 
 describe("conversation action folding and decisions", () => {
+  it("refuses forged group approvals for host cards and executes duplicate eligible decisions once", async () => {
+    const worldPath = await tempDir("arke-group-actions-");
+    const conversationId = await conversation(worldPath);
+    const counter = { executions: 0 };
+    const native: ConversationActionAuthorityAdapter = {
+      ...adapter(counter), actionKind: "world-chat-artifact-import",
+      prepare: async ({ intent }) => ({ authority: { kind: "artifact-store", id: intent.actionId }, authorityRevision: 1,
+        shown: { ...shown(), permissionReason: "host-file-access", body: { family: "host-action", action: "Import", effect: "Choose files on the PC" } } }),
+    };
+    const lifecycle = new ConversationActionLifecycle({ worldPath, worldId: WORLD_ID, adapters: [native, adapter(counter)], now: NOW });
+    const host = await lifecycle.prepare(preparationInput(conversationId, { actionKind: native.actionKind,
+      payload: { kind: native.actionKind, worldId: WORLD_ID, action: { kind: "artifact-import", source: "files", checkReceiptIds: [newId("check")] } },
+      baseObservations: [{ requirement: "artifacts", target: WORLD_ID, revisionOrDigest: "v1", complete: true }],
+    }));
+    assert.equal((await lifecycle.decide(decision(host, (await loaded(worldPath, conversationId)).seq, { groupApprovalTurnId: host.turnId }))).reason, "validation-refused");
+    assert.equal(counter.executions, 0);
+    const safe = await prepare(lifecycle, conversationId);
+    const request = decision(safe, (await loaded(worldPath, conversationId)).seq, { groupApprovalTurnId: safe.turnId });
+    assert.equal((await lifecycle.decide(request)).status, "completed");
+    assert.equal((await lifecycle.decide(request)).deduplicated, true);
+    assert.equal(counter.executions, 1);
+    assert.equal((await loaded(worldPath, conversationId)).actions.find(action => action.actionId === host.actionId)?.status, "pending");
+  });
   it("remote decisions refuse native pickers before approval or replay while desktop approval and remote denial remain available", async () => {
     for (const source of ["files", "folder"] as const) {
       const worldPath = await tempDir("arke-remote-actions-");

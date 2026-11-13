@@ -28,7 +28,7 @@ function tailscale() {
     if (args[0] === "status") return JSON.stringify({ BackendState: "Running", Self: { DNSName: "studio.example.ts.net." },
       CurrentTailnet: { MagicDNSEnabled: true }, CertDomains: ["studio.example.ts.net"] });
     if (args[1] === "status") return JSON.stringify(config);
-    const port = args.find(arg => arg.startsWith("--https="))!.split("=")[1];
+    const port = args.find(arg => arg.startsWith("--https="))!.split("=")[1]!;
     const key = `studio.example.ts.net:${port}`;
     if (args.includes("off")) { delete config.TCP?.[port]; delete config.Web?.[key]; return ""; }
     config.TCP = { ...config.TCP, [port]: { HTTPS: true } };

@@ -11,13 +11,15 @@
 export interface ScriptRun {
   text: string;
   /** Bold for the line itself, regular for its id and note, grey for the narration before it. */
-  style: "title" | "meta" | "id" | "context" | "line" | "note";
+  style: "title" | "meta" | "heading" | "id" | "context" | "line" | "note";
 }
 
 const PAGE = { width: 595, height: 842, margin: 56 } as const;
 const STYLE: Record<ScriptRun["style"], { font: "F1" | "F2"; size: number; grey: number; before: number }> = {
   title: { font: "F2", size: 18, grey: 0, before: 0 },
   meta: { font: "F1", size: 9, grey: 0.45, before: 4 },
+  // A radio script's scene heading (issue 1882): a performer's script has none.
+  heading: { font: "F2", size: 12, grey: 0, before: 20 },
   id: { font: "F2", size: 9, grey: 0.35, before: 16 },
   context: { font: "F1", size: 10, grey: 0.5, before: 3 },
   line: { font: "F2", size: 12, grey: 0, before: 4 },

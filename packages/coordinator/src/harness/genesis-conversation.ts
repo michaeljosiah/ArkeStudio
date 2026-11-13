@@ -1,6 +1,6 @@
 import { basename, dirname, join } from "node:path";
 import { readFile, stat, rm } from "node:fs/promises";
-import { CapabilitySchema, GenesisBlueprintSchema, BuildItemSchema, ManifestModelSchema, newId, ulid, UlidSchema, type DomainEvent, type GenesisBlueprint, type WorldChatMessage } from "@arke-studio/contracts";
+import { CapabilitySchema, GenesisBlueprintSchema, BuildItemSchema, ManifestModelSchema, newId, ulid, UlidSchema, type ConversationId, type DomainEvent, type GenesisBlueprint, type WorldChatMessage } from "@arke-studio/contracts";
 import { z } from "zod";
 import { WorldChatStore, conversationDir } from "../world-chat/store.js";
 import { foldBlueprint } from "./blueprint.js";
@@ -126,8 +126,11 @@ export async function loadGenesisConversation(dir: string, genesisId: string, ru
   };
 }
 
-/** Replays join the same event IDs; a crash can leave a prefix, never a duplicate transcript. */
-export async function carryGenesisConversation(dir: string, worldDir: string): Promise<void> {
+/**
+ * Replays join the same event IDs; a crash can leave a prefix, never a duplicate transcript.
+ * Answers the carried conversation's id, so its summary can be started straight away.
+ */
+export async function carryGenesisConversation(dir: string, worldDir: string): Promise<ConversationId> {
   const source = await genesisConversation(dir);
   const meta = (await source.readMeta())!;
   const { events, problems } = await source.read();
@@ -137,7 +140,7 @@ export async function carryGenesisConversation(dir: string, worldDir: string): P
   const incomplete = join(target.dir, ".founding-incomplete");
   const completed = await readFile(pointer, "utf8").then(raw => JSON.parse(raw).conversationId === meta.id)
     .catch((err: NodeJS.ErrnoException) => { if (err.code === "ENOENT") return false; throw err; });
-  if (completed) { await rm(incomplete, { force: true }); return; }
+  if (completed) { await rm(incomplete, { force: true }); return meta.id; }
   // A prefix is private until its final flushed event and handoff receipt exist.
   await atomicWriteFile(incomplete, "Founding conversation transfer in progress.\n");
   await target.create(meta.id, meta.createdAt);
@@ -150,4 +153,5 @@ export async function carryGenesisConversation(dir: string, worldDir: string): P
   // The pointer is written only after every append was flushed. Recovery can safely replay.
   await atomicWriteFile(pointer, JSON.stringify({ conversationId: meta.id }) + "\n");
   await rm(incomplete, { force: true });
+  return meta.id;
 }

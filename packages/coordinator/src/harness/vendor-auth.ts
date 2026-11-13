@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import {
+  harnessModelFailureReason,
   vendorAuthUnavailable,
   type HarnessAdapter,
   type VendorAuthStatus,
@@ -516,7 +517,7 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
  * prompts, which sends a person to re-authenticate a connection that was never the problem.
  */
 export function isAuthShapedFailure(detail: string | null | undefined): boolean {
-  if (!detail) return false;
+  if (!detail || harnessModelFailureReason(detail) !== null) return false;
   // One leading `Name: ` is allowed because the operator log's cause is written as
   // `${err.name}: ${err.message}` — "Error: provider.auth" is the same failure. A single word
   // only, so prose that merely mentions provider.auth mid-sentence stays unmatched.

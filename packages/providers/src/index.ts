@@ -49,6 +49,7 @@ export { FalClient } from "./clients/fal.js";
 export { HiggsfieldClient } from "./clients/higgsfield.js";
 export { KokoroClient, type KokoroSynthesize, type SidecarBaseUrl } from "./clients/kokoro.js";
 export { MistralClient, VOXTRAL_MODEL, VOXTRAL_PRESETS } from "./clients/mistral.js";
+export { MingClient, type MingSynthesis } from "./clients/ming.js";
 export { OllamaClient } from "./clients/ollama.js";
 export { OpenAiClient } from "./clients/openai.js";
 export { CodexClient, type CodexImageRunner } from "./clients/codex.js";
@@ -82,6 +83,7 @@ export { probeRuntime, type ProbeDeps } from "./runtime-detect.js";
 export { gateLocalRuntimes } from "@arke-studio/contracts";
 export {
   ProviderAuthError,
+  ProviderArtifactLimitError,
   ProviderBusyError,
   ProviderRequestRejectedError,
   ProviderDailyLimitError,
@@ -91,6 +93,7 @@ export {
   type CommandResult,
   type CommandRunner,
   type FetchedArtifact,
+  type ArtifactFetchOptions,
   type FetchLike,
   type PollResult,
   type PreparedAudioSource,

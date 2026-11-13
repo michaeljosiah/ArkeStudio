@@ -175,11 +175,15 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
     const rows = [...screen.querySelectorAll(".fy-fact")];
     assert.deepEqual(
       rows.map((row) => row.querySelector(".fy-fact__what")?.textContent),
-      ["Images", "Video", "Text-to-Speech", "Music", "Language", "Narrator"],
+      ["Studio setup", "Production tools", "Images", "Video", "Text-to-Speech", "Music", "Language", "Narrator"],
     );
+    const tools = rows.find(row => row.querySelector(".fy-fact__what")?.textContent === "Production tools")!;
+    assert.match(tools.textContent!, /Prompt history and inspection/);
+    assert.match(tools.textContent!, /Off by default/);
+    assert.equal(tools.querySelector("input")?.hasAttribute("checked"), false);
     // The select carries the source's mark in front of the value, and the state follows it in
     // the same cell rather than under it.
-    const video = rows[1]!;
+    const video = rows.find(row => row.querySelector(".fy-fact__what")?.textContent === "Video")!;
     assert.ok(video.querySelector(".ui-select--marked .fy-mark"), "the default's mark");
     assert.equal(video.querySelector(".fy-fact__is > .ui-select + .fy-fact__state")?.textContent, "this machine");
     // The capability copy — refs, frames, seconds — is the tile's on AI models, not this row's.
@@ -188,7 +192,7 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
 
   it("draws no Language picker, only the route to the harness that writes (R-17)", () => {
     const text = plain(render("/settings/general"));
-    assert.match(text, /Language\s+on Harness/);
+    assert.match(text, /Language\s+Set in Harness/);
     assert.doesNotMatch(text, /Anthropic · |OpenAI · /);
   });
 
@@ -257,7 +261,7 @@ describe("General: both halves in one list (SPEC-034 R-14, R-15, R-16a)", () => 
       providers: [{ id: CLOUD_VIDEO.provider, configured: true, validation: "untested", probes: [], fault: null }],
     });
     const untested = render("/settings/general", state);
-    assert.match(untested, /class="fy-fact__state">not tested</);
+    assert.doesNotMatch(untested, /not tested/);
     assert.doesNotMatch(untested, /fy-set__dot--ok|fy-set__dot--warn/);
     // Refused: the warning colour and its dot, in the state cell, and no callout above the list
     // saying the same thing (turn 149) — one fault, one place.

@@ -1,6 +1,8 @@
 import { z } from "zod";
 import {
   GARMENT_WORDS,
+  SCENE_MOOD_WORDS,
+  PICTURE_CHECK_NOTE_MAX,
   PICTURE_DETAIL_PART_MAX,
   PICTURE_EXPRESSION_MAX,
   PICTURE_FRAME_MAX,
@@ -8,10 +10,12 @@ import {
   normalizeSpeechText,
   type PictureCheck,
   type PictureDetail,
+  type PictureLookLine,
   type PictureWho,
 } from "@arke-studio/contracts";
 import { clip } from "./audiobook-direction.js";
-import { nameAt, type ChapterPerson, type ChapterPlace } from "./audiobook-look.js";
+import { personIdentity, resolveChapterPerson, type ChapterPerson } from "./audiobook-look.js";
+import { resolveChapterPlace, type ChapterPlace } from "./audiobook-location.js";
 
 /**
  * The picture brief (design turn 193k, SPEC-047 R-120, R-121): the instruction the writing service
@@ -60,17 +64,17 @@ export function briefRules(maxChars: number, never: readonly string[]): string {
 2. NAME THE FRAME FIRST. The prompt opens with the shot the words call for, and "frame" says it in the same words.
  - eyes, a look, a face, an expression, a held gaze: extreme close-up or close-up on that face; the person looked at is not in frame.
  - hands, fingers, a touch, an object handled: a detail shot of that and only that.
- - two people talking or facing each other across a table: a medium two-shot, both faces readable.
+ - two people interacting: choose a two-shot, side view or shared over-the-shoulder view that preserves their action, eyelines and usable objects. Faces may be hidden.
  - a person moving, entering or crossing a room: a wide or medium-wide shot, the place leading.
  - a place with nobody in it: an establishing shot, place only.
- - over-the-shoulder only when the words put one person behind another.
+ - over-the-shoulder when the camera can plausibly share a character’s view; the prose need not place one person behind another. A screen faces its user, even when its contents or a face must be hidden from the audience.
  The camera stands where the words stand. "He saw only her back" is his place looking at her back; it does not put him in frame. Your frame decides which look image rides for each person, and the app does it: the close view for Two-shot, Medium close-up, Close-up and Extreme close-up, the full body for the rest.
 3. SAY WHO IS IN FRAME, AND NOBODY ELSE. "inFrame" holds the keys of the characters the frame shows, from the characters list. A character who is in the scene but outside the frame goes in "notInFrame" and is never named in the prompt: not as behind the camera, not as a shoulder, not as a reflection. Write what the camera sees; never write what it does not, because a model draws what it is told. A detail shot has no one in "inFrame": say whose hand or arm it is in "details" (those characters are listed there and not in "notInFrame"), and describe only what the detail shows of them. In a detail shot say whose hand wears what: every ring, bangle, watch or sleeve stays on the person whose line has it, written with that person ("her hand, with her old-gold bangles, rests on his forearm above his steel watch"), never left to float between two hands.
-4. DRESS EACH PERSON FROM THEIR LOOK, NEVER FROM THE ART DIRECTION. For every person in frame use their line from "The look of this chapter": clothes, hair, jewellery, what they carry. Do not change, add or drop a garment, a hairstyle or an ornament. Where a line names its look (look "..."), that look's image rides and already carries the clothes: name each garment once, briefly and neutrally, by the garment and its colour ("her cream-gold silk evening dress"). Never write skin exposure, the cut of a garment or the body under it: no bare shoulders or back, no low-backed, strapless, sheer or tight, nothing beneath her braids. A person with no line gets no words about clothes or hair; their reference decides. Their identity (the shape and features of the face) is the reference's; their expression is not: see rule 5.
-5. NAME EVERY FACE'S EXPRESSION AND GAZE. For each person in "inFrame" the prompt says what their face is doing and where they are looking, in plain words, taken from what the block's words say they feel, do or react to. "She held his eyes without smiling" is a level, unsmiling, deliberate gaze, lips closed. "Tunde laughed until his chest hurt" is mouth open, eyes creased shut, head back. A block that states no emotion still gets an expression, inferred from the scene, the chapter note and what the person is doing, and written out; never leave it blank. The reference fixes identity, clothes and body only. It never fixes the expression: a reference photo's dead-pan face is not this block's, so never write "as in the reference" about a face. Put each expression in "expressions" under the person's key, in the words the prompt uses. If a face is turned away or out of frame (a wide shot from behind, a detail), say so in the prompt and write "face turned away" in "expressions"; for a detail shot name the ease or tension of the hand or arm in "details".
+4. DRESS EACH PERSON FROM THEIR LOOK, NEVER FROM THE ART DIRECTION. For every person in frame use their line from "The look of this chapter": clothes, hair, jewellery, what they carry. Do not invent clothing, hairstyles or ornaments. Without a selected costume look, explicit clothing in this block overrides the main photo and inherited description. Where a line names its look (look "..."), that look's image rides and already carries the clothes: name each garment once, briefly and neutrally, by the garment and its colour ("her cream-gold silk evening dress"). Never write skin exposure, the cut of a garment or the body under it: no bare shoulders or back, no low-backed, strapless, sheer or tight, nothing beneath her braids. Without a selected costume look, describe clothing explicitly supported by the block, including protective oversuits, hoods, gloves and taped cuffs. A main photo does not fix the outfit; do not invent clothing when neither the block nor an authored look supplies it. Their identity (the shape and features of the face) is the reference's; their expression is not: see rule 5.
+5. NAME EVERY FACE'S EXPRESSION AND GAZE. For each person in "inFrame" the prompt says what their face is doing and where they are looking, in plain words, taken from what the block's words say they feel, do or react to. "She held his eyes without smiling" is a level, unsmiling, deliberate gaze, lips closed. "Tunde laughed until his chest hurt" is mouth open, eyes creased shut, head back. A block that states no emotion still gets an expression, inferred from the scene, the chapter note and what the person is doing, and written out; never leave it blank. A main photo fixes face and physical identity; only a selected costume look also fixes hair and clothes. It never fixes the expression: a reference photo's dead-pan face is not this block's, so never write "as in the reference" about a face. Put each expression in "expressions" under the person's key, in the words the prompt uses. If a face is turned away or out of frame (a wide shot from behind, a detail), say so in the prompt and write "face turned away" in "expressions"; for a detail shot name the ease or tension of the hand or arm in "details".
 6. TAKE THE ACTION AND THE OBJECTS FROM THE BLOCK. Name each action and each object the block names (a glass turned slowly on a table, a key in a closed hand) in the posture the words give. Never invent an object to fill the frame.
-7. LIGHT AND TIME COME FROM THE PLACE AND THE MOOD. One sentence from "Place" and "Mood": where the light comes from, what colour, what time. The mood is about light, colour and grain only; anything in it about people, clothes or objects is not for this picture.
-8. PLAIN AND LITERAL. Three to six sentences, at most ${maxChars} characters. Concrete nouns, one camera, no metaphor, no story, no sound. Never ask for text, captions, titles, speech bubbles or logos. Never write the book's style or the references, and never write "keep the face as in the picture": the app adds the identity, hair and clothes line after your prompt.
+7. LIGHT AND TIME COME FROM THIS SCENE'S WORDS. State the scene's light source, weather and time only where its words support them. Mood supplies stable palette, contrast, grain and lens; it never supplies a lamp, fire, injury, equipment or a time transition. Look lines cite their source blocks: do not carry a later injury, changed clothing or equipment backwards, or a local light source into another scene. Check the combined brief against this picture's words and chronology before answering. Explicit local facts override inherited descriptions; omit uncertain scene details.
+8. PLAIN AND LITERAL. Three to six sentences, at most ${maxChars} characters. Concrete nouns, one camera, no metaphor, no story, no sound. Never ask for text, captions, titles, speech bubbles or logos. Never write the book's style or the references, and never write "keep the face as in the picture": the app adds the reference-purpose direction after your prompt.
 ${never.length > 0 ? `Never show, name or hint at: ${never.join(", ")}.\n` : ""}`;
 }
 
@@ -93,6 +97,7 @@ export interface BriefLine {
   text: string;
   /** The chosen look's name, when the line is a kit look's (turn 193). */
   look?: string;
+  blocks?: readonly string[];
 }
 
 /** What the brief is given (193k, "WHAT YOU ARE GIVEN"). */
@@ -102,7 +107,7 @@ export interface BriefGiven {
   synopsis?: string;
   note?: string;
   lines: readonly BriefLine[];
-  people: ReadonlyArray<Pick<ChapterPerson, "key" | "name" | "appearance"> & { essence?: string }>;
+  people: ReadonlyArray<Pick<ChapterPerson, "key" | "name" | "appearance" | "aliases" | "identity" | "pov"> & { essence?: string }>;
   places: readonly ChapterPlace[];
 }
 
@@ -111,21 +116,22 @@ export function briefGiven(input: BriefGiven): string {
   const place = input.lines.find((line) => line.key === null || line.label === "Place");
   const cast = input.lines
     .filter((line) => line !== place)
-    .map((line) => `[${line.key ?? line.label}] ${line.label}${line.look !== undefined ? `, look "${line.look}"` : ""}: ${line.text}`)
+    .map((line) => `[${line.key ?? line.label}] ${line.label}${line.look !== undefined ? `, look "${line.look}"` : ""}${line.blocks?.length ? ` (source blocks: ${line.blocks.join(", ")})` : ""}: ${line.text}`)
     .join("\n");
   const people = input.people
-    .map((person) => `[${person.key}] ${person.name}${person.essence !== undefined ? ` — ${person.essence}` : ""}${person.appearance !== undefined ? ` — ${person.appearance}` : ""}`)
+    .map((person) => `[${person.key}] ${person.name}${person.essence !== undefined ? ` — ${person.essence}` : ""}${person.appearance !== undefined ? ` — ${person.appearance}` : ""}${personIdentity(person)}`)
     .join("\n");
   const places = input.places.map((entry) => `[${entry.key}] ${entry.name}${entry.look !== undefined ? ` — ${entry.look}` : ""}`).join("\n");
   return `WHAT YOU ARE GIVEN
-## The book's mood (light, colour and grain only)
+## The book's mood (visual treatment only; the scene controls light and time)
 ${input.mood ?? "none stated"}
 ## The chapter (${input.title})
 ${input.synopsis ?? "no synopsis"}${input.note !== undefined ? `\n${input.note}` : ""}
 ## The look of this chapter
-Place: ${place?.text ?? "not read"}
+Place${place?.blocks?.length ? ` (source blocks: ${place.blocks.join(", ")})` : ""}: ${place?.text ?? "not read"}
 ${cast === "" ? "no lines" : cast}
 ## Characters
+Identity candidates only, not everyone in the scene. Resolve viewpoint pronouns, familiar names and relationships from this context and the chapter, and use canonical keys in every field. A remembered or mentioned relative is not automatically in frame. If an identity cannot be resolved, retain the literal name for the author to check; never guess a sheet.
 ${people === "" ? "none" : people}
 ## Places
 ${places === "" ? "none named" : places}`;
@@ -141,6 +147,8 @@ export interface HeldBrief {
   notInFrame: string[];
   expressions: Record<string, string>;
   details: PictureDetail[];
+  /** People whose body parts the camera shows; their references still define identity. */
+  detailPeople?: ChapterPerson[];
   place: ChapterPlace | undefined;
   prompt: string;
 }
@@ -153,8 +161,15 @@ export interface HeldBrief {
  * block's speakers and the people its words name, as before; an empty list is nobody.
  */
 export function holdBrief(raw: RawBrief, ctx: { people: readonly ChapterPerson[]; places: readonly ChapterPlace[]; prompt: string; fallback: () => ChapterPerson[] }): HeldBrief {
-  const find = (key: string): ChapterPerson | undefined => ctx.people.find((person) => person.key === key || person.name.toLowerCase() === key.trim().toLowerCase());
-  const resolve = (keys: readonly string[] | null | undefined): ChapterPerson[] => [...new Map((keys ?? []).flatMap((key) => (find(key) === undefined ? [] : [find(key)!])).map((person) => [person.key, person])).values()];
+  const find = (key: string): ChapterPerson | undefined => {
+    const person = resolveChapterPerson(ctx.people, key);
+    if (person !== undefined) return person.neverDepicted ? undefined : person;
+    const name = key.trim().slice(0, 120);
+    // An unresolved identity remains visible and requires reference confirmation. Dropping it
+    // would turn a failed resolution into a misleading green "Nobody in frame" check.
+    return name === "" ? undefined : { key: name.toLowerCase(), name, neverDepicted: false, first: 0 };
+  };
+  const resolve = (keys: readonly string[] | null | undefined): ChapterPerson[] => [...new Map((keys ?? []).flatMap((key) => (find(key) === undefined ? [] : [find(key)!])).map((person) => [person.key, person])).values()].slice(0, 12);
   const listed = raw.inFrame ?? raw.who;
   const inFrame = (listed === null || listed === undefined ? ctx.fallback() : resolve(listed)).slice(0, 12);
   const inKeys = new Set(inFrame.map((person) => person.key));
@@ -165,6 +180,7 @@ export function holdBrief(raw: RawBrief, ctx: { people: readonly ChapterPerson[]
     return person === undefined ? [] : [{ of: person.key, part, ...(state !== undefined ? { state } : {}) }];
   }).slice(0, 12);
   const detailKeys = new Set(details.map((detail) => detail.of));
+  const detailPeople = resolve((raw.details ?? []).map((detail) => detail.of)).filter((person) => detailKeys.has(person.key));
   const notInFrame = resolve(raw.notInFrame).map((person) => person.key).filter((key) => !inKeys.has(key) && !detailKeys.has(key));
   const expressions: Record<string, string> = {};
   for (const [key, words] of Object.entries(raw.expressions ?? {})) {
@@ -172,9 +188,9 @@ export function holdBrief(raw: RawBrief, ctx: { people: readonly ChapterPerson[]
     const said = clip(words, PICTURE_EXPRESSION_MAX);
     if (person !== undefined && inKeys.has(person.key) && said !== undefined) expressions[person.key] = said;
   }
-  const place = raw.place === null || raw.place === undefined ? undefined : ctx.places.find((candidate) => candidate.key === raw.place);
+  const place = resolveChapterPlace(ctx.places, raw.place);
   const frame = clip(raw.frame ?? "", PICTURE_FRAME_MAX) ?? openingFrame(ctx.prompt) ?? "";
-  return { frame, inFrame, notInFrame, expressions, details, place, prompt: ctx.prompt };
+  return { frame, inFrame, notInFrame, expressions, details, detailPeople, place, prompt: ctx.prompt };
 }
 
 /** The frame word a prompt opens with, from its first words. */
@@ -184,24 +200,27 @@ function openingFrame(prompt: string): string | undefined {
 
 /**
  * Who rides (design turn 193, rule 12; R-120): who is in frame. A detail shot has nobody in frame
- * and no reference rides — not a person, not the place; a frame with nobody in it carries the
+ * and carries only the people whose details are shown, not the place; a frame with nobody in it carries the
  * place's view alone; otherwise each person in frame, and the place where one is named.
  */
-export function briefRiders(held: Pick<HeldBrief, "frame" | "inFrame" | "place">): Array<{ key: string; name: string; sheet?: string; kind: "character" | "place"; billing?: string }> {
-  if (frameWord(held.frame) === "Detail") return [];
+export function briefRiders(held: Pick<HeldBrief, "frame" | "inFrame" | "place" | "detailPeople">): Array<{ key: string; name: string; sheet?: string; kind: "character" | "place"; billing?: string }> {
+  const detail = frameWord(held.frame) === "Detail";
+  const people = [...new Map([...(detail ? [] : held.inFrame), ...(held.detailPeople ?? [])].map((person) => [person.key, person])).values()];
   return [
-    ...held.inFrame.map((person) => ({ key: person.key, name: person.name, ...(person.sheet !== undefined ? { sheet: person.sheet } : {}), kind: "character" as const, ...(person.billing !== undefined ? { billing: person.billing } : {}) })),
-    ...(held.place === undefined ? [] : [{ key: held.place.key, name: held.place.name, sheet: held.place.key, kind: "place" as const }]),
-  ];
+    ...people.map((person) => ({ key: person.key, name: person.name, ...(person.sheet !== undefined ? { sheet: person.sheet } : {}), kind: "character" as const, ...(person.billing !== undefined ? { billing: person.billing } : {}) })),
+    ...(detail || held.place === undefined ? [] : [{ key: held.place.key, name: held.place.name, ...(held.place.unlinked === true ? {} : { sheet: held.place.key }), kind: "place" as const }]),
+  ].slice(0, 24);
 }
 
 // ---------------------------------------------------------------------------
 // The seven checks (rule 14, R-121)
 // ---------------------------------------------------------------------------
 
-/** Whether a person is named in words: their whole name, or their first name where it is a name of its own. */
-export function namedInText(text: string, person: Pick<ChapterPerson, "name">): boolean {
-  if (nameAt(text, person.name) >= 0) return true;
+/** Whether a person is named: a full name, familiar name or given name, never a shared surname alone. */
+export function namedInText(text: string, person: Pick<ChapterPerson, "name" | "aliases">): boolean {
+  const contains = (name: string): boolean => name !== "" && new RegExp(`(?<![\\p{L}\\p{N}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}\\p{N}])`, "iu").test(text);
+  // Relatives are identity context too; mentioning one person's surname cannot place the family.
+  if ([person.name, ...(person.aliases ?? [])].some(contains)) return true;
   // "Maren" for Maren Kest, as written with its capital: never a title or an article ("The Chorister").
   const first = person.name.trim().split(/\s+/)[0] ?? "";
   if (first.length < 3 || first === person.name.trim() || TITLES.has(first.toLowerCase()) || !/^\p{Lu}/u.test(first)) return false;
@@ -210,9 +229,28 @@ export function namedInText(text: string, person: Pick<ChapterPerson, "name">): 
 
 const TITLES = new Set(["the", "old", "young", "mr", "mrs", "ms", "miss", "dr", "lady", "lord", "sir", "dame", "madam", "mother", "father", "aunt", "uncle", "brother", "sister", "captain", "chief", "king", "queen", "prince", "princess", "saint"]);
 
-const AWAY = /\b(turned away|faces? (?:is |are )?(?:turned )?away|out of (?:the )?frame|from behind|back to (?:the )?camera|faces? (?:are |is )?(?:not|never) (?:seen|shown|visible))\b/i;
+const AWAY = /\b(turned away|faces? (?:is |are )?(?:turned )?away|out of (?:the )?frame|no faces? in (?:the )?frame(?=\s*(?:[.,;:!?—]|$))|from behind|back to (?:the )?camera|faces? (?:are |is )?(?:not|never) (?:seen|shown|visible))\b/i;
 const REFERENCE_FACE = /\b(as in the reference|reference'?s (?:face|expression)|same (?:face|expression) as (?:the )?reference)\b/i;
 const STOP = new Set(["with", "that", "this", "from", "into", "over", "onto", "their", "them", "they", "then", "than", "very", "little", "slightly", "just", "only", "still", "while"]);
+
+/** Only a simple, named clothing action can belong wholly to somebody else. Keep ambiguous
+ * clauses in the check: dropping them could restore an outfit the scene explicitly removed. */
+function clothingSceneFor(block: string, person: ChapterPerson, people: readonly ChapterPerson[]): string {
+  return block.split(/(?<=[.!?;])\s+|\n+/u).filter(sentence => {
+    const action = sentence.trim().match(/^(.+?)\s+(wears?|wore|(?:is|was) wearing|straightens?|straightened|adjusts?|adjusted|buttons?|buttoned|removes?|removed|takes? off|took off)\s+(his own|her own|their own|an?|the)\s+([^.!?;]+)[.!?;]?$/i);
+    if (action === null) return true;
+    // The actor may be handling somebody else's clothes. Only explicit "own" or wearing
+    // without an unresolved possessor establishes whose outfit this describes.
+    if (!/ own$/i.test(action[3]!) && !/^(?:wears?|wore|(?:is|was) wearing)$/i.test(action[2]!)) return true;
+    const subject = action[1]!;
+    const familiar = /^[\p{L}-]+$/u.test(subject) ? people.filter(candidate => namedInText(subject, candidate)) : [];
+    const owner = resolveChapterPerson(people, subject) ?? (familiar.length === 1 ? familiar[0] : undefined);
+    if (owner === undefined || owner.key === person.key) return true;
+    if (people.some(other => other.key !== owner.key && namedInText(sentence, other))) return true;
+    // Another clause or possessor is not a single person's wardrobe description.
+    return /\b(?:and|but|while|as|he|she|they|him|her|his|their|them|my|your|our|who|which|that)\b|['’]s\b/i.test(action[4]!);
+  }).join(" ");
+}
 
 /** Whether an expression is written in the prompt (check 7): its own words, at least half of those that carry meaning. */
 function expressionIn(prompt: string, said: string): boolean {
@@ -228,7 +266,7 @@ export interface CheckInput {
   who: readonly PictureWho[];
   people: readonly ChapterPerson[];
   /** The look lines of the people in frame and in details: what they may wear. */
-  lines: ReadonlyArray<{ key: string | null; text: string }>;
+  lines: ReadonlyArray<Pick<PictureLookLine, "key" | "text" | "lookId">>;
   /** The block's own words: a garment the block names is not invented. */
   block: string;
   mood: string | undefined;
@@ -249,19 +287,20 @@ export function pictureChecks(input: CheckInput): PictureCheck[] {
 
   // (1) Someone named is in frame or a detail, and each in frame has a reference.
   const strays = input.people.filter((person) => !inKeys.has(person.key) && !detailKeys.has(person.key) && !held.notInFrame.includes(person.key) && namedInText(held.prompt, person));
-  const lacking = held.inFrame.filter((person) => (who.find((entry) => entry.key === person.key)?.reference ?? null) === null);
-  const withReference = held.inFrame.length - lacking.length;
-  const count = held.inFrame.length;
+  const shown = briefRiders(held).filter((person) => person.kind === "character");
+  const lacking = shown.filter((person) => (who.find((entry) => entry.key === person.key)?.reference ?? null) === null);
+  const withReference = shown.length - lacking.length;
+  const count = shown.length;
   checks.push({
     id: "reference",
-    ok: strays.length === 0 && (detail || lacking.length === 0),
-    label: detail ? "Detail" : count === 0 ? "Nobody in frame" : `${withReference} of ${count} in frame ${count === 1 ? "has" : "have"} a reference`,
+    ok: strays.length === 0 && lacking.length === 0,
+    label: count === 0 ? (detail ? "Detail" : "Nobody in frame") : `${withReference} of ${count} ${detail ? "shown in detail" : "in frame"} ${count === 1 ? "has" : "have"} a reference`,
     ...(strays.length > 0
       ? { note: `names ${strays.map((person) => person.name).join(", ")}, not in frame` }
-      : lacking.length > 0 && !detail
-        ? { note: lacking.map((person) => `${person.name} · no reference`).join(", ") }
-        : detail
-          ? { note: "nobody in frame, so no reference rides" }
+      : lacking.length > 0
+        ? { note: lacking.map((person) => `${person.name} · ${person.sheet === undefined ? "identity not linked · confirm the character" : "no reference"}`).join(", ") }
+        : detail && count === 0
+          ? { note: "no character detail identified" }
           : count === 0
             ? { note: held.place !== undefined ? "place only" : "no reference rides" }
             : {}),
@@ -286,14 +325,28 @@ export function pictureChecks(input: CheckInput): PictureCheck[] {
   checks.push({ id: "frame", ok: word !== null && opening === word, label: "Frame named first", ...(word === null ? { note: "no frame word" } : opening !== word ? { note: `prompt opens ${opening ?? "without one"}` } : { note: word }) });
 
   // (4) A garment, hairstyle or ornament no look line and no word of the block gives is invented.
-  const allowed = [...input.lines.map((line) => line.text), input.block].join(" ").toLowerCase();
+  const scene = [...input.lines.map((line) => line.text), input.block].join(" ").toLowerCase();
+  // A main-photo appearance supplies the base when the scene adds only posture or a hood's
+  // state. Explicit wardrobe words, removals and selected kit looks keep their own authority;
+  // this vocabulary check must not silently combine a new outfit with the canonical one.
+  const canonical = input.people.filter((person) => {
+    if (!person.sheet || !person.appearance || (!inKeys.has(person.key) && !detailKeys.has(person.key))) return false;
+    const reference = who.find((entry) => entry.key === person.key && entry.sheet === person.sheet);
+    const line = input.lines.find((entry) => entry.key === person.key);
+    if (!reference?.reference || reference.look || line?.lookId) return false;
+    const current = `${line?.text ?? ""} ${clothingSceneFor(input.block, person, input.people)}`;
+    return !GARMENT_WORDS.test(current.replace(/\b(?:hoods?|sleeves?|collars?)\b/gi, "")) && !/\b(?:without|no longer|remov(?:e[sd]?|ing)|tak(?:es?|ing|en) off|took off|chang(?:e[sd]?|ing) into|instead of)\b/i.test(current);
+  });
+  const allowed = [scene, ...canonical.map((person) => person.appearance)].join(" ").toLowerCase();
   const found = [...new Set([...held.prompt.matchAll(new RegExp(GARMENT_WORDS.source, "gi"))].map((match) => match[0].toLowerCase()))];
   const invented = found.filter((wordFound) => !new RegExp(`\\b${wordFound.replace(/s$/, "")}`, "i").test(allowed));
-  checks.push({ id: "garments", ok: invented.length === 0, label: "Look lines", ...(invented.length > 0 ? { note: `invented: ${invented.join(", ")}` } : { note: "from the chosen look" }) });
+  const usedCanonical = found.some((wordFound) => !new RegExp(`\\b${wordFound.replace(/s$/, "")}`, "i").test(scene) && new RegExp(`\\b${wordFound.replace(/s$/, "")}`, "i").test(allowed));
+  checks.push({ id: "garments", ok: invented.length === 0, label: "Look lines", note: invented.length > 0 ? `invented: ${invented.join(", ")} · checked chapter look and passage${canonical.length > 0 ? " and canonical appearance" : ""}` : usedCanonical ? "includes canonical appearance" : "from chapter look or passage" });
 
   // (5) The Mood line carries no clothing.
   const moodClothes = input.mood === undefined ? false : GARMENT_WORDS.test(input.mood);
-  checks.push({ id: "mood", ok: !moodClothes, label: "Mood", note: moodClothes ? "names clothing" : "light and colour only" });
+  const moodScene = SCENE_MOOD_WORDS.test(input.mood ?? "");
+  checks.push({ id: "mood", ok: !moodClothes && !moodScene, label: "Mood", note: moodClothes ? "names clothing" : moodScene ? "contains scene state · check against this scene" : "visual treatment only" });
 
   // (6) The closing lines are the app's: the references named and the identity line composed by the coordinator.
   checks.push({ id: "closing", ok: true, label: "Closing lines", note: "added by the app" });
@@ -318,5 +371,5 @@ export function pictureChecks(input: CheckInput): PictureCheck[] {
           ? { note: detail || held.details.length > 0 ? "faces out of frame, said so" : "nobody in frame" }
           : { note: held.inFrame.map((person) => held.expressions[person.key]!).join("; ") }),
   });
-  return checks;
+  return checks.map(check => check.note === undefined ? check : { ...check, note: clip(check.note, PICTURE_CHECK_NOTE_MAX) });
 }

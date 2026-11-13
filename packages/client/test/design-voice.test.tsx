@@ -70,3 +70,35 @@ it("a recovered candidate replays locally; Save and Use are separate choices", a
   assert.equal(used[0]?.voiceId, designedVoiceTarget(voice));
   assert.ok(!sent.some(row => row.kind === "design-voice" || row.kind === "hear-designed-voice"));
 });
+
+it("From your Google project lists the project's voices by name, and Import saves the one pressed (design turn 204, issue 1635)", async () => {
+  const { sent } = await setup();
+  assert.equal(sent.length, 0, "nothing is listed before the view is opened");
+  await act(async () => button("From your Google project").click());
+  const list = sent.find(row => row.kind === "list-designed-voices");
+  assert.ok(list, "the view asks for the project's voices when it opens");
+  const worldId = FIXTURE_STATE.world!.meta.worldId;
+  await act(async () => __applyEventForTest({ type: "voice.designed-listed", at: voice.created, requestId: list.requestId, worldId, reason: null, voices: [
+    { remoteId: "voice_e9ki3cpkdhf0", name: "Nigerian Woman 2", language: "und", model: "gemini-3.8-flash-tts", expiresAt: "2099-04-06T00:00:00Z" },
+    { remoteId: "voice_fjwyh1zr45jr", name: "Nigerian Woman 1", language: "und", model: "gemini-3.8-flash-tts", expiresAt: "2099-04-06T00:00:00Z" },
+  ] }));
+  const rows = [...dom.document.querySelectorAll('[data-testid="project-voice"]')];
+  assert.deepEqual(rows.map(row => row.querySelector("b")!.textContent), ["Nigerian Woman 2", "Nigerian Woman 1"], "by name, as Google lists them");
+  assert.match(rows[0]!.textContent!, /voice_e9ki3cpkdhf0/, "with the ID as data");
+  await act(async () => rows[0]!.querySelector("button")!.click());
+  const save = sent.find(row => row.kind === "save-designed-voice");
+  assert.equal(save?.remoteId, "voice_e9ki3cpkdhf0", "Import verifies and saves the voice pressed, by its ID");
+  assert.equal(rows[0]!.querySelector("button")!.textContent, "importing…");
+  assert.ok(dom.document.querySelector('input[aria-label="Google voice ID"]'), "the ID stays for a voice not listed");
+});
+
+it("a project voice already in the world says so instead of Import", async () => {
+  const { sent } = await setup();
+  __setStateForTest({ ...FIXTURE_STATE, world: { ...FIXTURE_STATE.world!, designedVoices: [voice] }, app: { ...FIXTURE_STATE.app, manifest: SHIPPED_MANIFEST } });
+  await act(async () => button("From your Google project").click());
+  const list = sent.find(row => row.kind === "list-designed-voices")!;
+  await act(async () => __applyEventForTest({ type: "voice.designed-listed", at: voice.created, requestId: list.requestId, worldId: FIXTURE_STATE.world!.meta.worldId, reason: null,
+    voices: [{ remoteId: voice.remoteId, name: voice.name, language: "en-GB", model: voice.model, expiresAt: voice.expiresAt }] }));
+  assert.match(dom.document.querySelector('[data-testid="project-voice"]')!.textContent!, /in this world/);
+  assert.ok(!sent.some(row => row.kind === "save-designed-voice"));
+});

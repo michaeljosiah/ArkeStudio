@@ -5,8 +5,10 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import type { DomainEvent, SetupStatus } from "@arke-studio/contracts";
+import { SetupStatusSchema } from "@arke-studio/contracts";
 import { tempDir } from "../tmp.js";
 import { LocalSetupService, systemTar, type SetupDeps } from "../../src/setup/local-setup.js";
+import { SetupProcessCleanupPending } from "../../src/setup/process.js";
 import {
   catalogueTotalMb,
   isVoxaSetupComponentId,
@@ -17,6 +19,240 @@ import {
 } from "../../src/setup/catalogue.js";
 
 const GGML_MAGIC = [0x6c, 0x6d, 0x67, 0x67] as const;
+
+it("reviewed repair refuses a changed mapping and revalidates after its owner fence", async () => {
+  const appRoot = await root(), first = join(appRoot, "first"), second = join(appRoot, "second");
+  let selected = first, changeUnderFence = false;
+  const entry: CatalogueEntry = { id: "review-fixture", displayName: "Fixture", purpose: "Fixture", sizeMb: 1, optional: true,
+    spec: { kind: "files", dir: "weights", externalRoot: "models", files: [{ file: "model.bin", url: "https://example.test/model", sizeMb: 1 }] } };
+  for (const target of [first, second]) { await mkdir(join(target, "weights"), { recursive: true }); await writeFile(join(target, "weights", "model.bin"), "original"); }
+  const setup = new LocalSetupService(deps(), () => {}, { appRoot, catalogue: [entry], externalDirs: { models: () => selected },
+    beginFileMutation() { if (changeUnderFence) selected = first; return () => {}; } });
+  try {
+    const initial = SetupStatusSchema.parse(setup.status()).components[0]!.repairReview!;
+    selected = second; assert.equal(await setup.repair(entry.id, initial.revision), false);
+    const current = setup.status().components[0]!.repairReview!; changeUnderFence = true;
+    assert.equal(await setup.repair(entry.id, current.revision), false);
+    assert.equal(await readFile(join(first, "weights", "model.bin"), "utf8"), "original");
+    assert.equal(await readFile(join(second, "weights", "model.bin"), "utf8"), "original");
+    changeUnderFence = false;
+    assert.equal(await setup.repair(entry.id, setup.status().components[0]!.repairReview!.revision), true);
+    assert.equal(existsSync(join(first, "weights", "model.bin")), false);
+    assert.equal(await readFile(join(second, "weights", "model.bin"), "utf8"), "original");
+  } finally { await setup.dispose(); }
+});
+
+it("a repair intent that cannot be saved leaves the model untouched", async () => {
+  const appRoot = await root(), model = join(appRoot, "models", "fixture", "model.bin");
+  const entry: CatalogueEntry = { id: "review-fixture", displayName: "Fixture", purpose: "Fixture", sizeMb: 1, optional: true,
+    spec: { kind: "files", dir: "fixture", files: [{ file: "model.bin", url: "https://example.test/model", sizeMb: 1 }] } };
+  await mkdir(join(appRoot, "models", "fixture"), { recursive: true }); await writeFile(model, "original");
+  await writeFile(join(appRoot, "operations"), "not a directory");
+  const setup = new LocalSetupService(deps(), () => {}, { appRoot, catalogue: [entry] });
+  try {
+    assert.equal(await setup.repair(entry.id, setup.status().components[0]!.repairReview!.revision), false);
+    assert.equal(await readFile(model, "utf8"), "original");
+  } finally { await setup.dispose(); }
+});
+
+it("removal refuses a held model and shutdown drains an admitted removal without a duplicate command", async () => {
+  const entry: CatalogueEntry = { ...catalogue()[1]!, requires: [], optional: true, engine: "ollama" };
+  let busy = true, calls = 0, released = 0, entered!: () => void, finish!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const pending = new Promise<void>(resolve => { finish = resolve; });
+  const service = new LocalSetupService({ ...deps(), run: async () => { calls++; entered(); await pending; return { code: 0, output: "" }; } }, () => {}, {
+    appRoot: await root(), catalogue: [entry], beginFileMutation: (_id, selected) => {
+      assert.equal(selected, entry); if (busy) throw new Error("Model is in use");
+      return () => { released++; };
+    },
+  });
+  try {
+    await service.remove(entry.id); assert.equal(calls, 0); assert.match(service.status().components[0]!.detail!, /Model is in use/);
+    busy = false; const removing = service.remove(entry.id); await started;
+    await service.remove(entry.id); assert.equal(calls, 1); assert.equal(released, 0);
+    let stopped = false; const stop = service.dispose().then(() => { stopped = true; });
+    await Promise.resolve(); assert.equal(stopped, false);
+    finish(); await removing; await stop; assert.equal(released, 1);
+    await service.remove(entry.id); assert.equal(calls, 1);
+  } finally { finish(); await service.dispose(); }
+});
+
+it("a late runtime Skip does not abandon an installer that already started", { timeout: 10000 }, async () => {
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  const finish = new Promise<void>(resolve => { release = resolve; });
+  const ports = deps();
+  const service = new LocalSetupService({ ...ports, run: async (...args) => {
+    entered(); await finish; return ports.run(...args);
+  } }, () => {}, { appRoot: await root(), catalogue: [{ ...catalogue()[0]!, id: "ollama-runtime", optional: true }] });
+  try {
+    service.installClosure("ollama-runtime");
+    await started;
+    service.skip("ollama-runtime");
+    assert.equal(service.status().components[0]!.state, "installing");
+    release(); await service.run();
+    assert.equal(service.status().components[0]!.state, "ready");
+  } finally { release(); await service.dispose(); }
+});
+
+it("fresh and reopened setup makes no downloads until selected, and reuses the selected voice files", async () => {
+  const appRoot = await root();
+  for (const selected of [false, true, false]) {
+    const ports = deps();
+    const service = new LocalSetupService(ports, () => {}, { appRoot, catalogue: SETUP_CATALOGUE, throttleMs: 0 });
+    try {
+      await service.run();
+      assert.equal(ports.calls.filter(call => call.startsWith("fetch ")).length, 0, "startup only detects files");
+      assert.ok(ports.calls.filter(call => call.startsWith("run ")).every(call => call.endsWith(" list")), "detection cannot install or pull");
+      assert.ok(service.status().components.every(c => c.state === "available" || c.state === "present"));
+      for (const id of ["comfyui-runtime", "ollama-runtime", ...Object.values(VOXA_SETUP_COMPONENT_IDS)]) {
+        assert.notEqual(service.status().components.find(c => c.id === id)!.removable, true,
+          "optional acquisition must not introduce removal of live runtime/voice files");
+      }
+      if (selected) {
+        service.installClosure(VOXA_SETUP_COMPONENT_IDS.whisper);
+        await service.run();
+        assert.equal(ports.calls.filter(call => call.startsWith("fetch ")).length, 1, "only the chosen voice component is fetched");
+        assert.equal(service.status().components.find(c => c.id === VOXA_SETUP_COMPONENT_IDS.whisper)!.state, "ready");
+      }
+    } finally { await service.dispose(); }
+  }
+});
+
+it("unconfirmed installer cleanup retains its installation lease and staging bytes, blocking later work without replay", async () => {
+  for (const interactive of [false, true]) {
+    const appRoot = await root(), entries = [catalogue()[0]!, catalogue()[2]!];
+    let acquired = 0, released = 0, commands = 0, confirmed = false;
+    const activated: string[] = [], base = deps();
+    const service = new LocalSetupService({ ...base,
+      run: async () => { commands++; if (interactive && commands === 1) return { code: 1, output: "not installed" }; throw new SetupProcessCleanupPending(); },
+      confirmProcessCleanup: async () => { if (!confirmed) throw new SetupProcessCleanupPending(); },
+    }, () => {}, { appRoot, catalogue: entries, throttleMs: 0,
+      beginComponentInstall: async () => { acquired++; return () => { released++; }; },
+      onComponentReady: async id => { assert.equal(acquired, released); activated.push(id); },
+    });
+    try {
+      await service.run();
+      assert.equal(commands, interactive ? 2 : 1, "an unconfirmed silent launch cannot trigger the interactive fallback");
+      assert.equal(acquired, 1); assert.equal(released, 0); assert.deepEqual(activated, []);
+      assert.equal(service.status().components[0]!.state, "failed");
+      assert.equal(service.status().components[1]!.state, "blocked");
+      assert((await stat(join(appRoot, "models", ".staging", "OllamaSetup.exe"))).size > 0);
+      const before = base.calls.length;
+      await service.run(); assert.equal(base.calls.length, before, "unconfirmed cleanup admits no detection or transfer");
+      await assert.rejects(service.remove(entries[1]!.id), SetupProcessCleanupPending);
+      await assert.rejects(service.repair(entries[1]!.id), SetupProcessCleanupPending);
+      await assert.rejects(service.cancel(), SetupProcessCleanupPending);
+      assert.equal(released, 0);
+      confirmed = true; await service.run();
+      assert.equal(released, acquired); assert.equal(commands, interactive ? 2 : 1, "cleanup never replays the installer");
+      assert.deepEqual(activated, [entries[1]!.id]);
+    } finally { confirmed = true; await service.dispose(); }
+  }
+});
+
+it("Stop retains ownership when cancellation cannot confirm exit, and a later dispose can confirm without deleting staged bytes", async () => {
+  const appRoot = await root(); let entered!: () => void; const started = new Promise<void>(resolve => { entered = resolve; });
+  let released = 0, confirmations = 0, allow = false, discarded = 0;
+  const service = new LocalSetupService({ ...deps(), run: async (_command, _args, signal) => {
+    entered(); await new Promise<void>(resolve => { signal.addEventListener("abort", () => resolve(), { once: true }); if (signal.aborted) resolve(); });
+    throw new SetupProcessCleanupPending();
+  }, confirmProcessCleanup: async () => { confirmations++; if (!allow) throw new SetupProcessCleanupPending(); },
+  disposeProcesses: async () => { if (!allow) throw new SetupProcessCleanupPending(); } }, () => {}, {
+    appRoot, catalogue: [catalogue()[0]!], beginComponentInstall: async () => () => { released++; },
+  });
+  const internal = service as unknown as { discardOwned(entry: CatalogueEntry): Promise<unknown[]> };
+  const discard = internal.discardOwned.bind(service); internal.discardOwned = async entry => { discarded++; return discard(entry); };
+  const running = service.run();
+  try {
+    await started; const before = discarded;
+    await assert.rejects(service.cancel(), SetupProcessCleanupPending); await running;
+    assert.equal(confirmations, 0, "the cancellation does not immediately repeat its failed native cleanup");
+    assert.equal(discarded, before); assert.equal(released, 0);
+    await assert.rejects(service.dispose(), SetupProcessCleanupPending); assert.equal(released, 0);
+    allow = true; await service.dispose(); assert.equal(released, 1);
+    assert((await stat(join(appRoot, "models", ".staging", "OllamaSetup.exe"))).size > 0);
+  } finally { allow = true; await service.dispose(); await running; }
+});
+
+it("an unconfirmed read-only model listing blocks later setup until cleanup is confirmed, without replaying a model pull", async () => {
+  let calls = 0, allow = false;
+  const entry: CatalogueEntry = { ...catalogue()[1]!, requires: [], optional: true };
+  const service = new LocalSetupService({ ...deps(), run: async (_command, args) => {
+    calls++; assert.deepEqual(args, ["list"]); if (calls === 1) throw new SetupProcessCleanupPending(); return { code: 0, output: "" };
+  }, confirmProcessCleanup: async () => { if (!allow) throw new SetupProcessCleanupPending(); } }, () => {}, { appRoot: await root(), catalogue: [entry] });
+  try {
+    await service.detect(); assert.equal(service.status().components[0]!.state, "failed");
+    await service.detect(); await service.run(); assert.equal(calls, 1);
+    allow = true; await service.run(); assert.equal(calls, 2); assert.equal(service.status().components[0]!.state, "failed");
+  } finally { allow = true; await service.dispose(); }
+});
+
+it("an unconfirmed model removal retains its file-mutation lease until owner cleanup", async () => {
+  let released = 0, commands = 0, allow = false;
+  const entry: CatalogueEntry = { ...catalogue()[1]!, requires: [], optional: true };
+  const service = new LocalSetupService({ ...deps(), run: async (_command, args) => {
+    if (args[0] === "list") return { code: 0, output: "llama3.1:8b" };
+    commands++; throw new SetupProcessCleanupPending();
+  }, confirmProcessCleanup: async () => { if (!allow) throw new SetupProcessCleanupPending(); } }, () => {}, {
+    appRoot: await root(), catalogue: [entry], beginFileMutation: () => () => { released++; },
+  });
+  try {
+    await service.detect(); assert.equal(service.status().components[0]!.state, "present");
+    assert.equal((await service.remove(entry.id)).freedMb, 0); assert.equal(released, 0);
+    assert.match(service.status().components[0]!.detail!, /has not confirmed native process exit/);
+    allow = true; await service.run(); assert.equal(released, 1); assert.equal(commands, 1);
+  } finally { allow = true; await service.dispose(); }
+});
+
+it("publishes integer byte progress for small files whose catalogue size is a fractional MiB", async () => {
+  const entry: CatalogueEntry = { id: "small-file", displayName: "Small file", purpose: "Source fixture", sizeMb: 1,
+    spec: { kind: "files", dir: "small", files: [{ url: "https://example.test/source.py", file: "source.py", sizeMb: 0.00001 }] } };
+  const service = new LocalSetupService({ ...deps(), externallyPresent: async () => true }, () => {}, { appRoot: await root(), catalogue: [entry] });
+  try {
+    await service.detect(); const status = SetupStatusSchema.parse(service.status());
+    assert.equal(status.components[0]!.files![0]!.bytesDone, 10);
+  } finally { await service.dispose(); }
+});
+
+it("holds one install-owner lease through writes and policy rechecks, releasing before activation and on failure", async () => {
+  for (const fails of [false, true]) {
+    let held = false, acquired = 0, released = 0, policyChecks = 0, activated = 0;
+    const base = deps({ status: fails ? 500 : 200 });
+    const service = new LocalSetupService({ ...base, fetchStream: async (...args) => { assert(held); return base.fetchStream(...args); } }, () => {}, {
+      appRoot: await root(), catalogue: [catalogue()[2]!],
+      beforeComponentInstall: async () => { if (++policyChecks > 1) assert(held, "publication policy recheck keeps the existing lease"); },
+      beginComponentInstall: async () => { assert(!held); held = true; acquired++; return () => { assert(held); held = false; released++; }; },
+      onFileInstalled: async () => { assert(held); },
+      onComponentReady: async () => { assert(!held); activated++; },
+    });
+    try {
+      await service.run(); assert.equal(held, false); assert.equal(acquired, 1); assert.equal(released, 1);
+      assert.equal(activated, fails ? 0 : 1); assert.equal(service.status().components[0]!.state, fails ? "failed" : "ready");
+    } finally { await service.dispose(); }
+  }
+});
+
+it("reconciles models installed this session when the selected Ollama store changes", async () => {
+  let models = new Set<string>(), pulls = 0;
+  const entry = { ...catalogue()[1]!, requires: [], optional: true };
+  const service = new LocalSetupService({ ...deps(), ollama: {
+    modelsDir: () => null, list: async () => [...models],
+    pull: async model => { pulls++; models.add(model); }, remove: async model => { models.delete(model); },
+  } }, () => {}, { appRoot: await root(), catalogue: [entry] });
+  try {
+    service.retry(entry.id); await service.run();
+    assert.equal(service.status().components[0]!.state, "ready");
+    const previous = models;
+    models = new Set();
+    await service.detect();
+    assert.equal(service.status().components[0]!.state, "available");
+    service.installClosure(entry.id); await service.run();
+    assert.equal(service.status().components[0]!.state, "ready");
+    assert.equal(pulls, 2);
+    assert.deepEqual([...models], [...previous]);
+  } finally { await service.dispose(); }
+});
 
 it("keeps catalogue requirements in snapshots independently of transfer detail", async () => {
   const entry = SETUP_CATALOGUE.find(entry => entry.id === "ollama-gemma4-12b-balanced")!;

@@ -1,6 +1,9 @@
 import { valueSchema } from "./value-schema.js";
 import { z } from "zod";
+import { VoiceBackgroundOperationSchema } from "./voice-background.js";
 import { ImageDisclosureSchema, ImageObservationSchema } from "./world-chat-images.js";
+import { COMIC_ADAPTATION_CRAFT } from "./graphic-novel.js";
+import { AgentMediaObservationSchema } from "./agent-media.js";
 import { HumanDecisionCardSchema } from "./human-decision.js";
 
 /** A browser upload stays below the authenticated websocket frame budget, including base64. */
@@ -9,7 +12,7 @@ import { GenesisBlueprintSchema } from "./genesis.js";
 import { GenesisDecisionSchema } from "./genesis-review.js";
 import { GenesisImageCandidateSchema, GenesisImageTargetSchema } from "./genesis-images.js";
 import { GenesisVoiceCandidateSchema } from "./genesis-voices.js";
-import { ProductionSetupStateSchema, ProductionSetupUpdateSchema } from "./production-setup.js";
+import { ProductionSetupStateSchema, ProductionSetupStatusSchema, ProductionSetupUpdateSchema } from "./production-setup.js";
 import {
   WorldChatInputConstraintsSchema, WorldChatInputEventSchemas, WorldChatInputPromotionSchema, WorldChatInputQueueViewSchema,
 } from "./world-chat-input.js";
@@ -36,6 +39,7 @@ import {
   SlugSchema,
   TakeIdSchema,
   TurnIdSchema,
+  WorldFilePathSchema,
 } from "./ids.js";
 import { BIBLE_EDIT_BOUNDS, BibleEditRecordSchema, BibleEditSchema, type BibleEdit } from "./bible.js";
 import {
@@ -61,7 +65,7 @@ import {
 } from "./arke-actions.js";
 import { ArkeReadTargetSchema } from "./arke-reads.js";
 import { ProductionPlanRequestSchema, ProductionPlanCardSchema } from "./production-readiness.js";
-import { ModelWorldChatActionSchema, type ModelWorldChatAction } from "./world-chat-actions.js";
+import { ModelWorldChatActionSchema, editorProposalActionCount, type ModelWorldChatAction } from "./world-chat-actions.js";
 
 /**
  * World Chat (#70): a conversation about a world, and the propositions it produced.
@@ -117,6 +121,7 @@ export const WorldChatDeletionBlockSchema = z.enum([
   "wrap-up-in-flight",
   "unresolved-proposals",
   "pending-actions",
+  "background-lookups",
   /** Additional input still waiting or with an unsettled delivery (SPEC-045 R-19). */
   "pending-inputs",
   /** Private attachments still cited by a durable Bench composer or immutable take. */
@@ -268,6 +273,8 @@ export const WorldChatMessageSchema = z
     turnId: TurnIdSchema,
     role: z.enum(["user", "studio"]),
     text: z.string(),
+    /** Live delivery is already owned by its session; never auto-read it again after End voice. */
+    replyDelivery: z.literal("live-voice").optional(),
     /** Conversation-private attachment ids, not world artifact ids. */
     attachmentIds: z.array(ChatAttachmentIdSchema),
     createdAt: IsoDateTimeSchema,
@@ -384,6 +391,7 @@ export const CheckToolSchema = z.enum([
   "related",
   "get-attachment-text",
   "view-image",
+  "inspect-media", "sample-video", "analyze-audio-signal", "transcribe-audio", "review-audio-content", "listen-audio",
   /** Reading a page from the web, kept as an attachment so its quotes stay checkable. */
   "fetch-url",
   /*
@@ -421,6 +429,7 @@ export const WorldChatCheckReceiptSchema = z
     ),
     searchedCount: z.number().int().min(0).optional(),
     image: ImageObservationSchema.optional(),
+    media: AgentMediaObservationSchema.optional(),
     /** Present together on target reads; optional so every stored search receipt remains readable. */
     target: ArkeReadTargetSchema.optional(),
     observedRevisionOrDigest: z.string().min(1).max(200).optional(),
@@ -430,6 +439,15 @@ export const WorldChatCheckReceiptSchema = z
   })
   .strict()
   .superRefine((receipt, context) => {
+    const coverage = { "inspect-media": "metadata-only", "sample-video": "sampled-frames-only", "analyze-audio-signal": "decoded-audio-samples",
+      "transcribe-audio": "recognized-speech", "review-audio-content": "recognized-speech", "listen-audio": "model-audio-listening" } as const;
+    const expected = coverage[receipt.tool as keyof typeof coverage];
+    if (receipt.media && (!expected || receipt.media.coverage !== expected || receipt.status !== "complete") || expected && receipt.status === "complete" && !receipt.media) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "Media receipt evidence must match the completed tool's coverage" });
+    }
+    if (receipt.media?.transcript && (receipt.tool === "review-audio-content") !== !!receipt.media.transcript.contentReview) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "Speech-content review needs its exact script comparison; transcription alone cannot claim review" });
+    }
     if ((receipt.tool !== "view-image" && receipt.image !== undefined) ||
       (receipt.tool === "view-image" && receipt.status === "complete" && receipt.image === undefined)) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: "complete image receipts require an image observation; other tools cannot carry one" });
@@ -1130,8 +1148,11 @@ export type FrameRunOutcomeReport = z.infer<typeof FrameRunOutcomeReportSchema>;
  * never landed, and the panel would then describe changes that do not exist.
  */
 export const WorldChatStoredEventSchema = valueSchema(z.discriminatedUnion("type", [
+  z.object({ type: z.literal("voice.operation"), operation: VoiceBackgroundOperationSchema,
+    message: WorldChatMessageSchema.optional(), receipts: z.array(WorldChatCheckReceiptSchema).max(32).optional() }).strict(),
   z.object({ type: z.literal("image.disclosed"), disclosure: ImageDisclosureSchema }).strict(),
   z.object({ type: z.literal("image.receipt"), receipt: WorldChatCheckReceiptSchema }).strict(),
+  z.object({ type: z.literal("media.receipt"), receipt: WorldChatCheckReceiptSchema.refine(receipt => !!receipt.media && receipt.status === "complete", "A durable media receipt needs completed evidence") }).strict(),
   ...WorldChatInputEventSchemas,
   // A queued input becomes a primary turn in one record: message, constraints and run together,
   // so a crash can never pop an input without keeping the turn it became (SPEC-045 §2.4).
@@ -1445,7 +1466,7 @@ export type WorldChatEventEnvelope = z.infer<typeof WorldChatEventEnvelopeSchema
  */
 export const WorldChatSummarySchema = z
   .object({
-    setupStatus: ProductionSetupStateSchema.shape.status.optional(),
+    setupStatus: ProductionSetupStatusSchema.optional(),
     id: ConversationIdSchema,
     title: z.string().min(1).max(200),
     status: WorldChatStatusSchema,
@@ -1491,6 +1512,11 @@ export type WorldChatProblem = z.infer<typeof WorldChatProblemSchema>;
 export const WorldChatLoadedSchema = z
   .object({
     productionPlans: z.record(MessageIdSchema, ProductionPlanRequestSchema).optional(),
+    /**
+     * How many chapters of the story a setup adapts each reply read in full, keyed by the reply
+     * (SPEC-057 R-5). The reply's receipt says "18 of 18 chapters", or a partial read says so.
+     */
+    sourceReads: z.record(MessageIdSchema, z.object({ productionId: z.string().min(1).max(200), chapters: z.number().int().min(1) }).strict()).optional(),
     productionSetup: ProductionSetupStateSchema.optional(),
     id: ConversationIdSchema,
     title: z.string().min(1).max(200),
@@ -1505,6 +1531,8 @@ export const WorldChatLoadedSchema = z
     messages: z.array(WorldChatMessageSchema),
     imageDisclosures: z.array(ImageDisclosureSchema).optional(),
     imageReceipts: z.array(WorldChatCheckReceiptSchema).optional(),
+    mediaReceipts: z.array(WorldChatCheckReceiptSchema).max(256).optional(),
+    voiceOperations: z.array(VoiceBackgroundOperationSchema).max(200).optional(),
     /** Absent for conversations that have never used additional input (SPEC-045). */
     inputQueue: WorldChatInputQueueViewSchema.optional(),
     /** True when older messages exist before `messages[0]`. */
@@ -1542,6 +1570,12 @@ export const WorldChatLoadedSchema = z
      * what did NOT happen, and it belongs beside the sentence that may claim otherwise.
      */
     refusals: z.record(MessageIdSchema, RefusedToolsSchema).default({}),
+    /**
+     * What each studio reply proposed that could not be prepared, worded for a person: "Episode 1
+     * script: A draft of episode 1's script is waiting." Beside the reply for the reason
+     * `refusals` is (issue 1883): the reply had said the draft was made, and nothing else did.
+     */
+    notPrepared: z.record(MessageIdSchema, z.array(z.string().max(200))).default({}),
     /** Production filing rows, by the narration message they sit beside. */
     benchOutcomes: z.record(MessageIdSchema, BenchOutcomeReportSchema).default({}),
     /** Frame-run anchors, by narration message; report rows are joined from live frameRuns. */
@@ -1740,12 +1774,14 @@ export type ModelGroupOperation = z.infer<typeof ModelGroupOperationSchema>;
  * accept, so that one turn cannot become a wall of propositions nobody can review.
  */
 export const TURN_RESULT_BOUNDS = {
-  reply: 8_000,
+  // A chapter is durable conversation text, not a display-sized summary (#1927). The client
+  // pages long replies; the entire result still passes validation before anything is retained.
+  reply: 200_000,
   candidateOperations: 12,
   groupOperations: 6,
   actions: 12,
   productionActions: 24,
-  productionEditorRequests: 6,
+  productionEditorRequests: 2,
 } as const;
 
 const WorldChatTurnResultObjectSchema = z
@@ -1782,11 +1818,16 @@ const WorldChatTurnResultObjectSchema = z
     actions: z.array(ModelWorldChatActionSchema).max(TURN_RESULT_BOUNDS.actions).default([]),
   })
   .strict();
-export const WorldChatTurnResultSchema = valueSchema(WorldChatTurnResultObjectSchema);
+const editorProposalLimit = (turn: { editorRequests: readonly unknown[]; actions: readonly ModelWorldChatAction[] }, ctx: z.RefinementCtx) => {
+  const count = turn.editorRequests.length + editorProposalActionCount(turn.actions);
+  if (count > EDITOR_REQUEST_BOUNDS.perTurn) ctx.addIssue({ code: z.ZodIssueCode.custom,
+    message: `${count} editor proposals exceed the ${EDITOR_REQUEST_BOUNDS.perTurn}-per-turn limit across actions and editorRequests` });
+};
+export const WorldChatTurnResultSchema = valueSchema(WorldChatTurnResultObjectSchema.superRefine(editorProposalLimit));
 export const ProductionChatTurnResultSchema = valueSchema(WorldChatTurnResultObjectSchema.extend({
   actions: z.array(ModelWorldChatActionSchema).max(TURN_RESULT_BOUNDS.productionActions).default([]),
   editorRequests: z.array(ModelEditorRequestSchema).max(TURN_RESULT_BOUNDS.productionEditorRequests).default([]),
-}));
+}).superRefine(editorProposalLimit));
 export type WorldChatTurnResult = z.infer<typeof WorldChatTurnResultSchema>;
 
 // ---------------------------------------------------------------------------
@@ -1853,7 +1894,10 @@ export const WorldChatTranscriptMessageSchema = z
     turnId: TurnIdSchema.optional(),
     role: z.enum(["user", "studio"]),
     text: z.string(),
+    /** Attachments sent with this message, retained when the conversation is reopened. */
+    attachmentIds: z.array(ChatAttachmentIdSchema).optional(),
     /** Persisted receipts, already worded for a person: "read Maren Kest v4". */
+    replyDelivery: z.literal("live-voice").optional(),
     receipts: z.array(z.string().max(200)),
     /**
      * What this turn tried to do and was refused, worded for a person: "run a command on your
@@ -1887,11 +1931,15 @@ export type WorldChatTranscriptMessage = z.infer<typeof WorldChatTranscriptMessa
  */
 export const WorldChatWorkspaceSchema = z
   .object({
+    voiceOperations: z.array(VoiceBackgroundOperationSchema).max(200).optional(),
+    inputQueue: WorldChatInputQueueViewSchema.optional(),
+    runId: RunIdSchema.nullable().optional(),
     /** Live projections of existing human authorities; never part of a model turn result. */
     humanDecisions: z.array(HumanDecisionCardSchema).optional(),
     humanDecisionProblems: z.array(z.string().min(1).max(500)).optional(),
     imageDisclosures: z.array(ImageDisclosureSchema).optional(),
     imageReceipts: z.array(WorldChatCheckReceiptSchema).optional(),
+    mediaReceipts: z.array(WorldChatCheckReceiptSchema).max(256).optional(),
     productionSetup: ProductionSetupStateSchema.optional(),
     conversationId: ConversationIdSchema,
     status: WorldChatStatusSchema,
@@ -1950,6 +1998,8 @@ export const WorldChatWorkspaceSchema = z
             kind: z.enum(["document", "image", "audio", "video", "other"]),
             readability: z.enum(["text-readable", "not-readable", "extracted-text-available"]),
             promoted: z.boolean(),
+            /** Portable preview address; the client adds its current media authorization. */
+            imagePath: WorldFilePathSchema.optional(),
             imageInspection: z.literal("prepared").optional(),
           })
           .strict(),
@@ -2521,6 +2571,37 @@ const exampleWorldActions = {
     changes: { logline: "The drowned bell rings one night early." },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "production-episode-script": {
+    kind: "production-episode-script",
+    productionId: "low-water-drama",
+    episode: 1,
+    baseHash: "sha256:3f2a…",
+    blocks: [
+      { id: "01ARZ3NDEKTSV4RRFFQ69G5FB0", kind: "heading", place: "The bell tower", time: "Night" },
+      { kind: "ambience", heard: "Wind in the stairwell.", until: "new-1" },
+      { id: "01ARZ3NDEKTSV4RRFFQ69G5FB1", kind: "dialogue", speaker: "maren-kest", words: "Bray. Bray, look.", direction: "breathless" },
+      { id: "new-1", kind: "dialogue", speaker: "bray", words: "I see them." },
+    ],
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-comic-script": {
+    kind: "production-comic-script",
+    productionId: "low-water-drawn",
+    chapter: "salt",
+    baseHash: null,
+    pages: [{
+      layout: "feature",
+      panels: [
+        { description: "The harbour at slack water, boats on the mud, Maren walking the hard with her lantern.", characters: ["maren-kest"], location: "the-harbour",
+          lettering: [{ kind: "caption", text: "Salt was in everything that week." }],
+          source: { story: "low-water", chapter: "salt", paragraphs: [1, 2] } },
+        { description: "Bray at the weigh house door, watching her come.", characters: ["bray"],
+          lettering: [{ kind: "speech", speaker: "bray", text: "You walked the hard again." }],
+          source: { story: "low-water", chapter: "salt", paragraphs: [4] } },
+      ],
+    }],
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
   "production-prose-style": {
     kind: "production-prose-style",
     productionId: "saltlight",
@@ -2572,6 +2653,7 @@ const exampleWorldActions = {
     orderedIds: ["ep_the-ledger", "ep_below"],
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "chapter-review": { kind: "chapter-review", productionId: "saltlight", chapterId: "the-storm", checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-chapter-order": {
     kind: "production-chapter-order",
     productionId: "saltlight",
@@ -2721,6 +2803,25 @@ const exampleWorldActions = {
     subtitles: { trackId: "tr_subtitles", mode: "sidecar", sidecar: "vtt" },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  "production-comic-make": {
+    kind: "production-comic-make",
+    productionId: "saltlight",
+    target: { kind: "chapter", chapter: "the-tide" },
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-comic-mode": {
+    kind: "production-comic-mode",
+    productionId: "saltlight",
+    mode: "overlay",
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
+  "production-comic-export": {
+    kind: "production-comic-export",
+    productionId: "saltlight",
+    chapter: "the-tide",
+    formats: ["cbz", "pdf"],
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
   "production-export-cancel": {
     kind: "production-export-cancel",
     productionId: "saltlight",
@@ -2740,6 +2841,11 @@ const exampleWorldActions = {
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
   "bench-keep": { kind: "bench-keep", sessionId: `sess_${EXAMPLE_ULID}`, takeId: `tk_${EXAMPLE_ULID}`, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "music-track-choose": { kind: "music-track-choose", productionId: "songs-of-the-drowned-quarter", trackId: "the-bell-ropes", sessionId: `sess_${EXAMPLE_ULID}`, takeId: `tk_${EXAMPLE_ULID}`, baseHash: `sha256:${"a".repeat(64)}`, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "music-track-edit": { kind: "music-track-edit", productionId: "songs-of-the-drowned-quarter", trackId: "the-drowned-verse", trim: { startMs: 0, endMs: 238_000 }, fadeInMs: 2000, fadeOutMs: 8000,
+    sections: [{ label: "Intro", atMs: 0 }, { label: "Verse", atMs: 18_000 }, { label: "Chorus", atMs: 62_000 }], baseHash: `sha256:${"a".repeat(64)}`, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "music-sequence-set": { kind: "music-sequence-set", productionId: "songs-of-the-drowned-quarter", loudness: -14,
+    joins: [{ trackId: "the-drowned-verse", next: { gapMs: 2000 } }, { trackId: "slack-water", next: { crossfadeMs: 3000 } }], baseHash: `sha256:${"a".repeat(64)}`, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "bench-select": { kind: "bench-select", sessionId: `sess_${EXAMPLE_ULID}`, takeId: `tk_${EXAMPLE_ULID}`, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "bench-discard": { kind: "bench-discard", sessionId: `sess_${EXAMPLE_ULID}`, takeId: `tk_${EXAMPLE_ULID}`, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "prop-authoring": { kind: "prop-authoring", change: { operation: "create", name: "Tide sword", states: ["Intact", "Broken"] },
@@ -2752,6 +2858,14 @@ const exampleWorldActions = {
   "production-audio-generation": { kind: "production-audio-generation", productionId: "saltlight", request: { operation: "voice-line", shotId: "sh_12" }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-performance-command": { kind: "production-performance-command", productionId: "saltlight", command: { operation: "clear-selection", lineKey: `sh_${EXAMPLE_ULID}` }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-audio-edit": { kind: "production-audio-edit", productionId: "saltlight", request: { summary: "Mute the music track", commands: [{ kind: "set-track", trackId: "tr_music", muted: true }] }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "production-transitions-propose": { kind: "production-transitions-propose", productionId: "saltlight", proposal: { summary: "Add gentle crossfades", commands: [{ kind: "transition-set", trackId: "tr_picture", leftClipId: "cl_first", rightClipId: "cl_second", durationFrames: 24 }] }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "production-pictures-propose": { kind: "production-pictures-propose", productionId: "saltlight", proposal: { summary: "Lighten the overlay", commands: [{ kind: "picture-appearance", clipId: "cl_overlay", patch: { blendMode: "screen", opacity: 0.8 } }] }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "production-audio-studio-propose": { kind: "production-audio-studio-propose", productionId: "saltlight", chapterId: "ch_1", proposal: { base: "a".repeat(64), summary: "Lower the music", commands: [{ kind: "set-track", id: "music", changes: { gainDb: -12 } }] }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "production-effects-propose": { kind: "production-effects-propose", productionId: "saltlight",
+    scope: { kind: "effects-only", target: { kind: "composition" }, range: { startFrame: 0, endFrame: 240 }, audio: { kind: "off" },
+      direction: "Soften the existing dust", palette: [{ id: "dust", version: 1 }] }, proposal: { summary: "Soften the atmosphere",
+    commands: [{ kind: "effect-patch", clipId: "cl_dust", patch: { appearance: { opacity: .35 } } }], identities: [] }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "production-music": { kind: "production-music", productionId: "songs-of-the-drowned-quarter", command: { kind: "update-track", trackId: "the-drowned-verse", lyrics: "[verse]\nThe bells went under singing" }, checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
   "production-audio-cue": { kind: "production-audio-cue", productionId: "saltlight", source: { kind: "generation", actionRef: "music", outputIndex: 0 }, after: ["music"], trackId: "tr_music", startFrame: 0, durationFrames: 240, sourceInFrames: 0, gainDb: -6, role: "music", checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
 } satisfies Record<ModelWorldChatAction["kind"], ModelWorldChatAction>;
 
@@ -2790,8 +2904,8 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "reference-style": "Set the style override a character's kit is generated in.",
   "reference-generation": "Generate kit images: establish a look, main photo, character sheet, looks, missing or regenerated tiles, location views.",
   "reference-image-import": "Import an image the person picks as a world image, master look or staged reference. Approve opens the picker.",
-  "reference-world-image-result-use": "Use a pending world-image candidate as the world's key art.",
-  "reference-master-look-result-use": "Use a pending master-look candidate as the world's master look.",
+  "reference-world-image-result-use": "Use one pending candidateIndex OR a benchTake {sessionId, takeId} as the world's key art. For a Bench take, also read get_bench_session and cite its complete receipt. Never supply both sources.",
+  "reference-master-look-result-use": "Use one pending candidateIndex OR a benchTake {sessionId, takeId} as the world's master look. For a Bench take, also read get_bench_session and cite its complete receipt. Never supply both sources.",
   "reference-image-discard": "Discard a pending world-image or master-look candidate, or a staged reference.",
   "voice-assignment": "Assign a voice to a sheet, or clear it with null. Name only a voice you have read through list_voices.",
   "voice-audition": "Hear a character's line in a voice before assigning it.",
@@ -2799,7 +2913,8 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "voice-clip-review": "Accept or reject a voice take for a shot; a rejection cites the sheet field it fails.",
   "world-archive": "Archive this world.",
   "world-export": "Export this world.",
-  "production-create": "Create a production with its medium, kind, series, aspect, frame rate and defaults. The plan on the card is exactly what is created; it is never replanned after Approve.",
+  "production-create": "Create a production with its medium, kind, series, aspect, frame rate and defaults. Music is an album, single or soundtrack (productionKind); a soundtrack names the production it is for in soundtrackFor. The plan on the card is exactly what is created; it is never replanned after Approve.",
+  "production-music": "Change a music production's album: add a kept audio take or imported file from list_artifacts as its last track (makeAlbum only when the person said a single becomes an album), retitle a track or set its plain-text lyrics (write the words yourself; an empty string clears them), remove a track, reorder every track once, or set the cover to an image artifact or null. Track ids come from get_production_metadata's music row.",
   "production-metadata": "Change a production's title, medium, kind, series, status, aspect or frame rate.",
   "production-model": "Set the model a production uses for one capability.",
   "production-series": "Create or edit the Series record: title, engine, continuity and seasons. Recurring cast stays in world sheets.",
@@ -2809,12 +2924,15 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-chapter": "Outline chapters, create one, or edit a chapter's text, plan or a passage.",
   "production-scene": "Create a scene with its script, edit its title, synopsis, inherited place and defaults, or replace its script. Keep an existing block's id when only its text changes.",
   "production-episode-order": "Put episodes in a new order; name every episode once.",
+  "chapter-review": "Run bounded script and visual specialists over a saved chapter; return evidence-backed advisory findings without changing prose or media.",
   "production-chapter-order": "Put chapters in a new order; name every chapter once.",
   "production-scene-order": "Put scenes in a new order; name every scene once.",
   "production-scene-delete": "Delete a scene. Its history is kept and it can be restored.",
   "production-scene-restore": "Restore a scene to an earlier version.",
   "production-style": "Set the style this production's images and video are made in.",
   "production-prose-style": "Set the story's point of view, tense, voice and samples.",
+  "production-comic-script": `Plan, then write, a graphic novel chapter's pages. A chapter is planned before it is drafted: first send its plan alone, with no pages — every passage of the prose with keep, cut, merge, show or invent and why, each page's change and the turn it ends on, what the reader is shown or told and on which page, and every line that would lean on a cut or on something not yet shown and that the plan does not settle: a line the plan answers is not listed. Once the author keeps the plan, write the pages whole from it: turn the prose, or the chapter it adapts, into pages of panels and exact lettering. Read get_production first and name the chapter's comic baseHash — null for a chapter with nothing yet, as unpagedChapters lists them — keep every unchanged page, panel and line with its id, and cite each panel's source paragraphs. ${COMIC_ADAPTATION_CRAFT} The plan's shape, exactly: {"passages":[{"where":"¶ 1–6","what":"what happens","verdict":"keep","why":"a reason in a few words"}],"pages":[{"change":"what changes on the page","turn":"the turn it ends on"}],"knows":[{"name":"Bray","page":1,"how":"named"}],"leans":[{"page":3,"line":"the line","why":"what it leans on"}],"mysteries":["What is under the water?"]} — verdict is keep, cut, merge, show or invent; knows and leans may be empty; mysteries are the questions the book means the reader to carry unanswered, and the reader of the draft is told them. A page's layout sets how many panels it has: splash 1, feature or strip-3 3, grid-2x2 4, manga 5, grid-3x3 9; give each page exactly the panels its layout has. A reader who has only the pages reads every draft, and the author sees its questions beside the draft. They are advice: a question can be what the book holds back, so never answer one with words the book does not give or by telling the reader early. When the author asks about them, say which you would answer and how and which you would leave open, change nothing until they choose, then send the pages whole; they replace the draft waiting. The author keeps or discards each draft in Pages.`,
+  "production-episode-script": "Write or change an audio drama episode's script, whole. Read get_production first and name the script's baseHash — null for an episode with no script yet, as unwrittenEpisodes lists them — and keep every unchanged block with its id; the author keeps or discards the draft in the score.",
   "production-scene-command": "One command or an ordered commands list on a scene: cast and place, shots, staging, prompt overrides or boards. Independent commands on the same scene share an atomic card showing the resulting shot list. Explicit after dependencies stay separate cards. Use ref:name in a shot target to name the one shot a preceding action with ref=name creates; include that ref in after when it is a separate card. Visual facts require the person's review on the shot panel and cannot be set here.",
   "production-board-compile": "Compile a scene's storyboard from its shots and frames.",
   "production-board-export": "Export a scene's storyboard to a file the person chooses.",
@@ -2840,8 +2958,14 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-branch-canon": "Propose Canon that holds only on one route through the branch map.",
   "production-interactive-export": "Export the interactive production as a playable file.",
   "production-cut-export": "Export the cut of the production or one episode with a preset and subtitles.",
+  "production-comic-make": "Make a Panel by panel graphic novel's chapter, page or one panel again: the card prices it and the author approves. It draws the panels, redraws faults and places the words. It never accepts a panel at fault or a page.",
+  "production-comic-mode": "Set how a graphic novel's pages are made: overlay is Panel by panel, baked is Whole page. Pages already made stay as they are.",
+  "production-comic-export": "Export a graphic novel, or one chapter of it, as CBZ, PDF or EPUB. Only accepted pages can go.",
   "production-export-cancel": "Cancel an export that is running.",
-  "bench-generation": "Generate image, video, speech or music at the quote shown. Omit sessionId to create a session only on approval; rerunTakeId repeats a read take as a new card. Read eligible generation routes first. For speech, complete list_voices and use the exact provider/model/voiceId of an available catalogue row. Sound effects are unavailable: refuse a sound-effects request by name instead of generating music.",
+  "bench-generation": "Generate image, video, speech or music at the quote shown. Omit sessionId to create a session only on approval; rerunTakeId repeats a read take as a new card. Read eligible generation routes first. For speech, complete list_voices and use the exact provider/model/voiceId of an available catalogue row. Sound effects are unavailable: refuse a sound-effects request by name instead of generating music. For a music production's track, name musicTrack with its productionId and trackId: the takes go to the album's own session as that track's.",
+  "music-track-choose": "Make one of a music track's finished takes the track. Read get_production for the track's takes and get_bench_session for the album's session first. baseHash is get_production's music.baseHash.",
+  "music-track-edit": "Set a music track's trim, fade in and out, and sections, in milliseconds on its take's own clock. The take is never changed. Send the whole edit: a null trim plays the whole take. baseHash is get_production's music.baseHash.",
+  "music-sequence-set": "Set a music album's loudness target and what comes between each track and the next: a gap, a crossfade or nothing. A crossfade adds no time. baseHash is get_production's music.baseHash.",
   "bench-keep": "Keep a completed Bench take on the world's artifact shelf; generation alone files nothing.",
   "bench-select": "Select a read Bench take within its session; this changes neither a production's selection nor provider work.",
   "bench-discard": "Discard an open Bench take from its session as a destructive decision; filed results remain on their shelf.",
@@ -2853,7 +2977,11 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-audio-generation": "Quote a shot voice line, a generated performance, a scene table read, a speaking character sample, or local sample preparation. Read the exact source, assigned voice and current production first. Audition, rights, performance review and purge remain human controls.",
   "production-performance-command": "Propose a kept performance's duration, place its selected audio with explicit timing, or clear a line's selection. Versions, review and source hashes are frozen by the coordinator.",
   "production-audio-edit": "Propose typed timeline audio changes: tracks, gains, mute, roles and mix ducking. The person reviews and applies the ordinary editor request atomically.",
-  "production-audio-cue": "Stage a cue on a named existing audio track at an explicit frame and duration. For a new result, name an earlier generation action ref and include it in after; approval waits for that result. Sound effects are unavailable.",
+  "production-transitions-propose": "Prepare a crossfade composite card in ordinary chat. Read complete get_timeline and list_editor_requests and cite receipts. Use transition-set {trackId,leftClipId,rightClipId,durationFrames} or transition-remove for exact ordered touching still-image pairs. Preserve every cut, total duration and audio. One second is the default; floor half before the cut and ceil half after, at least two frames, no overlapping neighboring windows. Skip videos/gaps and keep protected values. For revisions include family {id,parentVersionId,candidateHash}; manual adjustments and Keep Current remain sticky. After Apply omit family. Never apply, review or release protection. Maximum 50 commands and two editor proposals per turn.",
+  "production-pictures-propose": "Prepare a picture-appearance composite card in chat. Read complete get_timeline and list_editor_requests and cite receipts. Use picture-appearance {clipId,patch:{blendMode:normal|screen|add,opacity:0..1}} for existing picture clips. Preserve placement, cuts, sources and sound. Read protected settings and retained manual decisions. For revisions include family {id,parentVersionId,candidateHash}; adjusted values and Keep Current stay sticky. Never review, apply or release protection. A person chooses Review in timeline, edits Suggested and applies the exact version. Counts toward the shared maximum two editor proposals per turn.",
+  "production-audio-studio-propose": "Prepare audio changes to a chapter, or to an audio drama's episode (chapterId episode-NNN, e.g. episode-001), for Current/Suggested review in Audio Studio. Read every page of get_chapter with section audio-studio first; copy its exact base, clip/source ids and integer 48000 Hz sample clock. Use passage-boundary or range attachments for cues unless fixed timing is requested. Proposals never apply automatically. Never release protection or acknowledge omitted speech. Revise a pending family only with its exact id and latest version; Keep Current and applied families are closed. Do not recreate a declined suggestion as a new family unless the person explicitly asks. Existing source windows and exact source hashes remain pinned. New takes must be prepared in the Library. All editor proposal paths together allow two per turn.",
+  "production-effects-propose": "Prepare an effects-only composite card from ordinary chat or the exact attached effect-arrangement subject. Without that subject, include scope with the proposed visual target, exact range, optional audio or Off, palette and direction resolved from the request and current timeline; ask only for genuinely ambiguous bindings. An attached subject cannot be overridden. Read complete get_timeline and list_editor_requests, preserve protected and Adjusted by you scopes, Keep current, Exclude and source bindings. Use family id, parentVersionId and candidateHash only to revise a pending version; after Apply, omit family and propose against Current. New effect aliases need new-effect identity claims; later additions reuse allocated slots or request explicit new-slot permission. Protect/release are inert requestedActions only. Never apply, activate Suggested or grant revision permission. Air Particles uses preset id air-particles v1, appearance texture/softness/depth/blendMode, motion airflow/particleDeflections/boundary (soft-bounce or open-flow), and seed for explicit New pattern. Do not change Pattern unless requested. Clip blending uses production-pictures-propose. Creative commands use the shared effect catalogue and 50-command bound; all editor proposal paths together allow two per turn.",
+  "production-audio-cue": "Stage a cue on a named existing audio track at an explicit frame and duration. For a new result, name an earlier generation action ref and include it in after; approval waits for that result. Sound effects are unavailable here; an audio drama's cue gets its sound from Add a sound in its script.",
 } as const satisfies Record<ModelWorldChatAction["kind"], string>;
 
 /** Shaped exactly as the coordinator accepts it; the guide prints this object (issue 684). */
@@ -3070,12 +3198,14 @@ Return one JSON object and nothing else — no prose around it, no markdown fenc
 
 {"reply": "...", "candidateOperations": [...], "groupOperations": [...], "bibleEdits": [...], "editorRequests": [...], "sceneEdits": [...], "actions": [...]}
 
-reply is plain prose for the person (at most ${TURN_RESULT_BOUNDS.reply} characters). candidateOperations holds at most ${TURN_RESULT_BOUNDS.candidateOperations} operations, groupOperations at most ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits at most ${BIBLE_EDIT_BOUNDS.edits}, editorRequests at most ${EDITOR_REQUEST_BOUNDS.perTurn} (${TURN_RESULT_BOUNDS.productionEditorRequests} in production threads), sceneEdits at most ${SCENE_EDIT_BOUNDS.perTurn}, actions at most ${TURN_RESULT_BOUNDS.actions} (${TURN_RESULT_BOUNDS.productionActions} in production threads); all are [] when there is nothing to record.
+reply is plain prose. Be concise, but retain requested long-form prose in full (hard limit ${TURN_RESULT_BOUNDS.reply} characters; the client pages long replies). A reply does not save a chapter: put its complete manuscript in the production-chapter action's changes.body, with a short reply introduction. Never shorten a manuscript for display or claim a prepared action is committed. Limits: candidateOperations ${TURN_RESULT_BOUNDS.candidateOperations}, groupOperations ${TURN_RESULT_BOUNDS.groupOperations}, bibleEdits ${BIBLE_EDIT_BOUNDS.edits}, editorRequests ${EDITOR_REQUEST_BOUNDS.perTurn} (${TURN_RESULT_BOUNDS.productionEditorRequests} in production threads), sceneEdits ${SCENE_EDIT_BOUNDS.perTurn}, actions ${TURN_RESULT_BOUNDS.actions} (${TURN_RESULT_BOUNDS.productionActions} in production threads). Use [] for unused lists.
 
 A complete result:
 ${JSON.stringify(exampleTurnResult, null, 1)}
 
 ### Candidate operations
+
+An executable kind such as production-chapter belongs in actions[].kind, never a candidate classification. Correct a requested change in its typed action; do not replace it with advice.
 
 op is one of create | update | withdraw | split.
 
@@ -3097,7 +3227,7 @@ candidateId and expectedRevision come from "What you have already understood" �
 
 ### The payload each classification requires
 
-Each classification below shows one complete example, then every field its draft accepts — the example is one instance, not the limit of what you may send. A field marked optional may be left out; one marked "or null to clear it" may be set to null to remove what is there. No other field is accepted, and one unknown field rejects the whole turn.
+Each classification shows a complete example and every accepted draft field. Examples do not limit that catalogue. Omit optional fields; "or null to clear it" permits removal with null. One unknown field rejects the whole turn.
 
 - ${draftPayloadLine("canon.create")}
   fields: ${draftFieldCatalogue("canon.create")}
@@ -3116,7 +3246,7 @@ ${sheetSectionRule()}
   proseEdits carries the complete new body of each section it touches, never an instruction to append.
   fields: ${draftFieldCatalogue("relationship.change")}
 - ${draftPayloadLine("art-direction.change")}
-  Use this — never canon.create — when they want the world to LOOK different. It changes the world look itself, which is what every image is generated from; a Canon entry describing a style changes nothing anyone can see. description is the whole look as it should now read, not an adjustment to the old one. First call get_art_direction through arke-world and put its final complete checkReceiptId in checkReceiptIds; without that complete fenced read this whole replacement is refused.
+  Use this — never canon.create — to change the look used for images; a Canon style entry changes nothing anyone can see. description replaces the whole look. First read get_art_direction through arke-world and cite its final complete checkReceiptId; a partial or unfenced read cannot authorize replacement.
   fields: ${draftFieldCatalogue("art-direction.change")}
 - ${draftPayloadLine("media.image-opportunity")}
   Use this for media the person could generate. medium is image or video. Use concept-image for a free image, concept-video for a free video, and shot-video when the target is a shot. The Studio proposes the brief; it never claims the media already exists.
@@ -3144,7 +3274,7 @@ ${sheetSectionRule()}
 
 ### Evidence
 
-EVERY candidate must cite at least one message quotation with "purpose": "intent" — the words in which they asked for it. That one is required and no other kind substitutes for it: a candidate without it is rejected now, and would be dropped at wrap-up even if it were not. Anything else is supporting evidence, added beside it.
+EVERY candidate needs a message quotation with "purpose": "intent" citing the user's ask; no other kind substitutes. Missing intent rejects the candidate and prevents wrap-up acceptance. Other evidence only supports it.
 
 The required intent quotation:
 ${JSON.stringify(exampleMessageEvidence)}
@@ -3163,9 +3293,9 @@ ${JSON.stringify(exampleAttachmentEvidence)}
 
 ### Bible edits
 
-The bible is the author's own document about their world — their thinking, in their words. It is shown to you in full under "The author's bible", or that section says the world has none yet. It is NOT canon: nothing in it is settled, grounded answers do not come from it, and a candidate may never cite it as evidence. Other generation paths may use it only as non-binding creative intent.
+The bible is the author's thinking, shown under "The author's bible" (or marked absent). It is NOT canon: nothing in it is settled, it cannot ground answers or candidate evidence. Other generation paths may use it only as non-binding creative intent.
 
-You may propose edits to it. Each edit is shown on a permission card and writes only after the person's Approve; approval cuts a version and can be undone. This is not a licence to tidy. Propose an edit when they ask you to, or when writing something down is plainly the point of what they just said. Never append to it as a routine end to a turn: it is loaded whole on every turn, so a document you add to reflexively is one that grows until it costs them.
+Each edit is shown on a permission card and writes only after Approve, creating an undoable version. Propose one only when asked or when recording their words is plainly intended. Do not tidy or routinely append: the whole bible is loaded each turn, so growth costs them.
 
 op is one of set-section | append-to-section | remove-section | replace-document.
 
@@ -3175,13 +3305,13 @@ op is one of set-section | append-to-section | remove-section | replace-document
 - replace-document rewrites the whole thing: {"op": "replace-document", "text": "..."}
   Before replace-document, page get_bible through arke-world to complete=true; a partial Bible read cannot authorize a whole replacement.
 
-heading matches the \`## \` headings shown to you, ignoring case and surrounding space. append-to-section and remove-section are refused when the heading is not there, and a refusal rejects the whole turn — so use set-section when you are adding something new. Prefer a section-scoped edit to replace-document: restating a long document to change one line loses the parts you were not thinking about.
+heading matches \`## \` headings, ignoring case and surrounding space. Missing headings reject append-to-section or remove-section and the whole turn; use set-section for a new heading. Prefer section edits over replace-document to preserve untouched prose.
 
 Where the bible and Canon disagree, Canon is what the world has decided. Say so rather than choosing — and never quietly edit the bible to agree with Canon unless they ask you to.
 
 ### World actions
 
-actions holds operations on the world or a production that the person decides on a card. The actions you can prepare this turn, with their fields and an example of each, are listed in this turn's context under "Actions you can prepare"; when an entry there is only a line, call describe_action through arke-world for its fields before you prepare it. Never send an action that is not listed there.
+actions holds operations reviewed on permission cards. Use only kinds listed under "Actions you can prepare" in this turn's context. For a compact entry, call describe_action through arke-world for fields, reads and an example.
 
 - Every action waits for Approve. Nothing you write in reply makes it happen, so never say it has happened.
 - checkReceiptIds carries the final complete receipts of the reads the action names; a partial or earlier-turn read is refused.
@@ -3202,6 +3332,7 @@ Only a thread held to a production: an editor request prepares exact timeline co
 ${JSON.stringify(exampleEditorRequest)}
 
 summary names concrete changes. Commands: ${TIMELINE_EDITOR_COMMAND_NAMES}. detach-audio is excluded from editorRequests; the direct editor resolves live media. Fields and choices are in the action guide. Frames count from zero at the production frame rate. New clip ids use cl_ plus letters, digits and dashes. Do not duplicate pending requests.
+
 
 ### Scene edits
 

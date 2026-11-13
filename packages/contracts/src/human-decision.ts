@@ -20,7 +20,7 @@ export interface StageReview {
   draft: StageConstructionDraft;
   status: "pending" | "discarded";
 }
-export const StageReviewSchema: z.ZodType<StageReview> = z.object({
+export const StageReviewSchema: z.ZodType<StageReview, z.ZodTypeDef, unknown> = z.object({
   id: z.string().uuid(), worldId: UlidSchema, productionId: SlugSchema, sceneId: SceneIdSchema,
   shotId: ShotIdSchema, baseVersion: z.number().int().positive(), conversationId: ConversationIdSchema,
   actionId: ConversationActionIdSchema, createdAt: IsoDateTimeSchema, draft: StageConstructionDraftSchema,
@@ -31,6 +31,9 @@ export type HumanDecisionControl =
   | { kind: "plan"; productionId: string; planId: string; passIndex: number; gate: "continue" | "reconfirm"; capMicroUsd: number; estimatedMicroUsd: number }
   | { kind: "proposal"; proposalId: string }
   | { kind: "editor-request"; productionId: string; requestId: string }
+  | { kind: "transition-proposal"; productionId: string; familyId: string; versionId: string }
+  | { kind: "picture-proposal"; productionId: string; familyId: string; versionId: string }
+  | { kind: "effect-proposal"; productionId: string; familyId: string; versionId: string }
   | { kind: "extraction"; artifactId: string }
   | { kind: "voice-sample"; review: VoiceSampleReview }
   | { kind: "performance-review"; productionId: string; performanceId: string }
@@ -38,12 +41,15 @@ export type HumanDecisionControl =
   | { kind: "stage-review"; review: StageReview };
 
 /** Only the coordinator projects these controls. None is a model action or a permission grant. */
-export const HumanDecisionControlSchema: z.ZodType<HumanDecisionControl> = z.discriminatedUnion("kind", [
+export const HumanDecisionControlSchema: z.ZodType<HumanDecisionControl, z.ZodTypeDef, unknown> = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("plan"), productionId: SlugSchema, planId: z.string().min(1).max(100),
     passIndex: z.number().int().nonnegative(), gate: z.enum(["continue", "reconfirm"]),
     capMicroUsd: z.number().int().nonnegative(), estimatedMicroUsd: z.number().int().nonnegative() }).strict(),
   z.object({ kind: z.literal("proposal"), proposalId: ProposalIdSchema }).strict(),
   z.object({ kind: z.literal("editor-request"), productionId: SlugSchema, requestId: z.string().min(1).max(100) }).strict(),
+  z.object({ kind: z.literal("transition-proposal"), productionId: SlugSchema, familyId: z.string().min(1).max(160), versionId: z.string().min(1).max(160) }).strict(),
+  z.object({ kind: z.literal("picture-proposal"), productionId: SlugSchema, familyId: z.string().min(1).max(160), versionId: z.string().min(1).max(160) }).strict(),
+  z.object({ kind: z.literal("effect-proposal"), productionId: SlugSchema, familyId: z.string().min(1).max(160), versionId: z.string().min(1).max(160) }).strict(),
   z.object({ kind: z.literal("extraction"), artifactId: ArtifactIdSchema }).strict(),
   z.object({ kind: z.literal("voice-sample"), review: VoiceSampleReviewSchema }).strict(),
   z.object({ kind: z.literal("performance-review"), productionId: SlugSchema, performanceId: PerformanceIdSchema }).strict(),
@@ -64,7 +70,7 @@ export interface HumanDecisionCard {
   detail?: string;
   body: { family: "human-decision"; reason: string; control: HumanDecisionControl };
 }
-export const HumanDecisionCardSchema: z.ZodType<HumanDecisionCard> = z.object({
+export const HumanDecisionCardSchema: z.ZodType<HumanDecisionCard, z.ZodTypeDef, unknown> = z.object({
   id: z.string().min(1).max(300), worldId: UlidSchema, conversationId: ConversationIdSchema,
   actionId: ConversationActionIdSchema.optional(), turnId: TurnIdSchema.optional(), title: z.string().min(1).max(200),
   status: z.enum(["pending", "settled", "blocked"]), detail: z.string().max(1000).optional(),

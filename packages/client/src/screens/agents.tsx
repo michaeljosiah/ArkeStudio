@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, Textarea, cx } from "../components/ui.js";
 import { listHarnessModels, setAgentConfig, useStore } from "../lib/store.js";
-import { HarnessModelOptions, HarnessModelStatus } from "../components/harness-models.js";
+import { HarnessModelOptions, HarnessModelStatus, languageChoiceReason } from "../components/harness-models.js";
+import { inheritsWriterModel } from "@arke-studio/contracts";
 
 /**
  * The writing agents, behind Advanced on Harness (design 54b — this was a settings tab
@@ -17,6 +18,12 @@ import { HarnessModelOptions, HarnessModelStatus } from "../components/harness-m
  * restate canon, never stamp versions. The accept gate assumes them, so an agent talked out of
  * them fails in ways that look like application bugs rather than like a changed setting.
  */
+/** The roster's names are ids; "comic-script-reader" reads as "Comic script reader". */
+function agentLabel(name: string): string {
+  const words = name.replaceAll("-", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 export function AgentsPanel({ focusAgent }: { focusAgent?: string } = {}) {
   const { state } = useStore();
   const agents = state?.app.agents ?? [];
@@ -26,6 +33,10 @@ export function AgentsPanel({ focusAgent }: { focusAgent?: string } = {}) {
   const focusTarget = useRef<HTMLSelectElement | null>(null);
   const focusedAgent = useRef<string | undefined>(undefined);
   const catalogStatus = state?.app.harnessModelStatus?.status;
+  const modelOf = (name: string) => agents.find(a => a.name === name)?.model ?? undefined;
+  const writerModel = modelOf("story-writer");
+  // The comic script reader starts on the lettering reader's model before the writer's (SPEC-064 decision 15).
+  const lettering = modelOf("page-lettering-reader") ?? modelOf("chapter-visual-reviewer");
 
   // Ask once when the screen opens: the list is the harness's, and it can change under us.
   useEffect(() => {
@@ -46,11 +57,15 @@ export function AgentsPanel({ focusAgent }: { focusAgent?: string } = {}) {
       <HarnessModelStatus state={state} />
       {agents.map((a) => {
         const open = editing === a.name;
+        // A saved model the harness stopped listing showed a green dot here and failed only when the
+        // agent next ran (issue 1865): say so beside the agent, as AI models says a tile's reason.
+        // A catalogue that has not answered yet says nothing; the status above speaks for it.
+        const unusable = catalogStatus === "ready" ? languageChoiceReason(state, a.model, false, a.name === "stage-designer") : undefined;
         return (
           <div key={a.name} className="fy-set__row fy-set__row--stack">
             <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
               <div className="fy-set__name fy-set__name--wide">
-                <div className="fy-set__title">{a.name}</div>
+                <div className="fy-set__title">{agentLabel(a.name)}</div>
                 <div className="fy-set__caps">{a.description}</div>
               </div>
               <select
@@ -62,8 +77,9 @@ export function AgentsPanel({ focusAgent }: { focusAgent?: string } = {}) {
                 value={a.model ?? ""}
                 onChange={(e) => setAgentConfig(a.name, { model: e.target.value === "" ? null : e.target.value })}
               >
-                {/* Empty is a real answer, not a missing one: it means the harness decides. */}
-                <option value="">Ask the harness</option>
+                {/* Empty is a real answer, not a missing one: the writer's model, or the harness's choice. */}
+                <option value="">{a.name === "comic-script-reader" && lettering !== undefined ? "Same as Page lettering reader"
+                  : writerModel !== undefined && inheritsWriterModel(a.name) ? "Same as Story writer" : "Ask the harness"}</option>
                 <HarnessModelOptions state={state} selected={a.model} needsImages={a.name === "stage-designer"} />
               </select>
               <button
@@ -76,8 +92,14 @@ export function AgentsPanel({ focusAgent }: { focusAgent?: string } = {}) {
               >
                 {open ? "Close" : a.edited ? "Brief · edited" : "Brief"}
               </button>
-              <span className={cx("fy-set__dot", (a.model || a.edited) && "fy-set__dot--ok")} />
+              <span className={cx("fy-set__dot", unusable !== undefined ? "fy-set__dot--warn" : (a.model || a.edited) && "fy-set__dot--ok")} />
             </div>
+            {unusable === undefined ? null : (
+              <div className="fy-set__why" data-testid="agent-model-reason">
+                <span className="fy-set__dot fy-set__dot--warn" />
+                <span>{unusable}</span>
+              </div>
+            )}
             {open && (
               <div style={{ marginTop: 10 }}>
                 <Textarea

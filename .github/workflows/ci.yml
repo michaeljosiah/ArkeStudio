@@ -1,10 +1,14 @@
 # The gate every pull request must pass, on both the platform we ship (Windows) and the one
-# that catches path and case assumptions (Linux). Lint, types, build and tests — no formatting
-# check yet: 111 files predate the `format` script, and reformatting them is its own decision.
+# that catches path and case assumptions (Linux). Lint, types and build once; tests on both — no
+# formatting check yet: 111 files predate the `format` script, and reformatting them is its own
+# decision.
 #
-# Tests run in four shards per platform because the coordinator suite is 89% of the repo's test
-# time and has no hot file to remove — see scripts/ci-test.mjs for the measurements and why the
-# split is by shard rather than by hand-written directory list.
+# Coordinator tests run in eight shards on Windows and four on Linux; other workspaces have a
+# separate job. See scripts/ci-test.mjs for measurements and the automatic discovery that preserves
+# coverage. A pull request that changes only the client skips the coordinator's jobs (scope).
+# `CI passed` stands for every job, so one required check can gate a merge (issue 2812).
+# The effect benchmarks (effects.yml) and the engine's package check (engine.yml) run in their own
+# workflows, on main and on pull requests that touch what they measure.
 name: CI
 
 on:
@@ -21,44 +25,29 @@ permissions:
   contents: read
 
 jobs:
-  gate:
-    name: ${{ matrix.os }} · ${{ matrix.shard }}/4
-    runs-on: ${{ matrix.os }}
-    # A leaked file watcher holds a runner at "in progress" until GitHub's six-hour default kills
-    # it — six billable hours to learn what a ceiling reports the same morning (one leaked
-    # WorldStore cost exactly that on 2026-08-11).
-    #
-    # That job now belongs to the silence guard in scripts/ci-test.mjs, which kills a step that
-    # has printed nothing for ten minutes. A hang and a slow run are indistinguishable to a
-    # clock but not to the test runner, which prints a line per test right up until it stops —
-    # so the guard measures the thing that actually differs, and a busy runner cannot trip it.
-    #
-    # What is left for the ceiling is the one case silence misses: a suite that never ends and
-    # never stops talking. That job does not need a tight number, and tightness was the whole
-    # problem — measured over every green sharded run since #563 (432 jobs, 54 runs, to
-    # 2026-08-28), windows-latest shards run 2m34s–12m14s (median 4m59s) and ubuntu-latest
-    # 0m52s–3m30s (median 1m50s), so the 15 this replaces had already drifted to 1.2×: the same
-    # margin at which the 25 before it stopped discriminating and turned a docs-only PR red
-    # (#560). Sample the last few hours instead of the last few days and you will measure 8m44s
-    # and conclude something comfortable, which is how it drifted the first time.
-    #
-    # 30 minutes is what the guard needs, not a round number. It only reports before the ceiling
-    # while everything ahead of it fits: worst pre-Test work (4m37s on shard 1, which carries
-    # lint, types and build) + worst Test step (10m50s) + the guard's ten minutes + up to 10s of
-    # interval = 25m37s. Past that the ceiling quietly takes hang detection back and everything
-    # above stops being true, with nothing to say so — so move the two together. It is also 2.4×
-    # the worst shard, which is the older question and no longer the binding one.
-    #
-    # And the guard is more precise than the ceiling, not faster: on a shard that hangs at the
-    # very end it reports later than a tight ceiling would have. Precision is the point.
-    timeout-minutes: 30
-    strategy:
-      # One platform failing should still tell us about the other, and one shard failing should
-      # still tell us about the rest of the suite.
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        shard: [1, 2, 3, 4]
+  # Whether the coordinator's jobs are needed: not for a pull request that changes only client
+  # files no coordinator test reads. A push to main always runs everything (scripts/ci-scope.mjs).
+  scope:
+    name: What changed
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      coordinator: ${{ steps.scope.outputs.coordinator }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+      - id: scope
+        run: node scripts/ci-scope.mjs "${{ github.event_name }}" >> "$GITHUB_OUTPUT"
+
+  # Lint, types and build describe the tree, not a platform, so they answer once. They used to ride
+  # on shard 1 of both platforms: typecheck alone took 9.5 minutes on each, and Windows shard 1
+  # reached the 30-minute ceiling on main on 2026-10-23 with no test failed. Here they run beside
+  # the shards rather than ahead of them.
+  checks:
+    name: Lint, types and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
     env:
       # The gate never launches Electron — it only reads the package's version and types, so the
       # ~100 MB binary is dead weight here. The packaging workflow fetches its own.
@@ -75,38 +64,170 @@ jobs:
       # from source where it doesn't. Either way it must succeed — the derived index depends on it.
       - run: npm ci
 
-      # Lint, types and build describe the tree, not a slice of it, so they answer once per
-      # platform rather than four times. Shard 1 carries them; the others go straight to tests.
       - name: Lint
-        if: matrix.shard == 1
         run: npm run lint
 
+      # Two programs side by side: every Node workspace as one, and the client (issue 2812).
       - name: Typecheck
-        if: matrix.shard == 1
         run: npm run typecheck
 
       - name: Build
-        if: matrix.shard == 1
         run: npm run build
 
-      # Check the native pipe before the many adapter sessions that depend on it. A helper
-      # startup failure should report once, without spending its timeout on every session.
-      - name: Windows file helper
-        if: matrix.os == 'windows-latest' && matrix.shard == 2
-        run: node --import tsx --test --test-timeout=45000 --test-name-pattern="Unicode paths and large binary reads|in-place Windows reparse" packages/adapter-codex/test/confined-files.test.ts
+      - name: Bundle budget
+        run: node scripts/check-bundle-budget.mjs
+
+      - name: CI test planning
+        run: node --test scripts/ci-test-plan.test.mjs scripts/ci-test-time.test.mjs
+
+  gate:
+    name: ${{ matrix.os }} · ${{ matrix.shard }}/${{ matrix.os == 'ubuntu-latest' && 4 || 8 }}
+    needs: scope
+    if: needs.scope.outputs.coordinator == 'true'
+    runs-on: ${{ matrix.os }}
+    # The script kills steps silent for ten minutes; this ceiling also bounds suites that
+    # keep printing forever. Keep enough room for setup, healthy work and the silence guard.
+    # Rebalance growing suites rather than treating a busy runner as a resource leak.
+    timeout-minutes: 30
+    strategy:
+      # One platform failing should still tell us about the other, and one shard failing should
+      # still tell us about the rest of the suite.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        # Linux shards finished in two to five minutes against Windows's six to seventeen
+        # (2026-11-09), so Linux takes four, each still far inside the ceiling (issue 2812).
+        exclude:
+          - { os: ubuntu-latest, shard: 5 }
+          - { os: ubuntu-latest, shard: 6 }
+          - { os: ubuntu-latest, shard: 7 }
+          - { os: ubuntu-latest, shard: 8 }
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./.github/actions/pause-defender
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Lint first (issue 2788): a push that fails lint used to run every test before the checks
+      # job said so — 39 of them spent 5,387 runner-minutes in one week.
+      - name: Lint
+        run: npm run lint
 
       - name: Windows owned-process cleanup
         if: matrix.os == 'windows-latest' && matrix.shard == 3
         run: node --import tsx --test --test-timeout=60000 packages/coordinator/test/harness/owned-child.test.ts
 
-      # Shard 2 also runs every workspace other than the coordinator — 50s of tests all told,
-      # smaller than the cost of splitting them further, and put beside a shard that is not
-      # already carrying lint, types and build.
-      - name: Test
-        run: node scripts/ci-test.mjs ${{ matrix.shard }}/4
+      - name: Offline audio-listener worker protocol (no model or GPU)
+        if: matrix.shard == 1
+        run: python -I -B packages/coordinator/test/media/local_audio_listener_test.py
 
-      - name: Qwen runtime and installer checks (no GPU)
-        if: matrix.shard == 2
+      - name: Offline Ming task mapping and archive safety (no model or GPU)
+        if: matrix.shard == 1
+        run: python -I -B scripts/test-ming-worker.py
+
+      - name: Test
+        run: node scripts/ci-test.mjs ${{ matrix.shard }}/${{ matrix.os == 'ubuntu-latest' && 4 || 8 }}
+
+  workspaces:
+    name: ${{ matrix.os }} · Other workspaces
+    runs-on: ${{ matrix.os }}
+    # These previously followed coordinator shard 2. On Windows that combination exceeded
+    # 30 minutes with no failed tests. Keep the ceiling and silence guard, split the work.
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/pause-defender
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      # Check the native pipe before the many adapter sessions that depend on it.
+      - name: Windows file helper
+        if: matrix.os == 'windows-latest'
+        run: node --import tsx --test --test-timeout=45000 --test-name-pattern="Unicode paths and large binary reads|in-place Windows reparse" packages/confined-tools/test/confined-files.test.ts
+      - name: Test
+        run: node scripts/ci-test.mjs workspaces
+
+  production-acceptance:
+    name: ${{ matrix.os }} · Production Chat film
+    needs: scope
+    if: needs.scope.outputs.coordinator == 'true'
+    runs-on: ${{ matrix.os }}
+    # The film itself takes about half a minute; the rest is setup and the FFmpeg install, whose
+    # Windows fallback can take two minutes. The effect benchmarks that used to share this job,
+    # and needed its old 25 minutes, are in effects.yml now.
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    # The `runner` context does not exist at job level. Naming it in this env block made the whole
+    # file invalid, so every push to main from #1592 on started no job at all, not just this one.
+    # Step-level env and `with` can read it.
+    env:
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+      ARKE_PRODUCTION_ACCEPTANCE_REAL_MEDIA: 1
+    steps:
+      - uses: actions/checkout@v5
+      - uses: ./.github/actions/pause-defender
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - uses: ./.github/actions/install-ffmpeg
+      # The only run of this test in CI: the coordinator shards skip it by name (scripts/
+      # ci-test-plan.mjs), since this job runs the same film with real media where they used an
+      # injected encoder. It additionally decodes provider fixtures and makes the native
+      # twelve-second review cut.
+      - name: Make a film from Production Chat
+        working-directory: packages/coordinator
+        env:
+          ARKE_PRODUCTION_ACCEPTANCE_DIR: ${{ runner.temp }}/arke-production-acceptance
+        run: node --import tsx --test --test-timeout=240000 test/world-chat/production-acceptance.test.ts
+      - name: Retain cards, spend and exported media
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-chat-${{ runner.os }}
+          path: ${{ runner.temp }}/arke-production-acceptance
+          if-no-files-found: warn
+
+  # One check that stands for all of them, so a required status can gate a merge without naming
+  # every shard (issue 2812). A job skipped by scope passes; one failed or cancelled does not.
+  passed:
+    name: CI passed
+    if: always()
+    needs: [scope, checks, gate, workspaces, production-acceptance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every job passed or was not needed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
         run: |
-          node --test scripts/test/install-comfyui-qwen21.test.mjs
-          python scripts/test/qwen21-runtime.test.py
+          node -e '
+            const failed = Object.entries(JSON.parse(process.env.RESULTS)).filter(([, job]) => job.result !== "success" && job.result !== "skipped");
+            for (const [name, job] of failed) console.log(`${name}: ${job.result}`);
+            process.exit(failed.length > 0 ? 1 : 0);
+          '

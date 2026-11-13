@@ -1,19 +1,39 @@
+import { VoiceConversationCommandSchema, VoiceConversationResponseSchema, type VoiceConversationResponse } from "./voice-conversation.js";
+import { PromptTargetSchema, PromptInspectSourceSchema } from "./prompt-tools.js";
+import { WORLD_CHAT_INPUT_BOUNDS, WorldChatInputRequestSchema, WorldChatInputRoutingSchema } from "./world-chat-input.js";
+import { MediaMeasurementSourceSchema } from "./media-measurement.js";
+import { Sha256Schema as MeasurementHashSchema } from "./ids.js";
+import { TraversalEvidenceSchema } from "./routing.js";
+import { OnboardingPlanSchema } from "./onboarding.js";
+import { DraftGuideDescriptionRequestSchema, GuideVoiceLinesRequestSchema, SetGuideEntrySchema, SetGuideStorySchema, SetGuideTeasersSchema } from "./world-guide.js";
+import { ARKE_PLAYER_PICTURE_SIZES } from "./world-package.js";
+import { ArkePlayerPartRequestSchema } from "./arke-player-release.js";
+import { ChapterReviewDecisionSchema, ChapterReviewChecksSchema } from "./chapter-review.js";
+import { ManuscriptReviewDecisionSchema } from "./manuscript-review.js";
+import { StoryPublishActionSchema } from "./story-publication.js";
 import { valueSchema } from "./value-schema.js";
+import { BrowserMediaFilesSchema } from "./browser-media-import.js";
 import { SamplingSettingSchema } from "./local-sampling.js";
 import { ReviewCitationSchema } from "./take.js";
 import { VoiceDesignDraftSchema } from "./designed-voice.js";
 import { GenesisDraftSchema } from "./genesis.js";
 import { GenesisImportResolveSchema } from "./genesis-imports.js";
 import { GenesisImageTargetSchema } from "./genesis-images.js";
+import { CreatorPublishingFormSchema } from "./creator-publishing.js";
 import { AccountPageSchema } from "./account.js";
 import { StageReferenceFrameSchema } from "./scene.js";
 import { isManuscriptLanguage } from "./manuscript.js";
-import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingSchema } from "./audiobook.js";
+import { AudiobookDirectionInputSchema, AudiobookReaderSchema, AudiobookReadingSchema, AudiobookTurnPlaceSchema } from "./audiobook.js";
+import { AudiobookCreditDetailsSchema, CREDIT_WORDS_MAX } from "./audiobook-credits.js";
 import { AudiobookPictureSourceSchema } from "./audiobook-pictures.js";
-import { LOOK_LINE_MAX, LookTargetSchema } from "./audiobook-look.js";
-import { PICTURE_PROMPT_MAX, PictureShotSchema } from "./audiobook-illustrate.js";
+import { AudiobookScopeSchema } from "./audiobook-listening.js";
+import { AudiobookVideoOptionsSchema } from "./audiobook-video.js";
+import { AudiobookMotionQuoteSchema } from "./audiobook-motion-quote.js";
+import { LOOK_LINE_MAX, LookTargetSchema, PictureOwnLooksSchema } from "./audiobook-look.js";
+import { ILLUSTRATION_ROWS_MAX, PICTURE_PROMPT_MAX, PictureShotSchema, PictureReuseSchema } from "./audiobook-illustrate.js";
 import { BedInputSchema, BlockSoundInputSchema, BlockTimingInputSchema, ReactionInputSchema } from "./audiobook-timing.js";
 import { TimingProposalSchema } from "./audiobook-timing-proposal.js";
+import { AudioArrangementEditSchema } from "./audio-arrangement-schema.js";
 import { StageInspectionFrameSchema } from "./stage-construction.js";
 import { DialogueFailureTagSchema } from "./take-feedback.js";
 import { ShotVisualFactsSchema } from "./shot-visual-facts.js";
@@ -23,14 +43,18 @@ import { AudioAttestationSchema, AudioRangeSchema, FullSha256Schema } from "./au
 import { RehearsalIdSchema } from "./rehearsal.js";
 import { PerformanceReferenceRoleSchema } from "./performance-bible.js";
 import { PerformanceDeliverySchema } from "./voice.js";
-import { CADENCE_NOTE_MAX, CADENCE_PHRASE_MAX, CadencePlanSchema } from "./cadence.js";
+import { CADENCE_NOTE_MAX, PERFORMANCE_NOTE_MAX, CadencePlanSchema } from "./cadence.js";
 import { PerformanceIdSchema } from "./performance.js";
 import { VoiceSampleSourceSchema } from "./voice-sample.js";
 import { z } from "zod";
+import { RecoveryModeSchema, RecoveryAdvancedSettingsSchema } from "./recovery-policy.js";
+import { RecoveryHistoryCommandSchema, RecoveryHistoryQuerySchema } from "./recovery-settings.js";
+import { RecoveryActionCommandSchema } from "./recovery-actions.js";
+import { CharacterAliasesInputSchema } from "./world.js";
 import { RoutingCommandSchema } from "./world-chat-actions.js";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
-import { BIBLE_HELPER_BOUNDS, BibleHelperKindSchema } from "./bible.js";
-import { ClientStateSchema } from "./client-state.js";
+import { MusicSequenceSchema, MusicTrackEditSchema } from "./music.js";
+import { ClientStateSchema, type ClientState } from "./client-state.js";
 import { AdapterActionSchema } from "./adapters.js";
 import { MAX_CLIP_LANE } from "./cut.js";
 import {
@@ -41,11 +65,17 @@ import {
   TimelineTrackIdSchema,
 } from "./timeline.js";
 import { EditorRequestIdSchema, WorldChatSubjectSchema } from "./editor-request.js";
+import { EffectReviewCommandSchema } from "./editor-effect-review.js";
+import { TransitionReviewCommandSchema } from "./editor-transition-proposal.js";
+import { PictureReviewCommandSchema } from "./editor-picture-proposal.js";
 import { LanguageTagSchema, SidecarFormatSchema, SubtitleOutputModeSchema } from "./subtitles.js";
-import { DomainEventSchema } from "./events.js";
+import { DomainEventSchema, type DomainEvent } from "./events.js";
+import { DramaDeliverySchema } from "./audio-drama-edition.js";
+import { DramaChapterDecisionSchema, DramaReviewDecisionSchema, DramaRoleKeySchema, DramaRoleSchema, EpisodeScriptBlockSchema, MissingVoiceChoiceSchema } from "./audio-drama.js";
+import { COMIC_LIMITS, ComicAttemptCapSchema, ComicModeSchema, ComicPageSchema, ComicReadingSchema, ComicStyleSchema, ComicTypefaceSchema, LetteringPlacementSchema, LetteringThresholdsSchema } from "./graphic-novel.js";
 import { ArtifactIdSchema, CandidateIdSchema, ChatAttachmentIdSchema, ConversationIdSchema, EpisodeIdSchema, FrameRunIdSchema, GenesisIdSchema, JobIdSchema, PresetIdSchema, SceneIdSchema, SessionIdSchema, ShotIdSchema, SlugSchema, TakeIdSchema, TurnIdSchema, UlidSchema, prefixedIdSchema } from "./ids.js";
-import { PropIdSchema, PropStateIdSchema } from "./prop.js";
-import { ProseReadSourceSchema } from "./prose.js";
+import { PropIdSchema, PropStateIdSchema, PropStateSelectionSchema } from "./prop.js";
+import { ProseReadSourceSchema, CHAPTER_GOAL_LIMITS } from "./prose.js";
 import { BROWSER_ATTACHMENT_MAX_BYTES } from "./world-chat.js";
 import { SceneCommandSchema } from "./scene-operations.js";
 import { SizeTierSchema } from "./manifest.js";
@@ -54,16 +84,20 @@ import { ReferenceAngleSchema } from "./reference.js";
 import { HarnessEngineSchema } from "./harness.js";
 import { BackgroundNotificationPreferenceSchema, NarratorSettingsSchema, ThemePreferenceSchema } from "./settings.js";
 import { MAX_IMAGE_PREVIEWS, STAGED_REFERENCE_KEY } from "./planning.js";
-import { CHARACTER_ROLE_MAX, SHORT_NAME_MAX, FrameRateSchema, ProductionFormatSchema, ProductionMediumSchema, ChapterImpliesWriteSchema } from "./world.js";
+import { CHARACTER_ROLE_MAX, SHORT_NAME_MAX, FrameRateSchema, ProductionFormatSchema, ProductionMediumSchema, ChapterImpliesWriteSchema, CHAPTER_PLAN_LIMITS } from "./world.js";
 import { DeliverySchema } from "./voice.js";
 import { WorldChatContextSchema, WorldChatInitiativeSchema } from "./world-chat.js";
 import { ProductionSetupCommandSchema } from "./production-setup.js";
 import { NarrativeFieldsSchema } from "./production-narrative.js";
 import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
-import { DecideConversationActionSchema } from "./arke-actions.js";
+import { DecideConversationActionSchema, PrepareConversationTakeReviewSchema } from "./arke-actions.js";
+import { StudioAssistantCommandSchema, StudioAssistantResponseSchema, type StudioAssistantResponse } from "./studio-assistant.js";
+import { SnapshotPageSchema, type SnapshotPage } from "./snapshot-page.js";
+import { TextDraftAnswerSchema, TextDraftCommandSchema, TextTypefaceBytesSchema, TextTypefacesCommandSchema, type TextDraftAnswer, type TextTypefaceBytes } from "./editor-text-draft.js";
 
 /**
- * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then `event` frames, sequence
+ * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then events and requester-only
+ * Studio replies. Private replies never enter shared app/world state. Sequence
  * numbers monotonic per connection. A reconnecting client sends its last-seen sequence and
  * receives a fresh snapshot — partial replay is deliberately not offered (D4).
  */
@@ -76,11 +110,32 @@ import { DecideConversationActionSchema } from "./arke-actions.js";
 export const PASSAGE_SPAN_MAX = 20_000;
 export const PASSAGE_KEPT_MAX = 2_400;
 
-export const FrameSchema = valueSchema(z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema }).strict(),
+/**
+ * Named rather than inferred: the snapshot carries the whole client state and the event every
+ * domain event, and inferred together they outgrew what the compiler will write into the engine's
+ * bundled declarations (TS7056, once the graphic novel's events joined the studio assistant's
+ * frame). Naming the parts keeps the declaration a reference to them.
+ */
+export type Frame =
+  | { kind: "snapshot"; seq: number; state: ClientState; retainedHistory?: ("jobs" | "ledger")[] | undefined; collectionSnapshot?: number | undefined; resume?: string | undefined }
+  | { kind: "snapshot-page"; seq: number; snapshot: number; page: SnapshotPage }
+  | { kind: "event"; seq: number; event: DomainEvent }
+  | { kind: "studio-assistant"; seq: number; requestId: string; response: StudioAssistantResponse }
+  | { kind: "voice-conversation"; seq: number; session: string; response: VoiceConversationResponse }
+  // A text draft and the typeface files answer the window that asked and no other (SPEC-065 R-32).
+  | { kind: "text-draft"; seq: number; requestId: string; answer: TextDraftAnswer }
+  | { kind: "text-typefaces"; seq: number; requestId: string; faces: TextTypefaceBytes[] };
+
+export const FrameSchema: z.ZodType<Frame, z.ZodTypeDef, unknown> = valueSchema(z.discriminatedUnion("kind", [
+  // `resume` names the collections this barrier completed, for a reconnect to present (issue 2798).
+  z.object({ kind: z.literal("snapshot"), seq: z.number().int().min(1), state: ClientStateSchema, retainedHistory: z.array(z.enum(["jobs", "ledger"])).optional(), collectionSnapshot: z.number().int().min(1).optional(), resume: z.string().max(64).optional() }).strict(),
+  z.object({ kind: z.literal("snapshot-page"), seq: z.number().int().min(1), snapshot: z.number().int().min(1), page: SnapshotPageSchema }).strict(),
   z.object({ kind: z.literal("event"), seq: z.number().int().min(1), event: DomainEventSchema }).strict(),
+  z.object({ kind: z.literal("voice-conversation"), seq: z.number().int().min(1), session: z.string().uuid(), response: VoiceConversationResponseSchema }).strict(),
+  z.object({ kind: z.literal("studio-assistant"), seq: z.number().int().min(1), requestId: z.string().uuid(), response: StudioAssistantResponseSchema }).strict(),
+  z.object({ kind: z.literal("text-draft"), seq: z.number().int().min(1), requestId: z.string().uuid(), answer: TextDraftAnswerSchema }).strict(),
+  z.object({ kind: z.literal("text-typefaces"), seq: z.number().int().min(1), requestId: z.string().uuid(), faces: TextTypefaceBytesSchema }).strict(),
 ]));
-export type Frame = z.infer<typeof FrameSchema>;
 
 /** What a client may send up. Commands arrive with their owning specs. */
 /** A staged-reference key, as strictly as the coordinator needs it to be — it becomes a folder. */
@@ -103,7 +158,27 @@ export const EditorImportSchema = z.object({
 }).strict();
 export type EditorImport = z.infer<typeof EditorImportSchema>;
 
+export const AudioStudioImportSchema = z.object({
+  productionId: SlugSchema, chapterFile: z.string().min(1).max(1000), base: z.string().regex(/^[a-f0-9]{64}$/),
+  destination: z.union([z.literal("library"), z.object({
+    trackId: z.string().min(1).max(160).nullable(), at: z.number().int().min(0).max(4_147_200_000),
+  }).strict()]),
+}).strict();
+export type AudioStudioImport = z.infer<typeof AudioStudioImportSchema>;
+
+/** Import a file as a music production's track (SPEC-060 R-6, 238d): filed to the production, probed, then added. */
+export const MusicImportSchema = z.object({ productionId: SlugSchema, makeAlbum: z.boolean().optional() }).strict();
+export type MusicImport = z.infer<typeof MusicImportSchema>;
+
 export const ClientMessageSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("import-world"), requestId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("check-onboarding") }).strict(),
+  z.object({ kind: z.literal("save-onboarding"), plan: OnboardingPlanSchema,
+    action: z.enum(["save", "install", "finish"]).default("save") }).strict(),
+  StudioAssistantCommandSchema,
+  VoiceConversationCommandSchema,
+  TextDraftCommandSchema,
+  TextTypefacesCommandSchema,
   ProductionSetupCommandSchema,
   z.object({ kind: z.literal("save-production-narrative"), worldId: UlidSchema, productionId: SlugSchema,
     requestId: UlidSchema, expectedVersion: z.number().int().min(1).nullable(), narrative: NarrativeFieldsSchema }).strict(),
@@ -111,7 +186,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("stage-inspection"), worldId: z.string(), requestId: z.string().uuid(), round: z.number().int().min(1).max(2), frames: z.array(StageInspectionFrameSchema).min(3).max(8) }).strict(),
   z.object({ kind: z.literal("stage-construct-cancel"), worldId: z.string(), requestId: z.string().uuid() }).strict(),
 
-  z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional(), token: z.string().max(64).optional() }).strict(),
+  // `resumable`: this window reads resume tokens; `resume`: the last barrier whose collections it holds (issue 2798).
+  z.object({ kind: z.literal("hello"), lastSeq: z.number().int().min(0).optional(), token: z.string().max(64).optional(), retainHistory: z.boolean().optional(), pagedSnapshots: z.boolean().optional(), resumable: z.boolean().optional(), resume: z.string().max(64).optional() }).strict(),
   z.object({ kind: z.literal("open-world"), worldId: UlidSchema }).strict(),
   /** SPEC-002: create a world folder under the app root. */
   z
@@ -454,6 +530,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * twice is not an error — the second copy is a world of its own, slugged accordingly.
    */
   z.object({ kind: z.literal("install-sample-world") }).strict(),
+  z.object({ kind: z.literal("cancel-sample-world-download") }).strict(),
+  z.object({ kind: z.literal("discard-sample-world-download") }).strict(),
+  z.object({ kind: z.literal("refresh-sample-world-download") }).strict(),
   /** SPEC-002: adopt one closed-world edit — snapshot, bump, log (R-28). */
   z
     .object({ kind: z.literal("reconcile-external-edit"), worldId: UlidSchema, path: z.string().min(1) })
@@ -467,8 +546,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       /** World-relative sheet path, e.g. "characters/maren-kest.md". */
       path: z.string().min(1),
       summary: z.string().min(1).max(300),
+      /** Full form or changed sections. Omitted sections are preserved; this is not a body replacement. */
       sections: z.array(z.object({ heading: z.string().min(1), body: z.string() }).strict()).min(1),
-      /** Only these form fields may overwrite a proposal already present on this target (R-9a). */
+      /** Only these sections change, on the live sheet or a present draft. Empty body clears a named section. */
       dirtyHeadings: z.array(z.string().min(1)),
       /**
        * Characters only. The one frontmatter field the form edits, bounded here because this is
@@ -623,6 +703,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   DecideConversationActionSchema,
+  PrepareConversationTakeReviewSchema,
   /**
    * #70 §10.1.1: say something, and take a turn.
    *
@@ -635,7 +716,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       requestId: z.string().min(1),
       conversationId: ConversationIdSchema,
-      text: z.string().min(1).max(16_000),
+      text: z.string().min(1).max(WORLD_CHAT_INPUT_BOUNDS.text),
       attachmentIds: z.array(z.string().min(1)).max(20).default([]),
       /** This turn's language-model override; absent uses the production's remembered choice. */
       modelId: z.string().min(1).optional(),
@@ -667,6 +748,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       conversationId: ConversationIdSchema,
     })
     .strict(),
+  z.object({ kind: z.literal("world-chat-input"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    input: WorldChatInputRequestSchema }).strict(),
+  z.object({ kind: z.literal("world-chat-input-status"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    requestId: z.string().min(1).max(200) }).strict(),
+  z.object({ kind: z.literal("world-chat-input-remove"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    requestId: z.string().min(1).max(200), messageId: z.string().min(1), revision: z.number().int().min(0) }).strict(),
+  z.object({ kind: z.literal("world-chat-input-continue"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    requestId: z.string().min(1).max(200), revision: z.number().int().min(0), routing: WorldChatInputRoutingSchema }).strict(),
   /**
    * #70 §10.1.1: turn the conversation into proposals and close it.
    *
@@ -917,7 +1006,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * there — presence is completion — so it is no answer to a file that arrived intact and is
    * the wrong bytes. Repair is the answer to a digest that did not match.
    */
-  z.object({ kind: z.literal("setup-repair"), componentId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("setup-repair"), componentId: z.string().min(1), revision: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
   z.object({ kind: z.literal("setup-cancel") }).strict(),
   /** Genesis conversation: shape a world that does not exist yet, in a sandbox session. */
   z
@@ -1203,6 +1292,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       name: z.string().min(1).max(200),
       /** A character's short name (design turn 194, rule 12b): absent leaves it, empty or null puts the default back. */
       shortName: z.string().trim().max(SHORT_NAME_MAX).nullable().optional(),
+      /** Explicit character identity names: absent leaves them, empty removes them. */
+      aliases: CharacterAliasesInputSchema.optional(),
     })
     .strict(),
   /** The human's own action: assigning (or clearing) a voice commits straight to the sheet —
@@ -1224,6 +1315,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         })
         .strict()
         .nullable(),
+    })
+    .strict(),
+  /**
+   * A character's narration (design turn 200, SPEC-047 R-165): how a narrator plays them under
+   * `performed`, written straight to the sheet as a voice is. Null or empty clears it.
+   */
+  z
+    .object({
+      kind: z.literal("set-sheet-narration"),
+      worldId: UlidSchema,
+      path: z.string().min(1),
+      narration: z.string().trim().max(PERFORMANCE_NOTE_MAX).nullable(),
     })
     .strict(),
   /** SPEC-007 R-16: a sheet's computed detail — refs and incoming links from the index. */
@@ -1369,6 +1472,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       kind: z.literal("set-spend-threshold"),
       thresholdMicroUsd: z.number().int().min(0),
       periodDays: z.number().int().min(1).max(365),
+      /** Hear's one-press limit (issue 1882); absent keeps the one set. */
+      onePressMicroUsd: z.number().int().min(0).max(100_000_000).optional(),
     })
     .strict(),
   /** SPEC-008 R-22: re-run local runtime detection on demand. */
@@ -1390,6 +1495,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("choose-codex-executable") }).strict(),
   z.object({ kind: z.literal("clear-codex-executable") }).strict(),
   /** Voxa configuration stays host-owned: none of these messages contains a filesystem path. */
+  z.object({ kind: z.literal("set-speech-backend"), backend: z.enum(["voxa", "pipecat"]) }).strict(),
+  z.object({ kind: z.literal("cancel-voice-background"), worldId: UlidSchema, conversationId: ConversationIdSchema,
+    operationId: prefixedIdSchema("vop"), requestId: z.string().uuid() }).strict(),
   z.object({ kind: z.literal("choose-voxa-executable") }).strict(),
   z.object({ kind: z.literal("clear-voxa-executable") }).strict(),
   z.object({ kind: z.literal("use-bundled-voxa") }).strict(),
@@ -1405,6 +1513,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("clear-comfyui-models-dir") }).strict(),
   z.object({ kind: z.literal("set-comfyui-url"), url: z.string().min(1).max(2000) }).strict(),
   z.object({ kind: z.literal("clear-comfyui-engine") }).strict(),
+  z.object({ kind: z.literal("set-ollama-url"), url: z.string().min(1).max(2000) }).strict(),
+  z.object({ kind: z.literal("clear-ollama-engine") }).strict(),
+  z.object({ kind: z.literal("ollama-refresh") }).strict(),
+  z.object({ kind: z.literal("ollama-update-runtime") }).strict(),
   z.object({ kind: z.literal("use-detected-comfyui"), location: z.string().min(1) }).strict(),
   /** Re-read node classes and dependency identity on demand — the Settings refresh. */
   z.object({ kind: z.literal("comfyui-refresh") }).strict(),
@@ -1427,7 +1539,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("repair-voice-models") }).strict(),
   z.object({ kind: z.literal("open-model-folder") }).strict(),
   /** Open what a spawned engine said, host-owned end to end (SPEC-033 R-70; issue 585). */
-  z.object({ kind: z.literal("open-engine-log"), engine: z.enum(["comfyui", "voxa"]) }).strict(),
+  z.object({ kind: z.literal("open-engine-log"), engine: z.enum(["comfyui", "voxa", "ollama"]) }).strict(),
   z.object({ kind: z.literal("test-local-voice"), requestId: UlidSchema }).strict(),
   z
     .object({
@@ -1437,6 +1549,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     .strict(),
   /** The Inbox was opened: the instant the bell's foreground dot measures against (SPEC-014 R-25). */
   z.object({ kind: z.literal("mark-inbox-seen") }).strict(),
+  z.object({ kind: z.literal("settle-file-problems"), worldId: z.string().min(1), paths: z.array(z.string().min(1)) }).strict(),
   /** What's new was read up to this bundled release (SPEC-014 R-25). */
   z.object({ kind: z.literal("mark-whats-new-seen"), version: z.string().min(1) }).strict(),
   /**
@@ -1445,6 +1558,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * the browser, or clears the refusal a rejected one left. Open puts one of the account's own
    * pages in the system browser — the app draws no billing and no profile form.
    */
+  z.object({ kind: z.literal("creator-publishing-list"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("creator-publishing-prepare"), worldId: UlidSchema, productionId: SlugSchema, exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("creator-publishing-submit"), worldId: UlidSchema, candidateId: z.string().uuid(), form: CreatorPublishingFormSchema, replace: z.string().uuid().optional(), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("creator-publishing-control"), worldId: UlidSchema, id: z.string().uuid(), action: z.enum(["pause", "resume", "cancel", "refresh"]), requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("account-sign-in") }).strict(),
   z.object({ kind: z.literal("account-create") }).strict(),
   z.object({ kind: z.literal("account-cancel-sign-in") }).strict(),
@@ -1512,6 +1629,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       sheetId: SlugSchema,
       selection: z.discriminatedUnion("source", [
+        z.object({ source: z.literal("legacy-portrait") }).strict(),
         z.object({ source: z.literal("take"), takeId: TakeIdSchema }).strict(),
         z
           .object({
@@ -1618,15 +1736,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       propId: PropIdSchema,
       stateId: PropStateIdSchema,
-      selection: z.discriminatedUnion("source", [
-        z.object({ source: z.literal("take"), takeId: TakeIdSchema }).strict(),
-        z
-          .object({
-            source: z.literal("candidate"),
-            file: z.string().regex(/^[^/\\]+\.(?:png|jpe?g|webp)$/i, "expected an image filename"),
-          })
-          .strict(),
-      ]),
+      selection: PropStateSelectionSchema,
       replace: z.boolean().optional(),
     })
     .strict(),
@@ -1785,12 +1895,31 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       sheetId: SlugSchema,
       takeId: TakeIdSchema,
+      name: z.string().trim().max(60).optional(),
       /** A close view made for a chapter's look (R-118): filed on the same look as its `closeFile`. */
       closeTakeId: TakeIdSchema.optional(),
       /** `takeId` is a close view (made by Make close view) for the accepted look with this id, not a look of its own. */
       closeFor: z.string().min(1).optional(),
       /** The chapter that asked for the look chooses it for the character in the same press (R-112). */
       choose: z.object({ productionId: SlugSchema, chapterFile: z.string().min(1), key: z.string().min(1).max(120), name: z.string().min(1).max(120).optional(), sheet: SlugSchema.optional() }).strict().optional(),
+    })
+    .strict(),
+  /** A finished image lands for the ordinary look review; no identity is accepted by import. */
+  z.object({
+    kind: z.literal("import-character-look"), worldId: UlidSchema, requestId: UlidSchema,
+    sheetId: SlugSchema, name: z.string().trim().min(1).max(60),
+    lookKind: z.enum(["costume", "pose-expression", "condition-age"]),
+    files: BrowserMediaFilesSchema.refine(files => files.length === 1, "Choose one image for this look."),
+  }).strict(),
+  z
+    .object({
+      kind: z.literal("rename-character-look"),
+      worldId: UlidSchema,
+      requestId: UlidSchema,
+      sheetId: SlugSchema,
+      lookId: z.string().min(1),
+      name: z.string().trim().max(60),
+      expectedName: z.string().min(1).max(60).nullable(),
     })
     .strict(),
   z
@@ -1884,6 +2013,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("save-designed-voice"), requestId: UlidSchema, worldId: UlidSchema,
     jobId: z.string().regex(/^jb_[0-9A-HJKMNP-TV-Z]{26}$/).optional(), remoteId: z.string().regex(/^voice_[A-Za-z0-9_-]{1,200}$/).optional(),
   }).strict(),
+  /** The voices designed in the connected Google project, by name (design turn 204, issue 1635). */
+  z.object({ kind: z.literal("list-designed-voices"), requestId: UlidSchema, worldId: UlidSchema }).strict(),
   z.object({ kind: z.literal("hear-designed-voice"), requestId: UlidSchema, worldId: UlidSchema,
     model: z.string().min(1), voiceId: z.string().min(1), text: z.string().trim().min(1).max(4000),
     confirmedSpeechMicroUsd: z.number().int().nonnegative(),
@@ -1899,7 +2030,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * open. It could not, at first: an empty id failed frame validation and the request was
    * dropped, leaving the picker reading a catalogue that never arrived.
    */
-  z.object({ kind: z.literal("voice-catalogue"), worldId: UlidSchema.optional() }).strict(),
+  z.object({ kind: z.literal("voice-catalogue"), worldId: UlidSchema.optional(), refresh: z.boolean().optional() }).strict(),
   z.object({ kind: z.literal("catalogue-voice-preview"), requestId: UlidSchema,
     provider: z.string().min(1), model: z.string().min(1), voiceId: z.string().min(1),
     maxMicroUsd: z.number().int().nonnegative(),
@@ -1951,6 +2082,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       voiceId: z.string().min(1),
       /** Opaque engine instance explicitly approved as a remote biometric-upload destination. */
       voiceUploadConfirmedFor: z.string().min(1).optional(),
+      /**
+       * The character's narration (design turn 200, R-168): the line read as a narrator plays
+       * them, the note leading it as a book sends it — a tag, a style, or held where the reader
+       * takes neither.
+       */
+      note: z.string().trim().min(1).max(PERFORMANCE_NOTE_MAX).optional(),
     })
     .strict(),
   /** SPEC-011 R-17: local push-to-talk transcription. Audio goes to loopback, nowhere else. */
@@ -1993,6 +2130,10 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
         .strict()
         .optional(),
       logline: z.string().max(500).optional(),
+      /** The production a Soundtrack is for (SPEC-060 R-3): music only, written to its `music.json`. */
+      soundtrackFor: SlugSchema.optional(),
+      /** A graphic novel from the door's Start empty (turn 272): Panel by panel, with one chapter. */
+      startEmpty: z.literal(true).optional(),
     })
     .strict(),
   /**
@@ -2198,6 +2339,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * Open a chapter: the body and its version, fetched on demand and answered by
    * `chapter.open-result` (turn 126). The summary in the bundle stays body-free on purpose.
    */
+  z.object({ kind: z.literal("chapter-review-start"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema, checks: ChapterReviewChecksSchema.optional(), recoverFrom: z.string().uuid().optional() }).strict(),
+  z.object({ kind: z.literal("chapter-review-preflight"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema, checks: ChapterReviewChecksSchema.optional() }).strict(),
+  z.object({ kind: z.literal("manuscript-review-start"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, brief: z.string().max(6000) }).strict(),
+  z.object({ kind: z.literal("manuscript-review-read"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, reviewId: UlidSchema.optional() }).strict(),
+  z.object({ kind: z.literal("manuscript-review-resume"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, reviewId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("manuscript-review-cancel"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("manuscript-review-decide"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, reviewId: UlidSchema, findingId: z.string().max(100), decision: ManuscriptReviewDecisionSchema }).strict(),
+  z.object({ kind: z.literal("manuscript-review-export"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, reviewId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("chapter-review-read"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("chapter-review-cancel"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("chapter-review-decide"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, requestId: UlidSchema,
+    reviewId: z.string().uuid(), findingId: z.string().uuid(), decision: ChapterReviewDecisionSchema, note: z.string().max(1000).optional() }).strict(),
   z
     .object({
       kind: z.literal("open-chapter"),
@@ -2205,6 +2358,20 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       chapterId: SlugSchema,
+    })
+    .strict(),
+  /**
+   * Compare versions (SPEC-056 R-13): the prose of one kept version of a chapter, read only. The
+   * answer is `chapter.version-result`, by requestId. Restoring stays `restore-chapter`.
+   */
+  z
+    .object({
+      kind: z.literal("read-chapter-version"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      version: z.number().int().min(1),
     })
     .strict(),
   /** SPEC-012 R-5: direct authoring saves in place — no proposal, no version cut. */
@@ -2227,7 +2394,264 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("retire-chapter"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  /**
+   * An audio drama's episode script, saved whole by the score (SPEC-057 R-83). Fenced like a
+   * chapter save: `baseHash` is the file the editor read, null for an episode with no script yet,
+   * and a save against a moved base is refused rather than merged. A direct save keeps the version.
+   */
+  /**
+   * Hear an audio drama's lines (SPEC-057 R-25..R-28, design turn 230g/h). `quoteOnly` prices the
+   * selection and names any speaker with no voice, making nothing; a press then sends the token it
+   * was quoted. `decisions` say what to do about a speaker with no voice — nothing substitutes on
+   * its own. `retake` makes a new take beside a current one, to wait for the author.
+   */
+  z
+    .object({
+      kind: z.literal("hear-drama-lines"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      episode: z.number().int().min(1).max(200),
+      blocks: z.array(UlidSchema).min(1).max(400),
+      /** The saved script's hash the press was priced from: a line edited since is refused, not heard old. */
+      scriptHash: z.string().min(1),
+      quoteOnly: z.boolean().optional(),
+      quoteToken: z.string().min(1).max(200).optional(),
+      decisions: z.record(SlugSchema, MissingVoiceChoiceSchema).optional(),
+      retake: z.boolean().optional(),
+    })
+    .strict(),
+  /**
+   * Make a sound for an audio drama's cue (SPEC-057 R-39..R-42, design turn 230x/y): priced first
+   * (`quoteOnly`), made against the token quoted. An ambience is made as two seamless loops; music
+   * with Eleven Music. Each is saved as a production artifact under `name`.
+   */
+  z
+    .object({
+      kind: z.literal("generate-drama-sound"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      cue: z.enum(["sound", "ambience", "music"]),
+      heard: z.string().max(600),
+      prompt: z.string().trim().min(1).max(2_000),
+      durationSec: z.number().min(0.5).max(300).nullable(),
+      loop: z.boolean().optional(),
+      name: z.string().trim().min(1).max(120),
+      quoteOnly: z.boolean().optional(),
+      quoteToken: z.string().min(1).max(200).optional(),
+    })
+    .strict(),
+  /**
+   * A role as this production plays it (SPEC-057 R-55..R-60, R-85): its voice here, How they sound,
+   * the narrator's version and a hidden identity. Kept in `audio-drama.json`; null clears the role.
+   */
+  z
+    .object({
+      kind: z.literal("set-drama-role"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      role: DramaRoleKeySchema,
+      value: DramaRoleSchema.nullable(),
+    })
+    .strict(),
+  /** An audio drama's edition (SPEC-057 R-71..R-76): the ready episodes, published and frozen. */
+  z
+    .object({
+      kind: z.literal("publish-drama-edition"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      name: z.string().trim().min(1).max(120),
+      delivery: DramaDeliverySchema,
+      episodes: z.array(z.number().int().min(1).max(200)).min(1).max(200),
+      /** Each separable track as its own file too (issue 1882); off unless asked for. */
+      stems: z.boolean().optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("list-drama-editions"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema }).strict(),
+  /** The exact chapter text a scene was adapted from, by the hash it was pinned at (SPEC-057 R-65). */
+  z
+    .object({
+      kind: z.literal("read-drama-source"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      hash: z.string().min(1).max(200),
+    })
+    .strict(),
+  /** What became of a source chapter (SPEC-057 R-61): kept in `audio-drama.json`; null clears it. */
+  z
+    .object({
+      kind: z.literal("set-drama-verdict"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapter: z.string().min(1).max(200),
+      value: DramaChapterDecisionSchema.nullable(),
+    })
+    .strict(),
+  /** A review note decided Intentional or Dismiss (R-53); null opens it again. */
+  z
+    .object({
+      kind: z.literal("decide-drama-note"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      key: z.string().min(1).max(200),
+      decision: DramaReviewDecisionSchema.nullable(),
+    })
+    .strict(),
+  /** The author's answer to a take that waits (R-30): keep the new one, or the one kept before. */
+  z
+    .object({
+      kind: z.literal("decide-drama-take"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      episode: z.number().int().min(1).max(200),
+      block: UlidSchema,
+      keep: z.enum(["new", "kept"]),
+      /** The waiting take the author heard: a different one waiting now is not decided. */
+      waiting: ArtifactIdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("save-episode-script"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      episode: z.number().int().min(1).max(200),
+      title: z.string().trim().max(160),
+      blocks: z.array(EpisodeScriptBlockSchema).max(4_000),
+      baseHash: z.string().min(1).nullable(),
+    })
+    .strict(),
   z.object({ kind: z.literal("restore-chapter-retired"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  /** A graphic novel chapter's comic script, saved whole and fenced on the file the editor read (SPEC-064 R-10). */
+  z
+    .object({
+      kind: z.literal("save-comic-script"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapter: SlugSchema,
+      pages: z.array(ComicPageSchema).max(COMIC_LIMITS.pagesPerChapter),
+      baseHash: z.string().min(1).nullable(),
+    })
+    .strict(),
+  /**
+   * What a page would cost and send, before anything is spent (SPEC-064 R-19, R-23, R-27). Asking
+   * also files a page that landed while the app was closed (R-25).
+   */
+  z
+    .object({
+      kind: z.literal("quote-comic-page"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      mode: ComicModeSchema.optional(),
+      /** Panel by panel: this panel's price alone (R-37a). */
+      panel: UlidSchema.optional(),
+    })
+    .strict(),
+  /** One page made on the price its press showed (R-22, R-25, R-27). */
+  z
+    .object({
+      kind: z.literal("make-comic-page"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      mode: ComicModeSchema.optional(),
+      /**
+       * The most the press may spend. With `untilPasses` it covers every attempt: the page is made
+       * again until its lettering passes, up to the book's cap (D-6, R-27).
+       */
+      confirmedMicroUsd: z.number().int().min(0),
+      untilPasses: z.literal(true).optional(),
+      /** Panel by panel: this panel alone; absent makes every panel not yet accepted (R-37a). */
+      panel: UlidSchema.optional(),
+    })
+    .strict(),
+  /** The words over a page's panels, placed by the author or an Undo of Arke's placing (R-38a, R-39a). */
+  z
+    .object({
+      kind: z.literal("set-comic-lettering"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      placements: z.array(LetteringPlacementSchema).max(COMIC_LIMITS.letteringPerPage),
+      /** This is the Undo of Arke's placing, so what it kept for one is let go. */
+      undoesPlacing: z.literal(true).optional(),
+    })
+    .strict(),
+  /** Arke places every unplaced line of one page, or of a chapter's ready pages; no picture credit (R-39a). */
+  z
+    .object({
+      kind: z.literal("place-comic-lettering"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      target: z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("page"), page: UlidSchema }).strict(),
+        z.object({ kind: z.literal("chapter"), chapter: z.string().min(1).max(200) }).strict(),
+      ]),
+    })
+    .strict(),
+  /**
+   * Accept page (R-48a): the one image the client flattened from the panels and words, filed as the
+   * page's take. `hash` is the page as the client drew it, so an edit meanwhile refuses it. The client
+   * draws it because the balloons on screen are its canvas: what is placed is what ships.
+   */
+  z
+    .object({
+      kind: z.literal("finish-comic-page"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      hash: z.string().min(1).max(80),
+      jpegBase64: z.string().min(1).max(40_000_000),
+    })
+    .strict(),
+  /** The book as CBZ and/or PDF from the accepted pages (SPEC-064 R-47, R-49). */
+  z.object({ kind: z.literal("export-comic"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, formats: z.array(z.enum(["cbz", "pdf", "epub"])).min(1).max(3) }).strict(),
+  /** Read a take back and check its lettering again (R-29). */
+  z.object({ kind: z.literal("check-comic-take"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, page: UlidSchema, take: UlidSchema }).strict(),
+  /** Keep a take as the page (R-26); past findings or an unchecked take only with an override (R-33). */
+  z
+    .object({
+      kind: z.literal("accept-comic-take"),
+      requestId: UlidSchema,
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      page: UlidSchema,
+      take: UlidSchema,
+      override: z.object({ findings: z.array(z.string().min(1).max(80)).max(200), reason: z.string().trim().min(1).max(400).optional() }).strict().optional(),
+    })
+    .strict(),
+  /** A review warning on a take marked Seen (SPEC-064 R-69, turn 253c): looked at, not fixed. */
+  z.object({ kind: z.literal("see-comic-warning"), requestId: UlidSchema, worldId: UlidSchema, productionId: SlugSchema, page: UlidSchema, take: UlidSchema,
+    warning: z.enum(["layout", "continuity", "likeness"]) }).strict(),
+  /** How a graphic novel reads and how its pages are checked (SPEC-064 R-12, R-31). */
+  z
+    .object({
+      kind: z.literal("set-comic-settings"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      settings: z.object({
+        reading: ComicReadingSchema.optional(),
+        aspect: z.string().min(3).max(12).optional(),
+        mode: ComicModeSchema.optional(),
+        typeface: ComicTypefaceSchema.optional(),
+        thresholds: LetteringThresholdsSchema.optional(),
+        cap: ComicAttemptCapSchema.optional(),
+        /** The book's style (R-21a); `null` is World look, the world's art direction alone. */
+        style: ComicStyleSchema.nullable().optional(),
+      }).strict(),
+    })
+    .strict(),
   /**
    * The plan on the chapter (turn 127): title, synopsis, point of view, story-time and the facts
    * it implies, saved in place as the prose is — no proposal, no version cut. `null` clears a
@@ -2242,10 +2666,14 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       changes: z
         .object({
           title: z.string().trim().min(1).max(200).optional(),
-          synopsis: z.string().trim().max(600).nullable().optional(),
+          synopsis: z.string().trim().max(CHAPTER_PLAN_LIMITS.synopsis).nullable().optional(),
           pov: SlugSchema.nullable().optional(),
-          when: z.string().trim().max(80).nullable().optional(),
+          when: z.string().trim().max(CHAPTER_PLAN_LIMITS.when).nullable().optional(),
           implies: ChapterImpliesWriteSchema.nullable().optional(),
+          // The chapter's own goal and chosen picture (SPEC-056 R-50): a whole number of words in
+          // range, and a world-relative image file the coordinator checks exists. null clears.
+          goal: z.number().int().min(CHAPTER_GOAL_LIMITS.min).max(CHAPTER_GOAL_LIMITS.max).nullable().optional(),
+          picture: z.string().trim().min(1).max(400).nullable().optional(),
         })
         .strict()
         .refine((changes) => Object.keys(changes).length > 0, "a plan edit must change at least one field"),
@@ -2447,6 +2875,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     productionId: SlugSchema, binding: MasterAudioBindingSchema }).strict(),
   z.object({ kind: z.literal("prepare-performance-audio-reference"), worldId: UlidSchema, requestId: UlidSchema,
     productionId: SlugSchema, performanceId: PerformanceIdSchema, expectedHash: FullSha256Schema, range: AudioRangeSchema }).strict(),
+  z.object({ kind: z.literal("set-prompt-tools"), enabled: z.boolean() }).strict(),
+  z.object({ kind: z.literal("measure-production-media"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema,
+    source: MediaMeasurementSourceSchema, expectedHash: MeasurementHashSchema.optional() }).strict(),
+  PromptTargetSchema.extend({ kind: z.literal("prompt-history-read"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  PromptTargetSchema.extend({ kind: z.literal("prompt-history-restore"), worldId: UlidSchema, requestId: UlidSchema,
+    assembledHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    baseVersion: z.number().int().positive(), baseHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+    sourceVersion: z.number().int().positive(), sourceHash: z.string().regex(/^sha256:[a-f0-9]{64}$/) }).strict(),
+  z.object({ kind: z.literal("prompt-request-inspect"), worldId: UlidSchema, requestId: UlidSchema, source: PromptInspectSourceSchema }).strict(),
+  z.object({ kind: z.literal("production-spend-refresh"), worldId: UlidSchema }).strict(),
   z
     .object({
       kind: z.literal("dispatch-scene-planned"),
@@ -2534,6 +2972,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       from: SceneIdSchema,
       to: SceneIdSchema,
       route: z.array(SceneIdSchema),
+      story: TraversalEvidenceSchema.shape.story,
     })
     .strict(),
   /** Epic 401 (brief §4): ask for the named findings. */
@@ -2675,6 +3114,28 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sourcePath: z.string().min(1),
       openingFrameSourcePath: z.string().min(1),
       referenceFrames: z.array(StageReferenceFrameSchema.extend({ sourcePath: z.string().min(1) })).min(2),
+      /** The look the frames were drawn in (issue 1825); absent is Greybox. */
+      look: z.enum(["greybox", "lit", "plate"]).optional(),
+    })
+    .strict(),
+  /** A board's cut animatic the Stage rendered (issue 1824, design turn 229g), filed and pinned on the scene's boards. */
+  z
+    .object({
+      kind: z.literal("stage-animatic"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      sceneFile: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/),
+      sceneId: SceneIdSchema,
+      baseVersion: z.number().int().min(1),
+      members: z.array(ShotIdSchema).min(2).max(24),
+      stagings: z.array(z.object({ shotId: ShotIdSchema, version: z.number().int().min(1), durationSec: z.number().positive(), lens: z.string().max(80) }).strict()).min(2).max(24),
+      durationSec: z.number().positive(),
+      aspect: z.string().min(1).max(20),
+      look: z.enum(["greybox", "lit", "plate"]).optional(),
+      sourcePath: z.string().min(1),
+      openingFrameSourcePath: z.string().min(1),
+      /** The desktop's finishing step always adds this list; a board files no extra stills. */
+      referenceFrames: z.array(StageReferenceFrameSchema.extend({ sourcePath: z.string().min(1) })).max(0).optional(),
     })
     .strict(),
   /** Renderer completion for an approved World Chat Stage action; private spool paths never enter the card. */
@@ -2698,6 +3159,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sourcePath: z.string().min(1).optional(),
       openingFrameSourcePath: z.string().min(1).optional(),
       referenceFrames: z.array(StageReferenceFrameSchema.extend({ sourcePath: z.string().min(1) })).min(2).optional(),
+      /** The look the frames were drawn in (issue 1825); absent is Greybox. */
+      look: z.enum(["greybox", "lit", "plate"]).optional(),
     })
     .strict(),
   /** SPEC-013 R-10: rejection requires the cited sheet and field; selection untouched. */
@@ -2764,6 +3227,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       label: z.string().min(1).max(160).optional(),
     })
     .strict(),
+  /** Local derived work; neither preparation nor cancellation is an editor mutation. */
+  z.object({ kind: z.literal("editor-effect-analysis"), worldId: UlidSchema, productionId: SlugSchema,
+    effectId: TimelineClipIdSchema, action: z.enum(["prepare", "retry", "cancel"]), requestId: z.string().min(1).max(128),
+    expectedSourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional() }).strict(),
+  EffectReviewCommandSchema,
+  TransitionReviewCommandSchema,
+  PictureReviewCommandSchema,
   /**
    * SPEC-039 R-29: the only Accept/Reject boundary for one of Arke's editor requests. The
    * coordinator checks the request exists, is pending and still applies before anything lands;
@@ -2813,8 +3283,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     kind: z.literal("upload-artifacts"), worldId: UlidSchema, requestId: UlidSchema,
     // Null preserves the original position of a dropped File without a native path.
     sourcePaths: z.array(z.string().min(1).nullable()).min(1).max(16).optional(),
+    /** Authenticated local-browser selection; no host path or native picker is required. */
+    browserFiles: BrowserMediaFilesSchema.optional(),
     production: SlugSchema.nullable().optional(),
     editor: EditorImportSchema.optional(),
+    audioStudio: AudioStudioImportSchema.optional(),
+    music: MusicImportSchema.optional(),
   }).strict(),
   /**
    * Another world's placeable files, for the Cut's Library to browse (issue 1033): names, kinds,
@@ -2831,6 +3305,17 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     kind: z.literal("borrow-artifacts"), worldId: UlidSchema, requestId: UlidSchema, slug: SlugSchema,
     /** Artifact file names within the source world's `artifacts/`. */
     files: z.array(z.string().min(1)).min(1).max(16),
+    editor: EditorImportSchema,
+  }).strict(),
+  /**
+   * Copy accepted takes of another production of this world into this production's Library
+   * (issue 2953): `productionId` is where the takes are, `editor.productionId` the one being
+   * cut. A copy through ordinary filing with `importedFrom: production:<id>`, never a reference,
+   * so a later take there changes nothing here and the source production is never written.
+   */
+  z.object({
+    kind: z.literal("borrow-takes"), worldId: UlidSchema, requestId: UlidSchema, productionId: SlugSchema,
+    takeIds: z.array(TakeIdSchema).min(1).max(16),
     editor: EditorImportSchema,
   }).strict(),
   /**
@@ -2944,6 +3429,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   z.object({ kind: z.literal("cancel-export"), worldId: UlidSchema, exportId: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("stop-comic-make"), worldId: UlidSchema, run: z.string().min(1).max(100) }).strict(),
   /** SPEC-013 R-22: a folder that reopens identically elsewhere — history kept, caches dropped. */
   z.object({ kind: z.literal("export-world"), worldId: UlidSchema }).strict(),
   /** SPEC-015 R-19: remove shelf membership while retaining bytes and provenance. */
@@ -3015,6 +3501,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("clone-voice"),
+      transcript: z.string().trim().min(1).max(4000).optional(),
       worldId: UlidSchema,
       /**
        * A clip already staged by `stage-voice-clip`, never a path. The renderer has no path to
@@ -3088,9 +3575,13 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("stop-continuity"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
     .strict(),
-  /** The cast of lines (turn 130): cast by a press, never by a save, one run per chapter at a time, stoppable. */
+  /**
+   * The cast of lines (turn 130): cast by a press, never by a save, one run per chapter at a time,
+   * stoppable. `changed` casts only the paragraphs edited since the cast (design turn 198, SPEC-012
+   * R-68), worked out when the run starts, and merges their lines into the record.
+   */
   z
-    .object({ kind: z.literal("cast-voices"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
+    .object({ kind: z.literal("cast-voices"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), scope: z.literal("changed").optional() })
     .strict(),
   z
     .object({ kind: z.literal("stop-voices"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) })
@@ -3132,6 +3623,11 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       voiceUploadConfirmedFor: z.string().min(1).optional(),
       /** These blocks alone, made again whatever their state — the panel's `Make again` (SPEC-047 R-30). */
       blocks: z.array(z.string().min(1)).min(1).max(400).optional(),
+      /**
+       * Cast the paragraphs left to cast before a word is read (design turn 198, SPEC-012 R-69): the
+       * confirm's ticked `Cast 2 paragraphs first`. Priced first, cast once the price is answered.
+       */
+      castFirst: z.literal(true).optional(),
     })
     .strict(),
   z
@@ -3140,6 +3636,27 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({ kind: z.literal("set-audiobook-reading"), worldId: UlidSchema, productionId: SlugSchema, reading: AudiobookReadingSchema })
     .strict(),
+  /** The shapes the book's pictures are made in (design turn 235a, SPEC-047 R-195): turning one on or off makes and removes nothing. */
+  z
+    .object({ kind: z.literal("set-audiobook-picture-shapes"), worldId: UlidSchema, productionId: SlugSchema, shapes: z.array(z.enum(["wide", "tall"])).min(1).max(2) })
+    .strict(),
+  /**
+   * A block's picture made Tall (design turn 235, SPEC-047 R-196): recomposed from the picture it
+   * has now, which rides as the reference, on the price the press showed. Answered as
+   * `audiobook.picture-made` under the same id.
+   */
+  z
+    .object({ kind: z.literal("make-audiobook-tall-picture"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1).max(40), confirmedMicroUsd: z.number().int().min(0), requestId: UlidSchema })
+    .strict(),
+  /**
+   * `Make 290 tall` (235a, R-199): a Tall for every picture of the book without one, or with one
+   * from an earlier picture, each from its current picture, one at a time. Followed through
+   * `audiobook.tall-progress`, stopped by `stop-audiobook-tall-pictures`.
+   */
+  z
+    .object({ kind: z.literal("make-audiobook-tall-pictures"), worldId: UlidSchema, productionId: SlugSchema, confirmedMicroUsd: z.number().int().min(0), requestId: UlidSchema })
+    .strict(),
+  z.object({ kind: z.literal("stop-audiobook-tall-pictures"), worldId: UlidSchema, productionId: SlugSchema }).strict(),
   /** The book's requests for a groupable reader (design turn 185d): several blocks a request, or one. */
   z
     .object({ kind: z.literal("set-audiobook-requests"), worldId: UlidSchema, productionId: SlugSchema, requests: z.enum(["grouped", "per-paragraph"]) })
@@ -3165,23 +3682,36 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * carries; null takes it away. Changing it makes that speaker's lines stale (R-45).
    */
   z
-    .object({ kind: z.literal("set-audiobook-note"), worldId: UlidSchema, productionId: SlugSchema, speaker: z.string().min(1).max(120), note: z.string().min(1).max(CADENCE_PHRASE_MAX).nullable() })
+    .object({ kind: z.literal("set-audiobook-note"), worldId: UlidSchema, productionId: SlugSchema, speaker: z.string().min(1).max(120), note: z.string().min(1).max(PERFORMANCE_NOTE_MAX).nullable() })
     .strict(),
   /**
    * The book's own narrator (design turn 155h, SPEC-047 R-46), or null for the app's. Written
    * on the book record and nothing made; the takes a switch leaves current are the record's
-   * choice again without a call (R-48).
+   * choice again without a call (R-48). With `chapterId` (R-195), that chapter's own narrator is
+   * cleared in the same write, so a chapter switched back to the book's narrator follows it:
+   * one write, because two frames racing on the book record could keep either.
    */
   z
-    .object({ kind: z.literal("set-audiobook-narrator"), worldId: UlidSchema, productionId: SlugSchema, voice: AudiobookReaderSchema.nullable() })
+    .object({ kind: z.literal("set-audiobook-narrator"), worldId: UlidSchema, productionId: SlugSchema, voice: AudiobookReaderSchema.nullable(), chapterId: SlugSchema.optional() })
+    .strict(),
+  /**
+   * A chapter's own narrator (SPEC-047 R-195), or null to read it in the book's narrator again.
+   * Written on the book record and nothing made, as the book's narrator is (R-46, R-48).
+   */
+  z
+    .object({ kind: z.literal("set-audiobook-chapter-narrator"), worldId: UlidSchema, productionId: SlugSchema, chapterId: SlugSchema, voice: AudiobookReaderSchema.nullable() })
     .strict(),
   /**
    * What a narrator switch would do, before it is made (R-46): the blocks that go stale across
    * the book, the direction the new reader cannot express, the price of reading the book
-   * again, and the takes kept. Answered by `audiobook.narrator-quote`; nothing written.
+   * again, and the takes kept. Answered by `audiobook.narrator-quote`; nothing written. With a
+   * chapter it is that chapter's switch (R-195): its blocks, its direction, its price, and
+   * `voice: null` is the book's narrator rather than the app's. `clears` is the book's switch
+   * made from a chapter with its own narrator, which `set-audiobook-narrator` with that
+   * `chapterId` lets go in the same write: the quote weighs both (codex on PR 2168).
    */
   z
-    .object({ kind: z.literal("quote-audiobook-narrator"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, voice: AudiobookReaderSchema.nullable() })
+    .object({ kind: z.literal("quote-audiobook-narrator"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, voice: AudiobookReaderSchema.nullable(), chapterId: SlugSchema.optional(), clears: SlugSchema.optional() })
     .strict(),
   /**
    * A block heard as it would be read (R-45, R-46): its words with its direction and, under
@@ -3282,6 +3812,31 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema.optional(),
     })
     .strict(),
+  /**
+   * Join or Split pressed on a gap between two of the chapter's lines (design turn 198, SPEC-047
+   * R-147..R-150): the gap named by the turns either side and the hash of their words as the press
+   * saw them. A press the gap does not offer, a limit, or words changed since are refused. Answered
+   * as `audiobook.record`.
+   */
+  z
+    .object({
+      kind: z.literal("set-audiobook-seam"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      press: z.enum(["join", "split"]),
+      anchor: z.object({ before: AudiobookTurnPlaceSchema, after: AudiobookTurnPlaceSchema, textHash: z.string().min(1).max(200) }).strict(),
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  /** Reset (design turn 198, R-151): every seam of the chapter back to the automatic split. Answered as `audiobook.record`. */
+  z.object({ kind: z.literal("reset-audiobook-seams"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema.optional() }).strict(),
+  /**
+   * Group by beats (SPEC-047 R-172): the director names where each beat of the chapter begins and
+   * the blocks of a beat are joined, the chapter's seams replaced. Answered as `audiobook.beats`,
+   * the record as `audiobook.record`.
+   */
+  z.object({ kind: z.literal("group-chapter-beats"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema.optional() }).strict(),
   z
     .object({
       kind: z.literal("direct-chapter"),
@@ -3290,20 +3845,19 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       chapterFile: z.string().min(1),
       /**
        * What the sheet's `Also` asks for (design turn 184a, SPEC-047 R-52, R-54): the lines cast
-       * first, under `performed` or `cast`, so the one proposal carries who speaks and how; the
-       * chapter note drafted; and the missing speaker notes drafted from the sheets.
+       * first, under `performed` or `cast`, so the one proposal carries who speaks and how; and the
+       * missing speaker notes drafted from the sheets. A chapter note is no longer drafted (R-53).
        */
       cast: z.literal(true).optional(),
-      chapterNote: z.literal(true).optional(),
       speakerNotes: z.literal(true).optional(),
     })
     .strict(),
   /** What `Direct this chapter` would read (design turn 184a, R-51), answered as `direction.reads`; nothing run. */
   z.object({ kind: z.literal("preview-direction"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema }).strict(),
   /**
-   * The book note, or with `chapterFile` that chapter's note (design turn 184, SPEC-047 R-53): at
-   * most 300 characters on the book record; null takes it away. Changing either makes the blocks
-   * it leads stale.
+   * The book note, or with `chapterFile` that chapter's note taken away (design turn 184, SPEC-047
+   * R-53): at most 300 characters on the book record; null takes it away. A chapter note is only
+   * cleared now, never written. Changing either makes the blocks it leads stale.
    */
   z
     .object({
@@ -3326,7 +3880,39 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * The book as a listener hears it (design turn 186, SPEC-047 R-66..R-71): the made chapters in
    * order with their takes, gaps and pictures, answered as `audiobook.listening`. Nothing written.
    */
-  z.object({ kind: z.literal("open-audiobook-listening"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("open-audiobook-listening"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, scope: AudiobookScopeSchema.optional() }).strict(),
+  /**
+   * The audiobook's opening and closing credits (design turn 252, SPEC-047 R-210 – R-213): their
+   * details, words and states, answered as `audiobook.credits`. Read as a chapter is, by
+   * `read-audiobook-chapter` naming `audiobook-credits`. Nothing written by opening.
+   */
+  z.object({ kind: z.literal("open-audiobook-credits"), worldId: UlidSchema, productionId: SlugSchema }).strict(),
+  /**
+   * A detail set, or a credit's words written over its draft (R-211); words set to null go back
+   * to the draft. A detail changed redrafts every credit whose words were never written over.
+   * Answered as `audiobook.credits`.
+   */
+  z
+    .object({
+      kind: z.literal("set-audiobook-credits"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      details: AudiobookCreditDetailsSchema.optional(),
+      words: z
+        .object({
+          opening: z.string().max(CREDIT_WORDS_MAX).nullable().optional(),
+          closing: z.string().max(CREDIT_WORDS_MAX).nullable().optional(),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
+  z.object({ kind: z.literal("quote-audiobook-motion"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), model: z.string().min(1), params: AudiobookMotionQuoteSchema.shape.params, prompt: AudiobookMotionQuoteSchema.shape.prompt, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("make-audiobook-motion"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), quote: AudiobookMotionQuoteSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("stop-audiobook-motion"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("choose-audiobook-motion"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), block: z.string().min(1), choice: z.enum(["candidate", "still", "behavior"]), behavior: z.enum(["repeat", "hold"]), artifactId: z.string().optional(), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("audiobook-word-timing"), worldId: UlidSchema, productionId: SlugSchema, action: z.enum(["read", "status", "prepare", "stop"]), chapters: z.array(SlugSchema).optional(), blocks: z.array(z.object({ chapterId: SlugSchema, key: z.string().min(1) }).strict()).min(1).optional(), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("audiobook-words"), worldId: UlidSchema, productionId: SlugSchema, action: z.enum(["read", "check", "stop"]), chapters: z.array(SlugSchema).min(1).max(1000).optional(), blocks: z.array(z.object({ chapterId: SlugSchema, key: z.string().min(1).max(200) }).strict()).min(1).max(10000).optional(), requestId: UlidSchema }).strict(),
   /**
    * A picture set on a block, or taken off it with null (design turn 186c, R-69): a picture the
    * world holds, by its world-relative path, and the tab it was chosen on. Answered as
@@ -3339,7 +3925,39 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       chapterFile: z.string().min(1),
       block: z.string().min(1),
-      picture: z.object({ file: z.string().min(1).max(1000), source: AudiobookPictureSourceSchema }).strict().nullable(),
+      picture: z.object({ file: z.string().min(1).max(1000), source: AudiobookPictureSourceSchema, tallFrom: z.string().min(1).max(1000).optional() }).strict().nullable(),
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  /**
+   * A picture moved along the words (design turn 237, SPEC-047 R-205): from where it stands to the
+   * start of another sentence, by their picture keys — a block's own or a mark's. It keeps its
+   * picture, shapes, look, shot, focus and motion. A place with a picture already, or words no
+   * longer there, is refused. Answered as `audiobook.record`.
+   */
+  z
+    .object({
+      kind: z.literal("move-audiobook-picture"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      from: z.string().min(1).max(40),
+      to: z.string().min(1).max(40),
+      requestId: UlidSchema.optional(),
+    })
+    .strict(),
+  /**
+   * Where a block's picture's subject stands (design turn 197b): dragged in the video's preview,
+   * kept on the picture, `null` back to the centre. Answered as `audiobook.record`.
+   */
+  z
+    .object({
+      kind: z.literal("set-audiobook-picture-focus"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      block: z.string().min(1),
+      focus: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }).strict().nullable(),
       requestId: UlidSchema.optional(),
     })
     .strict(),
@@ -3359,6 +3977,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("make-audiobook-picture"),
+      reuse: PictureReuseSchema.optional(),
       worldId: UlidSchema,
       productionId: SlugSchema,
       chapterFile: z.string().min(1),
@@ -3369,7 +3988,41 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       frame: z.string().max(120).optional(),
       /** The suggestion's shot, kept on the picture it makes so its card still shows it (design turn 194g). */
       shot: PictureShotSchema.optional(),
+      /**
+       * The looks chosen for this picture alone (design turn 193d, SPEC-047 R-146), by person: a kit
+       * look's id or the main photo. Each rides for that person in place of the chapter's choice and
+       * is stamped `only`. Absent, the block's held choices are used, else the picture's own.
+       */
+      looks: PictureOwnLooksSchema.optional(),
       confirmedMicroUsd: z.number().int().min(0),
+      requestId: UlidSchema,
+      /**
+       * Its Tall too (design turn 235, R-196): made from the picture once it lands, answered as
+       * `audiobook.picture-made` under this id. Held by the coordinator with the request, never by
+       * a window, so another block opened meanwhile cannot take it (codex on PR 2166).
+       */
+      tall: z.object({ requestId: UlidSchema, confirmedMicroUsd: z.number().int().min(0) }).strict().optional(),
+    })
+    .strict(),
+  /**
+   * Update prompt (design turn 193d, SPEC-047 R-146): a person's look for this picture is not the
+   * one the prompt was written for, so the writing service rewrites that person's clothing words
+   * from the look now chosen — `from` and `to` each a kit look's id or the main photo — and leaves
+   * every other word as the author has it. Nothing is made or spent. Answered as
+   * `audiobook.picture-prompt` under the same id.
+   */
+  z
+    .object({
+      kind: z.literal("rewrite-audiobook-picture-prompt"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      chapterFile: z.string().min(1),
+      block: z.string().min(1).max(40),
+      prompt: z.string().min(1).max(PICTURE_PROMPT_MAX),
+      changes: z
+        .array(z.object({ key: z.string().min(1).max(120), from: z.string().min(1).max(120), to: z.string().min(1).max(120) }).strict())
+        .min(1)
+        .max(24),
       requestId: UlidSchema,
     })
     .strict(),
@@ -3380,6 +4033,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * discarded; nothing is made or spent by reading. Answered as `illustration.finished`.
    */
   z.object({ kind: z.literal("illustrate-chapter"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
+  z.object({ kind: z.literal("refresh-illustration-references"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), proposalId: z.string().min(1).max(64) }).strict(),
   z.object({ kind: z.literal("discard-illustration"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1) }).strict(),
   /**
    * The proposal accepted (R-102): the rows left unskipped, made one at a time through the Bench
@@ -3394,8 +4048,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       chapterFile: z.string().min(1),
       proposalId: z.string().min(1).max(64),
-      blocks: z.array(z.string().min(1).max(40)).max(60),
-      without: z.array(z.string().min(1).max(40)).max(60).optional(),
+      blocks: z.array(z.string().min(1).max(40)).max(ILLUSTRATION_ROWS_MAX),
+      without: z.array(z.string().min(1).max(40)).max(ILLUSTRATION_ROWS_MAX).optional(),
       confirmedMicroUsd: z.number().int().min(0),
     })
     .strict(),
@@ -3423,15 +4077,22 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema.optional(),
     })
     .strict(),
+  /** Explicit identity choice for an existing unresolved chapter line; no new sheet or reference is made. */
+  z.object({ kind: z.literal("link-audiobook-character"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), key: z.string().min(1).max(120), expectedName: z.string().min(1).max(120), expectedHash: z.string().min(1).max(128), sheetId: SlugSchema, requestId: UlidSchema }).strict(),
   /**
    * Which chapters of the book chose each kit look (design turn 193, SPEC-047 R-114): read from the
    * chapters' records, nothing changed. Answered as `audiobook.looks` under the same id.
    */
-  z.object({ kind: z.literal("read-audiobook-looks"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("read-audiobook-looks"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, coverage: z.boolean().optional() }).strict(),
   /**
    * A kit look chosen for a character in this chapter (design turn 193, SPEC-047 R-112), or the
    * choice taken away with null. Chosen by pointer; the look stays unattached (SPEC-017 R-18). The
    * character's line becomes the look's own clothing line. Answered as `audiobook.record`.
+   *
+   * From a block's look menu (design turn 193d, R-146) it names the `block`: with `only`, the look
+   * (null: the main photo) is chosen for that block's picture alone and held on the block until it
+   * is made, the chapter left as it is; without, it is the chapter's choice, as above, and that
+   * block's picture follows it — any look chosen for it alone for this person is let go.
    */
   z
     .object({
@@ -3443,6 +4104,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       name: z.string().min(1).max(120).optional(),
       sheet: SlugSchema.optional(),
       lookId: z.string().min(1).max(120).nullable(),
+      block: z.string().min(1).max(40).optional(),
+      only: z.literal(true).optional(),
       requestId: UlidSchema.optional(),
     })
     .strict(),
@@ -3462,6 +4125,22 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       requestId: UlidSchema.optional(),
     })
     .strict(),
+  z.object({ kind: z.literal("read-audio-studio"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema }).strict(),
+  /**
+   * Spans of an episode's saved mix that just played whole, in seconds, on the base they were
+   * heard on (design turn 230o, issue 1882). The person's own listening; a stale base records nothing.
+   */
+  z.object({ kind: z.literal("record-audio-heard"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), base: z.string().regex(/^[a-f0-9]{64}$/),
+    spans: z.array(z.tuple([z.number().min(0), z.number().min(0)])).min(1).max(50) }).strict(),
+  /** What of an episode's mix has been heard, for the script's Review (issue 1882): answered as `audio-studio.heard`. */
+  z.object({ kind: z.literal("read-audio-heard"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("decide-audio-studio-proposal"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema, id: z.string().min(1).max(160), version: z.number().int().min(1), decision: z.enum(["keep", "apply"]) }).strict(),
+  z.object({ kind: z.literal("edit-audio-studio"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema, base: z.string().regex(/^[a-f0-9]{64}$/), edit: AudioArrangementEditSchema }).strict(),
+  z.object({ kind: z.literal("read-audio-studio-source"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema, file: z.string().min(1).max(1000), expectedHash: z.string().regex(/^sha256:[a-f0-9]{64}$/).optional(), waveform: z.boolean().optional() }).strict(),
+  z.object({ kind: z.literal("preview-audio-studio"), worldId: UlidSchema, productionId: SlugSchema, chapterFile: z.string().min(1), requestId: UlidSchema,
+    base: z.string().regex(/^[a-f0-9]{64}$/), edit: AudioArrangementEditSchema.optional(), solo: z.array(z.string().min(1).max(160)).max(128).optional(),
+    window: z.object({ from: z.number().int().nonnegative(), to: z.number().int().positive() }).strict().optional() }).strict(),
+  z.object({ kind: z.literal("stop-audio-studio-preview"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
   /**
    * A reaction, a bed or a sound at a block set, changed (by its key) or taken away (null) —
    * design turn 187, SPEC-047 R-83, R-84. A new one takes the next free key. Answered as
@@ -3564,8 +4243,9 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * the world's `exports/` and reports through `export.progress`; the import is read by the host
    * and shown before anything is written, then appended in one commit.
    */
-  z
-    .object({
+  z.object({ kind: z.literal("list-story-publications"), requestId: UlidSchema }).strict(),
+  z.object({ kind: z.literal("publish-story"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, input: StoryPublishActionSchema }).strict(),
+  z.object({
       kind: z.literal("export-manuscript"),
       worldId: UlidSchema,
       productionId: SlugSchema,
@@ -3575,7 +4255,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /** The world's exports folder, or with `dir` one package in it (design turn 186e): a single folder name, never a path. */
-  z.object({ kind: z.literal("open-exports-folder"), worldId: UlidSchema, dir: z.string().regex(/^[A-Za-z0-9._-]+$/).optional() }).strict(),
+  z
+    .object({
+      kind: z.literal("open-exports-folder"),
+      worldId: UlidSchema,
+      dir: z.string().regex(/^[A-Za-z0-9._-]+$/).optional(),
+      /** A video or the completed audiobook player, opened by the host. */
+      file: z.union([z.literal("player.html"), z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]*\.mp4$/)]).optional(),
+    })
+    .strict(),
   /**
    * The audiobook as the player (design turn 186e, SPEC-047 R-72): a web package of the chapters
    * read whole, their audio and their pictures, answered as `audiobook.exported`.
@@ -3583,6 +4271,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("export-audiobook-player"),
+      scope: AudiobookScopeSchema.optional(),
       worldId: UlidSchema,
       productionId: SlugSchema,
       requestId: UlidSchema,
@@ -3590,8 +4279,129 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       exportId: z.string().regex(/^ab_[0-9A-HJKMNP-TV-Z]{26}$/).optional(),
     })
     .strict(),
+  /** Retail chapter files, SPEC-047 R-22–R-28; same scoped result event and cancellation owner. */
+  z.object({ kind: z.literal("export-audiobook-chapters"), scope: AudiobookScopeSchema.optional(), worldId: UlidSchema,
+    productionId: SlugSchema, requestId: UlidSchema, exportId: z.string().regex(/^ab_[0-9A-HJKMNP-TV-Z]{26}$/).optional() }).strict(),
+  /**
+   * The world package for Arke Player (design turn 233, SPEC-058 R-1 – R-8): the book and the
+   * illustrated narration of the chapters read whole, in one ZIP under `exports/`, answered as
+   * `arke-player.exported` and followed in Activity through `export.progress`.
+   */
+  z
+    .object({
+      kind: z.literal("export-arke-player"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      /** Chosen by the window, so it can find the package again after a reconnect lost the answer. */
+      exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/),
+      /**
+       * The book and the pictures' loops are each the author's to leave out (233a); the pictures' Size
+       * (235d), full when absent; and Release (236d): absent for the whole world, else a part of the
+       * chapters named, with the author's schedule.
+       */
+      options: z.object({ book: z.boolean(), motion: z.boolean(), size: z.enum(ARKE_PLAYER_PICTURE_SIZES).optional(), part: ArkePlayerPartRequestSchema.optional() }).strict(),
+    })
+    .strict(),
+  /**
+   * A world's guide alone for Arke Player (SPEC-059 R-10, design turn 276g): the world and its public
+   * Guide in one ZIP under `exports/`, with no production, made from the Guide page's Export and
+   * answered as `guide-alone.exported`.
+   */
+  z.object({ kind: z.literal("export-guide-alone"), worldId: UlidSchema, requestId: UlidSchema, exportId: z.string().regex(/^ap_[0-9A-HJKMNP-TV-Z]{26}$/) }).strict(),
+  /**
+   * What Export → Arke Player would make of an interactive movie or a visual novel (design turn
+   * 245a – 245c, SPEC-058 R-89): its rows, its estimate and what stands in the way, at the picture
+   * Size chosen, answered as `story.export-state`. Nothing is made.
+   */
+  z.object({ kind: z.literal("read-story-export"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, size: z.enum(ARKE_PLAYER_PICTURE_SIZES).optional() }).strict(),
+  /**
+   * The audiobook as a video (design turn 197, SPEC-047): the chapters read whole rendered to MP4
+   * on this machine, one a chapter or one for the book, answered as `audiobook.video-exported`
+   * and followed in Activity through `export.progress`.
+   */
+  z
+    .object({
+      kind: z.literal("export-audiobook-video"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      /** Chosen by the window, so it can find the render again after a reconnect lost the answer. */
+      exportId: z.string().regex(/^vb_[0-9A-HJKMNP-TV-Z]{26}$/),
+      options: AudiobookVideoOptionsSchema,
+    })
+    .strict(),
+  /** What a video render with these options would make, and this machine's rates: answered as `audiobook.video-state`. */
+  z.object({ kind: z.literal("read-audiobook-video"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, options: AudiobookVideoOptionsSchema }).strict(),
   /** The world's web packages — interactive, visual novel and audiobook — answered as `web-packages.listed`. */
   z.object({ kind: z.literal("list-web-packages"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
+  /** One entry of the world's Guide (SPEC-059 R-4, R-8): what is public and when, written to `guide.json`. */
+  z.object({ kind: z.literal("set-guide-entry"), worldId: UlidSchema, change: SetGuideEntrySchema }).strict(),
+  /** The Guide's teasers (SPEC-059 R-24, R-27), replaced whole in the author's order. */
+  z.object({ kind: z.literal("set-guide-teasers"), worldId: UlidSchema, change: SetGuideTeasersSchema }).strict(),
+  /** The story every public section of the Guide waits for (SPEC-059 R-41). */
+  z.object({ kind: z.literal("set-guide-story"), worldId: UlidSchema, change: SetGuideStorySchema }).strict(),
+  /** Draft (SPEC-059 R-40): one entry's description, or every public one still without, answered as `guide.drafting`. */
+  z.object({ kind: z.literal("draft-guide-description"), ...DraftGuideDescriptionRequestSchema.shape }).strict(),
+  /** Stop (274c): ends the world's Draft run after the description being written now is abandoned. */
+  z.object({ kind: z.literal("stop-guide-drafting"), worldId: UlidSchema }).strict(),
+  /**
+   * A music production's tracks (SPEC-060 R-5 – R-7, design turn 238). Each writes `music.json`
+   * through the production store. Adding a second track to a Single makes it an Album only when
+   * the person said so (`makeAlbum`): a Single holds one track.
+   */
+  z.object({ kind: z.literal("music-track-add"), worldId: UlidSchema, productionId: SlugSchema, artifactId: ArtifactIdSchema, makeAlbum: z.boolean().optional() }).strict(),
+  z.object({
+    kind: z.literal("music-track-update"),
+    worldId: UlidSchema,
+    productionId: SlugSchema,
+    trackId: SlugSchema,
+    title: z.string().trim().min(1).max(200).optional(),
+    /** Plain text; an empty string clears them. */
+    lyrics: z.string().max(20_000).optional(),
+  }).strict(),
+  z.object({ kind: z.literal("music-track-remove"), worldId: UlidSchema, productionId: SlugSchema, trackId: SlugSchema }).strict(),
+  /** The tracks in their new order, every one of them. */
+  z.object({ kind: z.literal("music-tracks-reorder"), worldId: UlidSchema, productionId: SlugSchema, order: z.array(SlugSchema).min(1).max(64) }).strict(),
+  /** The album's cover (R-5): an image on the shelf, or null to clear it. */
+  z.object({ kind: z.literal("music-set-cover"), worldId: UlidSchema, productionId: SlugSchema, artifactId: ArtifactIdSchema.nullable() }).strict(),
+  /** Draft with Arke (R-7): the lyricist's words for a track, answered as `music.lyrics-drafted`. */
+  z.object({ kind: z.literal("music-draft-lyrics"), worldId: UlidSchema, productionId: SlugSchema, trackId: SlugSchema, requestId: UlidSchema, description: z.string().trim().min(1).max(2_000) }).strict(),
+  /** Where each track is heard in the world's other productions (R-14), answered as `music.heard-in`. */
+  z.object({ kind: z.literal("read-music-heard-in"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  /** Play all (R-8): the album rendered as the export renders it, answered as `music.rendered`. */
+  z.object({ kind: z.literal("render-music"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  /**
+   * A track's composer (design turn 238i, SPEC-060 R-9): takes made in the album's own Bench
+   * session at the Bench's quote, tagged to the track. Answered as the Bench answers a dispatch
+   * (`queue.result` by requestId), then `music.takes`.
+   */
+  z.object({
+    kind: z.literal("music-track-make"),
+    worldId: UlidSchema,
+    productionId: SlugSchema,
+    trackId: SlugSchema,
+    requestId: UlidSchema,
+    composer: z.object({ provider: z.string().min(1), model: z.string().min(1), params: BenchParamsSchema, brief: z.string().max(4_000) }).strict(),
+  }).strict(),
+  /** Choose a take as its track's (238i, R-10): kept to the shelf if it is not yet, and played from there. */
+  z.object({ kind: z.literal("music-track-choose"), worldId: UlidSchema, productionId: SlugSchema, trackId: SlugSchema, sessionId: SessionIdSchema, takeId: TakeIdSchema, requestId: UlidSchema }).strict(),
+  /**
+   * The track editor's Save (238j, R-11): its trim, fades and sections, applied at render and
+   * never to the take. A null trim plays the whole source.
+   */
+  z.object({ kind: z.literal("music-track-edit"), worldId: UlidSchema, productionId: SlugSchema, trackId: SlugSchema, ...MusicTrackEditSchema.shape }).strict(),
+  /**
+   * The album's sequence (238k, R-13): each track's join to the next — a gap, a crossfade, or
+   * back to back — and its loudness target.
+   */
+  z.object({ kind: z.literal("music-sequence-set"), worldId: UlidSchema, productionId: SlugSchema, ...MusicSequenceSchema.shape }).strict(),
+  /** The takes of the album's Bench session by track (238i), answered as `music.takes`. */
+  z.object({ kind: z.literal("read-music-takes"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
+  /** A waveform of a world audio file (238j, 238k), answered as `music.waveform`. */
+  z.object({ kind: z.literal("read-music-waveform"), worldId: UlidSchema, file: z.string().min(1).max(1000), requestId: UlidSchema }).strict(),
+  /** The sentences a character speaks in takes of chapters read whole (R-6), answered as `guide.voice-lines`. */
+  z.object({ kind: z.literal("list-guide-voice-lines"), ...GuideVoiceLinesRequestSchema.shape }).strict(),
   z.object({ kind: z.literal("pick-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   z.object({ kind: z.literal("import-manuscript"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   /** The same file read again at the level the person chose (turn 131): the held document, nothing written. */
@@ -3633,6 +4443,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * finally looks. Coalesced like any other trigger; never a timer.
    */
   z.object({ kind: z.literal("refresh-diagnostics") }).strict(),
+  /** Turn 240: resource-only UI observations never accelerate storage or provider probing. */
+  z.object({ kind: z.literal("refresh-system-resources") }).strict(),
+  /** Host presentation/policy controls; opening an incident never invokes these. */
+  z.object({ kind: z.literal("recovery-set-mode"), requestId: UlidSchema, mode: RecoveryModeSchema }).strict(),
+  z.object({ kind: z.literal("recovery-set-advanced"), requestId: UlidSchema, settings: RecoveryAdvancedSettingsSchema }).strict(),
+  z.object({ kind: z.literal("recovery-set-preferences"), requestId: UlidSchema,
+    preferences: z.object({ transientMuted: z.boolean().optional(), desktopOptIn: z.boolean().optional() }).strict() }).strict(),
+  z.object({ kind: z.literal("recovery-history-control"), requestId: UlidSchema, command: RecoveryHistoryCommandSchema }).strict(),
+  z.object({ kind: z.literal("recovery-history-read"), requestId: UlidSchema, query: RecoveryHistoryQuerySchema }).strict(),
+  RecoveryActionCommandSchema,
   /**
    * The grouped-read probe (design turn 185): the same few consecutive blocks of a chapter read
    * as one request three ways — every turn its whole style, the notes once with each later turn
@@ -3694,7 +4514,16 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
   /** Clear-the-bench: a NEW session. The old one keeps running; nothing is cancelled by this. */
-  z.object({ kind: z.literal("bench-new-session"), worldId: UlidSchema }).strict(),
+  z.object({
+    kind: z.literal("bench-new-session"),
+    worldId: UlidSchema,
+    picture: z.object({ source: PictureReuseSchema, prompt: z.string().min(1).max(PICTURE_PROMPT_MAX) }).strict().optional(),
+    /**
+     * A fresh image session set to a shape, with words to start from: Make cover opens one at
+     * 1:1 for a music cover (SPEC-060 R-5, call 5), so the cover is made square, never cut.
+     */
+    image: z.object({ aspect: z.string().min(1).max(20), brief: z.string().max(4_000) }).strict().optional(),
+  }).strict(),
   z.object({ kind: z.literal("bench-close"), worldId: UlidSchema }).strict(),
   z
     .object({
@@ -3806,28 +4635,6 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * The style rides along because a draft written blind to the arrangement is a draft written
    * for a different song, but it is optional: a style is not required to describe a subject.
    */
-  /**
-   * A helper run against a passage of the bible (design turn 90).
-   *
-   * Answered by `bible.helper-answered` under this requestId. The answer opens nothing and
-   * changes nothing — it lands in the rail beside the editor, and only Replace moves it into the
-   * document. The bible has no accept step and gains none here: what stands in for one is the
-   * version and Earlier versions, which is why this may be a plain one-shot rather than a
-   * proposal.
-   *
-   * Only the passage travels. The document itself is read from the store on the other side, so a
-   * long bible is not carried up the socket on every press.
-   */
-  z
-    .object({
-      kind: z.literal("bible-helper-run"),
-      worldId: UlidSchema,
-      requestId: UlidSchema,
-      helper: BibleHelperKindSchema,
-      /** The passage the author highlighted, verbatim. */
-      selection: z.string().min(1).max(BIBLE_HELPER_BOUNDS.selection),
-    })
-    .strict(),
 
   z
     .object({
@@ -3909,6 +4716,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       takeId: TakeIdSchema,
     })
     .strict(),
+  z.object({ kind: z.literal("bench-use-reference"), worldId: UlidSchema, sessionId: SessionIdSchema,
+    takeId: TakeIdSchema, sheetId: SlugSchema, image: z.enum(["main-photo", "character-sheet"]), requestId: UlidSchema }).strict(),
   /** Subject sessions file into production; the world-scoped bench keeps using bench-keep. */
   z
     .object({

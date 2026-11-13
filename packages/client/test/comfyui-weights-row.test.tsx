@@ -96,7 +96,7 @@ function qwenState(source: "user-url" | "managed" | "user-path", reason?: string
   } } };
 }
 
-describe("Qwen's terms and external setup are visible before download (#1226)", () => {
+describe("Qwen's terms are visible before download (#1226)", () => {
   it("places the noncommercial label and official licence beside the download controls", () => {
     const html = render("/settings/models?half=local&kind=image", qwenState("managed"));
     assert.match(html, /Noncommercial research/);
@@ -105,29 +105,30 @@ describe("Qwen's terms and external setup are visible before download (#1226)", 
     assert.doesNotMatch(html, /Dedicated engine profile required/);
   });
 
-  it("keeps external setup next to the action through offline, missing-guard and ready states", () => {
-    for (const reason of ["the engine did not answer", "custom node ArkeQwen21Runtime is missing from the engine", undefined]) {
-      const html = render("/settings/models?half=local&kind=image", qwenState("user-url", reason));
-      assert.match(html, /Dedicated engine profile required/);
-      assert.match(html, /href="https:\/\/github.com\/michaeljosiah\/ArkeStudio\/blob\/[a-f0-9]{40}\/docs\/development\/qwen21.md#externally-managed-url-engines"[^>]*>Setup<\/a>/);
-      assert.ok(html.indexOf("Dedicated engine profile required") < html.indexOf("Download ·"));
-      if (reason) assert.ok(html.includes(reason), "the measured readiness reason remains available");
+  // Version 2 runs on the ordinary engine (2026-10-10), so a URL engine needs no profile of its own.
+  it("asks no engine, URL or supervised, for a setup of its own", () => {
+    for (const source of ["user-url", "managed", "user-path"] as const) {
+      for (const reason of ["the engine did not answer", undefined]) {
+        const html = render("/settings/models?half=local&kind=image", qwenState(source, reason));
+        assert.match(html, /Noncommercial research/);
+        assert.doesNotMatch(html, /Dedicated engine profile required|qwen21.md/);
+        if (reason) assert.ok(html.includes(reason), "the measured readiness reason remains available");
+      }
     }
   });
 
-  it("retains the licence after download without asking supervised engines for manual setup", () => {
+  it("retains the licence after download", () => {
     for (const source of ["managed", "user-path"] as const) {
       const html = render("/settings/models?half=local&kind=image", qwenState(source, undefined, "ready"));
       assert.match(html, /Noncommercial research/);
-      assert.doesNotMatch(html, /Dedicated engine profile required/);
     }
   });
 
-  it("does not attach Qwen's terms or setup to another recipe", () => {
+  it("does not attach Qwen's terms to another recipe", () => {
     const state = stateWith(weights({}));
     state.app.comfyui!.engine.source = "user-url";
     const html = render("/settings/models?half=local&kind=image", state);
-    assert.doesNotMatch(html, /Noncommercial research|Dedicated engine profile required|Qwen-Image-2.1\/blob/);
+    assert.doesNotMatch(html, /Noncommercial research|Qwen-Image-2.1\/blob/);
   });
 });
 

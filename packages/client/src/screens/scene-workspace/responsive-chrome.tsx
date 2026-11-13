@@ -1,17 +1,25 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useMediaQuery } from "../../lib/media-query.js";
+import { useCompact, useMediaQuery, usePhone } from "../../lib/media-query.js";
+import { ARKE_HALF_QUERY, useHoldArkeHalf } from "../../lib/arke-half.js";
 import { PageSheet } from "../../components/page-sheet.js";
 import { ChevronLeft, More, Pin, Sparkle } from "../../components/icons.js";
+import { useGlobalChat } from "../../components/global-chat-context.js";
 
-/** Turn 168: a deep page owns the phone's head and the assistant overlays its work. */
-export function SceneBackRow({ context, title, onBack, press, children }: { context: string; title: string; onBack: () => void; /** One press in the place of the ⋯ menu, for a page whose menu would hold only that press (design turn 194, rule 15). */ press?: ReactNode; children?: ReactNode }) {
+/**
+ * Turn 168: a deep page owns the phone's head and the assistant overlays its work. Two lines, the
+ * context over the title, unless `back` names where the chevron goes: then the bar is 194h's one
+ * line, the chevron and the title, and the context is said only to a screen reader, by the press.
+ */
+export function SceneBackRow({ context, back, title, onBack, press, beside, children }: { context?: string; /** The one-line bar (194h): what the back press returns to, as its label says it. */ back?: string; title: string; onBack: () => void; /** One press in the place of the ⋯ menu, for a page whose menu would hold only that press (design turn 194, rule 15). */ press?: ReactNode; /** One labelled press before the ⋯ menu, which it does not replace (design 196q's Conversation). */ beside?: ReactNode; children?: ReactNode }) {
   const [open, setOpen] = useState(false);
+  const line = back !== undefined;
   return <>
-    <header className="fy-scene-back">
-      <button type="button" aria-label="Back" onClick={onBack}><ChevronLeft size={20} /></button>
-      <div><span>{context}</span><h1>{title}</h1></div>
-      {press ?? <button type="button" aria-label="Page actions" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><More size={20} /></button>}
+    <header className={line ? "fy-scene-back fy-scene-back--line" : "fy-scene-back"}>
+      <button type="button" aria-label={line ? `Back to ${back}` : "Back"} onClick={onBack}><ChevronLeft size={line ? 16 : 20} /></button>
+      <div>{!line && <span>{context}</span>}<h1>{title}</h1></div>
+      {beside}
+      {press ?? <button type="button" aria-label="Page actions" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><More size={line ? 16 : 20} /></button>}
     </header>
     {press === undefined && <PageSheet open={open} onClose={() => setOpen(false)} title={title} className="fy-scene-page-menu">
       <div className="fy-scene-menu" onClick={event => { if ((event.target as Element).closest("button")) setOpen(false); }}>{children}</div>
@@ -20,15 +28,24 @@ export function SceneBackRow({ context, title, onBack, press, children }: { cont
 }
 
 export function useSceneDock() {
-  const compact = useMediaQuery("(max-width: 1099px)");
+  const compact = useCompact();
   const [open, setOpen] = useState(!compact);
   useEffect(() => { setOpen(!compact); }, [compact]);
   return [open, setOpen] as const;
 }
 
-export function SceneDock({ open, onOpen, onClose, stage = false, children }: { open: boolean; onOpen: () => void; onClose: () => void; stage?: boolean; children: ReactNode }) {
-  const compact = useMediaQuery("(max-width: 1099px)");
-  const phone = useMediaQuery("(max-width: 599px)");
+/**
+ * `away` puts the dock and its rail out of the page while the conversation stays mounted and
+ * registered, so Chat in the title bar still opens it (the Stage's workspace, turn 231a).
+ */
+export function SceneDock({ open, away = false, onOpen, onClose, stage = false, children }: { open: boolean; away?: boolean; onOpen: () => void; onClose: () => void; stage?: boolean; children: ReactNode }) {
+  const global = useGlobalChat();
+  const compact = useCompact();
+  const phone = usePhone();
+  // On a Fold7 the open dock is the hinge half beside the live page, not a drawer over it (202).
+  const half = useMediaQuery(ARKE_HALF_QUERY);
+  useHoldArkeHalf(half && open && !global);
+  useEffect(() => { if (global && compact && open) { global.open(); onClose(); } }, [global, compact, open]);
   const trigger = useRef<HTMLButtonElement>(null);
   const inlineHost = useRef<HTMLDivElement>(null), sheetHost = useRef<HTMLDivElement>(null);
   const [conversationHost, setConversationHost] = useState<HTMLDivElement | null>(null);
@@ -61,13 +78,15 @@ export function SceneDock({ open, onOpen, onClose, stage = false, children }: { 
     place(); window.addEventListener("scroll", place, true); window.addEventListener("resize", place);
     return () => { cancelAnimationFrame(frame); if (trigger.current) trigger.current.style.translate = "none"; window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
   }, [phone, stage]);
-  const rail = <button ref={trigger} type="button" className="fy-sw__rail" title="Open Arke" aria-haspopup={compact ? "dialog" : undefined} onClick={onOpen}>
+  const rail = <button ref={trigger} type="button" className="fy-sw__rail" title="Open Arke" aria-haspopup={compact ? "dialog" : undefined} onClick={() => global ? global.open() : onOpen()}>
     {phone ? <Sparkle size={16} /> : <span className="fy-sw__rail-dot" aria-hidden="true" />}<span className="fy-sw__rail-label">{phone ? "Arke" : "Ask Arke"}</span><span className="fy-sw__rail-pin"><Pin size={13} /></span>
   </button>;
+  // A phone's rail floats over the page, and nothing floats over Stage's picture (issue 1355). Its way
+  // into the conversation is the Conversation press in the page's head instead (design 196q).
   return <>
-    {compact ? phone && stage ? null : rail : open ? null : rail}
-    <div ref={inlineHost} className="fy-scene-dock-inline" hidden={compact || !open} />
-    <PageSheet open={compact && open} keepMounted onClose={onClose} title="Arke" className="fy-scene-dock"><div ref={sheetHost} className="fy-scene-dock-content" /></PageSheet>
+    {away ? null : compact ? phone && stage || half && open ? null : rail : open ? null : rail}
+    <div ref={inlineHost} className="fy-scene-dock-inline" hidden={away || compact || !open} />
+    <PageSheet open={compact && open && !global} keepMounted modeless={half} onClose={onClose} title="Arke" className="fy-scene-dock"><div ref={sheetHost} className="fy-scene-dock-content" /></PageSheet>
     {conversationHost ? createPortal(children, conversationHost) : children}
   </>;
 }

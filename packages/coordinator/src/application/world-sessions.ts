@@ -12,6 +12,12 @@ export class WorldSessionService {
     requireContext(context);
     await this.policy.authorise(context, "read", { worldId });
     const snapshot = await this.repository.use(worldId, session => session.snapshot());
+    if (this.policy.needsReceipts === false) {
+      // The snapshot is already a detached copy; nothing reads a receipt, so none is hashed.
+      const bundle = await this.policy.project(context, snapshot.bundle);
+      if (bundle.meta.worldId !== worldId) throw new Error("The projected world does not match the request.");
+      return { revision: snapshot.revision, bundle };
+    }
     const bundle = structuredClone(await this.policy.project(context, structuredClone(snapshot.bundle)));
     if (bundle.meta.worldId !== worldId) throw new Error("The projected world does not match the request.");
     await this.policy.deliver(context, { worldId }, { kind: "world", id: worldId, sha256: engineHash(bundle) });

@@ -2,6 +2,10 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   SHEET_SHAPES,
+  CharacterAliasesInputSchema,
+  characterAliases,
+  PERFORMANCE_NOTE_MAX,
+  EXPRESSIVE_DIRECTION_SCHEMA_VERSION,
   propSlugs,
   sheetDir,
   worldSheets,
@@ -12,6 +16,7 @@ import {
 } from "@arke-studio/contracts";
 import type { CommitResult } from "../world/commit.js";
 import type { ProposalManager } from "../gate/proposals.js";
+import { sheetProseHash } from "../gate/sheet-seed.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { uniqueSlug } from "../world/slug.js";
 import { MarkdownFile, sha256 } from "../world/text-files.js";
@@ -49,8 +54,15 @@ async function takenSlugs(store: WorldStore, type: SheetKind): Promise<string[]>
 }
 
 /** The prose of a sheet, sections ordered per the schema and the empty optional ones dropped (D2). */
-function sheetBody(type: SheetKind, sections: Record<string, string>): string {
-  return SHEET_SHAPES[type].sections
+function sheetBody(type: SheetKind, sections: Record<string, string>, preserveLegacy = false): string {
+  const shape = SHEET_SHAPES[type].sections;
+  const headings = new Set(shape.map(section => section.heading));
+  return [
+    ...shape,
+    // Older sheets have Wants, Fears and Truth outside today's shape. An edit of Essence must
+    // not discard that prose merely because the form no longer offers its heading (#1910).
+    ...(preserveLegacy ? Object.keys(sections).filter(heading => !headings.has(heading)).map(heading => ({ heading, required: true })) : []),
+  ]
     .map((section) => {
       const text = (sections[section.heading] ?? "").trim();
       if (text === "" && !section.required) return null;
@@ -111,6 +123,7 @@ export function editSheetContent(input: {
       ...(billing !== undefined ? { billing } : {}),
       ...(sheet.neverDepicted !== undefined ? { neverDepicted: sheet.neverDepicted } : {}),
       ...(sheet.shortName !== undefined ? { shortName: sheet.shortName } : {}),
+      ...(sheet.aliases !== undefined ? { aliases: sheet.aliases } : {}),
       ...(region !== undefined ? { region } : {}),
       // The live version, not 1: the committer stamps the real one either way, and restating what
       // the sheet actually says keeps the staged file readable as the thing it is a version of.
@@ -122,11 +135,14 @@ export function editSheetContent(input: {
       links: [...(input.links ?? sheet.links)],
       ...(sheet.origin ? { origin: sheet.origin } : {}),
       ...(sheet.voice ? { voice: sheet.voice } : {}),
+      // Kept through an edit like the voice: a World Chat edit that listed only the fields it knew
+      // would drop how the narrator plays the character (design turn 200).
+      ...(sheet.narration !== undefined ? { narration: sheet.narration } : {}),
       // Created once, and not by an edit. Only `updated` moves.
       created: sheet.created,
       updated: input.date,
     },
-    sheetBody(sheet.type, input.sections),
+    sheetBody(sheet.type, input.sections, true),
   );
   return doc.serialize();
 }
@@ -190,6 +206,7 @@ export async function createSheetFromSentence(
     production?: string;
     /** The existing destination surface that will hold the ordinary request's decision. */
     attendedSurface?: "sheet-list" | "production-cast";
+    requiresDraft?: boolean;
   },
   precondition?: WorldStatePrecondition,
 ): Promise<SentenceDraft> {
@@ -232,6 +249,7 @@ export async function createSheetFromSentence(
         }
       : {}),
     targets: [{ path, content }],
+    ...(input.attendedSurface && input.requiresDraft ? { sheetSeed: { path, bodyHash: sheetProseHash(content) } } : {}),
     // Ownership on the proposal, not only in the staged file: the world's surfaces read pending
     // sheets from the proposal and would otherwise show this guest all through its review.
     ...(input.production !== undefined ? { production: input.production } : {}),
@@ -273,10 +291,12 @@ export async function duplicateSheet(
     updated: store.now().slice(0, 10),
   });
   // A copy goes by its own name: carrying the source's short name would give two characters the
-  // same one, and rows would fall back to their full names (design turn 194, rule 12b).
-  if ("shortName" in copy.data) {
+  // same one, and rows would fall back to their full names (design turn 194, rule 12b). Its
+  // identity aliases belong to the original too; cloning them would create ambiguous bindings.
+  if ("shortName" in copy.data || "aliases" in copy.data) {
     const next = { ...copy.data };
     delete next["shortName"];
+    delete next["aliases"];
     copy.data = next;
     copy.setData({});
   }
@@ -319,17 +339,19 @@ export async function stageSheetStatus(
 export async function stageSheetRename(
   store: WorldStore,
   gate: ProposalManager,
-  input: { path: string; name: string; shortName?: string | null },
+  input: { path: string; name: string; shortName?: string | null; aliases?: string[] },
 ): Promise<Proposal> {
   const live = await readLive(store, input.path);
   if (live === null) throw new Error(`${input.path} does not exist`);
   const doc = MarkdownFile.parse(live);
   const oldName = String(doc.data["name"]);
-  const content = sheetRenameContent(live, input.name, input.shortName);
+  const content = sheetRenameContent(live, input.name, input.shortName, input.aliases);
   return gate.stage({
     kind: "sheet-edit",
     summary:
-      input.name.trim() === oldName && input.shortName !== undefined
+      input.aliases !== undefined && input.name.trim() === oldName
+        ? `Set other names for ${oldName}: ${characterAliases(input.aliases).join(", ") || "none"} — existing briefs and takes stay unchanged`
+        : input.name.trim() === oldName && input.shortName !== undefined
         ? `Call ${oldName} ${input.shortName?.trim() ? input.shortName.trim() : "by the default short name"} in rows and filters — the name, the id and every citation stay`
         : `Rename ${oldName} to ${input.name} — the id and every citation stay`,
     source: "form",
@@ -383,9 +405,15 @@ export function sheetStatusContent(content: string, status: "sketch" | "locked")
  * The sheet renamed, and — for a character — its short name set (`shortName` text), put back to the
  * default (`null` or empty) or left alone (absent). Frontmatter only.
  */
-export function sheetRenameContent(content: string, name: string, shortName?: string | null): string {
+export function sheetRenameContent(content: string, name: string, shortName?: string | null, aliases?: readonly string[]): string {
   const doc = MarkdownFile.parse(content);
   doc.setData({ name: name.trim() });
+  if (aliases !== undefined) {
+    if (doc.data["type"] !== "character") throw new Error("Only a character has identity aliases.");
+    const names = characterAliases(CharacterAliasesInputSchema.parse(aliases));
+    if (names.length > 0) doc.setData({ aliases: names });
+    else { const next = { ...doc.data }; delete next["aliases"]; doc.data = next; doc.setData({}); }
+  }
   if (shortName === undefined) return doc.serialize();
   const written = shortName === null ? "" : shortName.trim();
   if (written === "") {
@@ -441,6 +469,46 @@ export async function applyVoiceAssignment(
       assignedAtVersion: currentVersion + 1,
     };
     doc.setData({ voice: assignment });
+  }
+  return store.commit(
+    {
+      kind: "sheet-edit",
+      source: options.source ?? "form",
+      files: [{ path: input.path, action: "replace", content: doc.serialize(), baseHash: sha256(live) }],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    },
+    undefined,
+    options.precondition,
+  );
+}
+
+/**
+ * Write or clear a character's narration (design turn 200, SPEC-047 R-165): how a narrator plays
+ * them under `performed`. The person's own action, committed straight to the sheet as a voice
+ * assignment is. `ifEmpty` is the drafting path's (R-170): a narration already written, by hand or
+ * by an earlier draft, is never replaced, and the commit is skipped.
+ */
+export async function applySheetNarration(
+  store: WorldStore,
+  input: { path: string; narration: string | null; ifEmpty?: boolean },
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
+): Promise<CommitResult | null> {
+  const live = await readLive(store, input.path);
+  if (live === null) throw new Error(`${input.path} does not exist`);
+  const doc = MarkdownFile.parse(live);
+  const current = typeof doc.data["narration"] === "string" ? (doc.data["narration"] as string).trim() : "";
+  const next = input.narration?.trim() ?? "";
+  if (next.length > PERFORMANCE_NOTE_MAX) throw new Error(`A character brief takes at most ${PERFORMANCE_NOTE_MAX} characters.`);
+  if (input.ifEmpty === true && current !== "") return null;
+  if (next === current) return null;
+  if (next.length > 60) await store.ensureSchemaVersion(EXPRESSIVE_DIRECTION_SCHEMA_VERSION, "character-expressive-direction");
+  if (next === "") {
+    const data = { ...doc.data };
+    delete data["narration"];
+    doc.data = data;
+    doc.setData({});
+  } else {
+    doc.setData({ narration: next });
   }
   return store.commit(
     {

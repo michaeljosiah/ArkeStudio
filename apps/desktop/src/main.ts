@@ -1,35 +1,51 @@
+import { createDesktopCreatorPublishing } from "./aonik-publishing.js";
+import { desktopDistribution } from "./distribution.js";
+import { createWindowsCommitProbe } from "./windows-commit.js";
+import { createDesktopGpuProbe } from "./system-resources.js";
+import { StartupRuntimeOwners } from "./startup-runtime-owners.js";
+import { workspaceRoot, prepareWorkspace, rememberWorkspace } from "./workspace-location.js";
 import { pathToFileURL } from "node:url";
+import { webWindowOpenHandler } from "./external-links.js";
+import { storyPublicationFileFilter } from "./story-publication-file.js";
 import { DesktopRemoteAccess, remoteGatewayPort } from "./remote-access.js";
 import { createPerformanceSpool } from "./performance-spool.js";
-import { microphoneAllowed } from "./microphone-permission.js";
+import { fullscreenAllowed, microphoneAllowed } from "./microphone-permission.js";
+import { LEAVE_PAGE_FULL_SCREEN } from "./focus-escape.js";
 import { audioMediaOptions, createMediaProcessRunner } from "./media-tools.js";
 import { PublicationHost } from "./publication-host.js";
 import { publicationMedia } from "./publication-media.js";
 import { authenticatedMediaHeaders, desktopTransportOrigins } from "./transport-auth.js";
-import { execFile } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { createFfprobe, resolveFfprobe } from "./media-probe.js";
 import { createComfyUiFetch } from "./comfyui-transport.js";
 import { ComfyUiDigestCache } from "./comfyui-digest-cache.js";
-import { cudaFreeMemoryArgs, detectQwenCudaDevice, qwenEngineProfile } from "./comfyui-profiles.js";
 import { comfyUiWeightCatalogue } from "./comfyui-setup.js";
 import { CloudProviderTransport } from "./provider-transport.js";
 import { appendFileSync, existsSync } from "node:fs";
 import { copyFile, readdir, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { freemem } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, safeStorage, shell, Tray } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, nativeTheme, Notification, powerMonitor, safeStorage, shell, Tray } from "electron";
 import electronUpdater from "electron-updater";
 import {
   assembleHarness,
+  managedStudioAssistant,
   describeClaudeAvailability,
   describeCodexAvailability,
   ChildLedger,
   ChildSupervisor,
-  ProfiledComfyUiEngineService,
+  ComfyUiEngineService,
+  OllamaEngineService,
+  MingProcess,
+  allocateLoopbackPort,
   Coordinator,
+  UNDERSONG_RELEASE,
   createStudioHost,
+  SystemResourceService,
+  createNodeSystemResourceProbe,
+  localAudioListenerOptions,
+  createNodeEffectRasterHost,
+  createNodeEffectAudioAnalysisHost,
   type StudioServer,
   AppSettingsFile,
   defaultAppRoot,
@@ -39,6 +55,7 @@ import {
   SecretRegistry,
   nodeSetupDeps,
   harnessTrace,
+  hashAudioFile,
   lazyCodexImageRunner,
   spoolBytes,
   sweepSpool,
@@ -75,18 +92,20 @@ import {
   type SidecarHealth,
 } from "@arke-studio/voice";
 import { BackgroundNotificationController } from "./background-notifications.js";
-import { drainDesktop, isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "./startup.js";
+import { drainDesktop, guardDesktopClose, isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "./startup.js";
 import { boundaryFrameOptions, takePosterOptions, takeQcOptions } from "./take-qc.js";
 import { createExportFfmpegRunner } from "./export-ffmpeg.js";
-import { saveMediaHandler } from "./save-media.js";
+import { saveMediaHandler, revealMediaHandler } from "./save-media.js";
 import { createStageExporter, type StageExporter } from "./stage-export.js";
 import { resolveTheme, themePalette, type ResolvedTheme, type ThemePalette } from "./theme.js";
 import { fileUpdateMarker, UpdateController } from "./updates.js";
+import { ManagedSpeech, initialSpeechBackend } from "./managed-speech.js";
 import {
   environmentVoxaArgs,
   safeVoxaExtraArgs,
   selectVoxa,
   validateVoxaExecutable,
+  createVoxaTranscriptionIdentity,
   type VoxaSelection,
 } from "./voxa-runtime.js";
 import {
@@ -118,6 +137,7 @@ function loadElectronSqlite(): DatabaseCtor | undefined {
 }
 
 declare const __APP_VERSION__: string;
+declare const __BUILD_CHANNEL__: string;
 
 /**
  * Electron main: embeds the coordinator (SPEC-001 D2 — it is the domain layer, not a server),
@@ -126,6 +146,11 @@ declare const __APP_VERSION__: string;
  */
 
 const isDev = !app.isPackaged;
+const distribution = desktopDistribution(__BUILD_CHANNEL__, app.getPath("home"), app.getPath("appData"));
+if (distribution.userData) {
+  app.setName(distribution.name);
+  app.setPath("userData", distribution.userData);
+}
 
 /** Repo root in dev (dist/ is two levels below apps/desktop). */
 const repoRoot = resolve(__dirname, "../../..");
@@ -135,7 +160,8 @@ const clientIndex = isDev
 const appIcon = join(__dirname, "../assets/arke-studio.ico");
 
 /** The real on-disk app root (SPEC-002 §2.2): %USERPROFILE%\ArkeStudio, env-overridable. */
-const appRoot = defaultAppRoot();
+const workspacePreference = join(app.getPath("userData"), "workspace-location.json");
+const appRoot = workspaceRoot(workspacePreference, distribution.development ? distribution.workspace : defaultAppRoot(), process.env.ARKE_STUDIO_ROOT);
 const desktopLog = join(appRoot, "logs", "desktop.jsonl");
 
 function traceDesktop(kind: string, detail: Record<string, unknown> = {}): void {
@@ -203,6 +229,11 @@ let remoteAccess: DesktopRemoteAccess | null = null;
 let remoteTray: Tray | null = null;
 let window: BrowserWindow | null = null;
 let shuttingDown = false;
+let shutdownOwner = "local work";
+function waitingForShutdown(owner: string): void {
+  shutdownOwner = owner;
+  traceDesktop("shutdown.waiting", { owner });
+}
 let allowQuit = false;
 let closeForUpdate: Promise<void> | null = null;
 let normalShutdown: Promise<void> | null = null;
@@ -218,6 +249,7 @@ let backgroundLogin = false;
 let windowPresentation: StartupWindowPresentation | null = null;
 let startupController: StartupController | null = null;
 let startupProvider: FsWorldProvider | null = null;
+const startupRuntimeOwners = new StartupRuntimeOwners();
 let providerTransport: CloudProviderTransport | null = null;
 let startupState: StartupState = { status: "initializing" };
 let transportSession: { port: number; token: string } | null = null;
@@ -344,6 +376,7 @@ function registerHostIpc(): void {
     return publicationMedia(createMediaProcessRunner({ ffmpeg: ffmpeg ?? "", ffprobe }));
   };
   publicationHost = new PublicationHost({
+    fileSpace: () => coordinator?.publicationFileSpace,
     root: join(appRoot, "publications"), origins: desktopTransportOrigins(process.env.ARKE_DEV_SERVER_URL),
     providers: () => ({ starting: startupProvider, live: coordinator?.worldProvider ?? null }),
     compiler: signal => media().compiler(signal), probe: (path, type, signal) => media().playback(path, type, signal),
@@ -415,6 +448,38 @@ function registerHostIpc(): void {
    * The destination is the platform's to ask for, and so is what to do about a name already in
    * use — the dialog confirms an overwrite rather than this deciding one silently.
    */
+  ipcMain.handle("arke:save-story-publication", async (event, input: unknown) => {
+    const parent = window;
+    if (!parent || event.sender !== parent.webContents || event.senderFrame !== parent.webContents.mainFrame || shuttingDown || !coordinator ||
+        !input || typeof input !== "object" || !("editionId" in input) || !("file" in input) ||
+        typeof input.editionId !== "string" || typeof input.file !== "string") return { ok: false };
+    const filter = storyPublicationFileFilter(input.file);
+    if (!filter) return { ok: false };
+    const hit = await coordinator.storyPublicationFile(input.editionId, input.file);
+    if (!hit || parent !== window || shuttingDown) return { ok: false };
+    const chosen = await dialog.showSaveDialog(parent, { title: "Save edition", defaultPath: join(app.getPath("downloads"), hit.downloadName),
+      filters: [filter],
+      properties: ["createDirectory", "showOverwriteConfirmation"] });
+    if (chosen.canceled || !chosen.filePath) return { ok: false, cancelled: true };
+    const current = await coordinator?.storyPublicationFile(input.editionId, input.file);
+    if (!current || parent !== window || shuttingDown) return { ok: false };
+    try { await copyFile(current.path, chosen.filePath); return { ok: true }; } catch { return { ok: false }; }
+  });
+  ipcMain.handle("arke:locate-story-publication", async (event, input: unknown) => {
+    const parent = window, host = coordinator;
+    if (!parent || event.sender !== parent.webContents || event.senderFrame !== parent.webContents.mainFrame || shuttingDown || !host ||
+        !input || typeof input !== "object" || !("editionId" in input) || !("file" in input) ||
+        typeof input.editionId !== "string" || !/^[a-f0-9-]{36}$/.test(input.editionId) ||
+        typeof input.file !== "string") return { ok: false };
+    const filter = storyPublicationFileFilter(input.file);
+    if (!filter) return { ok: false };
+    const chosen = await dialog.showOpenDialog(parent, { title: "Locate the same edition file", properties: ["openFile"],
+      filters: [filter] });
+    if (chosen.canceled || !chosen.filePaths[0]) return { ok: false, cancelled: true };
+    if (parent !== window || host !== coordinator || shuttingDown) return { ok: false };
+    try { await host.restoreStoryPublicationFile(input.editionId, input.file, chosen.filePaths[0]); return { ok: true }; }
+    catch { return { ok: false }; }
+  });
   const saveMediaFromHost = saveMediaHandler({
     allowedSender: () => window?.webContents ?? null,
     // The world provider's own confined lookup — the one the media server serves through, so a
@@ -441,6 +506,13 @@ function registerHostIpc(): void {
     async (event, input: { worldSlug?: unknown; path?: unknown; name?: unknown }) =>
       await saveMediaFromHost(event.sender, input),
   );
+  const revealMediaFromHost = revealMediaHandler({
+    allowedSender: () => window?.webContents ?? null,
+    worldSlug: () => coordinator?.getState().world?.meta.slug ?? null,
+    providers: () => ({ starting: startupProvider, live: coordinator?.worldProvider ?? null }),
+    reveal: path => shell.showItemInFolder(path),
+  });
+  ipcMain.handle("arke:reveal-media", async (event, input) => revealMediaFromHost(event.sender, input));
   /*
    * Put a picture on the system clipboard.
    *
@@ -505,6 +577,25 @@ function registerHostIpc(): void {
     if (!window || event.sender !== window.webContents) return;
     void shell.openPath(appRoot);
   });
+  ipcMain.handle("arke:restart-for-setup", async (event) => {
+    if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame) return { reason: "Open setup in the main Arke window." };
+    return restartForSetup();
+  });
+  ipcMain.handle("arke:choose-workspace-folder", async (event) => {
+    if (!window || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame || shuttingDown) return { reason: "Arke is not ready to change folders." };
+    if (process.env.ARKE_STUDIO_ROOT) return { reason: "This installation’s folder is set by ARKE_STUDIO_ROOT. Change that launch setting to use another folder." };
+    const result = await dialog.showOpenDialog(window, { title: "Choose your Arke folder", properties: ["openDirectory", "createDirectory"], defaultPath: appRoot });
+    const path = result.filePaths[0];
+    if (result.canceled || !path || resolve(path) === resolve(appRoot)) return {};
+    const confirmed = await dialog.showMessageBox(window, { type: "question", title: "Use another Arke folder?",
+      message: "Arke will restart using this folder.", detail: `${path}\n\nYour current worlds stay where they are. No files are moved. Account connections and downloads belong to each folder.`, buttons: ["Use this folder", "Cancel"], defaultId: 0, cancelId: 1 });
+    if (confirmed.response !== 0) return {};
+    try {
+      const current = await new AppSettingsFile(join(appRoot, "settings.json")).load();
+      await prepareWorkspace(path, current.onboarding ?? { version: 1, persona: null, step: "choose", writing: "none", harness: "opencode", account: null, modelId: null, media: false, voice: false });
+      return await restartForSetup(() => rememberWorkspace(workspacePreference, path));
+    } catch (error) { return { reason: `Could not use that folder: ${error instanceof Error ? error.message : String(error)}` }; }
+  });
   ipcMain.on("arke:quit", (event) => {
     if (!window || event.sender !== window.webContents) return;
     app.quit();
@@ -552,11 +643,29 @@ async function createWindow(): Promise<void> {
     if (window && !window.isDestroyed()) window.show();
   });
   const rendererUrl = process.env.ARKE_DEV_SERVER_URL ?? pathToFileURL(clientIndex).href;
-  window.webContents.session.setPermissionCheckHandler((contents, permission, _origin, details) => microphoneAllowed({
+  const permitted = (ask: Parameters<typeof microphoneAllowed>[0]) => microphoneAllowed(ask) || fullscreenAllowed(ask);
+  /*
+   * The page's full screen (Focus) swallows Escape before the page sees it, and Electron does not
+   * leave it either, so Focus would hold the screen with no key out. Escape there leaves the
+   * document's full screen; the page hears that change and leaves Focus (SPEC-056 R-12). Not while
+   * a menu, list or dialog is showing: that Escape is the overlay's, as the page's own rule says,
+   * and taking it here would close the `@` or `/` menu and Focus with one key (codex on PR 1835).
+   */
+  let pageFullScreen = false;
+  window.on("enter-html-full-screen", () => { pageFullScreen = true; });
+  window.on("leave-html-full-screen", () => { pageFullScreen = false; });
+  window.webContents.on("before-input-event", (_event, input) => {
+    if (!pageFullScreen || input.type !== "keyDown" || input.key !== "Escape") return;
+    void window?.webContents.executeJavaScript(LEAVE_PAGE_FULL_SCREEN).catch(() => {});
+  });
+  // A `download` link's save dialog would otherwise be titled with the page's blob: address (issue 2544).
+  window.webContents.session.removeAllListeners("will-download");
+  window.webContents.session.on("will-download", (_event, item) => item.setSaveDialogOptions({ title: "Save file", defaultPath: join(app.getPath("downloads"), item.getFilename()) }));
+  window.webContents.session.setPermissionCheckHandler((contents, permission, _origin, details) => permitted({
     permission, sameWebContents: contents === window?.webContents, isMainFrame: details.isMainFrame,
     requestingUrl: details.requestingUrl ?? "", rendererUrl, mediaTypes: details.mediaType ? [details.mediaType] : [],
   }));
-  window.webContents.session.setPermissionRequestHandler((contents, permission, callback, details) => callback(microphoneAllowed({
+  window.webContents.session.setPermissionRequestHandler((contents, permission, callback, details) => callback(permitted({
     permission, sameWebContents: contents === window?.webContents, isMainFrame: details.isMainFrame,
     requestingUrl: details.requestingUrl, rendererUrl, mediaTypes: "mediaTypes" in details ? details.mediaTypes ?? [] : [],
   })));
@@ -603,10 +712,7 @@ async function createWindow(): Promise<void> {
     const allowed = process.env.ARKE_DEV_SERVER_URL ?? `file://${clientIndex.replace(/\\/g, "/")}`;
     if (!url.startsWith(allowed)) event.preventDefault();
   });
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url);
-    return { action: "deny" };
-  });
+  window.webContents.setWindowOpenHandler(webWindowOpenHandler((url) => shell.openExternal(url)));
   window.webContents.on("render-process-gone", (_event, details) => {
     activityActivationReady = false;
     void stageExporter?.cancelAll();
@@ -617,7 +723,10 @@ async function createWindow(): Promise<void> {
     if (!allowQuit && !shuttingDown && remoteAccess?.status().running && !updateController?.shouldKeepWindowVisible()) {
       event.preventDefault(); window?.hide(); return;
     }
-    if (allowQuit || !updateController?.shouldKeepWindowVisible()) return;
+    if (allowQuit || !updateController?.shouldKeepWindowVisible()) {
+      guardDesktopClose(event, allowQuit, () => app.quit());
+      return;
+    }
     event.preventDefault();
     if (!updateController.isInstallOnCloseArmed() || closeForUpdate) return;
     closeForUpdate = updateController.prepareInstallOnClose().then((ready) => {
@@ -653,35 +762,32 @@ async function initialize(): Promise<{ port: number }> {
   // Stop-Process); the ledger sweep reaps them before this run spawns its own (R-5). One of
   // those orphans once held a file lock that broke packaging — this is not hypothetical.
   const childLedger = new ChildLedger(join(appRoot, "run", "children.json"));
+  const mingProcess = new MingProcess(childLedger);
+  const transferMing = startupRuntimeOwners.own(mingProcess);
+  const systemGpuProbe = createDesktopGpuProbe({ ledger: childLedger });
+  // Keep this observation reader owned through normal quit, startup failure and cleanup retry.
+  startupRuntimeOwners.own(systemGpuProbe);
   const swept = await childLedger.reapStale();
   if (swept.reaped.length > 0) {
     const named = swept.reaped.map((r) => `${r.id} (pid ${r.pid})`).join(", ");
     console.log(`[arke] reaped ${swept.reaped.length} orphaned child process(es): ${named}`);
   }
 
-  // Harness assembly (SPEC-005 R-1, issue 327 §3–§4): both generations resolved, v2
-  // preferred, v1 the escape hatch (ARKE_OPENCODE_GENERATION=v1 until the Settings toggle
-  // lands). One seam builds the whole launch — discovery, password protocol, redirected
-  // profile, adapter, config writer — so dev and desktop cannot drift. Absent → authoring
-  // degrades with the reason stated (R-4). The trace file answers "what did the app hear,
-  // and when" whenever a chat sticks, without a debugger.
-  /*
-   * Read before the harness is assembled, because the stored choice decides which lane launches.
-   * The same file the coordinator writes through, so Settings and launch cannot disagree.
-   */
+  // Harness assembly (SPEC-005 R-1).
+  // Only the pinned OpenCode v2 runtime is supported.
   const hostSettings = new AppSettingsFile(join(appRoot, "settings.json"));
-  const storedHarness = (await hostSettings.load().catch(() => null))?.harness ?? null;
+  const savedHostSettings = await hostSettings.initializeSpeechBackend(initialSpeechBackend(windowsArchitecture(), process.env["ARKE_VOXA_CMD"], app.runningUnderARM64Translation));
+  const storedHarness = savedHostSettings.harness;
+  const ollamaEngine = new OllamaEngineService({ appRoot, port: await allocateLoopbackPort(), deps: { ledger: childLedger } });
+  const transferOllama = startupRuntimeOwners.own(ollamaEngine);
+  await ollamaEngine.applySettings(savedHostSettings.ollama, { deferManagedStart: true });
   const chosenHarness = effectiveHarnessEngine(storedHarness?.engine ?? "opencode", process.env["ARKE_HARNESS"]);
 
   const wiring = await assembleHarness({
     appRoot,
+    ollamaEndpoint: () => ollamaEngine.endpoint(),
     engine: chosenHarness,
     deps: { ledger: childLedger },
-    preferV1: process.env["ARKE_OPENCODE_GENERATION"] === "v1",
-    v1: {
-      ...(process.env["ARKE_OPENCODE_CMD"] ? { configuredPath: process.env["ARKE_OPENCODE_CMD"] } : {}),
-      ...(app.isPackaged ? { bundledPath: join(process.resourcesPath, "opencode", "opencode.exe") } : {}),
-    },
     v2: {
       ...(process.env["ARKE_OPENCODE2_CMD"] ? { configuredPath: process.env["ARKE_OPENCODE2_CMD"] } : {}),
       ...(app.isPackaged ? { bundledPath: join(process.resourcesPath, "opencode2", "opencode2.exe") } : {}),
@@ -721,6 +827,14 @@ async function initialize(): Promise<{ port: number }> {
 
   // One client set serves validation (SPEC-008) and dispatch (SPEC-009).
   const providerSecrets = new SecretRegistry();
+  const creatorCloud = await createDesktopCreatorPublishing({ appRoot,
+    cipher: { ...cipher, isAvailable: () => cipher.isAvailable() && (process.platform !== "linux" || safeStorage.getSelectedStorageBackend() !== "basic_text") },
+    openExternal: async url => { await shell.openExternal(url); }, secrets: providerSecrets,
+    ...(distribution.development
+      ? { configurationFile: isDev ? join(repoRoot, "apps/desktop/config/aonik-dev.json") : join(process.resourcesPath, "aonik-publishing.json") }
+      : process.env["ARKE_AONIK_CONFIG"] ? { configurationFile: process.env["ARKE_AONIK_CONFIG"] } : {}),
+  });
+  const transferCreatorCloud = startupRuntimeOwners.own({ dispose: async () => { await creatorCloud.creatorPublishing?.stop(); await creatorCloud.account?.stop?.(); } });
   const providerCalls = new ProviderCallStore(join(appRoot, "provider-calls", "calls.jsonl"), providerSecrets);
   providerTransport = new CloudProviderTransport();
   // Higgsfield authenticates through its own CLI, so "is it configured" is a discovery
@@ -737,9 +851,15 @@ async function initialize(): Promise<{ port: number }> {
   // Healthy, not merely running: a sidecar still starting reads as absent, which refuses with a
   // remedy instead of failing halfway through a dispatch.
   let voxaSupervisorRef: ChildSupervisor | null = null;
+  let voxaSettings = savedHostSettings.voxa;
+  const speech = new ManagedSpeech({ root: app.isPackaged ? join(process.resourcesPath, "speech") : join(repoRoot, "apps/desktop/build-resources/speech", process.arch),
+    decoder: app.isPackaged ? join(process.resourcesPath, "ffmpeg/ffmpeg.exe") : join(repoRoot, "apps/desktop/build-resources/ffmpeg/ffmpeg.exe"),
+    modelRoot: join(appRoot, "models"), architecture: windowsArchitecture(), settings: () => voxaSettings,
+    espeak: app.isPackaged ? join(process.resourcesPath, "espeak-ng/espeak-ng.exe") : join(repoRoot, "apps/desktop/build-resources/espeak-ng", process.arch, "espeak-ng.exe") });
   const voxaClient = new VoxaClient(
     (url, init) => fetch(url, init),
     () => `http://127.0.0.1:${voxaSupervisorRef?.port ?? 0}`,
+    { capability: speech.capability },
   );
   let voxaRequestsEnabled = true;
   const voxaBaseUrl = (): string | null => {
@@ -751,55 +871,11 @@ async function initialize(): Promise<{ port: number }> {
   // provider clients need its baseUrl and pre-flight before the coordinator exists — the same
   // ordering Voxa's supervisor ref solves. Everything it knows about a recipe is facts —
   // digests, node classes, file lists — never a graph.
-  /*
-   * How much of the graphics card is free right now, in MB.
-   *
-   * The device's own answer, not the engine's: ComfyUI reports what torch allocated and cannot
-   * see the browser holding 3 GB of the same card (SPEC-022 §2.6). NVIDIA-only, and null
-   * everywhere else — an unmeasurable card dispatches rather than being refused (SPEC-021 D15).
-   *
-   * One implementation, two readers: readiness asks it so a busy machine says so before Generate
-   * is pressed, and the dispatch path asks it again after telling the engine to unload.
-   */
-  const qwenCudaDevice = await detectQwenCudaDevice();
-  const freeVramMb = (model?: string): Promise<number | null> =>
-    new Promise((resolve) => {
-      execFile(
-        "nvidia-smi",
-        cudaFreeMemoryArgs(model === "comfyui-qwen21-image" && comfyUiEngine.engineStatus().source !== "user-url" ? qwenCudaDevice : null),
-        { timeout: 5_000, windowsHide: true },
-        (err, stdout) => {
-          if (err) return resolve(null);
-          const mb = Number.parseInt(String(stdout).trim().split(/\r?\n/)[0] ?? "", 10);
-          resolve(Number.isFinite(mb) && mb >= 0 ? mb : null);
-        },
-      );
-    });
-
-  /*
-   * How much system memory is free right now, in MB (issue 846).
-   *
-   * The resource a streaming video recipe actually spends: H3's verified runs bottomed under a
-   * gigabyte free of 32, and the start-up probe only ever reads the total. `os.freemem` is the
-   * OS's own available figure — what Task Manager shows — and it is what the walkthrough author's
-   * "free up RAM" button was watching. Async and nullable for the same reasons as the card probe:
-   * the readers treat unknown as dispatchable (SPEC-021 D15), and a remote engine gets null.
-   */
-  const freeMemMb = async (): Promise<number | null> => {
-    try {
-      return Math.floor(freemem() / (1024 * 1024));
-    } catch {
-      return null;
-    }
-  };
-
   const comfyUiFetch = createComfyUiFetch((url, init) => fetch(url, init));
   const comfyUiDigests = new ComfyUiDigestCache(appRoot);
 
-  const qwenProfile = qwenEngineProfile(app.isPackaged ? join(process.resourcesPath, "comfyui-nodes") : join(repoRoot, "vendor", "comfyui"), qwenCudaDevice);
-  const comfyUiEngine = new ProfiledComfyUiEngineService({
-    freeVramMb,
-    freeMemMb,
+  const comfyUiEngine = new ComfyUiEngineService({
+    windowsCommit: createWindowsCommitProbe(),
     appRoot,
     recipes: COMFYUI_RECIPES.map((recipe) => ({
       id: recipe.id,
@@ -810,9 +886,7 @@ async function initialize(): Promise<{ port: number }> {
       exercisedThroughVersion: recipe.engine.exercisedThroughVersion,
       minVramMb: recipe.hardware.minVramMb,
       ...(recipe.hardware.accelerator ? { accelerator: recipe.hardware.accelerator } : {}),
-      minFreeVramMb: recipe.hardware.minFreeVramMb,
       ...(recipe.hardware.minMemMb !== undefined ? { minMemMb: recipe.hardware.minMemMb } : {}),
-      ...(recipe.hardware.minFreeMemMb !== undefined ? { minFreeMemMb: recipe.hardware.minFreeMemMb } : {}),
       recommendedVramMb: recipe.hardware.recommendedVramMb,
       checkpoints: recipe.requires.checkpoints,
       customNodes: recipe.requires.customNodes,
@@ -849,12 +923,18 @@ async function initialize(): Promise<{ port: number }> {
     },
     registerSupervisorExitBackstop: (supervisor) => registerExitBackstop(supervisor),
     createProcessEpoch: () => randomUUID(),
-  }, qwenProfile.model, qwenProfile.launch);
+  });
   // Per-recipe weight entries for setup (SPEC-021 §2.4): derived from the provider layer's
   // recipe facts so the digests live in exactly one place, landing in the engine's own models
   // folder through the coordinator's external-dir resolver.
   const comfyUiWeightEntries = comfyUiWeightCatalogue(COMFYUI_RECIPES);
   const providerClients = createProviderClients({
+    ming: {
+      status: model => coordinator?.mingSpeechStatus(model) ?? Promise.resolve({ready: false, reason: "Arke is starting."}),
+      synthesize: (input, signal) => coordinator?.synthesizeMing(input, signal) ?? Promise.reject(new Error("Arke is not running.")),
+    },
+    ollama: () => ollamaEngine.baseUrl(),
+    ollamaCleanup: () => ollamaEngine.endpoint(),
     fetch: (url, init) => fetch(url, init),
     transport: providerTransport,
     higgsfield: lazyHiggsfieldRunner(findHiggsfield),
@@ -868,6 +948,7 @@ async function initialize(): Promise<{ port: number }> {
       },
     }),
     voxa: voxaBaseUrl,
+    voxaHealth: (timeoutMs) => voxaClient.health({ timeoutMs }),
     voxaSynthesize: (input, options) => voxaClient.synthesize(input, options),
     voxaTranscribe: (input, options) => voxaClient.transcribe(input.audio, input.contentType, options),
     comfyui: {
@@ -884,8 +965,6 @@ async function initialize(): Promise<{ port: number }> {
       // The engine says what it is doing only on its socket (SPEC-021 D16). Node's own
       // WebSocket, adapted to the two handlers the client needs — nothing here should hold a
       // dependency on a socket library for one optional figure.
-      freeVramMb,
-      freeMemMb,
       openSocket: (url) => {
         const socket = new WebSocket(url);
         const adapter = {
@@ -906,10 +985,9 @@ async function initialize(): Promise<{ port: number }> {
 
   // Voxa discovery is environment -> configured -> bundled -> absent. Configured paths stay
   // in the main process; renderer state receives only source, basename, and safe categories.
-  let voxaSettings = (await hostSettings.load()).voxa;
   const expectedArchitecture = windowsArchitecture();
   const discoverVoxa = (settings: VoxaSettings) =>
-    selectVoxa({
+    settings.backend === "pipecat" ? speech.select() : selectVoxa({
       settings,
       environmentPath: process.env["ARKE_VOXA_CMD"],
       bundledPath: bundledVoxaPath(),
@@ -951,21 +1029,9 @@ async function initialize(): Promise<{ port: number }> {
     });
   };
 
-  const voxaPaths = () => {
-    const modelRoot = join(appRoot, "models");
-    const espeakRoot = app.isPackaged
-      ? join(process.resourcesPath, "espeak-ng")
-      : join(repoRoot, "apps", "desktop", "build-resources", "espeak-ng", process.arch);
-    return {
-      kokoroModel: join(modelRoot, "kokoro-82m", "model_quantized.onnx"),
-      kokoroConfig: join(modelRoot, "kokoro-82m", "config.json"),
-      kokoroVoices: join(modelRoot, "kokoro-82m", "voices"),
-      whisperModel: join(modelRoot, "whisper-base-en", "ggml-base.en.bin"),
-      espeak: join(espeakRoot, "espeak-ng.exe"),
-      espeakData: join(espeakRoot, "share", "espeak-ng-data"),
-    };
-  };
+  const voxaPaths = () => speech.legacyPaths();
   const voxaLaunch = (selection: VoxaSelection, settings: VoxaSettings) => {
+    if (settings.backend === "pipecat") return speech.launch(selection);
     const paths = voxaPaths();
     const advanced = safeVoxaExtraArgs(
       selection.source === "environment"
@@ -995,7 +1061,10 @@ async function initialize(): Promise<{ port: number }> {
       ...voxaLaunch(voxaSelection, voxaSettings),
       logFile: join(appRoot, "logs", "engines", "voxa.log"),
       healthPath: "/health",
-      readyTimeoutMs: 30_000,
+      healthHeaders: speech.healthHeaders,
+      // Cold Python/native imports can exceed a minute under disk pressure. Keep
+      // readiness fenced through startup, matching waitForKokoroReady's bound.
+      readyTimeoutMs: 120_000,
       validateHealth: async (response) => {
         const parsed = await response.json().catch(() => null);
         const health = parsed ? SidecarHealthSchema.safeParse(parsed) : null;
@@ -1022,6 +1091,13 @@ async function initialize(): Promise<{ port: number }> {
   );
   voxaSupervisorRef = voxaSupervisor;
   registerExitBackstop(...(opencodeSupervisor ? [opencodeSupervisor] : []), voxaSupervisor);
+  const transcriptionIdentity = createVoxaTranscriptionIdentity({
+    id: () => speech.backend === "pipecat" ? "pipecat-faster-whisper" : "voxa-whisper",
+    additionalPaths: () => speech.backend === "pipecat" ? [...["config.json", "tokenizer.json", "vocabulary.txt"].map(name => join(appRoot, "models/faster-whisper-base-en", name)), ...speech.recognitionFiles()] : [],
+    path: () => speech.backend === "pipecat" ? join(appRoot, "models/faster-whisper-base-en/model.bin") : voxaPaths().whisperModel,
+    health: signal => voxaSelection.command === null || !voxaRequestsEnabled ? Promise.resolve(null) : voxaClient.health({ signal }),
+    hash: async (path, signal) => (await hashAudioFile(path, signal)).hash,
+  });
   const voxaSidecar = {
     /*
      * The catalogue asks this before offering a voice (2026-08-24), so it has to be here and not
@@ -1031,15 +1107,17 @@ async function initialize(): Promise<{ port: number }> {
      * Null when no runtime was found at all, which the catalogue reads as "unknown, leave the
      * configured presets alone" rather than "failed, offer nothing".
      */
-    health: () =>
-      voxaSelection.command === null || !voxaRequestsEnabled ? Promise.resolve(null) : voxaClient.health(),
+    health: (options?: { signal?: AbortSignal }) =>
+      voxaSelection.command === null || !voxaRequestsEnabled ? Promise.resolve(null) : voxaClient.health(options),
     listVoices: () => voxaClient.listVoices(),
     // The caller's signal travels with the request (codex on PR 1183): a stopped audiobook run
     // or a cancelled performance ends the Voxa request, and the client's own waiter, rather
     // than leaving the engine to finish a paragraph nobody is waiting for.
     synthesize: (input: { voiceId: string; text: string; params?: Record<string, number> }, options?: { signal?: AbortSignal }) =>
       voxaClient.synthesize(input, options ?? {}),
-    transcribe: (audio: Uint8Array, contentType: string) => voxaClient.transcribe(audio, contentType),
+    transcribe: (audio: Uint8Array, contentType: string, options?: { signal?: AbortSignal }) => voxaClient.transcribe(audio, contentType, options),
+    transcriptionIdentity,
+    transcribeWords: (audio: Uint8Array, options?: { signal?: AbortSignal }) => voxaClient.transcribeWords(audio, options),
   };
 
   const setupEngine = (id: string, healthReady: boolean) => {
@@ -1068,7 +1146,7 @@ async function initialize(): Promise<{ port: number }> {
   const runtimeStatus = (): VoiceRuntimeStatus => {
     const paths = voxaPaths();
     const kokoro = setupEngine(VOXA_SETUP_COMPONENT_IDS.kokoro, voxaHealth?.engineStatus.kokoro.ready ?? false);
-    const whisper = setupEngine(VOXA_SETUP_COMPONENT_IDS.whisper, voxaHealth?.engineStatus.whisper.ready ?? false);
+    const whisper = setupEngine(speech.backend === "pipecat" ? "stt-faster-whisper-base-en" : VOXA_SETUP_COMPONENT_IDS.whisper, voxaHealth?.engineStatus.whisper.ready ?? false);
     if (kokoro.state === "unavailable" && voxaHealth?.engineStatus.kokoro.reason) {
       kokoro.detail = voxaHealth.engineStatus.kokoro.reason;
     }
@@ -1098,6 +1176,7 @@ async function initialize(): Promise<{ port: number }> {
       "Runtime is starting";
     return {
       source: voxaSelection.source,
+      backend: speech.backend,
       configured: voxaSelection.configured,
       bundledAvailable: voxaSelection.bundledAvailable,
       executableName: voxaSelection.executableName,
@@ -1145,7 +1224,9 @@ async function initialize(): Promise<{ port: number }> {
     });
   };
 
-  const applyVoxaSettings = async (settings: VoxaSettings): Promise<void> => {
+  let speechConfiguration = Promise.resolve();
+  const applyVoxaSettings = (settings: VoxaSettings): Promise<void> => {
+    const change = speechConfiguration.then(async () => {
     voxaRequestsEnabled = false;
     voxaClient.cancelPending();
     voxaSettings = settings;
@@ -1156,6 +1237,9 @@ async function initialize(): Promise<{ port: number }> {
     await voxaSupervisor.reconfigure(voxaLaunch(voxaSelection, settings));
     voxaRequestsEnabled = voxaSupervisor.status === "healthy";
     await publishRuntimeStatus();
+    });
+    speechConfiguration = change.catch(() => {});
+    return change;
   };
   voxaSupervisor.on("status", (status: { status: string }) => {
     if (status.status === "healthy") voxaRequestsEnabled = true;
@@ -1169,7 +1253,7 @@ async function initialize(): Promise<{ port: number }> {
 
   updateController = new UpdateController({
     updater: electronUpdater.autoUpdater,
-    packaged: app.isPackaged,
+    packaged: app.isPackaged && distribution.allowUpdates,
     currentVersion: () => app.getVersion(),
     marker: fileUpdateMarker(join(appRoot, "update", "pending.json")),
     publish: (update) => {
@@ -1192,6 +1276,8 @@ async function initialize(): Promise<{ port: number }> {
 
   const transportToken = randomBytes(32).toString("hex");
   const studioHost = createStudioHost({
+    ...creatorCloud,
+    onShutdownWait: waitingForShutdown,
     transportAuth: { token: transportToken, allowedOrigins: desktopTransportOrigins(process.env.ARKE_DEV_SERVER_URL) },
     provider,
     adapter,
@@ -1200,21 +1286,20 @@ async function initialize(): Promise<{ port: number }> {
     jobsSeedPath: join(appRoot, "queue", "jobs.jsonl"),
     ledgerSeedPath: join(appRoot, "ledger.jsonl"),
     appRoot,
-    // The sample world ships beside the other resources (SPEC-016 R-6, R-8), the same way
-    // ffmpeg and the harness binary do. Unpackaged there is no resources directory to read, so
-    // this build honestly has none; the dev coordinator points at the repo fixture instead, and
-    // that is where the feature is exercised from source.
-    sampleWorldPath: app.isPackaged ? join(process.resourcesPath, "sample-world") : null,
+    systemResources: new SystemResourceService(createNodeSystemResourceProbe({ gpu: systemGpuProbe, mingRunning: () => mingProcess.running })),
+    // The full story is an explicit, integrity-pinned download (SPEC-016 R-6, R-8).
+    // Test fixtures are never installer resources.
+    sampleWorldDownload: UNDERSONG_RELEASE,
     authoring: { agentForPurpose, roster: ROSTER, skillFor },
     ...(wiring.harnessInfo ? { harnessInfo: wiring.harnessInfo } : {}),
     harnessLaunchEngine: chosenHarness,
+    harnessRecovery: wiring.recovery,
     ...(wiring.unavailableReason ? { harnessUnavailableReason: wiring.unavailableReason } : {}),
     ...(process.env["ARKE_HARNESS"] === chosenHarness ? { harnessEngineOverride: chosenHarness } : {}),
     // Stored LLM keys reach the harness as spawn environment (SPEC-005 D5) — under v2's
     // redirected profile this is the only credential path there is (issue 327 §2).
     relaunchHarness: wiring.relaunchHarness,
     // The local models the bundled harness cannot see on its own (issue 1247).
-    ...(wiring.publishLocalModels ? { publishLocalHarnessModels: wiring.publishLocalModels } : {}),
     cipher,
     secretRegistry: providerSecrets,
     providerCalls,
@@ -1255,6 +1340,13 @@ async function initialize(): Promise<{ port: number }> {
       });
       return result.canceled ? null : (result.filePaths[0] ?? null);
     },
+    chooseWorldFolder: async () => {
+      if (!window) return null;
+      const result = await dialog.showOpenDialog(window, {
+        title: "Import an Arke world folder", buttonLabel: "Copy world into Arke", properties: ["openDirectory"],
+      });
+      return result.canceled ? null : result.filePaths[0] ?? null;
+    },
     // Only the harnesses that can be absent — OpenCode is in the installer beside this process.
     chooseCodexExecutable: async () => {
       const parent = window;
@@ -1290,6 +1382,10 @@ async function initialize(): Promise<{ port: number }> {
     ...(ffmpegPath() !== null
       ? {
           ffmpeg: createExportFfmpegRunner(ffmpegPath()!, slateFontPath()),
+          effectAudioAnalysisHost: createNodeEffectAudioAnalysisHost({ ffmpeg: ffmpegPath()! }),
+          ...(ffprobeResolution().path ? { effectRasterHost: createNodeEffectRasterHost({ ffmpeg: ffmpegPath()!,
+            workerPath: join(__dirname, "effect-raster-worker.cjs"),
+            mediaProcess: createMediaProcessRunner({ ffmpeg: ffmpegPath()!, ffprobe: ffprobeResolution().path! }) }) } : {}),
           // The same binary, a different job (#248): arrival-time motion QC reads frame hashes
           // and writes no media. The bounded runner lives in take-qc.ts so it can be tested
           // without a real ffmpeg on the machine running the tests.
@@ -1299,6 +1395,7 @@ async function initialize(): Promise<{ port: number }> {
         }
       : {}),
     ...audioMediaOptions(ffmpegPath(), ffprobeResolution().path),
+    ...localAudioListenerOptions(app.isPackaged ? join(process.resourcesPath, "audio-listener", "local-audio-listener.py") : join(__dirname, "local-audio-listener.py")),
     performanceSpool,
     // Measuring media (#253): the spine cannot make a clock out of a track whose length is
     // unknown, and the cut cannot check a take against the window it was cut for. Wired
@@ -1321,15 +1418,15 @@ async function initialize(): Promise<{ port: number }> {
     },
     // Attaching files. The dialog is the host's business and so is the path it hands back — the
     // renderer never sees either, it only sees artifacts appear (SPEC-001 R-9).
-    pickFiles: async ({ accept }) => {
+    pickFiles: async ({ accept, purpose }) => {
       const parent = window;
       if (!parent) return [];
       const result = await dialog.showOpenDialog(parent, {
-        title: "Attach to this world",
-        buttonLabel: "Attach",
+        title: purpose === "music" ? "Import music" : "Attach to this world",
+        buttonLabel: purpose === "music" ? "Import" : "Attach",
         properties: ["openFile", "multiSelections"],
         filters: [
-          { name: "Anything the studio can hold", extensions: [...accept] },
+          { name: purpose === "music" ? "Music files" : "Anything the studio can hold", extensions: [...accept] },
           { name: "All files", extensions: ["*"] },
         ],
       });
@@ -1359,9 +1456,10 @@ async function initialize(): Promise<{ port: number }> {
     // The ComfyUI runtime entry asks whether an external source was deliberately selected
     // (SPEC-021 D10). A detected install remains an offer and does not suppress managed Download.
     setup: {
-      ...nodeSetupDeps(),
+      ...nodeSetupDeps({ ledger: childLedger }),
       externallyPresent: async (entryId) =>
-        entryId === "comfyui-runtime" ? comfyUiEngine.externallySelected() : false,
+        entryId === "comfyui-runtime" ? comfyUiEngine.externallySelected() : entryId === "ollama-runtime" ? ollamaEngine.externallySelected() : false,
+      ollama: ollamaEngine,
     },
     // Breeze and Fish keep a cloned voice on the account — a slot, a model; the library asks for
     // it here (SPEC-046 R-13). A reader whose client carries no slot calls keeps none.
@@ -1387,6 +1485,10 @@ async function initialize(): Promise<{ port: number }> {
         return client.hasVoice(key, voiceId, signal);
       },
     },
+    ollama: { service: ollamaEngine, reconfigureHarness: wiring.reconfigureOllama },
+    studioAssistant: managedStudioAssistant(wiring, ollamaEngine),
+    ming: mingProcess,
+    ...(app.isPackaged ? { mingWorkerPath: join(process.resourcesPath, "ming", "ming-worker.py") } : {}),
     comfyui: {
       service: comfyUiEngine,
       choosePath: async () => {
@@ -1424,6 +1526,20 @@ async function initialize(): Promise<{ port: number }> {
           reason: "the native index binding did not load — search and counts degrade; authoring still works",
         },
     voice: {
+      liveEndpoint: async signal => {
+        if (speech.backend !== "pipecat" || !voxaRequestsEnabled) return null;
+        const base = voxaBaseUrl();
+        if (!base) return null;
+        const health = await voxaClient.health({ signal });
+        if (speech.backend !== "pipecat" || !voxaRequestsEnabled || base !== voxaBaseUrl()
+          || !health?.engineStatus.kokoro.ready || !health.engineStatus.whisper.ready) return null;
+        return { url: base.replace("http:", "ws:") + "/live", headers: speech.healthHeaders() };
+      },
+      recovery: {
+        ownership: () => voxaSelection.source === "bundled" ? "managed" : "external",
+        componentDigest: () => speech.digest(voxaLaunch(voxaSelection, voxaSettings)),
+        reserve: signal => voxaClient.reserveRuntime(signal),
+      },
       sidecar: voxaSidecar,
       waitUntilReady: waitForKokoroReady,
       sidecarHealth: async () => {
@@ -1491,6 +1607,7 @@ async function initialize(): Promise<{ port: number }> {
   });
   coordinator = studioHost.coordinator;
   studioServer = studioHost.server;
+  transferMing(); transferOllama(); transferCreatorCloud();
   startupProvider = null;
 
   // Both children are allowed to be absent: the app opens, browses and navigates regardless,
@@ -1506,9 +1623,14 @@ async function initialize(): Promise<{ port: number }> {
     setStartOnLogin: enabled => app.setLoginItemSettings({ openAtLogin: enabled,
       ...(process.platform === "win32" ? { args: ["--remote-background"] } : {}) }),
   });
-  await remoteAccess.initialize();
-  updateRemoteTray();
-  if (backgroundLogin && !remoteAccess.status().running) revealWindow();
+  // Not awaited (issue 2814): with remote access on, starting it waits on the Tailscale CLI, up
+  // to 15 s, and the Studio is ready without it. It never rejects, recording any failure as the
+  // reason Settings shows, and owner commands and stop() already queue behind it.
+  const access = remoteAccess;
+  void access.initialize().then(() => {
+    updateRemoteTray();
+    if (backgroundLogin && !access.status().running) revealWindow();
+  }).catch(() => traceDesktop("remote-access.startup-settle-failed"));
   void updateController.initialize();
   backgroundNotifications.arm(coordinator.getState());
   applyHostTheme(coordinator.getState().app.appearance.theme, false);
@@ -1527,16 +1649,52 @@ async function shutdownConfirmed(): Promise<void> {
   shuttingDown = true;
   backgroundNotifications.stop();
   try {
-    await drainDesktop(async () => { await remoteAccess?.stop(); }, async () => {
+    await drainDesktop(async () => {
+      waitingForShutdown("remote access");
+      await remoteAccess?.stop();
+    }, async () => {
       try {
+        waitingForShutdown("publication playback");
         await publicationHost?.stop();
+        waitingForShutdown("Studio coordinator");
         await (studioServer?.stop() ?? startupProvider?.close() ?? Promise.resolve());
       } finally {
-        await closeProviderTransport();
+        try { waitingForShutdown("startup runtimes"); await startupRuntimeOwners.close(); }
+        finally { waitingForShutdown("provider connections"); await closeProviderTransport(); }
+      }
+    }, async stillStopping => {
+      traceDesktop("shutdown.slow", { owner: shutdownOwner });
+      const options = {
+        type: "warning" as const, title: "Arke is still closing", message: `Waiting for ${shutdownOwner}.`,
+        detail: "You can keep waiting or close anyway. Saved queued jobs remain available next start. Unfinished work will recover as after a forced quit; recent changes may be lost. No update will be installed if you close anyway.",
+        buttons: ["Wait", "Close anyway"], defaultId: 0, cancelId: 0, noLink: true,
+      };
+      const result = window && !window.isDestroyed()
+        ? await dialog.showMessageBox(window, options) : await dialog.showMessageBox(options);
+      if (result.response === 1 && stillStopping()) {
+        traceDesktop("shutdown.forced", { owner: shutdownOwner });
+        app.exit(0);
       }
     });
+    traceDesktop("shutdown.complete");
   } finally {
     shuttingDown = false;
+  }
+}
+
+async function restartForSetup(beforeRestart?: () => Promise<void>): Promise<{ reason?: string }> {
+  if (shuttingDown || normalShutdown || closeForUpdate || updateController?.isInstallOnCloseArmed()) return { reason: "Finish the current shutdown or update before restarting setup." };
+  updateController?.beginShutdown("restart");
+  try {
+    normalShutdown = shutdownConfirmed();
+    await normalShutdown;
+    await beforeRestart?.();
+    allowQuit = true;
+    app.relaunch(); app.quit();
+    return {};
+  } catch (error) {
+    normalShutdown = null; updateController?.failShutdown();
+    return { reason: `Arke could not restart safely. Try again after local work stops. ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 
@@ -1573,9 +1731,10 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
+    powerMonitor.on("resume", () => { void coordinator?.wakeStorage().catch(() => {}); });
     backgroundLogin = isBackgroundLogin(process.platform, process.argv,
       process.platform === "darwin" ? app.getLoginItemSettings() : undefined);
-    if (process.platform === "win32") app.setAppUserModelId("studio.arke.app");
+    if (process.platform === "win32") app.setAppUserModelId(distribution.appUserModelId);
     registerHostIpc();
     startupController = new StartupController({
       initialize,
@@ -1589,7 +1748,8 @@ if (!gotLock) {
           if (started) await started.stop();
           else await provider?.close();
         } finally {
-          await closeProviderTransport();
+          try { await startupRuntimeOwners.close(); }
+          finally { await closeProviderTransport(); }
         }
         coordinator = null;
         studioServer = null;
@@ -1602,6 +1762,9 @@ if (!gotLock) {
         traceDesktop("startup.error", { error: String(error) });
       },
     });
+    // The window's first screens follow the author's theme. Waiting for the coordinator left a
+    // dark-mode author on a white page for as long as a world took to open.
+    themePreference = await new AppSettingsFile(join(appRoot, "settings.json")).load().then((settings) => settings.appearance.theme, () => themePreference);
     try {
       await launchDesktop(createWindow, startupController);
     } catch (error) {

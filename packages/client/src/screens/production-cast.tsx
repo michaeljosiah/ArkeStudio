@@ -4,6 +4,7 @@ import {
   lookHoldingScope,
   pendingGuestsOf,
   pendingSheets,
+  productionShape,
   worldSheets,
   type CharacterLook,
   type CompiledReference,
@@ -25,6 +26,7 @@ import { ConnectedProposalPanel } from "../domain/connected.js";
 import { useProduction } from "../lib/selectors.js";
 import { attachCharacterLook, createSheetFromSentence } from "../lib/store.js";
 import { lookTileLabel } from "./character-reference.js";
+import { DramaCastScreen } from "./drama-cast.js";
 
 /**
  * What each character wears in this production (design 67).
@@ -163,6 +165,8 @@ export function ProductionCastScreen() {
       </Screen>
     );
   }
+  // An audio drama's Cast is its speaking roles and how each sounds (SPEC-057 R-55, design turn 230k).
+  if (productionShape(production.meta).isAudioDrama) return <DramaCastScreen world={world} production={production} />;
   const guests = guestsOf(world.sheets, production.meta.id).filter((s) => s.retired !== true);
   const fromWorld = worldSheets(world.sheets).filter((s) => s.retired !== true);
   // Guests under review are kept off the world's surfaces, so they have to be visible here or a
@@ -415,7 +419,7 @@ export function carriedSubjects(references: readonly CompiledReference[]): strin
  * caption is claimed more than once — a lone look carries no number to read.
  */
 export function lookPickerLabels(looks: readonly CharacterLook[]): Map<string, string> {
-  const caption = (look: CharacterLook): string => lookTileLabel(look.prompt, look.kind);
+  const caption = (look: CharacterLook): string => (look.name ?? lookTileLabel(look.prompt, look.kind));
   const claims = new Map<string, number>();
   for (const look of looks) claims.set(caption(look), (claims.get(caption(look)) ?? 0) + 1);
   const seen = new Map<string, number>();

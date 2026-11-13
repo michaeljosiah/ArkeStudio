@@ -327,6 +327,7 @@ describe("world ownership: release removes only our own lock (R-3)", () => {
     await store.renameWorld("Still owned", "ownership-test");
     await lock.refreshHeartbeat();
     assert.match(losses[0]?.message ?? "", /heartbeat failed three times/);
+    assert.equal(store.closingSignal.aborted, true, "background consumers stop immediately when ownership is lost");
     assert.equal(warnings.mock.callCount(), 3);
     await assert.rejects(store.renameWorld("Must refuse", "ownership-test"), /read-only.*heartbeat/);
     assert.equal(lock.held, false);

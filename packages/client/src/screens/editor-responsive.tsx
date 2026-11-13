@@ -1,15 +1,14 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { TimelineCommand, TimelineTrack, TimelineTrackId } from "@arke-studio/contracts";
+import { AUDIO_TRACK_KINDS, type TimelineCommand, type TimelineTrack, type TimelineTrackId } from "@arke-studio/contracts";
 import { PageSheet } from "../components/page-sheet.js";
 import { EditorDialog } from "../components/editor-dialog.js";
-import { useMediaQuery } from "../lib/media-query.js";
+import { useCompact, useMediaQuery } from "../lib/media-query.js";
 import type { Transport } from "./editor-transport.js";
 
 export const CUT_PHONE_QUERY = "(max-width: 599px), (max-width: 1099px) and (max-height: 599px) and (orientation: landscape)";
 export const CutTouchContext = createContext({ snap: true, toggleSnap: () => {}, openLane: (_id: TimelineTrackId) => {} });
 export const useCutTouch = () => useContext(CutTouchContext);
-export const coarsePointer = () => typeof window !== "undefined" && !!window.matchMedia?.("(pointer: coarse)").matches;
 export function cutTime(frames: number, rate: number): string {
   const seconds = Math.floor(frames / rate);
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}.${String(frames % rate).padStart(2, "0")}`;
@@ -17,8 +16,12 @@ export function cutTime(frames: number, rate: number): string {
 
 const subscribe = () => () => {};
 /** A draft stays in one React subtree when its pane becomes a sheet or is put away. */
-export function EditorSheetSlot({ sheet, open, title, onClose, children, className = "", footer }: {
+export function EditorSheetSlot({ sheet, open, title, onClose, children, className = "", footer, style, onBack }: {
   sheet: boolean; open: boolean; title: string; onClose: () => void; children: ReactNode; className?: string; footer?: ReactNode;
+  /** Where the sheet starts, when the page decides it: a title's sheet starts under the Viewer (turn 277 rule 15). */
+  style?: CSSProperties;
+  /** A page inside the sheet goes back with this (the typeface list, 277k). */
+  onBack?: () => void;
 }) {
   const client = useSyncExternalStore(subscribe, () => true, () => false);
   const host = useMemo(() => client ? document.createElement("div") : null, [client]);
@@ -29,7 +32,7 @@ export function EditorSheetSlot({ sheet, open, title, onClose, children, classNa
   }, [host, sheet]);
   return <>
     <div ref={inline} className="fy-editor-slot" hidden={sheet} />
-    <PageSheet open={sheet && open} title={title} onClose={onClose} keepMounted className={`fy-cut-sheet ${className}`} footer={footer}><div ref={node => { modal.current = node; if (node && host && sheet) { host.style.display = "contents"; node.appendChild(host); } }} className="fy-editor-sheet-content" /></PageSheet>
+    <PageSheet open={sheet && open} title={title} onClose={onClose} keepMounted className={`fy-cut-sheet ${className}`} footer={footer} style={style} onBack={onBack}><div ref={node => { modal.current = node; if (node && host && sheet) { host.style.display = "contents"; node.appendChild(host); } }} className="fy-editor-sheet-content" /></PageSheet>
     {host ? createPortal(children, host) : children}
   </>;
 }
@@ -44,7 +47,7 @@ export function LaneSheet({ track, baseTrackId, disabled, onCommands, onClose }:
         if (name && name !== track.name) onCommands([{ kind: "set-track", trackId: track.id, name }], "Rename lane");
       }} /></label>
       <button type="button" disabled={disabled} aria-pressed={track.muted === true} onClick={() => onCommands([{ kind: "set-track", trackId: track.id, muted: !track.muted }], "Mute lane")}>Mute</button>
-      {track.kind !== "picture" && track.kind !== "subtitle" && <>
+      {AUDIO_TRACK_KINDS.has(track.kind) && <>
         <button type="button" disabled={disabled} aria-pressed={track.solo === true} onClick={() => onCommands([{ kind: "set-track", trackId: track.id, solo: !track.solo }], "Solo lane")}>Solo</button>
         <label>Gain · all clips (dB)<input type="number" inputMode="decimal" min={-60} max={12} step={1} disabled={disabled || !track.clips.length}
           key={`${track.id}:${track.clips.map(clip => clip.gainDb).join()}`} defaultValue={track.clips[0]?.gainDb ?? 0} onBlur={event => {
@@ -54,8 +57,8 @@ export function LaneSheet({ track, baseTrackId, disabled, onCommands, onClose }:
             if (commands.length) onCommands(commands, "Set lane clip gain");
           }} /></label>
       </>}
-      <button type="button" disabled={disabled || track.id === baseTrackId || track.clips.length > 0 || !!track.cues?.length} onClick={() => { onCommands([{ kind: "remove-track", trackId: track.id }], "Remove lane"); onClose(); }}>Remove lane</button>
-      {track.id === baseTrackId ? <span>The base Picture lane stays in the cut.</span> : (track.clips.length > 0 || !!track.cues?.length) && <span>Remove its clips and subtitles before removing the lane.</span>}
+      <button type="button" disabled={disabled || track.id === baseTrackId || track.clips.length > 0 || !!track.cues?.length || !!track.effects?.length} onClick={() => { onCommands([{ kind: "remove-track", trackId: track.id }], "Remove lane"); onClose(); }}>Remove lane</button>
+      {track.id === baseTrackId ? <span>The base Picture lane stays in the cut.</span> : (track.clips.length > 0 || !!track.cues?.length || !!track.effects?.length) && <span>Remove lane contents first.</span>}
     </>}
   </PageSheet>;
 }
@@ -144,7 +147,7 @@ export function useTouchLanes({ phone, transport, totalSec, zoom, setZoom }: {
 }
 
 export function useCutLayout() {
-  return { phone: useMediaQuery(CUT_PHONE_QUERY), compact: useMediaQuery("(max-width: 1099px)") };
+  return { phone: useMediaQuery(CUT_PHONE_QUERY), compact: useCompact() };
 }
 
 export function CutDialog(props: React.ComponentProps<typeof EditorDialog>) {

@@ -1,12 +1,21 @@
 export { AppLog } from "./app-log.js";
+export { SystemResourceService, createNodeSystemResourceProbe } from "./system-resources.js";
+export { SetupProcessRunner } from "./setup/process.js";
+export { OllamaEngineService } from "./local-ai/ollama.js";
+export { MingProcess, type MingBatchCommand } from "./local-ai/ming.js";
 export { RemoteDevices, writeRemotePrivate } from "./remote-access/devices.js";
 export { RemoteGateway, type RemoteTrace } from "./remote-access/gateway.js";
 export { AppSettingsFile, routingFaults } from "./app-settings.js";
 export { ChangeLog, WriteQueue, type LogRecord } from "./change-log.js";
 export { Coordinator, type CoordinatorOptions } from "./coordinator.js";
 export { createStudioCoordinator, createStudioHost } from "./application/studio-host.js";
+export { ImportStorageHeld, type ImportFileSpace } from "./storage/import-files.js";
 export { StudioServer, type StudioServerApplication, type StudioEventSink } from "./studio-server.js";
 export { createNodeStudioHost, type NodeStudioHostOptions } from "./node-studio-host.js";
+export { createNodeEffectRasterHost, type EffectRasterHost, type EffectAlphaRequest } from "./media/node-effect-renderer.js";
+export { createNodeMediaHost, createNodeMediaProcessRunner, createNodeFfmpegRunner } from "./media/node-media-host.js";
+export { probeFfmpegGraphFileOption } from "./media/ffmpeg-graph-probe.js";
+export { runEffectExport } from "./productions/editor-effect-export.js";
 export { createStudioStorage } from "./application/studio-composition.js";
 export {
   ARKE_ACTION_REGISTRY,
@@ -42,8 +51,14 @@ export {
   readConversationActionTombstones,
 } from "./arke-actions/tombstones.js";
 export { CredentialStore, type Cipher } from "./credentials/store.js";
+export { NoArkeCloud } from "./account.js";
+export { AonikAccount } from "./publishing/account.js";
+export { AonikPublishingApi } from "./publishing/api.js";
+export { CreatorPublishingService } from "./publishing/service.js";
+export { parseAonikConfiguration } from "./publishing/config.js";
 export {
   assembleHarness,
+  managedStudioAssistant,
   describeClaudeAvailability,
   describeCodexAvailability,
   HarnessPasswordHolder,
@@ -285,6 +300,7 @@ export { leashChildToParent, type LeashResult } from "./job-leash.js";
 export { Transport, type TransportOptions } from "./transport.js";
 export { type WorldProvider } from "./world-provider.js";
 export { atomicWriteFile, renameWithRetry } from "./world/atomic.js";
+export { checkOnboardingWorkspace } from "./setup/onboarding.js";
 export { appendChanges, changesForEntity, readChanges } from "./world/change-writer.js";
 export {
   classify,
@@ -300,6 +316,7 @@ export {
 export { WorldLock, WorldLockDeposedError, WorldLockedError } from "./world/lock.js";
 export { checkPathBudget, defaultAppRoot, fsPath, toExtendedLength, toPortable } from "./world/paths.js";
 export { FsWorldProvider, type CreateWorldInput } from "./world/provider.js";
+export { UNDERSONG_RELEASE } from "./world/undersong-release.js";
 export { readWorldMeta, scanWorld, SUPPORTED_SCHEMA_VERSION, WorldOpenError } from "./world/scan.js";
 export { fallbackSlug, slugify, uniqueSlug } from "./world/slug.js";
 export { deleteScanState, WorldStore } from "./world/store.js";
@@ -353,6 +370,9 @@ export {
 } from "./comfyui/engine.js";
 export { ProfiledComfyUiEngineService } from "./comfyui/profiled-engine.js";
 export { CUSTOM_NODE_IDENTITY_FILE, readCustomNodeRef } from "./comfyui/node-ref.js";
+export { ComfyUiDigestCache } from "./comfyui/digest-cache.js";
+export { createComfyUiFetch, comfyUiLoopbackAddresses } from "./comfyui/node-transport.js";
+export { comfyUiWeightCatalogue } from "./comfyui/setup.js";
 export { sanitizeComfyUiMedia, type SanitizeResult } from "./comfyui/sanitize.js";
 export { GrantStore, type RememberedGrant } from "./harness/grants.js";
 export { WorldQueryServer } from "./harness/world-query.js";
@@ -377,6 +397,9 @@ export { assertFts5, loadNodeSqlite, type Database, type DatabaseCtor } from "./
 export { bundleFingerprint, WorldIndex } from "./index-db/world-index.js";
 
 export * from "./audio/media-tools.js";
+export * from "./media/agent-media-tools.js";
+export * from "./media/agent-listening.js";
+export * from "./media/local-audio-listener.js";
 export * from "./audio/qc.js";
 export * from "./audio/storage.js";
 export * from "./audio/rights.js";
@@ -394,3 +417,5 @@ export { publishPublication, publishVideoPublication, type PublicationDeliveryRe
 export { openPublication, type PinnedPublication } from "./publications/playback.js";
 export { parseByteRange } from "./transport.js";
 export { createImageRenditionMaker, type ImageRenditionMaker } from "./world-chat/image-rendition.js";
+
+export { createNodeEffectAudioAnalysisHost, type EffectAudioAnalysisHost, type FrozenAudioInput } from "./media/node-effect-audio.js";

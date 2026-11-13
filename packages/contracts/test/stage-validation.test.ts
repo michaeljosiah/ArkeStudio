@@ -18,8 +18,9 @@ it("measures each timed leg, ignores holds/tiny motion and does not charge a rid
   staging.performances![0]!.keys[0]!.gait = "run";
   assert.deepEqual(stageSpeedWarnings(staging, id => id, 4), []);
   const brief = stagingPromptClause(staging, id => id, 4);
-  assert.match(brief, /1.00s .* run/);
-  assert.doesNotMatch(brief, /runner walks through/);
+  assert.match(brief, /1\.0–2\.0 s · runner runs\./);
+  assert.doesNotMatch(brief, /runner walks/);
+  assert.doesNotMatch(brief, /\(-?\d+\.\d+, -?\d+\.\d+/, "no world coordinates reach the prompt (#1817)");
   staging.objectMotions![0]!.maxSpeed = 20;
   assert.match(stageSpeedWarnings(staging, id => id, 4).join("\n"), /car .*above 20.00m.s ceiling/);
 });
@@ -105,7 +106,10 @@ it("holds before eased travel, turns by the same progress, steps posture and sca
   assert.equal(retimed.performances![0]!.keys[0]!.hold, 2);
   assert.equal(retimed.performances![0]!.keys[0]!.t, 2);
   assert.equal(stageFigureAt(figure, retimed.performances, 4, 8).x, 0);
-  assert.match(stagingPromptClause(retimed, id => id, 8), /hold until 4.00s, ease out 50%/);
+  const said = stagingPromptClause(retimed, id => id, 8);
+  assert.match(said, /2\.0–4\.0 s · runner stands\./, "the scaled hold is said as a wait");
+  assert.match(said, /4\.0–6\.0 s · runner moves\./, "5 m/s is no walk (R-34)");
+  assert.match(said, /6\.0–8\.0 s · runner sits\./);
   keys[0]!.hold = 50;
   assert.equal(stagePerformanceDeparture(keys[0]!, keys[1]!), 2.9);
   assert.equal(stagePerformanceDeparture(keys[0]!, { ...keys[1]!, t: 1.05 }), 1, "short legs still travel");
@@ -123,10 +127,10 @@ it("describes stationary performance marks without adding a walking instruction 
   const staging = stage();
   staging.performances![0]!.keys[2]!.pose = "sit";
   const brief = stagingPromptClause(staging, id => id, 4);
-  assert.match(brief, /1.00s .* walk/);
-  assert.match(brief, /3.00s .* sit, holds position/);
-  assert.match(brief, /4.00s .* holds position/);
-  assert.doesNotMatch(brief, /sit, walk/);
+  assert.match(brief, /1\.0–2\.0 s · runner moves\./);
+  assert.match(brief, /2\.0–3\.0 s · runner stands\./);
+  assert.match(brief, /3\.0–4\.0 s · runner sits\./);
+  assert.equal(brief.match(/runner (?:walks|moves)/g)?.length, 1, "a centimetre between marks is not a walk");
 });
 
 it("retimes a static camera's action from the prior shot duration, not its last action mark (#1046)", () => {

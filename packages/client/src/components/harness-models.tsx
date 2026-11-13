@@ -20,8 +20,8 @@ export function harnessModelLabel(state: ClientState | null, model: ModelInfo): 
 
 export function runningHarnessLabel(state: ClientState | null): string {
   const generation = state?.app.harnessInfo?.generation;
-  return generation === "claude" ? "Claude Code" : generation === "codex" ? "Codex" : generation === "arke" ? "Local"
-    : generation === "v1" || generation === "v2" ? "OpenCode" : "the running harness";
+  return generation === "claude" ? "Claude Code" : generation === "codex" ? "Codex"
+    : generation === "v2" ? "OpenCode" : "the running harness";
 }
 
 export function harnessModelUnavailableReason(
@@ -48,6 +48,31 @@ export function harnessModelUnavailableReason(
   return undefined;
 }
 
+/**
+ * Why a production language choice cannot run, without choosing another model in its place. The
+ * Stage asks it of the Stage designer's model with `needsImages`, as the coordinator does, so a
+ * saved choice the harness stopped listing is said before Build rather than refused after it.
+ */
+export function languageChoiceReason(
+  state: ClientState | null,
+  modelId: string | undefined,
+  needsTools = false,
+  needsImages = false,
+): string | undefined {
+  if (modelId === undefined) return undefined;
+  if (state?.app.harnessModelStatus?.status === "loading") return "Checking language models…";
+  if (state?.app.harnessModelStatus?.status === "error") return state.app.harnessModelStatus.reason ?? "Model discovery failed. Retry models to check this choice.";
+  if (state?.app.harnessModelStatus?.status !== "ready") return "Language models need to be refreshed.";
+  // An empty list says nothing about this model: a harness still starting lists none for a moment,
+  // and "no longer available" sent people off to change a choice that was fine (issue 2557).
+  if ((state?.app.harnessModels ?? []).length === 0) return "Checking language models…";
+  const model = findHarnessModel(modelId, state?.app.harnessModels ?? [], state?.app.manifest?.models);
+  if (!model) return `${modelId} is no longer available through the running harness. Choose another model or clear the saved choice.`;
+  if (state?.app.health.harness.status !== "healthy") return state?.app.health.harness.reason ?? "The harness is not running.";
+  const reason = harnessModelUnavailableReason(state, model, needsImages, needsTools);
+  return reason ? `${harnessModelLabel(state, model)} ${reason.startsWith("cannot") ? "" : "is "}${reason}.` : undefined;
+}
+
 export function HarnessModelOptions({
   state,
   selected,
@@ -67,9 +92,10 @@ export function HarnessModelOptions({
     state?.app.harnessModelStatus?.status !== "ready";
   return (
     <>
+      {/* A catalogue still loading has not lost the saved model yet; a failed one cannot run it either. */}
       {selected && (!resolved || harnessModelReference(resolved) !== selected) && (
         <option value={selected} disabled>
-          {resolved ? harnessModelLabel(state, resolved) : selected}{resolved ? " · saved" : " · unavailable"}
+          {resolved ? harnessModelLabel(state, resolved) : selected}{resolved ? " · saved" : state?.app.harnessModelStatus?.status === "loading" ? " · checking" : " · unavailable"}
         </option>
       )}
       {[...byProvider.entries()].map(([provider, list]) => (

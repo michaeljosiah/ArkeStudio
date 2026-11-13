@@ -5,6 +5,7 @@ import { effectiveAudioRights } from "../audio/rights.js";
 import { conversationActionDigest } from "../arke-actions/digest.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
+import { effectProposalReadRows } from "./effect-proposal-reads.js";
 
 export interface ProductionReadRow { readonly key: string; readonly value: unknown }
 const numbered = (index: number) => String(index).padStart(10, "0");
@@ -74,6 +75,17 @@ export function audioCutReadRows(production: ProductionBundle | undefined): Prod
 }
 
 export function editorRequestReadRows(production: ProductionBundle | undefined): ProductionReadRow[] {
-  return [...(production?.editorRequests ?? [])].sort((a, b) => a.id.localeCompare(b.id))
-    .map(request => ({ key: request.id, value: request }));
+  return [{ key: "00:state", value: { kind: "editor-request-state", state: production?.editorRequestState ?? { status: "absent" } } },
+    ...[...(production?.editorRequests ?? [])].sort((a, b) => a.id.localeCompare(b.id)).map(request => ({ key: request.id, value: request })),
+    ...(production?.transitionFamilies ?? []).flatMap(family => family.versions.flatMap(version => [
+      { key: `transition:${family.id}:${version.id}`, value: { kind: "transition-proposal", familyId: family.id, versionId: version.id, candidateHash: version.candidateHash, status: family.status, summary: version.summary, notes: version.notes, conflicts: version.conflicts } },
+      ...version.transitions.map((transition, index) => ({ key: `transition:${family.id}:${version.id}:${index}`, value: { kind: "proposed-transition", transition } })),
+      ...version.sticky.map((decision, index) => ({ key: `transition:${family.id}:${version.id}:sticky:${index}`, value: { kind: "retained-human-transition-decision", decision } })),
+    ])),
+    ...(production?.pictureFamilies ?? []).flatMap(family => family.versions.flatMap(version => [
+      { key: `picture:${family.id}:${version.id}`, value: { kind: "picture-proposal", familyId: family.id, versionId: version.id, candidateHash: version.candidateHash, status: family.status, summary: version.summary, notes: version.notes, conflicts: version.conflicts } },
+      ...version.pictures.map((picture, index) => ({ key: `picture:${family.id}:${version.id}:${index}`, value: { kind: "proposed-picture", picture } })),
+      ...version.sticky.map((decision, index) => ({ key: `picture:${family.id}:${version.id}:sticky:${index}`, value: { kind: "retained-human-picture-decision", decision } })),
+    ])),
+    ...(production?.effectFamilies ?? []).flatMap(effectProposalReadRows)];
 }

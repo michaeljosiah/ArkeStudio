@@ -1,7 +1,7 @@
 import { PromptDispatchProvenanceSchema } from "@arke-studio/contracts";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
-import type { Capability, ProviderId } from "@arke-studio/contracts";
+import type { ArtifactTransferSettings, Capability, ProviderId } from "@arke-studio/contracts";
 import { redactComfyUiBody } from "./comfyui/redact.js";
 import {
   diagnoseProviderTransportError,
@@ -456,6 +456,7 @@ export function captureProviderClient(
     operation: ProviderOperation,
     context: (ProviderCallContext & { capability?: Capability }) | undefined,
     fn: () => Promise<T>,
+    artifactTransferSettings?: ArtifactTransferSettings,
   ) => {
     const current = {
       operation,
@@ -473,6 +474,7 @@ export function captureProviderClient(
             ...(current.attempt !== undefined ? { attempt: current.attempt } : {}),
             ...(current.model !== undefined ? { model: current.model } : {}),
             ...(current.capability !== undefined ? { capability: current.capability } : {}),
+            ...(operation === "fetch-artifacts" && artifactTransferSettings ? { artifactTransferSettings } : {}),
           },
           invoke,
         )
@@ -505,15 +507,13 @@ export function captureProviderClient(
       );
     },
     poll: (key, remoteId, context) => run("poll", context, () => client.poll(key, remoteId, context)),
-    fetchArtifacts: (key, remoteId, context) =>
-      run("fetch-artifacts", context, () => client.fetchArtifacts(key, remoteId, context)),
+    fetchArtifacts: (key, remoteId, context, options) =>
+      run("fetch-artifacts", context, () => client.fetchArtifacts(key, remoteId, context, options), options?.transferSettings),
     cancel: (key, remoteId, context) => run("cancel", context, () => client.cancel(key, remoteId, context)),
     ...(client.resetTransport ? { resetTransport: () => client.resetTransport!() } : {}),
     ...(client.unload ? { unload: (signal?: AbortSignal, only?: ReadonlySet<string>) => client.unload!(signal, only) } : {}),
     ...(client.usedModels ? { usedModels: () => client.usedModels!() } : {}),
     ...(client.residency ? { residency: (signal?: AbortSignal) => client.residency!(signal) } : {}),
-    // A listing, not a call: nothing is charged and nothing is journalled, like residency.
-    ...(client.listModels ? { listModels: (signal?: AbortSignal) => client.listModels!(signal) } : {}),
     ...(client.dispose ? { dispose: () => client.dispose!() } : {}),
     ...(client.release
       ? {

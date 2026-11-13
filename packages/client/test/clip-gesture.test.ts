@@ -67,6 +67,11 @@ describe("the slot a reorder lands in", () => {
 });
 
 describe("snapping", () => {
+  it("includes independent effect edges and excludes the effect being dragged", () => {
+    assert.deepEqual(snapCandidates([{ clips: sequence, effects: [
+      { id: "cl_effect-a", startFrame: 25, durationFrames: 10 }, { id: "cl_effect-b", startFrame: 100, durationFrames: 20 },
+    ] }], 72, "cl_effect-a"), [0, 48, 72, 96, 100, 120, 192, 240]);
+  });
   it("pulls a frame onto the nearest candidate inside the threshold and leaves it alone outside", () => {
     assert.deepEqual(snapFrame(50, [0, 48, 96], 4), { frame: 48, snappedTo: 48 });
     assert.deepEqual(snapFrame(60, [0, 48, 96], 4), { frame: 60, snappedTo: null });

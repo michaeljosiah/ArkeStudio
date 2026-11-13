@@ -1,18 +1,60 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { drainDesktop, isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "../src/startup.js";
+import { drainDesktop, guardDesktopClose, isBackgroundLogin, launchDesktop, StartupController, StartupWindowPresentation, type StartupState } from "../src/startup.js";
 
 describe("desktop startup", () => {
-  it("keeps slow remote cleanup in the shutdown promise before starting the core deadline", async t => {
+  it("retains the window through delayed or failed cleanup, then permits the owner's confirmed quit", async () => {
+    let allowQuit = false, destroyed = false, pending: Promise<void> | undefined;
+    let fail!: (error: Error) => void;
+    const cleanup = new Promise<void>((_resolve, reject) => { fail = reject; });
+    const requestClose = (stop: () => Promise<void>) => {
+      let prevented = false;
+      guardDesktopClose({ preventDefault: () => { prevented = true; } }, allowQuit, () => {
+        assert(prevented, "the close must be cancelled before requesting application quit");
+        pending = stop().then(() => { allowQuit = true; }, () => { assert(!destroyed, "shutdown errors still have a window"); });
+      });
+      if (!prevented) destroyed = true;
+    };
+    requestClose(() => cleanup);
+    assert(!destroyed); assert(!allowQuit);
+    fail(new Error("original worker cleanup is unconfirmed")); await pending;
+    assert(!destroyed); assert(!allowQuit);
+    requestClose(async () => {}); await pending;
+    assert(!destroyed); assert(allowQuit);
+    requestClose(async () => { assert.fail("confirmed quit must not start cleanup again"); });
+    assert(destroyed);
+  });
+  it("offers an escape during remote cleanup without abandoning the drain or closing core early", async t => {
     t.mock.timers.enable({ apis: ["setTimeout"] });
     let release!: () => void, stoppedCore = false, settled = false;
     const remote = new Promise<void>(resolve => { release = resolve; });
-    const shutdown = drainDesktop(() => remote, async () => { stoppedCore = true; }).finally(() => { settled = true; });
-    t.mock.timers.tick(45_000);
+    let warnings = 0, stillStopping = () => false;
+    const shutdown = drainDesktop(() => remote, async () => { stoppedCore = true; }, async pending => {
+      warnings++; stillStopping = pending;
+    }).finally(() => { settled = true; });
+    t.mock.timers.tick(15_000);
     await Promise.resolve();
+    assert.equal(warnings, 1); assert.equal(stillStopping(), true);
     assert.equal(settled, false); assert.equal(stoppedCore, false);
     release(); await shutdown;
     assert.equal(stoppedCore, true);
+    assert.equal(stillStopping(), false, "a stale Close anyway response must not exit after cleanup finishes");
+  });
+  it("keeps a slow core's original drain alive so a setup restart can still relaunch", async t => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    let finish!: () => void, warnings = 0, relaunches = 0, stops = 0;
+    const core = new Promise<void>(resolve => { finish = resolve; });
+    const shutdown = drainDesktop(async () => {}, async () => { stops++; await core; }, async () => { warnings++; })
+      .then(() => { relaunches++; });
+    await Promise.resolve();
+    t.mock.timers.tick(15_000);
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    assert.equal(warnings, 1); assert.equal(relaunches, 0);
+    t.mock.timers.tick(15_000);
+    await Promise.resolve();
+    assert.equal(warnings, 2, "Wait offers the escape again if the same owner remains stuck");
+    finish(); await shutdown;
+    assert.equal(relaunches, 1); assert.equal(stops, 1);
   });
   it("does not close the core or its providers when remote unpublication fails", async () => {
     let stoppedCore = false;

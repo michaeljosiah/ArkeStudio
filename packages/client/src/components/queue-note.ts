@@ -75,10 +75,18 @@ const NEVER_QUEUES = new Set([
   "upload-world-image",
   "upload-artifacts",
   "borrow-artifacts",
+  "borrow-takes",
   "pick-staged-reference",
   "import-shot-frame",
   "clear-shot-frame",
 ]);
+
+function jobNoun(job: Job, count: number): string {
+  if (job.target.kind === "voice-preview" && job.params.purpose === "audiobook") return job.params.hear === true ? "block preview" : `narration request${count === 1 ? "" : "s"}`;
+  // A shot's job is a clip unless it is making the shot's picture (issue 2497).
+  if (job.target.kind === "shot" && job.capability === "image") return count === 1 ? "picture" : "pictures";
+  return noun(job.target.kind, count);
+}
 
 function noun(kind: string, count: number): string {
   const pair = NOUN[kind];
@@ -108,6 +116,7 @@ const OPAQUE_ID = /^[a-z]+_[0-9A-HJKMNP-TV-Z]{20,}$/i;
  * `maren-kest/g1` is Maren Kest. A ULID names a world, which the title never needs.
  */
 export function subjectOf(job: Job): string | null {
+  if (job.target.kind === "voice-preview" && job.params.purpose === "audiobook") return typeof job.params.audiobookChapterTitle === "string" ? job.params.audiobookChapterTitle : "Chapter narration";
   const named = job.params["characterName"];
   if (typeof named === "string" && named.trim()) return named.trim();
   const head = job.target.id?.split("/")[0];
@@ -266,7 +275,7 @@ export function enqueueNote(
   jobs: readonly Job[],
   manifest: ModelManifest | null,
 ): QueueNote | null {
-  if ((result.command === "upload-artifacts" || result.command === "borrow-artifacts") && result.requestedCount > 0) {
+  if ((result.command === "upload-artifacts" || result.command === "borrow-artifacts" || result.command === "borrow-takes") && result.requestedCount > 0) {
     const failed = result.failures.length;
     const added = Math.max(0, result.requestedCount - failed);
     const reason = reasonOf(result);
@@ -301,7 +310,7 @@ export function enqueueNote(
     // Without the job records there is still an honest thing to say: the count and the command's
     // own noun. This is the shape a reconnect leaves behind, not an error.
     const what = first
-      ? `${partial || count > 1 ? `${count}${partial ? ` of ${result.requestedCount}` : ""} ` : ""}${noun(first.target.kind, count)}`
+      ? `${partial || count > 1 ? `${count}${partial ? ` of ${result.requestedCount}` : ""} ` : ""}${jobNoun(first, count)}`
       : `${count} ${commandNoun(result.command, count)}`;
     const meta = first
       ? [modelAndCost(accepted, manifest, false), pace(first, jobs, new Set(result.acceptedJobIds))]
@@ -359,7 +368,7 @@ export function readyNote(
   return {
     id: noteId ?? `job:${job.id}`,
     tone: "back",
-    title: title(subject, noun(job.target.kind, 1), "ready"),
+    title: title(subject, jobNoun(job, 1), "ready"),
     meta: modelAndCost([job], manifest, true),
     action: { label: to === "/activity" ? "Activity" : "View", to },
     ...(landed ? { thumb: { worldId: job.worldId, path: landed } } : {}),
@@ -404,7 +413,7 @@ export function failedNote(
   return {
     id: noteId ?? `job:${job.id}`,
     tone: "refused",
-    title: title(subjectOf(job), noun(job.target.kind, 1), "failed"),
+    title: title(subjectOf(job), jobNoun(job, 1), "failed"),
     meta: [modelName(job, manifest), job.status === "failed" ? failureCost(job) : "held"].join(" · "),
     ...(job.error ? { reason: job.error } : {}),
     action: { label: "Activity", to: "/activity" },
@@ -427,7 +436,7 @@ export function historyNote(job: Job, manifest: ModelManifest | null): QueueNote
     return {
       id: `job:${job.id}`,
       tone: remote ? "warning" : "queued",
-      title: title(subjectOf(job), noun(job.target.kind, 1), "cancelled"),
+      title: title(subjectOf(job), jobNoun(job, 1), "cancelled"),
       meta: `${modelName(job, manifest)} · ${usesCodexImagePlan(job) || measuredCost(job) !== null || job.speechQuote?.unit === "token" ? failureCost(job) : remote ? "charge unknown" : "not charged"}`,
       ...(job.error ? { reason: job.error } : {}),
     };

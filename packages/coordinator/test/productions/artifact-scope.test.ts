@@ -27,11 +27,11 @@ it("refuses direct, Library and legacy placements of another production's artifa
     commands: [{ kind: "add-track", trackId: "tr_sound", trackKind: "audio", name: "Sound" },
       { kind: "place", trackId: "tr_sound", clip: { id: "cl_foreign", startFrame: 0, durationFrames: 24, sourceInFrames: 0,
         source: { kind: "artifact", artifactId: artifact.id, label: "Foreign sound" } } }],
-  }), /cl_foreign cites artifact .*belongs to another production.*Import the file/);
+  }), /cl_foreign cites .*belongs to another production.*Import the file/);
   await assert.rejects(applyTimelineCommand(store, PRODUCTION, {
     kind: "commands", baseRevision: null, sourceFingerprint,
     commands: [{ kind: "add-to-library", items: [{ kind: "artifact", artifactId: artifact.id }] }],
-  }), /library cannot hold artifact .*belongs to another production/);
+  }), /library cannot hold .*belongs to another production/);
   assert.equal(await readFile(timelinePath(store), "utf8").catch(() => null), before);
   const cutPath = join(store.dir, "productions", PRODUCTION, "cut.json");
   const beforeCut = await readFile(cutPath, "utf8").catch(() => null);
@@ -108,12 +108,12 @@ it("refuses a foreign master before creating its first timeline (#895)", async t
   const p = productionOf(store); assert.ok(p.spine);
   await assert.rejects(applyTimelineCommand(store, PRODUCTION, { kind: "commands", baseRevision: null,
     sourceFingerprint: spineTimelineFingerprint(p, p.spine, 3), commands: [],
-  }), /Master track cites artifact .*belongs to another production.*Import the file/);
+  }), /Master track cites .*belongs to another production.*Import the file/);
   await assert.rejects(readFile(timelinePath(store), "utf8"), { code: "ENOENT" });
   for (const dryRun of [true, false]) await assert.rejects(stageEditorRequests(store, {
     conversationId: "cv_01J8G0000000000000000000C1", entryContext: { kind: "production", productionId: PRODUCTION }, now: store.now(), dryRun,
     requests: [{ summary: "Add a sound lane", commands: [{ kind: "add-track", trackId: "tr_new", trackKind: "audio", name: "Audio" }] }],
-  }), /Master track cites artifact .*belongs to another production.*Import the file/);
+  }), /Master track cites .*belongs to another production.*Import the file/);
   await assert.rejects(readFile(join(store.dir, "productions", PRODUCTION, "editor-requests.json"), "utf8"), { code: "ENOENT" });
 });
 

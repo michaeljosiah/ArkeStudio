@@ -5,12 +5,11 @@ import { GEMINI_SOUNDS } from "./voice-direction.js";
 export const GEMINI_SPEECH_INPUT_BYTES = 7000;
 
 /**
- * A grouped read's whole input, words and every turn's style together (design turn 185): the
- * coordinator packs a request to about 6,000 estimated tokens at 4 bytes a token, and this guard
- * sits a little above that and under the service's 8,192 tokens unless the words bill under 3.2
- * bytes a token — prose measured 4.4, short lines nearer 3.
+ * Grouping must not turn the price estimate (bytes / 4) into an input-limit guarantee. Use the
+ * same conservative byte allowance as solo reads, including every style and turn separator.
+ * This is a local request bound, not a measured Google token count (SPEC-049 R-25, issue 1335).
  */
-export const GEMINI_GROUPED_INPUT_BYTES = 26_000;
+export const GEMINI_GROUPED_INPUT_BYTES = GEMINI_SPEECH_INPUT_BYTES;
 /** Turns in one grouped read: far past five minutes of blocks, a bound on a malformed job rather than a plan. */
 export const GEMINI_GROUPED_TURNS_MAX = 400;
 
@@ -37,13 +36,19 @@ export function geminiSpeechModel(variant: "flash" | "lite"): ManifestModel {
       // 185 probe, 2026-10-03: all three packings came back whole, B chosen by ear). Flash-Lite
       // has not been heard, so it reads per paragraph until it is (SPEC-049 R-48).
       ...(variant === "flash" ? { groupable: true as const } : {}),
+      // The ordinary reading sends no style at all: the page's own advice is to test plain
+      // speech first, since "most requests need no style instruction", and it names long or
+      // stacked style as the commonest cause of voice drift (audit, 2026-10-08). The others are
+      // the concise descriptive phrases its examples use ("whispered urgently", "warm and
+      // enthusiastic", "speaking slowly"), not sentences addressed to the reader — each closed
+      // with a stop, since a note's sentence follows it in the same style.
       deliveryMappings: {
-        measured: { settings: {}, instruction: "Read calmly and evenly, at a steady pace." },
-        whispered: { settings: {}, instruction: "Read in a whisper." },
-        breaking: { settings: {}, instruction: "Read with a breaking voice, through tears." },
-        cold: { settings: {}, instruction: "Read coldly and flatly, without warmth." },
-        warm: { settings: {}, instruction: "Read warmly and gently." },
-        urgent: { settings: {}, instruction: "Read urgently, with a pressing pace." },
+        measured: { settings: {} },
+        whispered: { settings: {}, instruction: "Whispering." },
+        breaking: { settings: {}, instruction: "Voice breaking, close to tears." },
+        cold: { settings: {}, instruction: "Cold and flat." },
+        warm: { settings: {}, instruction: "Warm and gentle." },
+        urgent: { settings: {}, instruction: "Urgent, at a quick pace." },
       },
     },
   };

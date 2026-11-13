@@ -1,0 +1,37 @@
+import assert from "node:assert/strict";
+import { it } from "node:test";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { newId } from "@arke-studio/contracts";
+import { fixtureBundle } from "../index-db/helpers.js";
+import { tempDir } from "../tmp.js";
+import { readVersionHistory } from "../../src/world-chat/version-history.js";
+import { WorldChatTargetReads } from "../../src/world-chat/target-reads.js";
+import { QueryLeaseRegistry } from "../../src/world-chat/lease.js";
+
+it("lists real saved versions with fenced pages and refuses unsafe or unknown targets", async () => {
+  const worldDir = await tempDir("arke-history-read-"), bundle = await fixtureBundle();
+  const dir = join(worldDir, ".history", "characters", "maren-kest");
+  await mkdir(dir, { recursive: true });
+  for (const version of [1, 4, 12]) await writeFile(join(dir, `v${version}.md`), `---\nversion: ${version}\nname: Maren\n---\nVersion ${version}\n`);
+  await writeFile(join(dir, "notes.md"), "not a version");
+  const target = { kind: "sheet" as const, sheetType: "character" as const, id: "maren-kest" };
+  const reads = new WorldChatTargetReads({ getVersions: target => readVersionHistory(worldDir, bundle, target) });
+  const leases = new QueryLeaseRegistry(() => bundle.meta.worldId);
+  const lease = leases.mint({ runId: newId("run"), worldId: bundle.meta.worldId, conversationId: newId("cv") });
+  const first = await reads.call(lease, bundle, "list_versions", { target, limit: 1 });
+  assert.equal(first.result.total, 3); assert.equal(first.result.complete, false);
+  assert.deepEqual(first.result.items.map(row => (row as { version: number }).version), [1]);
+  const second = await reads.call(lease, bundle, "list_versions", { target, cursor: first.result.nextCursor, limit: 2 });
+  assert.deepEqual(second.result.items.map(row => (row as { version: number }).version), [4, 12]);
+  assert.equal(second.result.complete, true);
+  assert.equal(second.result.target.id, "versions:sheet:character:maren-kest");
+  assert.ok(!JSON.stringify(second).includes(worldDir), "no machine paths in history reads");
+  await writeFile(join(dir, "v4.md"), "---\nversion: 4\nname: Changed\n---\nChanged\n");
+  await assert.rejects(reads.call(lease, bundle, "list_versions", { target, cursor: first.result.nextCursor }), /changed|stale|current/i);
+  await assert.rejects(reads.call(lease, bundle, "list_versions", { target: { ...target, id: "../outside" } }));
+  await assert.rejects(reads.call(lease, bundle, "list_versions", { target: { ...target, id: "unknown" } }), /unavailable/);
+  assert.deepEqual(await readVersionHistory(worldDir, bundle, { kind: "bible" }), []);
+  const art = { ...bundle, artDirection: { ...bundle.artDirection, history: [{ version: 1, description: "Old look", masterLook: "art-direction/look-v1.png", acceptedAt: "2026-10-01T12:00:00Z", audio: bundle.artDirection.audio, failureModes: bundle.artDirection.failureModes }] } };
+  assert.deepEqual((await readVersionHistory(worldDir, art, { kind: "art-direction" })).map(row => row.version), [1]);
+});

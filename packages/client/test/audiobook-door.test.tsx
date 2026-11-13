@@ -138,6 +138,13 @@ async function typeInto(input: HTMLInputElement, value: string): Promise<void> {
   });
 }
 
+/** The hero's ⋯ and one of its entries (design turn 199d): Reading or Narrator. */
+async function fromMenu(m: Mounted, entry: "menu-reading" | "menu-narrator"): Promise<void> {
+  await act(async () => q(m, '[data-testid="audiobook-more"]')!.click());
+  await act(async () => q(m, `[data-testid="${entry}"]`)!.click());
+}
+const openReading = (m: Mounted) => fromMenu(m, "menu-reading");
+
 async function answerDoor(m: Mounted, answer: AudiobookDoor): Promise<void> {
   const ask = m.sent.findLast((message) => message.kind === "open-audiobook") as Extract<ClientMessage, { kind: "open-audiobook" }>;
   assert.ok(ask, "the door is asked for");
@@ -145,20 +152,29 @@ async function answerDoor(m: Mounted, answer: AudiobookDoor): Promise<void> {
 }
 
 describe("the Audiobook door (turn 146)", () => {
-  it("shows a row a chapter with its state, the count and running time over them, the read bar, and opens a chapter's Audiobook view", async () => {
+  it("opens Audio Studio from the book menu without starting generation or a mix", async () => {
+    const m = await mount(inkbound());
+    await act(async () => q(m, '[data-testid="audiobook-more"]')!.click());
+    await act(async () => q(m, '[data-testid="menu-audio-studio"]')!.click());
+    assert.match(m.where(), /story\/chapters\/slack-water\?view=audio-studio$/);
+    assert.equal(m.sent.some(message => ["read-audiobook-chapter", "read-audiobook-book", "render-audiobook-mix"].includes(message.kind)), false);
+  });
+  it("shows chapter states and measured versus estimated time, and opens a chapter's Audiobook view", async () => {
     const m = await mount(inkbound());
     // The page is the book's cover (design turn 190a): its title, not the word Audiobook, which the rail says.
     assert.match(text(m), /Inkbound/);
     assert.equal(q(m, 'section[aria-label="Audiobook"]') !== null, true);
     await answerDoor(m, door("narrator"));
-    assert.equal(q(m, '[data-testid="audiobook-line"]')?.textContent, "1 of 2 chapters read · 31:04 · 1 planned");
+    // One meta line (design turn 199): every chapter, the made takes' time and the rest from the words, who reads it.
+    assert.equal(q(m, '[data-testid="audiobook-line"]')?.textContent, "Audiobook · 3 chapters · ~53 min estimated total · 51 min recorded · Read by George");
     const rows = all(m, '[data-testid="audiobook-row"]');
     assert.deepEqual(
-      rows.map((row) => row.querySelector(".fy-row__meta")?.textContent),
-      ["read · 31:04", "22 of 26 made · 1 flagged", "planned"],
+      rows.map((row) => row.getAttribute("data-state")),
+      ["ready", "4 to read", "planned"],
     );
-    assert.equal(q(m, '[data-testid="audiobook-bar"]')?.getAttribute("aria-valuenow"), "46");
+    assert.equal(q(m, '[data-testid="audiobook-bar"]'), null, "no read bar (199)");
     assert.equal(q(m, '[data-testid="read-book"]')?.textContent, "Read the book · 1 chapter", "a local narrator costs nothing, so no price rides on the press");
+    assert.equal(q(m, '[data-testid="audiobook-planned"]')?.textContent, "1 planned chapter excluded from book narration");
     assert.ok(!/\bis\b.*\bbecause\b/.test(text(m)), "no sentence explains the door");
     // The door is asked again as the book moves, and only the latest ask's answer stands: an
     // older answer arriving late, or one for another world, changes nothing (codex on PR 1187).
@@ -204,14 +220,21 @@ describe("the Audiobook door (turn 146)", () => {
     await act(async () => __setStateForTest(voiced, kept()));
     assert.equal(asks(), asked + 3, "a sheet's voice asks the door again");
     await answerDoor(m, door("narrator"));
-    await act(async () => all(m, '[data-testid="audiobook-row"]')[1]!.click());
-    assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/neap?view=audiobook`, "a row opens the chapter in its Audiobook view");
+    const outlined = structuredClone(voiced);
+    outlined.world!.productions.find(p => p.meta.id === "inkbound")!.chapters[1]!.status = "outlined";
+    await act(async () => __setStateForTest(outlined, kept()));
+    assert.equal(asks(), asked + 4, "a status-only outline change refreshes book eligibility");
+    await answerDoor(m, door("narrator"));
+    await act(async () => all(m, '[data-testid="audiobook-row-open"]')[1]!.click());
+    assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/p/inkbound/story/chapters/neap?view=audiobook`, "a row's chevron opens the chapter in its Audiobook view");
   });
 
-  it("the voices row says who reads and who has no voice under Cast, and only the narrator under Narrator (R-12)", async () => {
+  it("Reading names who reads and who has no voice under Cast, and only the narrator under Narrator (R-12, design turn 199e)", async () => {
     const m = await mount(inkbound());
     await answerDoor(m, door("narrator"));
-    assert.deepEqual(all(m, '[data-testid="audiobook-voice"]').map((chip) => chip.getAttribute("data-state")), ["narrator"]);
+    await openReading(m);
+    assert.ok(q(m, '[data-testid="reading-narrator"]'), "the narrator's row");
+    assert.deepEqual(all(m, '[data-testid="audiobook-voice"]').map((chip) => chip.getAttribute("data-state")), [], "no speaker row under the narrator's reading");
     assert.doesNotMatch(text(m), /no voice/);
     await act(async () => all(m, '[aria-label="Reading"] button').find((b) => b.textContent === "Cast")!.click());
     assert.deepEqual(m.sent.filter((message) => message.kind === "set-audiobook-reading").map((message) => (message as Extract<ClientMessage, { kind: "set-audiobook-reading" }>).reading), ["cast"]);
@@ -229,23 +252,54 @@ describe("the Audiobook door (turn 146)", () => {
       }),
     );
     const chips = all(m, '[data-testid="audiobook-voice"]');
-    assert.deepEqual(chips.map((chip) => chip.getAttribute("data-state")), ["narrator", "reads", "no voice", "no voice"]);
-    assert.match(chips[1]!.textContent ?? "", /Maren KestAnna · ElevenLabs · cloud · 4 blocks/);
-    assert.match(chips[2]!.textContent ?? "", /Odile Sarnno voice · narrator · 3 blocks/);
-    assert.ok(chips[2]!.className.includes("fy-abdoor__voice--warn"), "in warning");
-    assert.match(chips[3]!.textContent ?? "", /unattributedno voice · narrator · 2 blocks/);
-    // A chip goes to where its voice is set (issue 1191); the unattributed lines have nowhere to go.
-    assert.deepEqual(chips.map((chip) => chip.tagName.toLowerCase()), ["button", "button", "button", "span"]);
-    await act(async () => chips[2]!.click());
-    assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/cast/odile-sarn/voice`, "a speaker's chip opens their voice page");
+    assert.deepEqual(chips.map((chip) => chip.getAttribute("data-state")), ["reads", "no voice", "unattributed"]);
+    assert.match(chips[0]!.textContent ?? "", /^Maren KestAnnaElevenLabs · cloud4 blocks$/);
+    assert.match(chips[1]!.textContent ?? "", /^Odile Sarnno voice · narrator3 blocks$/);
+    assert.ok(chips[1]!.querySelector(".fy-abshow__v--w"), "in warning");
+    assert.match(chips[2]!.textContent ?? "", /^unattributed2 lines · narrator$/);
+    // The one warning word on the page, never a chip (199 rule 5): on Read the book and the ⋯ menu's Reading.
+    assert.match(q(m, '[data-testid="read-book"]')!.textContent!, / · 1 no voice$/);
+    // A row goes to where its voice is set (issue 1191); the unattributed lines have nowhere to go.
+    assert.deepEqual(chips.map((chip) => chip.tagName.toLowerCase()), ["button", "button", "div"]);
+    await act(async () => chips[1]!.click());
+    assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/cast/odile-sarn/voice?book=inkbound`, "a speaker's chip opens their voice page, the book carried for its narrator (turn 200)");
+  });
+
+  it("a book narrator that cannot read is said on its row, the menu and Read the book, which holds (issue 1661)", async () => {
+    const m = await mount(inkbound());
+    // A 402 once had the door say `Performed · George` over the book's own narrator, with no reason given.
+    await answerDoor(m, door("narrator", { voices: [{ name: "Nigerian Woman 2", voice: { label: "Nigerian Woman 2", provider: "google", local: false }, state: "narrator", blocks: 40, book: true, unavailable: "Google needs payment" }] }));
+    assert.match(q(m, '[data-testid="audiobook-line"]')?.textContent ?? "", /Read by Nigerian Woman 2$/, "the book keeps its narrator");
+    const press = q(m, '[data-testid="read-book"]') as HTMLButtonElement;
+    assert.equal(press.disabled, true);
+    assert.match(press.textContent ?? "", / · Google needs payment$/);
+    await act(async () => q(m, '[data-testid="audiobook-more"]')!.click());
+    assert.match(q(m, '[data-testid="menu-narrator"]')?.textContent ?? "", /Google needs payment/);
+    await act(async () => q(m, '[data-testid="menu-reading"]')!.click());
+    assert.equal(q(m, '[data-testid="reading-narrator-unavailable"]')?.textContent, "Google needs payment");
+  });
+
+  it("asks the door again when a provider's fault comes or goes, so an idle page learns its narrator was silenced (codex on PR 1869)", async () => {
+    const m = await mount(inkbound());
+    await answerDoor(m, door("narrator"));
+    const asks = () => m.sent.filter((message) => message.kind === "open-audiobook").length;
+    const before = asks();
+    const faulted = FIXTURE_STATE.app.providers.map((p) => (p.id === "elevenlabs" ? { ...p, fault: "elevenlabs: HTTP 402 payment_required", faultKind: "credential" as const } : p));
+    await act(async () => __applyEventForTest({ at: AT, type: "provider.status", providers: faulted }));
+    assert.equal(asks(), before + 1, "a 402 on another job asks again");
+    await answerDoor(m, door("narrator"));
+    await act(async () => __applyEventForTest({ at: AT, type: "provider.status", providers: faulted }));
+    assert.equal(asks(), before + 1, "the same status again asks nothing");
+    await act(async () => __applyEventForTest({ at: AT, type: "provider.status", providers: FIXTURE_STATE.app.providers }));
+    assert.equal(asks(), before + 2, "and once more when it clears");
   });
 
   it("the narrator's chip opens the book's narrator: the app's, or a voice for this book, and nothing written until the press (SPEC-047 R-46)", async () => {
     const m = await mount(inkbound());
     await answerDoor(m, door("narrator"));
     const where = m.where();
-    await act(async () => all(m, '[data-testid="audiobook-voice"]')[0]!.click());
-    assert.equal(m.where(), where, "the chip no longer leaves for Settings, which keeps the app's default");
+    await fromMenu(m, "menu-narrator");
+    assert.equal(m.where(), where, "Narrator does not leave for Settings, which keeps the app's default");
     const dialog = dom.document.querySelector('[data-testid="narrator-dialog"]') as HTMLElement | null;
     assert.ok(dialog, "the Narrator dialog opens");
     const seg = [...dialog.querySelectorAll('[aria-label="Narrator"] button')] as HTMLButtonElement[];
@@ -261,7 +315,7 @@ describe("the Audiobook door (turn 146)", () => {
   it("the narrator is found by search: the voices on this machine first, providers named, and the press waits for what the switch costs (design turn 165c)", async () => {
     const m = await mount(inkbound());
     await answerDoor(m, door("narrator"));
-    await act(async () => all(m, '[data-testid="audiobook-voice"]')[0]!.click());
+    await fromMenu(m, "menu-narrator");
     const dialog = dom.document.querySelector('[data-testid="narrator-dialog"]') as HTMLElement;
     const voice = (provider: string, model: string, voiceId: string, label: string, local: boolean, attributes: string[] = []) => ({ provider, model, voiceId, label, attributes, local, canClone: false, usedBy: [] });
     // The catalogue's own order puts the paid voices first, as the build listed them (issue 1324 §3).
@@ -322,6 +376,21 @@ describe("the Audiobook door (turn 146)", () => {
   ];
   const PRICE = { chapters: 9, blocks: 120, cloudBlocks: 41, characters: 108_700, estimatedMicroUsd: 10_870_000 };
 
+  it("names a paid reader's quota reset while preserving the book narrator and the retry press", async () => {
+    const m = await mount(inkbound());
+    await answerDoor(m, door("narrator"));
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound" };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 2, blocks: 20 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-finished", ...ids, outcome: "failed", chaptersRead: 0, chaptersRefused: 0, made: 0, flagged: 0,
+      reason: "Google's daily request limit was reached · Gemini 3.8 Flash-Lite TTS · 100 a day · resets 2030-10-21T07:00:01.000Z" }));
+    assert.match(text(m), /Gemini 3.8 Flash-Lite TTS · daily request limit reached · 100 a day · resets 00:00 PT/);
+    assert.match(text(m), /recordings kept/);
+    await answerDoor(m, door("narrator"));
+    assert.ok(q(m, '[data-testid="read-book"]'));
+    assert.equal(m.sent.some(message => message.kind === "set-audiobook-narrator"), false);
+    assert.equal(all(m, "button").some(b => /default narrator|shipped narrator/i.test(b.textContent ?? "")), false);
+  });
+
   it("Read the book is priced once, each voice named, and answered by token or declined (R-17)", async () => {
     const m = await mount(inkbound("cast"));
     await answerDoor(m, door("cast", { price: { ...PRICE, voices: LINES } }));
@@ -365,7 +434,7 @@ describe("the Audiobook door (turn 146)", () => {
     const answered = m.sent.findLast((message) => message.kind === "read-audiobook-book") as Extract<ClientMessage, { kind: "read-audiobook-book" }>;
     assert.equal(answered.confirmationToken, "tok");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 9, blocks: 120 }));
-    assert.match(text(m), /reading… 0 of 9 chapters/);
+    assert.match(text(m), /reading… 0 of 9/);
     assert.ok(all(m, "button").some((b) => b.textContent === "Stop"));
     // The book's start asked the door again; answered, as the coordinator answers it.
     await answerDoor(m, door("cast", { price: { ...PRICE, voices: LINES } }));
@@ -385,13 +454,13 @@ describe("the Audiobook door (turn 146)", () => {
     const consented = m.sent.findLast((message) => message.kind === "read-audiobook-book") as Extract<ClientMessage, { kind: "read-audiobook-book" }>;
     assert.equal(consented.voiceUploadConfirmedFor, "engine-1");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-progress", ...ids, chapterId: "slack-water", done: 3, chapters: 9 }));
-    assert.match(text(m), /reading… 3 of 9 chapters/);
+    assert.match(text(m), /reading… 3 of 9/);
     // Every chapter's record refreshes the world, and the refresh replays the start with no
     // counts: what the window knows stands.
     const replayed = { at: AT, type: "audiobook.book-started" as const, ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 0, blocks: 0, replayed: true as const };
     await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 3, state: inkbound("cast") }));
     await act(async () => __applyEventForTest(replayed));
-    assert.match(text(m), /reading… 3 of 9 chapters/);
+    assert.match(text(m), /reading… 3 of 9/);
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, chapterId: "slack-water", outcome: "stopped", made: 1, flagged: 0 }));
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-finished", ...ids, outcome: "stopped", chaptersRead: 3, chaptersRefused: 0, made: 40, flagged: 0 }));
     await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 5, state: inkbound("cast") }));
@@ -406,13 +475,55 @@ describe("the Audiobook door (turn 146)", () => {
     assert.equal(m.sent.filter((message) => message.kind === "open-audiobook").length, asksBefore + 2, "and the book's end once more, once that is answered");
     // While a chapter is read, the seg holds: a reading switched under a run would leave every take it files stale.
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, chapterId: "neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H9", toMake: 26, blocks: 26 }));
+    await openReading(m);
+    assert.equal(all(m, '[aria-label="Reading"] button').length, 3, "the reading's seg, in the Reading sheet");
     assert.ok(all(m, '[aria-label="Reading"] button').every((b) => (b as HTMLButtonElement).disabled), "Narrator · Cast held while a chapter is read");
     // The run tried the four blocks not made (R-16): three made, one flagged.
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, chapterId: "neap", outcome: "read", made: 3, flagged: 1 }));
     assert.ok(all(m, '[aria-label="Reading"] button').every((b) => !(b as HTMLButtonElement).disabled));
     // A chapter the book has read shows as its run ended until the door answers: the row's
     // counts plus the run's.
-    assert.match(all(m, '[data-testid="audiobook-row"]')[1]?.textContent ?? "", /25 of 26 made · 1 flagged/);
+    assert.equal(all(m, '[data-testid="audiobook-row"]')[1]?.getAttribute("data-state"), "1 to read", "25 of 26 made: the flagged one is left to read");
+  });
+
+  it("refreshes newly saved prose during another chapter's read without refreshing for each take", async () => {
+    const m = await mount(inkbound(), ROUTE, true);
+    await answerDoor(m, door("narrator"));
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound" };
+    const asks = () => m.sent.filter((message) => message.kind === "open-audiobook").length;
+    const before = asks();
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, chapterId: "neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 26 }));
+    const saved = structuredClone(inkbound());
+    const production = saved.world!.productions.find((candidate) => candidate.meta.id === "inkbound")!;
+    Object.assign(production.chapters[2]!, { status: "drafted", version: 2, words: 2909, bodyHash: `sha256:${"c".repeat(64)}` });
+    await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 3, state: saved }));
+    assert.equal(asks(), before + 1, "the page and rail share one immediate refresh for new prose");
+    const current = door("narrator");
+    Object.assign(current.rows[2]!, { planned: false, total: 12, notMade: 12, seconds: 0 });
+    await answerDoor(m, current);
+    assert.equal(all(m, '[data-testid="audiobook-row"]')[2]!.getAttribute("data-state"), "not read");
+    assert.match(all(m, '[data-testid="audiobook-row"]')[1]!.textContent ?? "", /reading/);
+    const takeLanded = structuredClone(saved);
+    takeLanded.world!.productions.find((candidate) => candidate.meta.id === "inkbound")!.chapters[1]!.audiobook = { chapterVersion: 4, hash: "h", updatedAt: AT, takes: 23, flagged: 0 };
+    await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 4, state: takeLanded }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.progress", ...ids, chapterId: "neap", block: "p0.0", outcome: "made", made: 1, toMake: 4 }));
+    assert.equal(asks(), before + 1, "take-only changes still use the running row counts");
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.finished", ...ids, chapterId: "neap", outcome: "stopped", made: 1, flagged: 0 }));
+    assert.equal(asks(), before + 2, "the final take state is refreshed when the read stops");
+  });
+
+  it("does not reprepare the book when the page remounts during unchanged narration", async () => {
+    const m = await mount(inkbound(), ROUTE, true);
+    await answerDoor(m, door("narrator"));
+    const count = () => m.sent.filter((message) => message.kind === "open-audiobook").length;
+    const before = count();
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 26 }));
+    for (let visit = 0; visit < 2; visit++) {
+      await act(async () => m.root.render(null));
+      await act(async () => m.root.render(<MemoryRouter initialEntries={[ROUTE]}><Routes><Route path="/w/:worldId/p/:prodId" element={<ProductionLayout />}><Route path="story/audiobook" element={<AudiobookScreen />} /></Route></Routes></MemoryRouter>));
+      assert.equal(count(), before, "both consumers reuse the observed manuscript after remounting");
+      assert.match(all(m, '[data-testid="audiobook-row"]')[1]!.textContent ?? "", /reading/);
+    }
   });
 
   it("a window that joins a run going elsewhere still asks for the door it has none of (codex on PR 1187)", async () => {
@@ -422,7 +533,7 @@ describe("the Audiobook door (turn 146)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, chapterId: "neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 26, blocks: 26, made: 3, replayed: true }));
     assert.ok(m.sent.some((message) => message.kind === "open-audiobook"), "asked though a chapter is being read: this window holds no door");
     await answerDoor(m, door("narrator"));
-    assert.match(text(m), /reading… 2 of 9 chapters/);
+    assert.match(text(m), /reading… 2 of 9/);
     assert.equal(all(m, '[data-testid="audiobook-row"]').length, 3);
   });
 
@@ -435,7 +546,7 @@ describe("the Audiobook door (turn 146)", () => {
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.book-started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", chapters: 9, blocks: 120, done: 3, replayed: true }));
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, chapterId: "neap", requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 26, blocks: 26, made: 5, replayed: true }));
     await answerDoor(m, door("narrator"));
-    assert.match(text(m), /reading… 3 of 9 chapters/);
+    assert.match(text(m), /reading… 3 of 9/);
     assert.match(all(m, '[data-testid="audiobook-row"]')[1]?.textContent ?? "", /reading… 5 of 26/);
   });
 
@@ -466,6 +577,16 @@ describe("the Audiobook door (turn 146)", () => {
   // a long book each answer arrived superseded and was thrown away.
   const asks = (m: Mounted) => m.sent.filter((message): message is Extract<ClientMessage, { kind: "open-audiobook" }> => message.kind === "open-audiobook");
 
+  it("refreshes the door when character narration changes", async () => {
+    const m = await mount(inkbound(), ROUTE, true);
+    await answerDoor(m, door("narrator"));
+    const before = asks(m).length;
+    const changed = inkbound();
+    changed.world!.sheets[0]!.narration = "quiet American delivery";
+    await act(async () => __setStateForTest(changed, { connection: "open", audiobookDoor: __stateForTest().audiobookDoor }));
+    assert.equal(asks(m).length, before + 1);
+  });
+
   it("the rail and the door share one ask", async () => {
     const m = await mount(inkbound(), ROUTE, true);
     assert.equal(asks(m).length, 1, "one ask between them, not one each");
@@ -473,6 +594,31 @@ describe("the Audiobook door (turn 146)", () => {
     const rail = all(m, ".fy-prodrail__item").find((item) => item.textContent?.includes("Audiobook"))!;
     assert.match(rail.textContent ?? "", /1\/2/);
     assert.equal(all(m, '[data-testid="audiobook-row"]').length, 3, "the one answer serves both");
+  });
+
+  it("off the Audiobook page the rail asks once, and an autosave asks it nothing (issue 2782)", async () => {
+    const m = await mount(inkbound(), `/w/${FIXTURE_WORLD_ID}/p/inkbound`, true);
+    assert.equal(asks(m).length, 1, "the rail asks for its read count");
+    await answerDoor(m, door("narrator"));
+    // An autosave moves the chapter's version and body hash, and nothing else the count reads.
+    const saved = structuredClone(inkbound());
+    const chapter = saved.world!.productions.find((candidate) => candidate.meta.id === "inkbound")!.chapters[0]!;
+    Object.assign(chapter, { version: chapter.version + 1, bodyHash: `sha256:${"d".repeat(64)}` });
+    await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 3, state: saved }));
+    assert.equal(asks(m).length, 1, "the whole book was prepared and priced after every save");
+    // A chapter gaining prose changes what the count counts, so that still asks.
+    const drafted = structuredClone(saved);
+    Object.assign(drafted.world!.productions.find((candidate) => candidate.meta.id === "inkbound")!.chapters[2]!, { status: "drafted" });
+    await act(async () => __handleFrameForTest({ kind: "snapshot", seq: 4, state: drafted }));
+    assert.equal(asks(m).length, 2);
+  });
+
+  it("a graphic novel's rail asks for no audiobook count: it shows Pages (issue 2782)", async () => {
+    const state = structuredClone(inkbound());
+    const book = state.world!.productions.find((candidate) => candidate.meta.id === "inkbound")!;
+    book.meta = { ...book.meta, kind: "graphic-novel" };
+    const m = await mount(state, `/w/${FIXTURE_WORLD_ID}/p/inkbound`, true);
+    assert.equal(asks(m).length, 0);
   });
 
   it("a catalogue refresh asks the door nothing; a book's reader changing availability asks once", async () => {
@@ -552,10 +698,12 @@ describe("the Audiobook door (turn 146)", () => {
     assert.equal(all(m, '[data-testid="audiobook-row"]').length, 3, "an older answer after a newer one changes nothing");
   });
 
-  it("the book's reading: the book note, each performed speaker's note with where it came from, and Draft from the sheets (design turn 184c)", async () => {
+  it("the book's reading: the book note, each performed speaker's note with where it came from — this book or the character — and Draft from the sheets (design turns 184c, 200)", async () => {
     const state = inkbound();
-    const book = { schemaVersion: 1 as const, reading: "performed" as const, note: "Harbour English, unhurried and close.", notes: { "maren-kest": "dry, exact", "odile-sarn": "low and amused" }, noteSources: { "maren-kest": "sheet" as const } };
-    const m = await mount({ ...state, world: { ...state.world!, productions: state.world!.productions.map((p) => (p.meta.id === "inkbound" ? { ...p, audiobook: book } : p)) } });
+    // Odile's note is the book's own; Maren's is her character's narration, which the book inherits.
+    const book = { schemaVersion: 1 as const, reading: "performed" as const, note: "Harbour English, unhurried and close.", notes: { "odile-sarn": "low and amused" } };
+    const sheets = state.world!.sheets.map((sheet) => (sheet.id === "maren-kest" ? { ...sheet, narration: "dry, exact" } : sheet));
+    const m = await mount({ ...state, world: { ...state.world!, sheets, productions: state.world!.productions.map((p) => (p.meta.id === "inkbound" ? { ...p, audiobook: book } : p)) } });
     await answerDoor(m, {
       ...door("narrator"),
       reading: "performed",
@@ -566,24 +714,24 @@ describe("the Audiobook door (turn 146)", () => {
         { sheet: "perrin-tallow", name: "Perrin Tallow", state: "narrator", blocks: 2 },
       ],
     });
-    const where = m.where();
-    await act(async () => all(m, '[data-testid="audiobook-voice"]')[1]!.click());
-    assert.equal(m.where(), where, "a performed speaker's chip opens the book's reading, not their voice page");
-    const panel = q(m, '[data-testid="book-reading"]')!;
-    assert.match(panel.querySelector("h3")?.textContent ?? "", /^Performed · George$/);
+    // Speaker notes stay where 184c put them, under Performed: in the Reading sheet (design turn 199e).
+    await openReading(m);
+    const panel = q(m, '[data-testid="reading-sheet"]')!;
     const bookNote = panel.querySelector('textarea[aria-label="Book note"]') as HTMLTextAreaElement;
     const reactValue = (bookNote as unknown as Record<string, { value?: string }>)[Object.keys(bookNote).find((k) => k.startsWith("__reactProps$"))!]?.value;
     assert.equal(reactValue, "Harbour English, unhurried and close.");
-    const speakers = [...panel.querySelectorAll('[data-testid="book-reading-speaker"]')].map((row) => `${row.querySelector("b")!.textContent}|${row.querySelector("small")!.textContent}`);
-    assert.deepEqual(speakers, ["Maren Kest|10 / 60 · sheet", "Odile Sarn|14 / 60 · you", "Perrin Tallow|0 / 60"]);
-    assert.match(panel.textContent ?? "", /drafted from the sheets/);
+    const speakers = [...panel.querySelectorAll('[data-testid="audiobook-voice"]')].map(row => `${row.querySelector("b")!.textContent}|${row.querySelector('[data-testid="character-narration"]')!.getAttribute("data-source")}`);
+    assert.deepEqual(speakers, ["Maren Kest|character", "Odile Sarn|book", "Perrin Tallow|none"]);
+    assert.ok(panel.querySelector('textarea[aria-label="Narration · Maren Kest"]'), "the inherited note edits the character by default");
+    assert.ok(panel.querySelector('textarea[aria-label="Book override · Odile Sarn"]'), "the existing book override is explicitly labelled");
     await act(async () => (panel.querySelector('[data-testid="draft-from-sheets"]') as HTMLButtonElement).click());
     const drafted = m.sent.findLast((message) => message.kind === "draft-audiobook-speaker-notes") as Extract<ClientMessage, { kind: "draft-audiobook-speaker-notes" }>;
     assert.ok(drafted, "the speakers with no note are drafted from their sheets");
     await act(async () => __applyEventForTest({ at: AT, type: "audiobook.speaker-notes", worldId: FIXTURE_WORLD_ID, productionId: "inkbound", requestId: drafted.requestId, drafted: 1 }));
-    assert.match(q(m, '[data-testid="book-reading"]')?.textContent ?? "", /1 drafted/);
-    await act(async () => all(m, '[data-testid="book-reading"] button').find((b) => b.textContent === "Done")!.click());
-    assert.equal(q(m, '[data-testid="book-reading"]'), null);
+    assert.match(q(m, '[data-testid="reading-sheet"]')?.textContent ?? "", /1 drafted/);
+    // A performed speaker's row still goes to their Voice page, by its chevron.
+    await act(async () => (panel.querySelector('[aria-label="Voice · Odile Sarn"]') as HTMLButtonElement).click());
+    assert.equal(m.where(), `/w/${FIXTURE_WORLD_ID}/cast/odile-sarn/voice?book=inkbound`);
   });
 });
 
@@ -592,20 +740,77 @@ describe("the book's requests (design turn 185d)", () => {
   it("Requests · Grouped · Per paragraph shows only where the reader can group, with the book's counts, and a press writes the book", async () => {
     const m = await mount(inkbound());
     await answerDoor(m, door("narrator", { voices: [GROUPED], requests: "grouped", price: { chapters: 1, blocks: 169, cloudBlocks: 169, characters: 18_000, estimatedMicroUsd: 460_000, voices: [], requests: 5, perParagraph: 169 } }));
+    assert.equal(q(m, '[data-testid="book-requests"]'), null, "never on the page (199)");
+    await openReading(m);
     const panel = q(m, '[data-testid="book-requests"]')!;
     assert.ok(panel, "offered for a groupable reader");
     assert.match(panel.textContent!, /RequestsGroupedPer paragraphGoogle · up to ~5 min a request/);
     assert.match(panel.textContent!, /Book5 requests169 per paragraph/);
     assert.equal(all(m, '[data-testid="book-requests"] [aria-checked="true"]')[0]!.textContent, "Grouped", "grouped by default");
-    assert.match(q(m, '[data-testid="read-book"]')!.textContent!, /Read the book · 1 chapter · 5 requests · (~|up to )\$0\.46/);
+    assert.match(q(m, '[data-testid="read-book"]')!.textContent!, /^Read the book · 1 chapter · (~|up to )\$0\.46$/);
     await act(async () => all(m, '[data-testid="book-requests"] button').find((button) => button.textContent === "Per paragraph")!.click());
     const written = m.sent.findLast((message) => message.kind === "set-audiobook-requests") as Extract<ClientMessage, { kind: "set-audiobook-requests" }>;
     assert.equal(written.requests, "per-paragraph");
   });
 
+  it("holds its presses through a dropped connection instead of crashing the screen (issue 2775)", async () => {
+    const m = await mount(inkbound());
+    await answerDoor(m, door("narrator", { voices: [GROUPED], requests: "grouped" }));
+    await openReading(m);
+    const presses = () => all(m, '[data-testid="book-requests"] button') as HTMLButtonElement[];
+    assert.equal(presses().length, 2);
+    try {
+      await act(async () => __connectionStatusForTest("closed"));
+      assert.doesNotMatch(text(m), /could not be shown/);
+      assert.equal(presses().length, 2, "the panel survives the drop");
+      assert.ok(presses().every((button) => button.disabled), "and holds its presses while offline");
+    } finally {
+      await act(async () => __connectionStatusForTest("open"));
+    }
+    assert.doesNotMatch(text(m), /could not be shown/);
+    assert.ok(presses().length === 2 && presses().every((button) => !button.disabled), "and offers them again once back");
+  });
+
+  it("asks the door again when whisper answers after the page opened, and not for a probe that changes nothing (2026-10-05)", async () => {
+    // Installed 0.5.60-local.24: the page opened before the start-up probe heard whisper, the door
+    // answered without Requests, and nothing asked again — leaving the page and coming back read
+    // the same stamp — until a change of reading did.
+    const m = await mount(inkbound());
+    const asked = () => m.sent.filter((message) => message.kind === "open-audiobook").length;
+    await answerDoor(m, door("narrator", { voices: [GROUPED] }));
+    await openReading(m);
+    assert.equal(q(m, '[data-testid="book-requests"]'), null, "no transcriber yet");
+    const whisper = (available: boolean, at: string) => ({ id: "whispercpp" as const, configured: true, validation: "valid" as const, probes: [{ capability: "voice-stt" as const, available, ...(available ? {} : { reason: "whisper.cpp is not running on this machine" }) }], lastValidated: at, fault: null });
+    const status = (available: boolean, at: string) => act(async () => __applyEventForTest({ at, type: "provider.status", providers: [...FIXTURE_STATE.app.providers, whisper(available, at)] }));
+    await status(false, "2026-09-14T09:00:01.000Z");
+    // Whisper's row arriving is a provider the fault stamp has not seen (codex on PR 1869), so it
+    // asks once; answered, so what follows is whisper's own answer moving and nothing else.
+    await answerDoor(m, door("narrator", { voices: [GROUPED] }));
+    const settled = asked();
+    await status(false, "2026-09-14T09:00:06.000Z");
+    assert.equal(asked(), settled, "a probe that finds whisper still away asks nothing");
+    await status(true, "2026-09-14T09:00:11.000Z");
+    assert.equal(asked(), settled + 1, "whisper answering asks the door once");
+    await answerDoor(m, door("narrator", { voices: [GROUPED], requests: "grouped", price: { chapters: 1, blocks: 169, cloudBlocks: 169, characters: 18_000, estimatedMicroUsd: 460_000, voices: [], requests: 5, perParagraph: 169 } }));
+    assert.ok(q(m, '[data-testid="book-requests"]'), "the Requests row, from the answer");
+    assert.match(q(m, '[data-testid="read-book"]')!.textContent!, /^Read the book · 1 chapter · /);
+    await status(true, "2026-09-14T09:00:16.000Z");
+    assert.equal(asked(), settled + 1, "and a later probe of the same answer asks nothing");
+    // The narrator's engine coming and going changes who can read: asked once each way.
+    const kokoro = (available: boolean) => ({ id: "kokoro" as const, configured: true, validation: "valid" as const, probes: [{ capability: "voice-tts" as const, available, ...(available ? {} : { reason: "Kokoro is not running" }) }], lastValidated: AT, fault: null });
+    const engine = (available: boolean) => act(async () => __applyEventForTest({ at: AT, type: "provider.status", providers: [...FIXTURE_STATE.app.providers, whisper(true, AT), kokoro(available)] }));
+    await engine(true);
+    assert.equal(asked(), settled + 2, "the narrator's engine answering asks the door again");
+    await answerDoor(m, door("narrator", { voices: [GROUPED], requests: "grouped" }));
+    await engine(false);
+    assert.equal(asked(), settled + 3, "and its going away asks once more");
+  });
+
   it("is not offered where the coordinator says the reader cannot group here", async () => {
     const m = await mount(inkbound());
     await answerDoor(m, door("narrator"));
+    await openReading(m);
+    assert.ok(q(m, '[data-testid="reading-sheet"]'));
     assert.equal(q(m, '[data-testid="book-requests"]'), null);
   });
 });

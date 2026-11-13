@@ -1,0 +1,24 @@
+.fx-arrangement-dialog .fy-editordialog__head { flex: none; flex-wrap: wrap; }
+.fx-arrangement { display: grid; gap: 18px; padding: 20px; min-width: 0; min-height: 0; overflow: auto; font-size: 13px; }
+.fx-arrangement label { display: grid; gap: 7px; min-width: 0; }
+.fx-arrangement input:not([type="checkbox"]), .fx-arrangement select, .fx-arrangement textarea { width: 100%; min-width: 0; box-sizing: border-box; min-height: 44px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: inherit; }
+.fx-arrangement textarea { resize: vertical; line-height: 1.5; }
+.fx-arrangement fieldset { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 6px; }
+.fx-arrangement legend { padding-inline: 5px; font-weight: 600; }
+.fx-arrangement p, .fx-arrangement output { margin: 0; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.fx-arrangement p { color: var(--muted-foreground); }
+.fx-arrangement [role="alert"] { color: var(--destructive); }
+.fx-arrangement__times { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.fx-arrangement__actions, .fx-arrangement__footer { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fx-arrangement__footer { justify-content: space-between; position: sticky; bottom: 0; padding-block: 10px; background: var(--background); }
+.fx-arrangement button { min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; color: inherit; background: var(--background); font: inherit; cursor: pointer; }
+.fx-arrangement button[type="submit"] { background: var(--primary); color: var(--primary-foreground); border-color: var(--primary); }
+.fx-arrangement :disabled { opacity: .5; cursor: default; }
+.fx-arrangement :focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fx-arrangement__song { display: grid; gap: 12px; padding-block: 4px 12px; border-bottom: 1px solid var(--border); }
+.fx-arrangement .fx-arrangement__palette { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 12px; }
+.fx-arrangement__palette label { display: flex; align-items: center; gap: 8px; min-height: 44px; overflow-wrap: anywhere; }
+.fx-arrangement__palette input { width: 18px; height: 18px; flex: none; }
+.fx-arrangement__protection summary { min-height: 44px; padding-block: 12px; cursor: pointer; box-sizing: border-box; }
+.fx-arrangement__protection p { margin-block: 10px; }
+@media (max-width: 359px) { .fx-arrangement { padding: 14px; } .fx-arrangement__times { grid-template-columns: 1fr; } }

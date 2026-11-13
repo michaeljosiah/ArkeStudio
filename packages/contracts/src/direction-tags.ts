@@ -13,11 +13,13 @@ import type { Delivery } from "./voice.js";
  */
 
 export type DirectionWord =
-  | { kind: "delivery"; delivery: Delivery }
+  | { kind: "delivery"; delivery?: Delivery; phrase?: string }
   | { kind: "pause"; length: "short" | "long" }
   | { kind: "breath"; action: "inhale" | "exhale" }
   | { kind: "sound"; sound: Sound }
   | { kind: "emphasis" };
+
+export const EXPRESSIVE_PHRASES = ["curious", "sarcastic", "excited", "mischievously", "thoughtful", "sad", "angry", "surprised", "shouting", "quietly, with controlled fear"] as const;
 
 const DELIVERY_WORDS: Record<Delivery, readonly string[]> = {
   measured: ["measured", "calm", "calmly", "evenly", "calm and even", "calm and even, at a steady pace"],
@@ -29,6 +31,28 @@ const DELIVERY_WORDS: Record<Delivery, readonly string[]> = {
 };
 
 const SOUND_WORDS: Record<Sound, readonly string[]> = {
+  "argh": ["argh"],
+  "heavy breath": ["heavy breath"],
+  "cackles": ["cackles","cackle"],
+  "cheers": ["cheers","cheer"],
+  "cries": ["cries","cry"],
+  "giggles": ["giggles","giggle"],
+  "growls": ["growls","growl"],
+  "grunts": ["grunts","grunt"],
+  "grr": ["grr"],
+  "hisses": ["hisses","hiss"],
+  "moans": ["moans","moan"],
+  "pants": ["pants","pant"],
+  "pff": ["pff"],
+  "phew": ["phew"],
+  "screams": ["screams","scream"],
+  "shouts": ["shouts","shout"],
+  "shrieks": ["shrieks","shriek"],
+  "sneezes": ["sneezes","sneeze"],
+  "snickers": ["snickers","snicker"],
+  "tsk": ["tsk"],
+  "whimpers": ["whimpers","whimper"],
+  snorts: ["snorts", "snort"], wheezing: ["wheezing", "wheeze"], "laughs harder": ["laughs harder"], "starts laughing": ["starts laughing"],
   laughs: ["laughs", "laugh", "laughing", "laughter"],
   chuckles: ["chuckles", "chuckle", "chuckling"],
   sighs: ["sighs", "sigh", "sighing"],
@@ -42,6 +66,7 @@ const SOUND_WORDS: Record<Sound, readonly string[]> = {
 
 const ALIASES: ReadonlyMap<string, DirectionWord> = (() => {
   const map = new Map<string, DirectionWord>();
+  for (const phrase of EXPRESSIVE_PHRASES) map.set(phrase, { kind: "delivery", phrase });
   for (const [delivery, words] of Object.entries(DELIVERY_WORDS) as Array<[Delivery, readonly string[]]>) {
     for (const word of words) map.set(word, { kind: "delivery", delivery });
   }
@@ -172,7 +197,7 @@ export function recogniseDirection(raw: string): RecognisedDirection {
       const next = deliveries.find((other) => other.at > entry.at);
       const limit = next === undefined ? text.length : point(next.at);
       const to = sentenceEnd(from, Math.max(from, limit));
-      if (to > from) cues.push({ kind: "delivery", span: { from, to, text: text.slice(from, to) }, delivery: word.delivery });
+      if (to > from) cues.push({ kind: "delivery", span: { from, to, text: text.slice(from, to) }, ...(word.delivery !== undefined ? { delivery: word.delivery } : {}), ...(word.phrase !== undefined ? { phrase: word.phrase } : {}) });
     } else if (word.kind === "emphasis") {
       const from = startOfWords(entry.at);
       const match = /^[\p{L}\p{N}'’-]+/u.exec(text.slice(from));

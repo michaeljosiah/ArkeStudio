@@ -1,6 +1,6 @@
 {
   "name": "@arke-studio/desktop",
-  "version": "0.5.56",
+  "version": "0.5.116",
   "license": "AGPL-3.0-only",
   "private": true,
   "description": "Electron desktop shell: embeds the coordinator in main, supervises OpenCode and Voxa, and serves the React client as one app (SPEC-001 §2.2).",
@@ -8,18 +8,21 @@
   "main": "dist/main.cjs",
   "scripts": {
     "build": "npm run build --workspace @arke-studio/client && node scripts/build.mjs",
+    "build:main": "node scripts/build.mjs",
     "test": "node --import tsx --test \"test/**/*.test.ts\" \"test/**/*.test.mjs\"",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "node ../../scripts/tsc.mjs -p tsconfig.json --noEmit",
     "rebuild:native": "node scripts/rebuild-native.mjs",
     "start": "npm run build && npm run rebuild:native && electron dist/main.cjs",
     "prepare:runtimes:x64": "node scripts/prepare-runtimes.mjs --arch x64",
     "prepare:runtimes:arm64": "node scripts/prepare-runtimes.mjs --arch arm64",
     "prepare:runtimes": "npm run prepare:runtimes:x64",
+    "prepare:speech": "node scripts/prepare-speech.mjs --arch x64",
+    "prepare:alignment": "node scripts/prepare-alignment.mjs --arch x64",
     "prepare:opencode2": "node scripts/prepare-opencode2.mjs --arch x64",
     "smoke:voxa:x64": "node scripts/smoke-voxa.mjs --root build-resources/voxa/x64",
     "smoke:main": "node scripts/build.mjs && node scripts/smoke-main-bundle.mjs",
-    "package": "npm run prepare:runtimes && npm run prepare:opencode2 && npm run verify:licenses -- --require-runtimes && npm run build && node scripts/package-windows.mjs --publish never",
-    "release": "npm run prepare:runtimes && npm run prepare:opencode2 && npm run verify:licenses -- --require-runtimes && npm run build && node scripts/package-windows.mjs --publish never",
+    "package": "npm run prepare:runtimes && npm run prepare:speech && npm run prepare:opencode2 && npm run verify:licenses -- --require-runtimes && npm run build && node scripts/package-windows.mjs --publish never",
+    "release": "npm run prepare:runtimes && npm run prepare:speech && npm run prepare:opencode2 && npm run verify:licenses -- --require-runtimes && npm run build && node scripts/package-windows.mjs --publish never",
     "verify:licenses": "node scripts/verify-licenses.mjs"
   },
   "dependencies": {
@@ -28,7 +31,6 @@
     "undici": "^7.29.0"
   },
   "devDependencies": {
-    "@arke-studio/adapter-opencode": "*",
     "@arke-studio/contracts": "*",
     "@arke-studio/coordinator": "*",
     "@arke-studio/providers": "*",
@@ -38,9 +40,8 @@
     "electron-builder": "^26.15.3",
     "esbuild": "^0.25.12",
     "jsqr": "^1.4.0",
-    "tsx": "^4.19.0",
+    "tsx": "^4.19.2",
     "typescript": "^5.6.0",
-    "yaml": "^2.6.0",
     "zod": "^3.25.76"
   }
 }

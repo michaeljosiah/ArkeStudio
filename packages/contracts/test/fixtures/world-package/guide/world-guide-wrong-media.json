@@ -1,0 +1,48 @@
+{
+  "format": "arke-world-package",
+  "schemaVersion": 3,
+  "id": "undersong",
+  "edition": "2026-10-22",
+  "name": "The Undersong",
+  "keyArt": "key-art",
+  "productions": [],
+  "guide": "g-maren",
+  "assets": {
+    "key-art": {
+      "path": "key-art.jpg",
+      "mediaType": "image/jpeg",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "guide": {
+      "path": "guide/guide.json",
+      "mediaType": "application/vnd.arke.guide+json",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "g-maren": {
+      "path": "guide/maren-kest.jpg",
+      "mediaType": "image/jpeg",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "g-bray": {
+      "path": "guide/bray-half-hitch.png",
+      "mediaType": "image/png",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "g-vigil": {
+      "path": "guide/the-vigil.jpg",
+      "mediaType": "image/jpeg",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "g-maren-voice": {
+      "path": "guide/maren-kest.m4a",
+      "mediaType": "audio/mp4",
+      "byteLength": 1,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+}

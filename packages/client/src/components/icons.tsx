@@ -50,6 +50,8 @@ export function Check({ size = 14 }: { size?: number }) {
 export const ChevronRight = icon(<path d="m9 18 6-6-6-6" />);
 export const ChevronDown = icon(<path d="m6 9 6 6 6-6" />);
 export const ChevronLeft = icon(<path d="m15 18-6-6 6-6" />);
+/** The compare handle's grip (design turn 273): the line moves either way. */
+export const ChevronsLeftRight = icon(<><path d="m9 7-5 5 5 5" /><path d="m15 7 5 5-5 5" /></>);
 export const ChevronsUpDown = icon(
   <>
     <path d="m7 15 5 5 5-5" />
@@ -106,6 +108,13 @@ export const PanelLeft = icon(
   <>
     <rect x="3" y="3" width="18" height="18" rx="2" />
     <path d="M9 3v18" />
+  </>,
+);
+/** A pane with a panel down its right: the production conversation's canvas (202c). */
+export const PanelRight = icon(
+  <>
+    <rect x="3" y="3" width="18" height="18" rx="2" />
+    <path d="M15 3v18" />
   </>,
 );
 /** Three dots: everything else this row can be told to do. */
@@ -428,13 +437,6 @@ export const ChevronsDown = icon(
   </>,
 );
 
-export const ChevronsUp = icon(
-  <>
-    <path d="m17 11-5-5-5 5" />
-    <path d="m17 18-5-5-5 5" />
-  </>,
-);
-
 /** Put this back where the selection was. The one control an `ask` result does not get. */
 export const Replace = icon(
   <>
@@ -510,13 +512,6 @@ export const Users = icon(
     <path d="M16 3.13a4 4 0 0 1 0 7.75" />
   </>,
 );
-export const GraduationCap = icon(
-  <>
-    <path d="M21.42 10.92a1 1 0 0 0-.02-1.84L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.83l8.57 3.91a2 2 0 0 0 1.66 0z" />
-    <path d="M22 10v6" />
-    <path d="M6 12.5V16a6 3 0 0 0 12 0v-3.5" />
-  </>,
-);
 
 /*
  * Block art for the bible editor's `/` menu — the same Lucide transcriptions as everything above,
@@ -570,6 +565,11 @@ export const Pointer = icon(<><path d="M4 4l7.07 17 2.51-7.39L21 11.07z" /></>);
 export const Scissors = icon(<><circle cx="6" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M20 4 8.12 15.88" /><path d="M14.47 14.48 20 20" /><path d="M8.12 8.12 12 12" /></>);
 export const Hand = icon(<><path d="M18 11V6a2 2 0 0 0-4 0v1" /><path d="M14 10V4a2 2 0 0 0-4 0v2" /><path d="M10 10.5V6a2 2 0 0 0-4 0v8" /><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" /></>);
 export const RotateCw = icon(<><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /></>);
+/* The docked player's skips (design turn 199): the turn arrows with their seconds inside, as 186's transport draws them. */
+export const Back15 = icon(<><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /><text x="12" y="15.5" fontSize="7" textAnchor="middle" fill="currentColor" stroke="none" fontFamily="sans-serif">15</text></>);
+export const Forward30 = icon(<><path d="M21 12a9 9 0 1 1-3-6.7L21 8" /><path d="M21 3v5h-5" /><text x="12" y="15.5" fontSize="7" textAnchor="middle" fill="currentColor" stroke="none" fontFamily="sans-serif">30</text></>);
+/** Open the full player from the dock (design turn 199): out of the box it sits in. */
+export const OpenOut = icon(<path d="M14 4h6v6M20 4l-8 8M10 5H5v14h14v-5" />);
 export const Trash = icon(<><path d="M3 6h18" /><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" /><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" /></>);
 export const Collapse = icon(<><path d="M10 6 4 12l6 6" /><path d="m14 6 6 6-6 6" /><path d="M4 12h6" /><path d="M14 12h6" /></>);
 export const Snap = icon(<><path d="M9 3v18" /><path d="M15 3v18" /></>);
@@ -577,8 +577,6 @@ export const Duck = icon(<><path d="M2 12h3l3-8 4 16 3-8h5" /></>);
 export const Locate = icon(<><circle cx="12" cy="12" r="3" /><path d="M12 2v3" /><path d="M12 19v3" /><path d="M2 12h3" /><path d="M19 12h3" /></>);
 /* The Bench rail's Cut mark (design 142a): a clapperboard, so Takes and Cut do not share a camera. */
 export const Clapper = icon(<><path d="M20.2 6 3 11l-.9-2.4c-.3-1.1.3-2.2 1.3-2.5l13.5-4c1.1-.3 2.2.3 2.5 1.3Z" /><path d="m6.2 5.3 3.1 3.9" /><path d="m12.4 3.4 3.1 4" /><path d="M3 11h18v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" /></>);
-/* The Bench's "Not this" on a take's session line (design 142a). */
-export const ThumbsDown = icon(<><path d="M17 14V2" /><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z" /></>);
 
 // ---- Settings actions (SPEC-042 R-18): the verb's icon, beside the verb ----------------------
 export const Pencil = icon(<><path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" /></>);
@@ -587,14 +585,12 @@ export const ChartLine = icon(<><path d="M3 3v16a2 2 0 0 0 2 2h16" /><path d="m1
 export const LinkMark = icon(<><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></>);
 export const Power = icon(<><path d="M12 2v10" /><path d="M18.4 6.6a9 9 0 1 1-12.77.04" /></>);
 export const FileText = icon(<><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v5h5" /><path d="M9 13h6" /><path d="M9 17h4" /></>);
-export const ArrowLeftRight = icon(<><path d="m8 3-4 4 4 4" /><path d="M4 7h16" /><path d="m16 21 4-4-4-4" /><path d="M20 17H4" /></>);
 export const Wrench = icon(<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />);
 
 // ---- Row verbs and one-register toolbars (issue 1010) ----------------------------------------
 export const ChevronUp = icon(<path d="m18 15-6-6-6 6" />);
-/* The open storyboard row's panels and its location chip (design turn 143). */
+/* The open storyboard row's panels (design turn 143). */
 export const StickyNote = icon(<><path d="M16 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9l7-7V5a2 2 0 0 0-2-2z" /><path d="M15 21v-5a2 2 0 0 1 2-2h5" /></>);
-export const MapPin = icon(<><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></>);
 export const Help = icon(<><circle cx="12" cy="12" r="10" /><path d="M9.1 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><path d="M12 17h.01" /></>);
 /* A track of sound, and the plus that adds one — the verb drawn as its own noun. */
 export const AudioPlus = icon(<><path d="M3 10v4M7 6v12M11 9v6" /><path d="M16 13h6M19 10v6" /></>);
@@ -602,10 +598,17 @@ export const Tag = icon(<><path d="M12.59 2.59A2 2 0 0 0 11.17 2H4a2 2 0 0 0-2 2
 /* Split is not the blade: the tool cuts wherever you click, this one cuts at the playhead — so
    the mark is the line between two pieces rather than a second pair of scissors. */
 export const SplitMark = icon(<><path d="M12 3v18" /><path d="M8 8H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h4" /><path d="M16 8h4a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-4" /></>);
+/* A text clip and the action that adds one (design turn 277): Lucide's `type`, a capital T. Not
+   TextMark, which is three lines of a paragraph and reads as a block of prose. */
+export const TypeMark = icon(<><polyline points="4 7 4 4 20 4 20 7" /><line x1="9" x2="15" y1="20" y2="20" /><line x1="12" x2="12" y1="4" y2="20" /></>);
+/* Group by beats (design turn 201): Lucide's `group`, corner brackets around two offset blocks — paragraphs gathered into one. */
+export const GroupMark = icon(<><path d="M3 7V5c0-1.1.9-2 2-2h2" /><path d="M17 3h2c1.1 0 2 .9 2 2v2" /><path d="M21 17v2c0 1.1-.9 2-2 2h-2" /><path d="M7 21H5c-1.1 0-2-.9-2-2v-2" /><rect width="7" height="5" x="7" y="7" rx="1" /><rect width="7" height="5" x="10" y="12" rx="1" /></>);
 
 /* The branch map's marks (design turn 157): an ending's flag, a warning's triangle, an exclusion. */
 export const Flag = icon(<><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z" /><line x1="4" x2="4" y1="22" y2="15" /></>);
 export const TriangleAlert = icon(<><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /><path d="M12 9v4" /><path d="M12 17h.01" /></>);
+/* Open eye from the user's design-system bundle, paired with the existing hidden mark. */
+export const Eye = icon(<><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z" /><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /></>);
 export const EyeOff = icon(
   <>
     <path d="M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575 1 1 0 0 1 0 .696 10.747 10.747 0 0 1-1.444 2.49" />
@@ -621,3 +624,6 @@ export const Sliders = icon(<><path d="M20 7h-9" /><path d="M14 17H5" /><circle 
 export const Wifi = icon(<><path d="M12 20h.01" /><path d="M2 8.82a15 15 0 0 1 20 0" /><path d="M5 12.86a10 10 0 0 1 14 0" /><path d="M8.5 16.43a5 5 0 0 1 7 0" /></>);
 export const Cpu = icon(<><rect width="16" height="16" x="4" y="4" rx="2" /><rect width="6" height="6" x="9" y="9" rx="1" /><path d="M15 2v2M15 20v2M2 15h2M2 9h2M20 15h2M20 9h2M9 2v2M9 20v2" /></>);
 export const Palette = icon(<><circle cx="13.5" cy="6.5" r=".5" /><circle cx="17.5" cy="10.5" r=".5" /><circle cx="8.5" cy="7.5" r=".5" /><circle cx="6.5" cy="12.5" r=".5" /><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.93 0 1.65-.75 1.65-1.69 0-.44-.18-.84-.44-1.13-.29-.29-.44-.65-.44-1.13a1.64 1.64 0 0 1 1.67-1.67h2c3.05 0 5.55-2.5 5.55-5.55C21.96 6.01 17.46 2 12 2z" /></>);
+/* The writing room's Focus and Compare versions (design turn 227a): four corners, and two pages side by side. */
+export const FocusCorners = icon(<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />);
+export const PagesSide = icon(<path d="M4 4h7v16H4zM13 4h7v16h-7z" />);

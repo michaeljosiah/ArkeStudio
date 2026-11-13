@@ -1,9 +1,10 @@
+import { renderPerformancePassage, type PerformancePassage, type PerformanceState } from "./audiobook-performance.js";
 import type { ManifestModel } from "./manifest.js";
 import { deriveCapabilityAvailability, type ProviderStatus } from "./provider.js";
 import { AUDIOBOOK_TITLE_KEY } from "./audiobook.js";
-import { isSceneBreak } from "./manuscript.js";
+import { sceneBreakParagraphs } from "./manuscript.js";
 import { expectedSpeechSeconds, quoteSpeech, SPEECH_TOKEN_ESTIMATE, type SpeechQuote } from "./speech-pricing.js";
-import { speechUtf8Bytes } from "./speech-input.js";
+import { speechInputFits, speechUtf8Bytes, type SpeechInputLimits } from "./speech-input.js";
 
 /**
  * Grouped reads (design turn 185): consecutive blocks of one reader sent as one request, and the
@@ -56,9 +57,13 @@ export interface BlockTurns {
   /** The reader's identity — provider, model and voice. Two blocks group only when this is the same. */
   reader: string;
   shared?: string;
-  parts: ReadonlyArray<{ text: string; style?: string }>;
+  parts: ReadonlyArray<{ text: string; style?: string; performance?: PerformancePassage }>;
   /** Where a request may close after this block; absent is inside a paragraph or an exchange. */
   breakAfter?: ReadBreak;
+  /** The compiled provider-text cap, including tags and separators. */
+  maxCharacters?: number;
+  /** The reader's byte allowance includes every turn's words and style. */
+  maxSpeechUtf8Bytes?: number;
 }
 
 /**
@@ -69,6 +74,7 @@ export interface BlockTurns {
  */
 export function readBreaksFor(blocks: ReadonlyArray<{ key: string; paragraph: number; speaker?: string }>, paragraphs: readonly string[]): Map<string, ReadBreak> {
   const breaks = new Map<string, ReadBreak>();
+  const sceneBreaks = sceneBreakParagraphs(paragraphs);
   blocks.forEach((block, index) => {
     const next = blocks[index + 1];
     if (block.key === AUDIOBOOK_TITLE_KEY || next === undefined) {
@@ -76,7 +82,7 @@ export function readBreaksFor(blocks: ReadonlyArray<{ key: string; paragraph: nu
       return;
     }
     if (next.paragraph === block.paragraph) return;
-    if (paragraphs.slice(block.paragraph + 1, next.paragraph).some((between) => isSceneBreak(between))) {
+    if ([...sceneBreaks].some((at) => at > block.paragraph && at < next.paragraph)) {
       breaks.set(block.key, "scene");
       return;
     }
@@ -112,8 +118,16 @@ export function soloTurns(block: Pick<BlockTurns, "shared" | "parts">): SpeechTu
 export function packTurns(blocks: readonly BlockTurns[], packing: GroupPacking): PackedTurn[] {
   const turns: Array<PackedTurn & { own?: string; shared?: string }> = [];
   let sharedSent: string | undefined;
+  let performanceState: PerformanceState | undefined;
   for (const block of blocks) {
     for (const part of block.parts) {
+      if (part.performance !== undefined) {
+        const rendered = renderPerformancePassage(part.performance, performanceState);
+        performanceState = rendered.state;
+        turns.push({ text: rendered.text, keys: [block.key] });
+        continue;
+      }
+      performanceState = undefined;
       const last = turns[turns.length - 1];
       if (packing === "merged" && last !== undefined && last.own === part.style && last.shared === block.shared) {
         last.text = `${last.text}\n${part.text}`;
@@ -137,7 +151,12 @@ export function turnInputTokens(turn: SpeechTurn): number {
 
 /** What a grouped request's job says it reads: its turns' words, a space between. Activity shows it and the quote prices it. */
 export function groupedText(turns: readonly SpeechTurn[]): string {
-  return turns.map((turn) => turn.text).join(" ");
+  return turns.map((turn) => turn.text).join("\n\n");
+}
+
+/** Apply the reader's request bounds after packing style, independently of token estimates. */
+export function groupedSpeechInputFits(turns: readonly SpeechTurn[], limits: SpeechInputLimits): boolean {
+  return speechInputFits(groupedText(turns), limits, turns.map(turn => turn.instructions ?? "").join("\n"));
 }
 
 /**
@@ -179,6 +198,13 @@ function measure(blocks: readonly BlockTurns[], packing: GroupPacking): { turns:
  */
 export function groupReads(blocks: readonly (BlockTurns | null)[], packing: GroupPacking = DEFAULT_GROUP_PACKING, caps: GroupedReadCaps = GROUPED_READ_CAPS): ReadGroup[] {
   const groups: ReadGroup[] = [];
+  const fits = (members: BlockTurns[]) => {
+    const size = measure(members, packing);
+    const limit = Math.min(...members.map((member) => member.maxCharacters ?? Infinity));
+    const bytes = Math.min(...members.map((member) => member.maxSpeechUtf8Bytes ?? Infinity));
+    return size.turns.length <= 400 && size.inputTokens <= caps.inputTokens && size.seconds <= caps.speechSeconds
+      && groupedSpeechInputFits(size.turns, { maxPromptChars: limit, maxSpeechUtf8Bytes: bytes });
+  };
   let open: BlockTurns[] = [];
   const close = (members: BlockTurns[]) => {
     if (members.length > 0) groups.push({ keys: members.map((block) => block.key), ...measure(members, packing) });
@@ -194,8 +220,7 @@ export function groupReads(blocks: readonly (BlockTurns | null)[], packing: Grou
       open = [];
     }
     const next = [...open, block];
-    const size = measure(next, packing);
-    if (open.length === 0 || (size.inputTokens <= caps.inputTokens && size.seconds <= caps.speechSeconds)) {
+    if (open.length === 0 || fits(next)) {
       open = next;
       continue;
     }
@@ -207,8 +232,7 @@ export function groupReads(blocks: readonly (BlockTurns | null)[], packing: Grou
     open = [...open.slice(cut), block];
     // What carried over may itself be past the caps with the new block: it is closed as it stands.
     if (open.length > 1) {
-      const carried = measure(open, packing);
-      if (carried.inputTokens > caps.inputTokens || carried.seconds > caps.speechSeconds) {
+      if (!fits(open)) {
         close(open.slice(0, -1));
         open = [block];
       }
@@ -242,7 +266,7 @@ export function shareByCharacters(total: number | null, characters: readonly num
 
 /** Whether a reader's row may group (design turn 185): its cadence says so, and its price is the token's, which one request a group pays. */
 export function readerGroups(model: Pick<ManifestModel, "cadence" | "pricing"> | null | undefined): boolean {
-  return model?.cadence?.groupable === true && model.pricing.kind === "perToken";
+  return model?.cadence?.groupable === true && (model.pricing.kind === "perToken" || model.pricing.kind === "perCharacter");
 }
 
 /**

@@ -3,12 +3,14 @@
 // happily claim the old number if it wasn't. It now comes from this package's package.json,
 // the same file electron-builder reads, so they cannot disagree.
 import { build } from "esbuild";
-import { cpSync, readFileSync } from "node:fs";
+import { cpSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const { version } = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+const channel = process.env.ARKE_BUILD_CHANNEL ?? "production";
+if (!["production", "development"].includes(channel)) throw new Error("Unknown Studio distribution channel");
 
 const shared = {
   bundle: true,
@@ -18,7 +20,7 @@ const shared = {
   // The coordinator and its dependencies publish ESM; prefer it, fall back to main.
   mainFields: ["module", "main"],
   // Electron supplies these at runtime — bundling them would break the native bindings.
-  external: ["electron", "electron-updater"],
+  external: ["electron", "electron-updater", "pdfjs-dist/*"],
   outdir: join(root, "dist"),
   outExtension: { ".js": ".cjs" },
 };
@@ -46,7 +48,7 @@ await build({
   ...shared,
   entryPoints: [join(root, "src/main.ts")],
   banner: { js: 'var import_meta_url = require("node:url").pathToFileURL(__filename).href;' },
-  define: { __APP_VERSION__: JSON.stringify(version), "import.meta.url": "import_meta_url" },
+  define: { __APP_VERSION__: JSON.stringify(version), __BUILD_CHANNEL__: JSON.stringify(channel), "import.meta.url": "import_meta_url" },
 });
 
 await build({
@@ -56,5 +58,19 @@ await build({
 });
 
 // import.meta.url resolves beside main.cjs in the bundle, so session preparation reads here.
+await build({ ...shared, entryPoints: [join(root, "../../packages/coordinator/src/media/effect-raster-worker.ts")] });
+// PDF.js is ESM with top-level await. Keep the terminable PDF compiler in its own ESM entry,
+// instead of accidentally flattening its lazy import into the CommonJS coordinator bundle.
+await build({ ...shared, format: "esm", outExtension: { ".js": ".mjs" },
+  entryPoints: [join(root, "../../packages/coordinator/src/publications/story-pdf-worker.ts")],
+  external: ["@napi-rs/canvas"],
+  banner: { js: 'import { createRequire as arkeCreateRequire } from "node:module"; const require = arkeCreateRequire(import.meta.url);' },
+});
+cpSync(join(root, "../../packages/coordinator/src/publications/fonts"), join(root, "dist/fonts"), { recursive: true });
+cpSync(join(root, "../../licenses/story-pdf"), join(root, "dist/story-pdf-licenses"), { recursive: true });
 cpSync(join(root, "../../packages/coordinator/src/harness/skills"), join(root, "dist/skills"), { recursive: true });
-console.log(`[build] main.cjs + preload.cjs and authoring skills at ${version}`);
+cpSync(join(root, "../../packages/coordinator/src/media/local-audio-listener.py"), join(root, "dist/local-audio-listener.py"));
+cpSync(join(root, "../../packages/coordinator/src/local-ai/ming-worker.py"), join(root, "dist/ming-worker.py"));
+cpSync(join(root, "../../licenses/ming-audition-MIT.txt"), join(root, "dist/ming-MIT.txt"));
+writeFileSync(join(root, "dist/build-channel.json"), JSON.stringify({ channel, version }) + "\n");
+console.log(`[build] main.cjs + preload.cjs, story PDF worker/fonts and authoring skills at ${version} (${channel})`);

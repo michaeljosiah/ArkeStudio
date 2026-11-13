@@ -1,14 +1,18 @@
+import { PictureProposalCard } from "./editor-picture-proposal-card.js";
+import { StudioCard, useProductionStudio } from "./production-studio-context.js";
 import { useMemo, useState } from "react";
 import { orderedShots, productionFrameRate, timelineSourceFingerprint, type HumanDecisionCard,
   type HumanDecisionControl, type ProductionBundle, type SceneRecord, type WorldBundle } from "@arke-studio/contracts";
-import { decideEditorRequest, send, useStore } from "../lib/store.js";
+import { decideEditorRequest, send, useClientState } from "../lib/store.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { editorTimeline } from "../lib/editor-timeline.js";
 import { ConnectedProposalPanel } from "../domain/connected.js";
 import { EditorRequestCards } from "../screens/editor-requests.js";
+import { TransitionProposalCard } from "./editor-transition-proposal-card.js";
+import { ConnectedEffectProposalCard } from "./editor-effect-proposal-connected.js";
 import { exportViewFor } from "../screens/editor-export.js";
 import { PlanGateControls } from "../screens/scene-workspace/plans.js";
-import { SceneStage } from "../screens/scene-workspace/stage.js";
+import { LazySceneStage as SceneStage } from "./lazy-stage.js";
 import { SelectionProvider } from "../screens/scene-workspace/selection.js";
 import { useSceneWriter } from "../screens/scene-workspace/scene-writer.js";
 import { VoiceSampleFlow } from "./character-voice-sample.js";
@@ -19,7 +23,8 @@ import { Button } from "./ui.js";
 
 /** These controls send the person's existing command; they never approve a model action. */
 export function HumanDecisionCardView({ card }: { card: HumanDecisionCard }) {
-  const { state } = useStore();
+  const state = useClientState();
+  const studio = useProductionStudio();
   const world = state?.world;
   if (!world || world.meta.worldId !== card.worldId) return null;
   const control = card.body.control;
@@ -34,6 +39,21 @@ export function HumanDecisionCardView({ card }: { card: HumanDecisionCard }) {
     case "editor-request": {
       const production = world.productions.find(value => value.meta.id === control.productionId);
       if (production) content = <ThreadEditorRequest world={world} production={production} requestId={control.requestId} blocked={card.status === "blocked"} />;
+      break;
+    }
+    case "transition-proposal": {
+      const production = world.productions.find(value => value.meta.id === control.productionId);
+      if (production) content = <TransitionProposalCard world={world} production={production} familyId={control.familyId} versionId={control.versionId} />;
+      break;
+    }
+    case "picture-proposal": {
+      const production = world.productions.find(value => value.meta.id === control.productionId);
+      if (production) content = <PictureProposalCard world={world} production={production} familyId={control.familyId} versionId={control.versionId} />;
+      break;
+    }
+    case "effect-proposal": {
+      const production = world.productions.find(value => value.meta.id === control.productionId);
+      if (production) content = <ConnectedEffectProposalCard world={world} production={production} familyId={control.familyId} versionId={control.versionId} />;
       break;
     }
     case "extraction": {
@@ -64,11 +84,12 @@ export function HumanDecisionCardView({ card }: { card: HumanDecisionCard }) {
       break;
     }
   }
-  return <article className="fy-actioncard" data-family="human-decision" data-status={card.status} data-decision={card.id} aria-label={card.title}>
+  return <StudioCard id={card.id}><article className="fy-actioncard" data-family="human-decision" data-status={card.status} data-decision={card.id} aria-label={card.title}>
     <header className="fy-actioncard__head"><div><span className="fy-actioncard__reason">{card.body.reason}</span><h3>{card.title}</h3></div></header>
-    {card.detail && <p role="status">{card.detail}</p>}
+    {studio && <button type="button" className="fy-studio-toggle" onClick={() => studio.showDecision(card)}>Show</button>}
+    {card.detail && control.kind !== "effect-proposal" && <p role="status">{card.detail}</p>}
     <div className="fy-actioncard__body">{content}</div>
-  </article>;
+  </article></StudioCard>;
 }
 
 function ThreadStage({ world, production, scene, control, conversationId }: {
@@ -80,7 +101,7 @@ function ThreadStage({ world, production, scene, control, conversationId }: {
   const selection = useMemo(() => ({ subject: { kind: "shot" as const, shotId: target.shotId }, select: () => {} }), [target.shotId]);
   return <SelectionProvider value={selection}><SceneStage world={world} production={production} scene={writer.workingScene}
     aspect={production.meta.aspect ?? "16:9"} sceneFile={writer.sceneFile} locked={writer.locked} generatorPending={false}
-    refusalVersion={writer.refusalVersion} onCommand={writer.write} head={false}
+    onCommand={writer.write} head={false}
     {...(control.kind === "stage-review" ? { review: control.review } : control.mode === "construct"
       ? { constructionRequest: { actionId: control.actionId, conversationId, shotId: control.shotId, instruction: control.instruction ?? "", preserve: control.preserve ?? "none" } }
       : { playblastRequest: { actionId: control.actionId, conversationId, shotId: control.shotId } })} />

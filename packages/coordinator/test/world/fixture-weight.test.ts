@@ -6,9 +6,9 @@ import { decodePng } from "../../src/references/png.js";
 import { FIXTURE_WORLD } from "./helpers.js";
 
 /**
- * The fixture world is not only a fixture. Much of this suite copies it into a temp directory
- * per test, and it is what a user installs from Settings · Sample world — so its weight is paid
- * thousands of times in CI and once in every installer.
+ * Much of this suite copies the lightweight fixture into a temp directory per test, so its
+ * weight is paid thousands of times in CI. The full Undersong is an on-demand story release;
+ * installer resources exclude this test world (SPEC-016 R-8).
  *
  * It was 31 MB, almost all of it a dozen full-resolution PNGs of painterly art stored in a
  * format that suits it badly. These two tests hold the ground that recovered: one stops a

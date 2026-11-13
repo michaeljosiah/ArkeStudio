@@ -2,6 +2,17 @@ import { z } from "zod";
 import type { ModelInfo } from "./adapter.js";
 import { providerModelId, type ManifestModel } from "./manifest.js";
 
+export const OPENCODE_FREE_MODEL_REASON = "OpenCode's free models only work inside OpenCode. Choose another Writing model.";
+export const NON_CHAT_MODEL_REASON = "This model cannot answer a chat. Choose another Writing model.";
+
+/** Fixed, safe remedies shared by session admission and errors from an already-open session. */
+export function harnessModelFailureReason(detail: string | null | undefined): string | null {
+  if (!detail) return null;
+  if (detail.includes(OPENCODE_FREE_MODEL_REASON) || /OpenCode's free tier can only be used from within OpenCode/i.test(detail)) return OPENCODE_FREE_MODEL_REASON;
+  if (detail.includes(NON_CHAT_MODEL_REASON)) return NON_CHAT_MODEL_REASON;
+  return null;
+}
+
 export const HarnessModelStatusSchema = z.object({
   status: z.enum(["idle", "loading", "ready", "error"]),
   reason: z.string().optional(),

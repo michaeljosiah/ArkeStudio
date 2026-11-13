@@ -1,4 +1,7 @@
 import type { WorldStore } from "../world/store.js";
+import { ConversationExportStateSchema, type ConversationActionCard, type PrepareConversationTakeReview } from "@arke-studio/contracts";
+import { prepareConversationTakeReview, ConversationTakeReviewRefusal } from "./conversation-take-review.js";
+export { ConversationTakeReviewRefusal } from "./conversation-take-review.js";
 import type { ProposalManager } from "../gate/proposals.js";
 import { ConversationActionLifecycle, recoverConversationActions,
   type ConversationActionAuthorityAdapter, type ConversationActionLifecycleOptions } from "../arke-actions/lifecycle.js";
@@ -22,7 +25,7 @@ export class ConversationActionService {
   readonly lifecycle: ConversationActionLifecycle;
   private readonly options: ConversationActionLifecycleOptions;
 
-  constructor(store: WorldStore, deps: ConversationActionDependencies) {
+  constructor(private readonly store: WorldStore, private readonly deps: ConversationActionDependencies) {
     let worldPath = store.dir;
     const supplied = deps.supplied ?? [];
     const suppliedKinds = new Set(supplied.map(adapter => adapter.actionKind));
@@ -54,6 +57,27 @@ export class ConversationActionService {
 
   decide(input: Parameters<ConversationActionLifecycle["decide"]>[0]) {
     return this.lifecycle.decide(input);
+  }
+
+  async project(cards: readonly ConversationActionCard[]): Promise<ConversationActionCard[]> {
+    const actions = this.deps.actions;
+    // Every quote service reads the same sealed authority files; no source compiler runs here.
+    const quotes = actions.generationQuotes ?? actions.productionGenerationQuotes ?? actions.productionAudioQuotes ??
+      actions.productionBatchQuotes ?? actions.buildGenerationQuotes ?? actions.benchGenerationQuotes;
+    return Promise.all(cards.map(async card => {
+      const generationWork = await quotes?.project(card).catch(() => undefined);
+      const record = card.authority.kind === "export" ? actions.getExports?.().find(record => record.id === card.authority.id && record.worldId === card.worldId && record.productionId === card.productionId) : undefined;
+      const output = ConversationExportStateSchema.shape.output.safeParse(record?.output ?? null);
+      const exportState = record ? ConversationExportStateSchema.parse({ status: record.status, percent: record.percent ?? (record.status === "done" ? 100 : 0), output: output.success ? output.data : null }) : undefined;
+      return { ...card, ...(generationWork ? { generationWork } : {}), ...(exportState ? { exportState } : {}) };
+    }));
+  }
+
+  prepareTakeReview(input: PrepareConversationTakeReview) {
+    if (!this.deps.isWorldOpen()) throw new ConversationTakeReviewRefusal("The world is no longer open.");
+    return prepareConversationTakeReview(this.store, this.lifecycle, input, {
+      project: async card => (await this.project([card]))[0]!, jobs: () => this.deps.actions.getJobs?.() ?? [],
+    });
   }
 
   recover() {

@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
-import { readFile, stat, rm } from "node:fs/promises";
+import { readFile, stat, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { deriveProductionReadiness, productionExportFingerprint, type ReadinessExport, type ClientMessage, type DomainEvent } from "@arke-studio/contracts";
-import type { ChangeLog } from "../../src/change-log.js";
 import { Coordinator } from "../../src/coordinator.js";
 import { exportManuscript, importManuscript, manuscriptOf, readDocxDocument, readManuscript, writeDocx, writeEpub } from "../../src/productions/manuscript.js";
 import { openChapter, saveChapter } from "../../src/productions/ops.js";
@@ -18,7 +17,7 @@ import { closeOnCleanup } from "../tmp.js";
 
 /**
  * A manuscript out and in (design turn 131, issue 915, SPEC-012 §2.4.3): two zips written by
- * hand and read back by the reader that already opens them; the export landing whole under
+ * yazl and read back by the hand reader that already opens them; the export landing whole under
  * exports/; the import shown before anything is written and appended in one commit.
  */
 
@@ -33,10 +32,10 @@ async function open() {
   return { dir, store };
 }
 
-describe("a zip written by hand (R-52)", () => {
-  it("round-trips through the reader, stored and deflated, and the reader refuses an entry whose bytes do not add up", () => {
+describe("a manuscript zip (R-52)", () => {
+  it("round-trips through the reader, stored and deflated, and the reader refuses an entry whose bytes do not add up", async () => {
     const text = new TextEncoder().encode("The ledger of the Vigil is kept in a hand that changes every generation. ".repeat(40));
-    const zip = writeZip([
+    const zip = await writeZip([
       { name: "mimetype", data: new TextEncoder().encode("application/epub+zip"), stored: true },
       { name: "word/document.xml", data: text },
     ]);
@@ -52,7 +51,7 @@ describe("a zip written by hand (R-52)", () => {
 });
 
 describe("the manuscript out (R-49)", () => {
-  it("a .docx the flat reader reads back with its headings, its emphasis and its breaks in place", () => {
+  it("a .docx the flat reader reads back with its headings, its emphasis and its breaks in place", async () => {
     const doc = {
       title: "The ledger of nights",
       subtitle: "The Undersong",
@@ -62,7 +61,7 @@ describe("the manuscript out (R-49)", () => {
         { title: "Neap", words: 5, blocks: [{ kind: "paragraph" as const, runs: [{ text: "Maren counted the " }, { text: "bells", italic: true as const }, { text: "." }] }, { kind: "break" as const }, { kind: "paragraph" as const, runs: [{ text: "Six & seven <bells>.", bold: true as const }] }] },
       ],
     };
-    const bytes = writeDocx(doc);
+    const bytes = await writeDocx(doc);
     const flat = extractDocxText(bytes);
     assert.ok(flat.ok);
     assert.match(flat.text, /The ledger of nights\nThe Undersong\nNeap\nMaren counted the bells\.\n\* \* \*\nSix & seven <bells>\./);
@@ -79,7 +78,7 @@ describe("the manuscript out (R-49)", () => {
     assert.equal(again.leftOut, 2, "the title page's two lines stand above the chapters");
   });
 
-  it("reads a character style's emphasis, an apostrophe-quoted attribute and a leading page break, and calls a bad entity damaged (codex on PR 924)", () => {
+  it("reads a character style's emphasis, an apostrophe-quoted attribute and a leading page break, and calls a bad entity damaged (codex on PR 924)", async () => {
     const utf8Bytes = (text: string) => new TextEncoder().encode(text);
     const W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"';
     const styles = `<?xml version="1.0"?><w:styles ${W}><w:style w:type="character" w:styleId="Emphasis"><w:name w:val="Emphasis"/><w:rPr><w:i/></w:rPr></w:style><w:style w:type="character" w:styleId="Loud"><w:basedOn w:val="Emphasis"/><w:rPr><w:b/></w:rPr></w:style><w:style w:type="character" w:styleId="Plainer"><w:basedOn w:val="Emphasis"/><w:rPr><w:i/></w:rPr></w:style></w:styles>`;
@@ -89,21 +88,23 @@ describe("the manuscript out (R-49)", () => {
       `<w:p><w:r><w:t xml:space="preserve">Plain, </w:t></w:r><w:r><w:rPr><w:rStyle w:val="Emphasis"/></w:rPr><w:t>felt</w:t></w:r><w:r><w:rPr><w:rStyle w:val="Loud"/><w:i w:val='0'/></w:rPr><w:t> and loud</w:t></w:r><w:r><w:rPr><w:rStyle w:val="Plainer"/></w:rPr><w:t xml:space="preserve"> and toggled off</w:t></w:r></w:p>` +
       `<w:p><w:r><w:br w:type='page'/></w:r><w:r><w:t>After the break.</w:t></w:r></w:p>` +
       `</w:body></w:document>`;
-    const bytes = writeZip([{ name: "word/document.xml", data: utf8Bytes(document) }, { name: "word/styles.xml", data: utf8Bytes(styles) }]);
+    const bytes = await writeZip([{ name: "word/document.xml", data: utf8Bytes(document) }, { name: "word/styles.xml", data: utf8Bytes(styles) }]);
     const read = readManuscript(bytes, "styled.docx").read;
     assert.ok(read.ok);
     assert.deepEqual(read.chapters.map((chapter) => [chapter.title, chapter.body]), [["Neap", "Plain, *felt* **and loud** and toggled off\n\n***\n\nAfter the break."]], "a child style's repeated italic toggles its parent's off (codex on PR 927)");
-    const broken = writeZip([{ name: "word/document.xml", data: utf8Bytes(`<?xml version="1.0"?><w:document ${W}><w:body><w:p><w:r><w:t>&#1114112;</w:t></w:r></w:p></w:body></w:document>`) }]);
+    const broken = await writeZip([{ name: "word/document.xml", data: utf8Bytes(`<?xml version="1.0"?><w:document ${W}><w:body><w:p><w:r><w:t>&#1114112;</w:t></w:r></w:p></w:body></w:document>`) }]);
     const refused = readManuscript(broken, "broken.docx").read;
     assert.equal(refused.ok, false);
     assert.match((refused as { reason: string }).reason, /could not be opened/);
   });
 
-  it("an EPUB with mimetype first and stored, a package that names every chapter, the language, and the one modified stamp", () => {
+  it("an EPUB with mimetype first and stored, a package that names every chapter, the language, and the one modified stamp", async () => {
     const doc = { title: "The ledger of nights", subtitle: "The Undersong", leftOut: 0, words: 2, chapters: [{ title: "Neap", words: 1, blocks: [{ kind: "paragraph" as const, runs: [{ text: "Bells." }] }] }, { title: "Slack water", words: 1, blocks: [{ kind: "paragraph" as const, runs: [{ text: "Cold." }] }] }] };
-    const bytes = writeEpub(doc, { identifier: "urn:arke:w:p", language: "en-GB", modified: NOW() });
+    const bytes = await writeEpub(doc, { identifier: "urn:arke:w:p", language: "en-GB", modified: NOW() });
     assert.equal(utf8(bytes.subarray(30, 38)), "mimetype");
     assert.equal(bytes[8], 0, "stored, not deflated");
+    assert.equal(bytes[28]! + bytes[29]!, 0, "no extra field in its local header, as OCF requires");
+    assert.deepEqual(await writeEpub(doc, { identifier: "urn:arke:w:p", language: "en-GB", modified: NOW() }), bytes, "the same book is the same bytes");
     assert.equal(utf8(zipEntry(bytes, "mimetype")!), "application/epub+zip");
     const opf = utf8(zipEntry(bytes, "OEBPS/package.opf")!);
     assert.match(opf, /<dc:identifier id="pub-id">urn:arke:w:p<\/dc:identifier>/);
@@ -137,7 +138,7 @@ describe("the manuscript in (R-50)", () => {
     const { dir, store } = await open();
     const before = store.getBundle().productions.find((p) => p.meta.id === PRODUCTION)!.chapters;
     const highest = Math.max(...before.map((c) => c.order));
-    const bytes = writeDocx({
+    const bytes = await writeDocx({
       title: "Draft 3",
       subtitle: "",
       leftOut: 0,
@@ -165,7 +166,7 @@ describe("the manuscript in (R-50)", () => {
     await saveChapter(store, PRODUCTION, added[0]!.file, "Kept well, and then some.", { baseHash: opened.hash });
     const saved = store.getBundle().productions.find((p) => p.meta.id === PRODUCTION)!.chapters.find((c) => c.id === added[0]!.id)!;
     assert.equal(saved.source, undefined);
-    assert.equal(saved.version, 1, "a direct save keeps the version");
+    assert.equal(saved.version, 2, "the first edit keeps the imported text as v1 (issue 1735)");
   });
 
   it("through the coordinator: the host's picker, the read shown with nothing written, then the import; a file that cannot be read is refused", async () => {
@@ -175,8 +176,7 @@ describe("the manuscript in (R-50)", () => {
     const events: DomainEvent[] = [];
     const good = join(root, "Draft 3.docx");
     const bad = join(root, "broken.docx");
-    const { writeFile } = await import("node:fs/promises");
-    await writeFile(good, writeDocx({ title: "Draft 3", subtitle: "", leftOut: 0, words: 1, chapters: [{ title: "A called tide", words: 1, blocks: [{ kind: "paragraph", runs: [{ text: "Called." }] }] }] }));
+    await writeFile(good, await writeDocx({ title: "Draft 3", subtitle: "", leftOut: 0, words: 1, chapters: [{ title: "A called tide", words: 1, blocks: [{ kind: "paragraph", runs: [{ text: "Called." }] }] }] }));
     await writeFile(bad, new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3]));
     let picked = good;
     const coordinator = new Coordinator({
@@ -187,7 +187,7 @@ describe("the manuscript in (R-50)", () => {
       observeEvent: (event) => events.push(event),
       pickFiles: async () => [picked],
     });
-    const send = (message: ClientMessage) => (coordinator as unknown as { handleClientMessage(message: ClientMessage): Promise<void> }).handleClientMessage(message);
+    const send = (message: ClientMessage) => coordinator.dispatch(message);
     try {
       const request = "01J8F3K2QW9VZX4N7M0RTYB6H2";
       await send({ kind: "pick-manuscript", worldId: WORLD_ID, productionId: PRODUCTION, requestId: request });
@@ -230,10 +230,28 @@ describe("the manuscript in (R-50)", () => {
       assert.equal(done.deliveryKind,"manuscript");
       const completed=JSON.parse(await readFile(join(worldDir,"exports/.completed",`${done.exportId}.json`),"utf8")) as ReadinessExport;
       assert.equal(completed.createdAt,progress[0]!.at,"The durable completion retains the first progress timestamp");
-      await (coordinator as unknown as { changeLog: ChangeLog }).changeLog.drain();
+      await coordinator["changeLog"].drain();
       await rm(join(root,"logs/changes.jsonl"));
-      const restarted = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test" });
-      const records = await (restarted as unknown as { durableExportReads(worldId: string): Promise<ReadinessExport[]> }).durableExportReads(WORLD_ID);
+      const restoredEvents: DomainEvent[] = [];
+      const restarted = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test", observeEvent: event => restoredEvents.push(event) });
+      const records = await restarted["durableExportReads"](WORLD_ID);
+      const published = restarted["exportReads"].get(done.exportId)!;
+      assert.equal(published.sourceFingerprint, completed.sourceFingerprint);
+      assert.equal(published.deliveryKind, "manuscript", "announcing the download must preserve readiness metadata");
+      await restarted["durableExportReads"](WORLD_ID);
+      assert.equal(restoredEvents.filter(event => event.type === "export.progress" && event.exportId === done.exportId).length, 1, "opening a world publishes each restored download once without snapshot replay");
+      await restarted["changeLog"].drain();
+      // A film the Cut exported is restored the same way, so Publish's Made keeps it (issue 3032).
+      const film = { version: 1, id: "ex_01J8F3K2QW9VZX4N7M0RTYB6HG", worldId: WORLD_ID, productionId: PRODUCTION, status: "done", createdAt: completed.createdAt,
+        output: "exports/the-ledger-of-nights-review-cut-20261112010255.mp4", sourceFingerprint: "production-export-v1:film", deliveryKind: "video" };
+      await writeFile(join(worldDir, film.output), "film");
+      await writeFile(join(worldDir, "exports/.completed", `${film.id}.json`), `${JSON.stringify(film)}\n`);
+      const filmEvents: DomainEvent[] = [];
+      const filmRun = new Coordinator({ provider, adapter: null, changeLogPath: join(root, "logs", "changes.jsonl"), appVersion: "test", observeEvent: event => filmEvents.push(event) });
+      await filmRun["durableExportReads"](WORLD_ID);
+      const announced = filmEvents.find(event => event.type === "export.progress" && event.exportId === film.id);
+      assert.ok(announced && announced.type === "export.progress" && announced.deliveryKind === "video" && announced.output === film.output, "a film from the Cut is announced after a restart");
+      await filmRun["changeLog"].drain();
       assert.equal(deriveProductionReadiness(bundle, production, records).checks.find(check => check.key === "export")!.status, "ready");
       const chapter = production.chapters[0]!;
       const opened = await openChapter(provider.openStore()!, PRODUCTION, chapter.id);

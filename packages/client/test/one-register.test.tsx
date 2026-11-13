@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
+import { parseHTML } from "linkedom";
 import { legacySceneView } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __setStateForTest } from "../src/lib/store.js";
@@ -126,7 +127,8 @@ describe("a glyph names a state or a count, or it is not drawn (U3)", () => {
     const row = /<div class="fy-row__name">([\s\S]*?)<\/div>/.exec(html);
     assert.ok(row, "the ledger renders rows");
     assert.doesNotMatch(row[1]!, /fy-dot/, "no unlegended dot follows the name");
-    assert.match(html, /<span class="fy-row__meta">locked · /, "the row says the state instead");
+    const status = parseHTML(html).document.querySelector(".fy-row__meta");
+    assert.match(status?.textContent ?? "", /^locked · /, "the row says the state instead");
   });
 
   it("keeps the status off every heading of a location record", () => {

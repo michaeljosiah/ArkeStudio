@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { createHash } from "node:crypto";
-import { cadenceSupport, sentAs, supportedDeliveries, SOUNDS, type CadencePlan } from "@arke-studio/contracts";
+import { cadenceSupport, sentAs, supportedDeliveries, SOUNDS, NEW_VOCAL_SOUNDS, type CadencePlan } from "@arke-studio/contracts";
 import { requireModel, SHIPPED_MANIFEST } from "../src/index.js";
 
 // Design turn 181: one direction, every reader in its own syntax — the shipped rows, not stand-ins.
@@ -31,7 +31,7 @@ it("renders one direction into each shipped reader's own syntax, holding what it
     }),
   );
   const gemini = { text: "Don’t you dare walk away from me, Ade. <long pause> Not THIS time. <sigh>",
-    style: "Read coldly and flatly, without warmth. Angry and hurt — quieter, not louder; holding back tears.", held: [] };
+    style: "Cold and flat. Angry and hurt — quieter, not louder; holding back tears.", held: [] };
   assert.deepEqual(table["gemini-3.8-flash-tts"], gemini);
   assert.deepEqual(table["gemini-3.8-flash-lite-tts"], gemini, "both Gemini rows read alike");
   assert.deepEqual(table["eleven-v3"], { text: "[coldly] [angry and hurt — quieter, not louder; holding back tears] Don’t you dare walk away from me, Ade. [long pause] Not THIS time. [sighs]", style: undefined, held: [] },
@@ -61,10 +61,11 @@ it("support comes from the cadence row alone: Eleven v3 offers its six deliverie
   for (const model of SHIPPED_MANIFEST.models.filter((m) => m.capability === "voice-tts")) {
     assert.equal(model.limits.deliveries, undefined, `${model.id} declares no retired limit`);
   }
-  // Gemini makes every portable sound; Kokoro and Voxtral make none.
+  // Gemini keeps the portable set; Eleven also offers the extended vocalizations.
   for (const sound of SOUNDS) {
-    assert.equal(cadenceSupport(row("gemini-3.8-flash-tts")).sounds[sound].status, "best-effort", sound);
-    assert.equal(cadenceSupport(row("eleven-v3")).sounds[sound].status, "best-effort", sound);
+    assert.equal(cadenceSupport(row("gemini-3.8-flash-tts")).sounds[sound].status, ["wheezing", "laughs harder", "starts laughing"].includes(sound) ? "unsupported" : "best-effort", sound);
+    assert.equal(cadenceSupport(row("eleven-v3")).sounds[sound].status, (NEW_VOCAL_SOUNDS as readonly string[]).includes(sound) ? "unsupported" : "best-effort", sound);
+    assert.equal(cadenceSupport(row("eleven_v4")).sounds[sound].status, "best-effort", sound);
     assert.equal(cadenceSupport(row("kokoro-82m")).sounds[sound].status, "unsupported", sound);
   }
 });

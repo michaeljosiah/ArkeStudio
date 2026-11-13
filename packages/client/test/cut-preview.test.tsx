@@ -42,6 +42,7 @@ it("mounts stills only with a source and switches them on the frame clock, befor
   };
   try {
     await act(async () => root.render(<CutPreview slug="test-world" spans={spans} totalSec={4} restartToken={0} transport={transport} />));
+    assert.equal(host.querySelector(".fy-playbtn"), null, "playback leaves the picture unobscured");
     assert.equal(host.querySelector("img"), null, "video-only playback has no empty image");
     await tick(1.01);
     const still = host.querySelector("img")!;
@@ -56,6 +57,8 @@ it("mounts stills only with a source and switches them on the frame clock, befor
     await tick(0.2);
     assert.equal(host.querySelector("img"), null, "returning to video removes the overlay");
     assert.equal(transport.time, 0, "none of the transitions needed the throttled render clock");
+    await act(async () => root.render(<CutPreview slug="test-world" spans={spans} totalSec={4} restartToken={0} transport={{ ...transport, playing: false }} />));
+    assert.equal(host.querySelector(".fy-playbtn")?.getAttribute("aria-label"), "Play", "paused preview offers Play again");
   } finally {
     await act(async () => root.unmount());
     host.remove();

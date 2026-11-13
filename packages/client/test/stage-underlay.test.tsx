@@ -16,7 +16,7 @@ Object.assign(dom.HTMLElement.prototype, { showModal() {}, close() {}, readyStat
   pause(this: HTMLVideoElement) { Object.assign(this, { paused: true }); },
 });
 let root: Root | undefined;
-afterEach(async () => { await act(async () => root?.unmount()); root = undefined; dom.document.body.replaceChildren(); });
+afterEach(async () => { await act(async () => root?.unmount()); root = undefined; dom.document.body.replaceChildren(); Reflect.deleteProperty(window, "arke"); __setBridgeForTest(null); });
 
 function fixture() {
   const world = structuredClone(FIXTURE_STATE.world!);
@@ -45,7 +45,9 @@ it("fits an editor-only plate, syncs clipped video to scrubs and offsets, and us
   const { world, production } = fixture();
   const sent: ClientMessage[] = [];
   __setStateForTest({ ...FIXTURE_STATE, world }, { connection: "open" });
-  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => sent.push(JSON.parse(json)) } as unknown as ArkeBridge);
+  const bridge = { appVersion: "test", platform: "test", connect() {}, subscribe() {}, send: (json: string) => sent.push(JSON.parse(json)) } as unknown as ArkeBridge;
+  Object.assign(window, { arke: bridge });
+  __setBridgeForTest(bridge);
   const host = dom.document.createElement("div") as unknown as HTMLElement;
   const viewport = dom.document.createElement("div") as unknown as HTMLElement;
   Object.assign(viewport, { clientWidth: 800, clientHeight: 600 });

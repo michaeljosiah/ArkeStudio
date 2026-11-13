@@ -1,0 +1,132 @@
+# Chapter review
+
+Chapter review is an advisory workflow for saved prose and selected audiobook stills. Open **Review chapter** in the chapter workspace, or ask Arke to review a chapter and approve its chapter-review action. Running a review uses the configured writing harness; it does not generate replacement media, edit prose or listen to audio.
+
+## Ownership and specialist roles
+
+Before Start, the dialog reads current source coverage and the effective models for the selected
+checks. Specialist overrides take precedence, followed by the production's explicit writing model,
+then the configured/default harness model. Unavailable choices are refused, never substituted.
+Picture reviews also require the script role for consolidation. Narration-only checks need no
+model. Refresh readiness waits for discovery and reports missing picture or narration coverage.
+Start repeats this check before creating a running report and pins the resolved routes for the run;
+the existing per-session capability, ownership and cloud-policy checks still apply at dispatch.
+Readiness makes no inference call and does not guarantee a later provider call will succeed.
+
+The coordinator's `ChapterReviewService` owns the run. The conversation prepares a typed action; it cannot create arbitrary child agents. A read-only `chapter-script-reviewer` session extracts quoted scene facts and reader-facing concerns. Separate read-only `chapter-visual-reviewer` sessions inspect image renditions against the original text and those advisory facts. Each role receives a shipped, versioned review skill. Settings can choose its model and brief; normal harness tool confinement still applies. Native model delegation remains disabled.
+
+The review uses a retained world store, independent of which world is selected. Each session receives the saved chapter snapshot and explicitly supplied images, without the currently selected world's query tools or memory. Source loading observes cancellation; review work drains on shutdown and per-task scratch is removed after interruption/listener cleanup. There is one active review per chapter and at most three across the coordinator.
+
+## Evidence and limits
+
+The initial implementation accepts at most 60,000 characters and 60 selected pictures, with a 120 MB total source-image budget. Exceeding that aggregate budget refuses the run before any model call. It runs one script task and sequential visual tasks in groups of three with neighboring context, at most five pictures per task. Each nonempty visual result receives a separate evidence-check session with the same pixels. A final text-only task consolidates duplicates; these extra model calls are recorded separately. Images use the existing sanitized rendition and encoded-byte limits. Vision capability and current cloud-image policy are checked before dispatch. Unsupported models, unreadable images and failed tasks remain visible as incomplete coverage.
+
+Visual tasks receive the current grouped block-to-passage map and the saved shot frame, depicted people, deliberate exclusions, expressions and detail instructions when available. Shot intent is pinned in the review; missing legacy intent is not reconstructed. Intent helps interpret framing but cannot override the manuscript. A missing block or an image bound to older text is explicitly identified. The review checks perspective, usable objects, screen direction, eyelines, continuity, injuries, clothing, lighting and sequence readability. Intentional anomalies, cropping, occlusion and hidden screens are legitimate possibilities, not automatic errors. Character-reference matching and whole-book canon verification are outside this first pass.
+
+Every model finding must quote an exact chapter span. Image findings must cite supplied image IDs. The application rejects unplaceable citations; this does not prove a model's interpretation is correct. Findings distinguish contradictions, possible confusion and inability to assess. Derived facts never outrank the original source.
+
+The independent evidence check names the subject of each quote and assesses whether it supports the claim about the pictured person and moment. Wrong-subject or wrong-scene citations are rejected with an explanation; uncertainty becomes cannot-assess. This is model judgment, not a guarantee of correctness. The report calls mechanically checked results **source-linked**. An incomplete assessment fails its task, retains the original candidates and reports partial coverage without retry.
+
+The visual-review v4 brief asks for one independently assessable defect per finding (#1789).
+Verification must consider the whole claim and correction: partial support for a bundled
+candidate is uncertain, with the unsupported parts explained, rather than support for the whole.
+It keeps the original ID and wording. This is reviewer guidance, not a mechanical detector of
+compound claims. The existing versioned recovery check prevents reuse of v3 visual responses;
+live-model calibration remains separate.
+
+Consolidation proposes disjoint duplicate groups with existing IDs. The coordinator refuses unknown members, overlaps, different categories, certainty or image sets. Distinct defects in one prop must remain separate. Original findings, task IDs, quotes and assessment reasons remain in the sidecar and report, including rejected claims. No manuscript or media changes follow automatically. Consolidation has a 160,000-character input budget; an oversized set retains individual findings and marks that task failed. Legacy reviews remain readable; reviews with newly pinned shot intent require a fresh source check.
+
+Narration is currently a saved-record audit. It reports record availability and counts; it does not claim to inspect compiled provider requests, assess pronunciation or listen to audio. Future specialist stages can extend this same workflow without changing its ownership model.
+
+## Persistence and recovery
+
+Reviews are derived sidecars under `productions/<production>/.reviews/chapters/<chapter>/<review-id>.json`, with a `latest.json` pointer to the authoritative per-ID checkpoint. A crash during pointer replacement cannot hide later findings for an already selected review. They retain the reviewed prose, hashes, source paths, task receipts, findings and human decisions. They contain unpublished story text and belong to the portable world. Original image hashes are retained; image bytes remain in their existing world files. The report loads bounded bytes, checks their recorded SHA-256 and displays that verified browser blob; replaced files cannot silently become review evidence.
+
+The request ID determines a durable review identity. A replay reads the existing result, even after another review or a restart; it never silently retries an uncertain model call. Checkpoints use owned atomic writes before dispatch and after each task. World ownership is rechecked at dispatch, after asynchronous session and image preparation. An orphaned running review is marked interrupted. A new Review again request is an explicit new model run.
+
+Changing prose, selected image bytes, audiobook records or character narration marks prior results stale. Distinct review runs follow coordinator publication rather than wall-clock ordering. Stale findings cannot receive decisions, and the UI hides potentially changed images while retaining the original quote and hash. Keep intentionally and Dismiss finding save assessments only. Decisions may carry to a new review of identical sources only when category, certainty, quote, image IDs, observation, impact and correction all match; no semantic matching or automatic suppression is claimed.
+
+## Validation
+
+Run contracts `test/chapter-review.test.ts`, coordinator `test/productions/chapter-review.test.ts` and `test/harness/review-task.test.ts`, and client `test/chapter-review.test.tsx` and `test/chapter-review-evidence.test.ts` from their package roots with `node --import tsx --test <file>`. Also run action registry/parity, shipped skill and audiobook picture-brief tests, then the standard lint, typecheck, build and test gates.
+
+The tests use fixtures and fake model responses. They verify data boundaries and recovery, not the accuracy of a live model's visual judgment. A useful evaluation set includes a backwards tablet, a valid shared over-the-shoulder view, a deliberately impossible environment, an off-camera teammate, changing injury state and a recurring prop that changes appearance.
+
+## Visibility and disagreement (issue #1787)
+
+Version 3 review skills require an explicit visibility and evidence-basis assessment for each
+visual candidate. The coordinator retains the original model verdict, but a hidden, cropped,
+ambiguous or unobservable discrepancy cannot be effective support. A no-defect assessment
+rejects the candidate. Legacy reports remain readable. Explicit standalone no-change corrections
+are filtered before verification; substantive correction text is not filtered by that rule.
+
+The final text-only stage receives all original candidates and assessments, including rejected
+ones, without human decision notes. It identifies contrary verdicts about the same image set,
+subject and proposition before proposing duplicates. Valid conflict groups can only lower
+retained findings to cannot-assess; rejected originals are never restored. Both rationales stay
+inspectable in the report. Unknown, overlapping or incompatible groups fail before mutating the
+results. Semantic equivalence remains a model judgment, not a mechanically proven fact.
+
+Regression fixtures cover a hidden brace, opaque nested packaging, no-change findings, missing
+visibility fields, contrary verdicts, rejected-original preservation and conflict display. Live
+reviews remain necessary to assess actual visual accuracy.
+
+## AI tells (issue #1952)
+
+Design turn 232 adds a prose check that counts the patterns that read as AI-written. The six
+kinds and what counts as one are defined in [AI tells](../research/ai-tells.md).
+
+- **The prose specialist.** A read-only `chapter-prose-reviewer` session with its own versioned
+  skill (`chapter-prose-review.md`) runs as the `prose` task of every review. It returns only
+  tags: a kind and an exact quotation. It never returns a count, a score or a verdict.
+- **The app counts.** `readTells` in contracts `chapter-tells.ts` does every number:
+  - it drops quotations that are not in the saved chapter;
+  - it drops tags whose words occur in more places than they were tagged at, since it cannot
+    tell which occurrence was meant. The skill asks for a quotation that occurs once,
+    lengthened with the words after it so it still begins where the device begins;
+  - it counts a tag listed twice for one place once;
+  - it counts two tags of one kind that begin at the same place once;
+  - it reads the 450 words that begin at each tell. Any crowded 450 words in the chapter
+    hold their own first tell, so this finds every one wherever it falls, including in a
+    chapter written with single line breaks, which splits as one paragraph;
+  - it merges crowded stretches into passages that span their tells;
+  - it builds the report's strip of consecutive 450-word blocks.
+
+  The reading is pinned in the review as `tells`, with the line it was read against.
+- **The line is provisional.** It is 10 tells in a stretch, or 5 of one kind, until it is
+  calibrated against the author's own unaided chapters (S-6 of the issue). It was 8 and 4
+  until 2026-10-23, when the owner asked for a more lenient check: under 8 and 4, prose with
+  ordinary craft in it was flagged so often that clearing it stripped the writing bare.
+- **Dialogue is not counted.** Tells inside dialogue are dropped before the reading is made,
+  and the task's detail line says how many. Skill v2 also asks the tagger to leave dialogue
+  alone and not to tag a narrator's own vocabulary as metaphor.
+- **The report.** It shows the chapter's figures, the strip, the counts by kind and the crowded
+  passages. It calls the counts the model's reading, never a detector.
+- **Failure.** A prose answer without a tags list fails only its own task. The review is then
+  partial and holds no reading.
+- **Selective checks.** Choose AI tells, Clarity and continuity, Pictures, and Narration records
+  before starting. All start selected. The saved report records the requested checks; unchecked
+  specialists do not run. Prose-only checks do not read or depend on audiobook records or images.
+  Pictures retains its evidence verification and consolidation. Narration records makes no model
+  calls and does not listen to audio. Older reports and commands without a selection retain all checks.
+- **Not yet built.** The in-page marks, per-passage recheck and the checked
+  Rewrite are later slices of the issue.
+
+Tests: contracts `test/chapter-tells.test.ts`; coordinator `test/productions/chapter-review.test.ts`
+and `test/harness/review-task.test.ts`; client `test/chapter-tells.test.tsx`.
+
+
+## Failed-stage recovery
+
+Retry failed checks creates a new report linked to the original. Completed answers are reused
+only for matching task inputs; changed dependencies require new calls. Recovery uses the original
+selection and refuses changed source, image bytes, context, reviewer models, role briefs, effort
+or skills. The UI discloses new calls and uncertain prior outcomes; request replay never spends again.
+Older reports without recovery checkpoints require Review again.
+
+Completed raw model responses are saved before parsing or validation in sibling
+`<review-id>.responses/<task-id>.json` files, with request/task/session/model provenance.
+Each task retains at most two raw responses, capped at 256 Ki characters each with an explicit
+truncation marker, within a 4 MiB file limit. Successful parsed answers support reuse. Raw text is
+not sent in report events. Original reports and response files remain auditable; retry does not
+relax validation or turn skipped/failed tasks into successful coverage.

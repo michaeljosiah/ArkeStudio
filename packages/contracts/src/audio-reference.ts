@@ -10,6 +10,7 @@ import type { ReferenceKit } from "./reference.js";
 import type { Shot } from "./scene.js";
 import { orderedShots, type SceneRecord } from "./scene-flow.js";
 import type { Sheet, VoiceAssignment } from "./world.js";
+import { resolveCast } from "./planning.js";
 import type { WorldBundle } from "./client-state.js";
 
 const performanceSource = z.object({ kind: z.literal("performance"), performanceId: PerformanceIdSchema, hash: FullSha256Schema }).strict();
@@ -102,6 +103,14 @@ export function referenceAudioAsset(ref: CharacterAudioPlan["references"][number
     attestations: ref.attestations, acknowledgementId: ref.acknowledgementId };
 }
 
+/** The frozen recording's world address is shared by dispatch and conversation presentation. */
+export function referenceAudioMediaPath(ref: CharacterAudioPlan["references"][number]): string {
+  if ("master" in ref) return `productions/${ref.master.productionId}/${ref.prepared.file}`;
+  if ("sample" in ref) return `references/${ref.sheetId}/${ref.sample.file}`;
+  return ref.prepared ? `productions/${ref.performance.target.productionId}/${ref.prepared.file}`
+    : `productions/${ref.performance.target.productionId}/performances/${ref.performance.id}/${ref.performance.file}`;
+}
+
 
 /** Verified fal reference-to-video contract; neither frame nor continuation routes declare audio. */
 export function characterAudioRoute(model: { provider: string; id: string }, taskMode = "generate") {
@@ -141,6 +150,16 @@ export function shotSpeakers(scene: SceneRecord, shots: readonly Shot[]): { spea
     } else if (shot.audio?.kind === "dialogue" || shot.audio?.kind === "vo") add(shot.audio.speaker);
   }
   return { speakers, problems };
+}
+
+/**
+ * The characters in one shot, as sheet ids: those its description mentions, then those who speak in
+ * it, each once. Places and factions a description mentions are not cast.
+ */
+export function shotCast(scene: SceneRecord, shot: Shot, sheets: readonly Sheet[]): string[] {
+  const cast: string[] = resolveCast(shot.description, [...sheets]).cast.filter(c => c.sheet.type === "character").map(c => c.sheet.id);
+  for (const speaker of shotSpeakers(scene, [shot]).speakers) if (!cast.includes(speaker)) cast.push(speaker);
+  return cast;
 }
 
 export interface CastVoiceNotSent { sheetId: string; name: string; reason: string }

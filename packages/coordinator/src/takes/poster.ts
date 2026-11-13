@@ -15,12 +15,13 @@
  */
 
 import { stat } from "node:fs/promises";
+import { POSTER_NAME, isVideoMedia } from "@arke-studio/contracts";
 import { join } from "node:path";
 import { toExtendedLength } from "../world/paths.js";
 import type { MediaProbeRunner } from "./qc.js";
 
-/** The poster's filename, beside the clip. The readers' convention, named once. */
-export const POSTER_NAME = "frame.png";
+// The naming rule is contracts', shared with the client that asks for the poster (issue 2815).
+export { POSTER_NAME, isVideoMedia, posterNameFor } from "@arke-studio/contracts";
 
 /** Wall clock for the extraction. Past this the process is killed and no poster is written. */
 export const POSTER_TIMEOUT_MS = 15_000;
@@ -36,19 +37,6 @@ export const POSTER_MAX_OUTPUT_BYTES = 1_048_576;
  * takes does not quietly become a folder of megabytes.
  */
 export const POSTER_MAX_WIDTH = 960;
-
-/** Whether a landed file is the kind that needs a poster drawn for it. */
-export function isVideoMedia(file: string): boolean {
-  return /\.(mp4|webm|mov|m4v)$/i.test(file);
-}
-
-/**
- * The poster path for a piece of media, or the media itself when it is already a picture.
- * Mirrors the client's convention exactly; both sides are pinned by tests.
- */
-export function posterNameFor(file: string): string {
-  return isVideoMedia(file) ? POSTER_NAME : file;
-}
 
 /**
  * The command, as an argument array.

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
-import {
+import { stageDesignerBrief,
   orderedShots,
   stageShot,
   type HarnessAdapter,
@@ -126,7 +126,10 @@ it("constructs, inspects, revises and returns an editable draft without writing 
     assert.match(prompts[0]!, /verse, under the water/);
     assert.match(prompts[1]!, /round-1-0-camera.png/);
     assert.match(prompts[1]!, /180° line: Shot .* crosses/, "inspection feedback includes the draft's screen-direction finding");
-    assert.match(prompts[0]!, /Interior camera keys are passing waypoints/);
+    // The craft moved to the stage-designer's brief (issue 1822); the request keeps the contract.
+    assert.match(prompts[0]!, /easeIn\/easeOut apply at the first departure, the last arrival and holds/);
+    assert.match(stageDesignerBrief(), /interior keys are passing points, not stops/);
+    assert.doesNotMatch(prompts[0]!, /burgundy|ochre/, "the renders' cast colours are the current ones");
     assert.ok(Number(/"screenDirection":\{"total":(\d+)/.exec(prompts[1]!)?.[1]) > 12, "the crowded scene exceeds the old shared warning budget");
     assert.match(prompts[1]!, /Camera approaches moving @maren-kest/, "inspection receives whole-path standoff findings");
     assert.match(prompts[1]!, /frame-observation-39/, "line warnings must not displace any measured frame observations");
@@ -302,6 +305,47 @@ it("a build stopped while its configuration is still being decided creates no se
     constructor.cancel();
     await third_run;
     assert.match(third?.detail ?? "", /stopped/, "the stop reached the session being opened");
+  } finally {
+    await store.close();
+  }
+});
+
+it("refuses a plate whose picture changed after it was chosen, before any session (issue 1818)", async () => {
+  const dir = await makeTempWorld();
+  const store = await WorldStore.open(dir);
+  try {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(join(dir, "locations"), { recursive: true });
+    await writeFile(join(dir, "locations", "lobby.png"), encodePng(solidImage(4, 4, [40, 30, 20, 255])));
+    const bundle = structuredClone(store.getBundle());
+    const scene = bundle.productions.find((p) => p.meta.id === "saltlight")!.scenes.find((s) => s.id === "sc_04")!;
+    const shot = orderedShots(scene)[0]!;
+    // Pinned to other bytes than the file now holds.
+    scene.blocking = { version: 1, cast: [], sets: [], plate: { source: { source: "world-file", path: "locations/lobby.png", hash: `sha256:${"0".repeat(64)}` }, label: "Lobby", shotId: shot.id } };
+    store.getBundle = () => bundle;
+    let created = 0;
+    const adapter: HarnessAdapter = {
+      id: "test",
+      readiness: () => ({ ready: true }),
+      capabilities: () => new Set(["events"]),
+      createSession: async () => { created++; return { sessionId: "test" }; },
+      sendMessage: async () => ({ sessionId: "test", correlationId: "1" }),
+      dispatchAsync: async () => ({ sessionId: "test", correlationId: "1" }),
+      async *streamEvents() {},
+    };
+    let terminal: Extract<DomainEvent, { type: "stage.construction" }> | undefined;
+    await new StageConstructor().run(
+      store,
+      { kind: "stage-construct", worldId: store.worldId, productionId: "saltlight", sceneId: scene.id, shotId: shot.id,
+        baseVersion: scene.version, requestId: randomUUID(), instruction: "", preserve: "none" },
+      {
+        adapter, sessionInput: (input) => input, model: "test/vision", scratchRoot: join(dir, ".scratch"), current: () => true,
+        emit: (event) => { if (event.status === "failed" || event.status === "ready") terminal = event; },
+      },
+    );
+    assert.equal(terminal?.status, "failed");
+    assert.match(terminal?.detail ?? "", /plate's picture changed/);
+    assert.equal(created, 0, "refused before anything is spent");
   } finally {
     await store.close();
   }

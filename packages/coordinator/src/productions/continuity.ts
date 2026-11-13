@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { z } from "zod";
 import { ChapterContinuitySchema, type ChapterContinuity, type HarnessAdapter } from "@arke-studio/contracts";
 import { extractJson } from "../canon/ask.js";
-import { createPreparedSession, type SessionInput } from "../harness/session-files.js";
+import { createPreparedSession, sessionTurnTimeoutMs, type SessionInput } from "../harness/session-files.js";
+import { runHarnessTurn } from "../harness/turn.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -84,13 +85,6 @@ ${input.body}`;
 }
 
 const WALL_CLOCK_MS = 120_000;
-/**
- * The same clock on Arke's local harness. Two minutes was sized for hosted models; a 12B model on
- * a 10 GB card, part of it on the CPU, needed longer for a 76-word chapter with three spoken lines,
- * and both casts stopped at exactly 120 s (issue 1289). A local model costs nothing while it
- * works, so the clock is there to catch a stall, not to hurry it.
- */
-const LOCAL_WALL_CLOCK_MS = 10 * 60_000;
 
 /**
  * The built-in runner behind every derivation from the prose (turns 129 and 130): a sandboxed
@@ -123,57 +117,13 @@ export function makeAdapterJsonDeriver<T>(
 
     const turn = async (prompt: string): Promise<string> => {
       if (signal?.aborted) throw stopped();
-      let finalText = "";
-      const abort = new AbortController();
-      const onStop = () => {
-        // The session's own generation is told, not only this listener (codex on PR 907): a
-        // harness with no interrupt leaves a stopped run spending until it is disposed.
-        void adapter.interrupt?.(session.sessionId).catch(() => {});
-        abort.abort();
-      };
-      signal?.addEventListener("abort", onStop, { once: true });
-      if (signal?.aborted) onStop();
-      const events = adapter.streamEvents(abort.signal);
-      const collected = (async () => {
-        for await (const event of events) {
-          if (!("sessionId" in event) || event.sessionId !== session.sessionId) continue;
-          if (event.type === "message.completed") {
-            finalText = event.text ?? "";
-            return;
-          }
-          if (event.type === "session.error") throw new Error(event.message);
-        }
-      })();
-      // Handled from the start: the abort in the cleanup below can end the listener after the
-      // race has already settled the other way, and that rejection must land nowhere loud.
-      void collected.catch(() => {});
-      let deadline: ReturnType<typeof setTimeout> | undefined;
-      const timeout = new Promise<never>((_, reject) => {
-        deadline = setTimeout(() => {
-          // The session is told as well (codex on PR 907, round four): the timer ends this
-          // wait, and a generation left running behind it would go on spending.
-          void adapter.interrupt?.(session.sessionId).catch(() => {});
-          reject(new Error("deriving took too long"));
-        }, adapter.id === "arke" ? LOCAL_WALL_CLOCK_MS : WALL_CLOCK_MS);
-      });
-      try {
-        // Dispatch under the same cleanup as collection (codex on PR 907, round five) and under
-        // the same clock (codex on PR 914): a dispatch that hangs past the deadline would
-        // otherwise reject the timer into nothing, no handler attached yet, and hold this await.
-        await Promise.race([
-          (async () => {
-            await adapter.dispatchAsync({ sessionId: session.sessionId, parts: [{ type: "text", text: prompt }] });
-            await collected;
-          })(),
-          timeout,
-        ]);
-      } finally {
-        clearTimeout(deadline);
-        signal?.removeEventListener("abort", onStop);
-        abort.abort();
-      }
-      if (signal?.aborted) throw stopped();
-      return finalText;
+      // The helper tells the session to stop on a stop and at the clock, and runs the dispatch
+      // under the same clock — each a lesson of codex on PRs 907 and 914.
+      const outcome = await runHarnessTurn(adapter, { sessionId: session.sessionId, parts: [{ type: "text", text: prompt }],
+        timeoutMs: sessionTurnTimeoutMs(session.model, WALL_CLOCK_MS), ...(signal ? { signal } : {}) });
+      if (outcome.kind === "cancelled" || signal?.aborted) throw stopped();
+      if (outcome.kind === "completed") return outcome.text;
+      throw new Error(outcome.kind === "failed" ? outcome.detail : outcome.kind === "timeout" ? "deriving took too long" : "deriving did not finish");
     };
 
     let raw = await turn(prompt());

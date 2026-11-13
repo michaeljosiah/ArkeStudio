@@ -44,7 +44,7 @@ function service(adapter: HarnessAdapter, events: DomainEvent[], opts: { wallClo
 }
 
 /** An adapter whose turn never completes — for cancellation and timeout paths. */
-function neverendingAdapter(): HarnessAdapter & { interrupted: string[] } {
+function neverendingAdapter(): HarnessAdapter & { interrupted: string[]; emit: (event: HarnessEvent) => void } {
   const subscribers = new Set<{ queue: HarnessEvent[]; wake: (() => void) | null }>();
   const push = (event: HarnessEvent) => {
     for (const sub of subscribers) {
@@ -53,9 +53,10 @@ function neverendingAdapter(): HarnessAdapter & { interrupted: string[] } {
       sub.wake = null;
     }
   };
-  const adapter: HarnessAdapter & { interrupted: string[]; interrupt(id: string): Promise<void> } = {
+  const adapter: HarnessAdapter & { interrupted: string[]; emit: (event: HarnessEvent) => void; interrupt(id: string): Promise<void> } = {
     id: "stuck",
     interrupted: [],
+    emit: push,
     capabilities: () => new Set(),
     readiness: () => ({ ready: true }),
     async createSession() {
@@ -246,9 +247,9 @@ describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
     // Studio wrote the confinement config into the working directory (R-5, R-9, R-10).
     const config = JSON.parse(
       await readFile(join(dir, ".proposals", proposal.id, "opencode.json"), "utf8"),
-    ) as { agent: Record<string, { tools: Record<string, boolean> }>; mcp: Record<string, unknown> };
-    assert.equal(config.agent["sheet-editor"]!.tools["bash"], false);
-    assert.ok(config.mcp["arke-world"]);
+    ) as { agents: Record<string, { permissions: { action: string; resource: string; effect: string }[] }>; mcp: { servers: Record<string, unknown> } };
+    assert.ok(config.agents["sheet-editor"]!.permissions.some(rule => rule.action === "shell" && rule.effect === "deny"));
+    assert.ok(config.mcp.servers["arke-world"]);
 
     // The proposal is intact and still staged (R-12).
     assert.ok(store.getBundle().proposals.some((p) => p.proposal.id === proposal.id));
@@ -451,6 +452,135 @@ describe("authoring sessions over proposals (R-9, R-12, R-13)", () => {
     const outcome = await gate.accept(draft.proposalId);
     assert.equal(outcome.status, "invalid", "and the gate still refuses it rather than writing it");
     await store.close();
+  });
+
+  it("holds cancellation through progress and the stop acknowledgement, preserving partial work (#1981)", async () => {
+    const { dir, store, gate, proposal } = await setup();
+    const events: DomainEvent[] = [];
+    const adapter = neverendingAdapter();
+    const authoring = service(adapter, events);
+    const target = join(dir, ".proposals", proposal.id, MAREN);
+    const original = await readFile(target, "utf8");
+    let dispatched!: () => void, stopStarted!: () => void, finishWork!: () => void, stopped!: () => void, acknowledge!: () => void;
+    const dispatch = new Promise<void>(r => { dispatched = r; });
+    const stopping = new Promise<void>(r => { stopStarted = r; });
+    const finish = new Promise<void>(r => { finishWork = r; });
+    const terminal = new Promise<void>(r => { stopped = r; });
+    const ack = new Promise<void>(r => { acknowledge = r; });
+    adapter.dispatchAsync = async input => { dispatched(); return { sessionId: input.sessionId, correlationId: "c" }; };
+    adapter.interrupt = async id => {
+      adapter.emit({ type: "tool.activity", sessionId: id, tool: "write", summary: "writing already-started work" });
+      stopStarted();
+      await finish;
+      await writeFile(target, original + "\nPartial work stays.\n", "utf8");
+      adapter.emit({ type: "session.ended", sessionId: id, reason: "cancelled" });
+      stopped();
+      await ack;
+    };
+    const run = authoring.run(store, gate, { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "draft" });
+    let cancel: Promise<void> | undefined;
+    try {
+      await dispatch;
+      cancel = authoring.cancel(proposal.id);
+      await stopping;
+      await new Promise<void>(r => setImmediate(r));
+      assert.equal(authoring.isRunning(proposal.id), true, "progress must not release a writing proposal");
+      assert.equal(events.some(e => e.type === "authoring.status" && e.status === "cancelled"), false);
+      finishWork(); await terminal;
+      await new Promise<void>(r => setImmediate(r));
+      assert.equal(authoring.isRunning(proposal.id), true, "the interruption request still owns its acknowledgement");
+      acknowledge(); await cancel; await run;
+      assert.match(await readFile(target, "utf8"), /Partial work stays/);
+      assert.equal(authoring.isRunning(proposal.id), false);
+      assert.ok(events.some(e => e.type === "authoring.status" && e.status === "cancelled"));
+    } finally { finishWork(); acknowledge(); await cancel; await run; await store.close(); }
+  });
+
+  it("does not let an unresponsive interruption hold cleanup after the deadline (#1981)", { timeout: 30_000 }, async t => {
+    const { store, gate, proposal } = await setup();
+    const events: DomainEvent[] = []; const adapter = neverendingAdapter();
+    let dispatched!: () => void; const ready = new Promise<void>(resolve => { dispatched = resolve; });
+    adapter.dispatchAsync = async input => { dispatched(); return { sessionId: input.sessionId, correlationId: "c" }; };
+    let acknowledge!: () => void;
+    const interruption = new Promise<void>(resolve => { acknowledge = resolve; });
+    adapter.interrupt = async () => interruption;
+    const authoring = service(adapter, events, { wallClockMs: 150 });
+    let run: Promise<void> | undefined, cancel: Promise<void> | undefined;
+    try {
+      run = authoring.run(store, gate, { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "draft" });
+      await ready;
+      // Keep the same cleanup bound; copying/opening the world is not part of it (#2094).
+      await t.test("Stop and the turn settle without an interrupt acknowledgement", { timeout: 8_000 }, async () => {
+        cancel = authoring.cancel(proposal.id);
+        await Promise.all([cancel, run]);
+        assert.equal(authoring.isRunning(proposal.id), false);
+        assert.ok(events.some(e => e.type === "authoring.status" && e.status === "timeout"));
+      });
+    } finally {
+      // Release the fake even when the bound fails, then close the real world watcher.
+      acknowledge();
+      try { await Promise.all([cancel, run]); }
+      finally { await store.close(); }
+    }
+  });
+
+  it("keeps the budget cause when the writer acknowledges interruption (#1981)", async () => {
+    const { store, gate, proposal } = await setup();
+    const events: DomainEvent[] = []; const adapter = { ...neverendingAdapter(), usageTokens: () => 100 };
+    const authoring = service(adapter, events, { tokenBudget: 1 });
+    try {
+      await authoring.run(store, gate, { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "draft" });
+      const final = events.findLast(e => e.type === "authoring.status");
+      assert.ok(final?.type === "authoring.status" && final.status === "budget-exceeded");
+      assert.match(final.detail ?? "", /budget/);
+    } finally { await store.close(); }
+  });
+
+  it("holds the proposal after the budget stops the writer until the writer says it stopped (codex on PR 2863)", async () => {
+    const { store, gate, proposal } = await setup();
+    const events: DomainEvent[] = []; const adapter = { ...neverendingAdapter(), usageTokens: () => 100 };
+    let acknowledge!: () => void, asked!: () => void;
+    const askedToStop = new Promise<void>(resolve => { asked = resolve; });
+    adapter.interrupt = async () => { asked(); await new Promise<void>(resolve => { acknowledge = resolve; }); };
+    const authoring = service(adapter, events, { tokenBudget: 1 });
+    try {
+      const run = authoring.run(store, gate, { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "draft" });
+      await askedToStop;
+      await new Promise(resolve => setTimeout(resolve, 50));
+      assert.equal(authoring.isRunning(proposal.id), true, "the writer may still be writing into the proposal");
+      acknowledge(); await run;
+      assert.equal(authoring.isRunning(proposal.id), false);
+      const final = events.findLast(e => e.type === "authoring.status");
+      assert.ok(final?.type === "authoring.status" && final.status === "budget-exceeded");
+    } finally { await store.close(); }
+  });
+
+  it("retries a failed Stop while sharing an in-flight attempt (#1989)", async () => {
+    const { store, gate, proposal } = await setup();
+    const adapter = neverendingAdapter(), events: DomainEvent[] = [];
+    let started!: () => void, rejectStop!: (error: Error) => void, attempts = 0;
+    const ready = new Promise<void>(resolve => { started = resolve; });
+    const dispatch = adapter.dispatchAsync!.bind(adapter), interrupt = adapter.interrupt!.bind(adapter);
+    adapter.dispatchAsync = async input => { const receipt = await dispatch(input); started(); return receipt; };
+    adapter.interrupt = async id => {
+      attempts++;
+      if (attempts === 1) await new Promise<void>((_resolve, reject) => { rejectStop = reject; });
+      else await interrupt(id);
+    };
+    const authoring = service(adapter, events);
+    try {
+      const run = authoring.run(store, gate, { worldId: WORLD_ID, proposalId: proposal.id, purpose: "authoring", instruction: "draft" });
+      await ready;
+      const first = authoring.cancel(proposal.id), concurrent = authoring.cancel(proposal.id);
+      assert.equal(attempts, 1);
+      rejectStop(new Error("writer temporarily unreachable")); await Promise.all([first, concurrent]);
+      assert.equal(authoring.isRunning(proposal.id), true);
+      await authoring.cancel(proposal.id); await run;
+      assert.equal(attempts, 2);
+      assert.equal(authoring.isRunning(proposal.id), false);
+      const final = events.findLast(e => e.type === "authoring.status");
+      assert.ok(final?.type === "authoring.status" && final.status === "cancelled");
+    } finally { await store.close(); }
   });
 
   it("cancellation is immediate, stated, and costs nothing (R-13, D8)", async () => {
