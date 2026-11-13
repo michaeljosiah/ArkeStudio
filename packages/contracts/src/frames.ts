@@ -1233,6 +1233,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       sheetType: z.enum(["character", "location", "faction"]),
       name: z.string().min(1).max(200),
       sentence: z.string().min(1).max(2000),
+      /** Explicit manual sketch (true) or AI draft (false); omitted preserves older callers. */
+      manual: z.boolean().optional(),
       /**
        * Settle it as soon as it is drafted, without asking. Used when beginning a world: the
        * author already said yes to this cast by pressing Begin, and a sheet is a sketch that

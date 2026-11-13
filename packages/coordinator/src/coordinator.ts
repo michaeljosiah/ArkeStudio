@@ -8925,7 +8925,7 @@ export class Coordinator {
               ? {}
               : {
                   attendedSurface: msg.production !== undefined ? "production-cast" : "sheet-list",
-                  requiresDraft: this.authoring !== null,
+                  requiresDraft: msg.manual !== true && (msg.manual === false || this.authoring !== null),
                 }),
           })).value;
           this.emit({
@@ -8953,7 +8953,7 @@ export class Coordinator {
           };
           // When the harness is up, the sheet-editor drafts the full sketch inside the
           // proposal; without it, the skeleton with the author's sentence still stands.
-          if (this.authoring && this.opts.adapter?.readiness().ready) {
+          if (msg.manual !== true && this.authoring && this.opts.adapter?.readiness().ready) {
             const worldQueryUrl = await this.worldQuery.start();
             this.trackBackground(
               this.authoring

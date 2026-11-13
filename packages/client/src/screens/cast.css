@@ -245,3 +245,13 @@
 }
 
 .fy-sheet-proposal-review :is(.dom-review__was, .dom-review__now) { font: 400 var(--text-sm)/1.6 var(--font-sans); }
+
+/* Turn 281: a manual sketch's existing fields and decision must fit on a phone. */
+@media (max-width: 599px) {
+  .fy-new-sheet.fy-gate { display: block; }
+  .fy-new-sheet > .fy-gate__main { border-right: 0; overflow: visible; }
+  .fy-new-sheet .fy-gate__head { padding: 20px 20px 12px; }
+  .fy-new-sheet .fy-gate__body { padding: 10px 20px 20px; overflow: visible; }
+  .fy-new-sheet > .fy-gate__side { width: auto; padding: 20px; overflow: visible; }
+  .fy-new-sheet .ui-btn { min-height: 44px; white-space: normal; }
+}

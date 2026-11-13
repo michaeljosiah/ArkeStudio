@@ -29,15 +29,18 @@ it("a fresh install resumes its saved journey; legacy settings do not force onbo
   await writeFile(path, "{}"); assert.equal((await file.load()).onboarding, undefined);
 });
 
-it("writing setup fills existing authoring settings without rerouting private agents or custom choices", async () => {
+it("writing setup sets one writer default without pinning inheriting or private agents", async () => {
   const path = join(await tempDir("arke-onboarding-model-"), "settings.json");
   const file = new AppSettingsFile(path);
-  await file.setAgent("story-writer", { model: "openai/custom" });
   const plan = OnboardingPlanSchema.parse({ persona: "guided", writing: "account", account: "openai", step: "review", modelId: "openai/chosen" });
   const saved = await file.setOnboarding(plan, "openai/chosen");
-  assert.equal(saved.agents["world-builder"]?.model, "openai/chosen");
-  assert.equal(saved.agents["story-writer"]?.model, "openai/custom");
-  for (const name of ["studio-assistant", "diagnostic-specialist", "stage-designer", "chapter-visual-reviewer"]) assert.equal(saved.agents[name], undefined);
+  assert.deepEqual(saved.agents, { "story-writer": { model: "openai/chosen" } });
+  await file.setAgent("story-writer", { model: "openai/custom" });
+  await file.setAgent("world-builder", { model: "openai/other", brief: "Keep my brief." });
+  await file.setAgent("stage-designer", { model: "openai/vision" });
+  const before = (await file.load()).agents;
+  await file.setOnboarding(plan, "openai/new-choice");
+  assert.deepEqual((await new AppSettingsFile(path).load()).agents, before);
 });
 
 it("Lightweight has no AI closure, while selected capabilities include missing dependencies once", () => {

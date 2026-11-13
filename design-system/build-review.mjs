@@ -28,6 +28,16 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN SKETCHES NAVIGATION 281
+  { group: "Manual sketches and production navigation · turn 281", screen: "Manual sketch · writing AI unavailable", frame: "281a", route: "Locations / New", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved narrow change. Existing surrounding layout and approval controls remain; see turn 281 notes."] },
+  { group: "Manual sketches and production navigation · turn 281", screen: "Writing model · existing role selectors", frame: "281b", route: "Settings / AI models / Agent settings", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved narrow change. Existing surrounding layout and approval controls remain; see turn 281 notes."] },
+  { group: "Manual sketches and production navigation · turn 281", screen: "Desktop episode navigation · reachable structure and cast", frame: "281c", route: "Production / Story structure", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved narrow change. Existing surrounding layout and approval controls remain; see turn 281 notes."] },
+  { group: "Manual sketches and production navigation · turn 281", screen: "Phone audio drama · Adaptation in the page strip", frame: "281d", route: "Audio drama / Adaptation", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved narrow change. Existing surrounding layout and approval controls remain; see turn 281 notes."] },
+  // END SKETCHES NAVIGATION 281
+
+
+
+
   // BEGIN FIRST RUN DECISIONS CHAT 280
   { group: "First run, decisions and chat · turn 280", screen: "Launch · first visit · narrow detail", frame: "280a", route: "Launch", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved detail drawing. Retain the surrounding application layout and existing controls; see the notes for durable reply and action-guide rules."] },
   { group: "First run, decisions and chat · turn 280", screen: "Launch · first visit · desktop detail", frame: "280aw", route: "Launch", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved detail drawing. Retain the surrounding application layout and existing controls; see the notes for durable reply and action-guide rules."] },
@@ -1398,6 +1408,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="world-cleanup-278.css">
 <link rel="stylesheet" href="restart-export-279.css">
 <link rel="stylesheet" href="first-run-decisions-chat-280.css">
+<link rel="stylesheet" href="sketches-navigation-281.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">

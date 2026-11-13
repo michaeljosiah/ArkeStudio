@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { NEW_ONBOARDING, ROSTER, type OnboardingPlan } from "@arke-studio/contracts";
+import { NEW_ONBOARDING, type OnboardingPlan } from "@arke-studio/contracts";
 import {
   AppSettingsSchema,
   newId,
@@ -112,12 +112,11 @@ export class AppSettingsFile {
 
   async setOnboarding(onboarding: OnboardingPlan, writingModel?: string): Promise<AppSettings> {
     return this.mutate(current => {
-      // Use the existing agent settings. Keep custom choices and private operational agents.
+      // Ordinary writing roles inherit this choice. Pinning every role here prevents later
+      // Story writer changes from reaching them; existing explicit choices remain untouched.
       const agents = { ...current.agents };
-      if (writingModel) for (const member of ROSTER) {
-        if (!member.operationalOnly && !member.voiceOnly && !["stage-designer", "chapter-visual-reviewer"].includes(member.name) && !agents[member.name]?.model) {
-          agents[member.name] = { ...agents[member.name], model: writingModel };
-        }
+      if (writingModel && !agents["story-writer"]?.model) {
+        agents["story-writer"] = { ...agents["story-writer"], model: writingModel };
       }
       const settings: AppSettings = { ...current, onboarding, agents,
         harness: onboarding.writing === "none" ? current.harness : { ...current.harness, engine: onboarding.harness } };
