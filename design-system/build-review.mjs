@@ -28,6 +28,14 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN STORY SPEND 282
+  { group: "Story spend · turn 282", screen: "Story overview · audio and picture spend", frame: "282a", route: "Story / Overview", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Proposed; needs owner approval. Reuse existing summary and PageSheet; no confirmation-policy changes."] },
+  { group: "Story spend · turn 282", screen: "Spend details · known charges and missing history", frame: "282b", route: "Story / Spend details", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Proposed; needs owner approval. Reuse existing summary and PageSheet; no confirmation-policy changes."] },
+  { group: "Story spend · turn 282", screen: "First use and unavailable history", frame: "282c", route: "Story / Spend states", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Proposed; needs owner approval. Reuse existing summary and PageSheet; no confirmation-policy changes."] },
+  // END STORY SPEND 282
+
+
+
   // BEGIN SKETCHES NAVIGATION 281
   { group: "Manual sketches and production navigation · turn 281", screen: "Manual sketch · writing AI unavailable", frame: "281a", route: "Locations / New", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved narrow change. Existing surrounding layout and approval controls remain; see turn 281 notes."] },
   { group: "Manual sketches and production navigation · turn 281", screen: "Writing model · existing role selectors", frame: "281b", route: "Settings / AI models / Agent settings", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved narrow change. Existing surrounding layout and approval controls remain; see turn 281 notes."] },
@@ -1409,6 +1417,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="restart-export-279.css">
 <link rel="stylesheet" href="first-run-decisions-chat-280.css">
 <link rel="stylesheet" href="sketches-navigation-281.css">
+<link rel="stylesheet" href="story-spend-282.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">
