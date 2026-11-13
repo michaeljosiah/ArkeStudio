@@ -21246,7 +21246,8 @@ export class Coordinator {
     this.stageConstructor.cancel();
     if (this.stopPromise) return this.stopPromise;
     this.stopping = true;
-    this.worldCleanup.stop();
+    // A clean-up run stops before its next item; the one under way is waited for before the world is let go.
+    const cleanupStopped = this.worldCleanup.stop();
     clearTimeout(this.productionSpendTimer);
     const creatorPublishingStopped = this.opts.creatorPublishing?.stop();
     const creatorAccountStopped = this.account.stop?.();
@@ -21283,7 +21284,7 @@ export class Coordinator {
     // but none can reserve work and receive an id from a queue shutdown has stopped accepting.
     this.jobQueue?.stopAccepting();
     this.stopPromise = (async () => {
-      await Promise.allSettled([creatorPublishingStopped, creatorAccountStopped]);
+      await Promise.allSettled([creatorPublishingStopped, creatorAccountStopped, cleanupStopped]);
       this.opts.onShutdownWait?.("chapter reviews");
       await this.chapterReviewService?.stop();
       await this.manuscriptReviewService?.stop();

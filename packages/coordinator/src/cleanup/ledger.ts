@@ -14,6 +14,27 @@ import { toExtendedLength } from "../world/paths.js";
 export const LEDGER = "cleanup.jsonl";
 
 export type LedgerOp = "run" | "restore" | "expire" | "empty" | "auto";
+
+const PLAN_ID = /^cp_[0-9A-HJKMNP-TV-Z]{26}$/;
+/** A world-relative path: forward slashes, no `.` or `..` segment, no drive, no absolute start. */
+export const isWorldPath = (path: unknown): path is string =>
+  typeof path === "string" && path.length > 0 && path.length <= 1024 && !/[\\:\u0000]/.test(path) && !path.startsWith("/") &&
+  path.split("/").every(part => part !== "" && part !== "." && part !== "..");
+/**
+ * A ledger travels with a world, so an imported one is read as untrusted: a line whose plan id
+ * or paths could reach outside the world is skipped, never acted on (Codex on PR 3052).
+ */
+function wellFormed(line: LedgerLine): boolean {
+  if (line.kind === "setting") return typeof line.autoMixes === "boolean";
+  if (!PLAN_ID.test(line.planId)) return false;
+  if (line.kind !== "intent") return true;
+  const item = line.item;
+  return !!item && typeof item.id === "string" && Array.isArray(item.paths) && Array.isArray(item.files) &&
+    item.paths.every(isWorldPath) && item.files.every(file => isWorldPath(file?.path)) &&
+    (item.keep === undefined || isWorldPath(item.keep)) &&
+    (item.sidecar === undefined || (isWorldPath(item.sidecar.path) && /^artifacts\/[^/]+\.json$/.test(item.sidecar.path))) &&
+    (item.bench === undefined || (/^sess_[0-9A-HJKMNP-TV-Z]{26}$/.test(item.bench.sessionId) && /^tk_[0-9A-HJKMNP-TV-Z]{26}$/.test(item.bench.takeId)));
+}
 export interface LedgerFile { path: string; size: number; mtimeMs: number }
 /** What one item does, written before it is done: enough to finish it or undo it after a crash. */
 export interface LedgerItem {
@@ -42,7 +63,7 @@ export async function readLedger(worldDir: string): Promise<LedgerLine[]> {
   const lines: LedgerLine[] = [];
   for (const text of raw.split("\n")) {
     if (!text.trim()) continue;
-    try { const line = JSON.parse(text) as LedgerLine; if (line && line.v === 1 && typeof line.kind === "string") lines.push(line); }
+    try { const line = JSON.parse(text) as LedgerLine; if (line && line.v === 1 && typeof line.kind === "string" && wellFormed(line)) lines.push(line); }
     catch { /* The torn tail of a crash; its step is recovered from the intent before it. */ }
   }
   return lines;

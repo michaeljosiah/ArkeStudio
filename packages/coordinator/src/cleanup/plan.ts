@@ -156,6 +156,8 @@ export async function computePlan(store: WorldStore, deps: PlanDeps): Promise<Pl
   }
   if (lastCopies.length) problems.push({ kind: "last-copy", label: "Bench pictures · Last copy · artifact gone", count: new Set(lastCopies.map(f => f.path.split("/").slice(0, 4).join("/"))).size, bytes: lastCopies.reduce((s, f) => s + f.size, 0), putBack: true });
   if (benchUnreadable.length) stopped.set("unkept-bench-takes", "Stopped · Bench session unreadable");
+  // A take nothing seemed to name is only known so when every holder was read (R-8; Codex on PR 3052).
+  if (census.unreadable ?? unreadableSidecar) stopped.set("unkept-bench-takes", `Stopped · ${census.unreadable ?? unreadableSidecar} unreadable`);
   const lastCopyPaths = new Set(lastCopies.map(f => f.path));
 
   // ---- Phase 1: copies become links (R-32, R-33) ------------------------------------------
@@ -372,4 +374,27 @@ async function exportUnits(dir: string, signal: AbortSignal): Promise<ExportUnit
       names: files.map(f => f.path.slice(`exports/${top}`.length) || "."), files: files.map(f => planned(f.path, f.info)) });
   }
   return units;
+}
+
+/**
+ * The census taken again after the confirm, before anything is held (R-21): a plan can be minutes
+ * old, and a picture placed in a chapter since then is named only in that chapter's record. A hold
+ * whose subject a record names now is dropped, and every hold is dropped when a record cannot be
+ * read (Codex on PR 3052).
+ */
+export async function namedSince(dir: string, appRoot: string | null, items: readonly PlannedItem[], signal: AbortSignal): Promise<Set<PlannedItem>> {
+  const holds = items.filter(item => item.action === "hold");
+  if (!holds.length) return new Set();
+  const subjects = holds.map(item => {
+    if (item.sidecar) {
+      const sidecar = (() => { try { return JSON.parse(item.sidecar!.text) as { id?: string; file?: string }; } catch { return {}; } })();
+      return { item, ids: sidecar.id ? [sidecar.id] : [], files: sidecar.file ? [sidecar.file] : [], own: sidecar.id ? [`side:${sidecar.id}`] : [] };
+    }
+    if (item.bench) return { item, ids: [item.bench.takeId], files: [] as string[], own: [`sess:${item.bench.sessionId}`] };
+    return { item, ids: [] as string[], files: [item.files[0]!.path.split("/")[1]!], own: [] as string[] };
+  });
+  const census = await takeCensus(dir, appRoot, new Set(subjects.flatMap(subject => subject.files)), signal);
+  if (census.unreadable) return new Set(holds);
+  return new Set(subjects.filter(subject => subject.ids.some(id => namedElsewhere(census.named.get(id), ...subject.own))
+    || subject.files.some(file => namedElsewhere(census.files.get(file), ...subject.own))).map(subject => subject.item));
 }

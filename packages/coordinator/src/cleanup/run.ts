@@ -8,7 +8,7 @@ import { BENCH_TAKE_RESTORED_SCHEMA_VERSION } from "../world/commit.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { sha256 } from "../world/text-files.js";
-import type { Ledger, LedgerFile, LedgerItem, LedgerOp } from "./ledger.js";
+import { isWorldPath, type Ledger, type LedgerFile, type LedgerItem, type LedgerOp } from "./ledger.js";
 import type { PlannedFile, PlannedItem } from "./plan.js";
 
 /**
@@ -29,7 +29,11 @@ export interface RunContext {
 
 export type ItemResult = { result: "done" } | { result: "skipped" | "failed"; reason: string; stopClass?: boolean };
 
-const abs = (dir: string, path: string) => toExtendedLength(join(dir, ...path.split("/")));
+/** Every path a run touches is the world's own: anything else is refused before the disk is touched (R-26). */
+const abs = (dir: string, path: string) => {
+  if (!isWorldPath(path)) throw new Error("Clean up refused a path outside the world.");
+  return toExtendedLength(join(dir, ...path.split("/")));
+};
 export const heldPath = (planId: string, path: string) => `.held/${planId}/${path}`;
 
 async function unchanged(dir: string, file: PlannedFile): Promise<boolean> {
@@ -60,6 +64,9 @@ export async function runItem(ctx: RunContext, planId: string, item: PlannedItem
     // The sidecar's hash is a 64-bit prefix: both files are read whole now (R-21).
     const [a, b] = await Promise.all([fileSha256(abs(dir, keep.path)), fileSha256(abs(dir, copy.path))]);
     if (a !== b) return { result: "skipped", reason: "Changed since plan" };
+    // Hashing takes time: the world may have closed, or another Studio taken it, meanwhile.
+    await ctx.store.assertOwnership();
+    if (!(await unchanged(dir, keep)) || !(await unchanged(dir, copy))) return { result: "skipped", reason: "Changed since plan" };
     const tmp = `${copy.path}.tmp-${ulid()}`;
     await ctx.ledger.append({ kind: "intent", op, planId, item: ledgerItem(item, { keep: keep.path, sha256: a, paths: [copy.path, tmp] }) });
     try { await link(abs(dir, keep.path), abs(dir, tmp)); }
@@ -102,6 +109,7 @@ export async function runItem(ctx: RunContext, planId: string, item: PlannedItem
     const take = session?.takes.find(t => t.id === item.bench!.takeId);
     if (!take || take.disposition === "filed" || take.keptArtifactId) return { result: "skipped", reason: "Changed since plan" };
   }
+  await ctx.store.assertOwnership();
   await ctx.ledger.append({ kind: "intent", op, planId, item: ledgerItem(item, item.unit ? { paths: [item.unit] } : {}) });
   const moves = item.unit ? [item.unit] : item.files.map(f => f.path);
   const moved: string[] = [];
@@ -240,6 +248,9 @@ export async function recoverIntent(ctx: RunContext, line: { op: LedgerOp; planI
         if (!gone && await there(heldPath(planId, path)) && !(await there(path))) { await mkdir(dirname(abs(dir, path)), { recursive: true }); await rename(abs(dir, heldPath(planId, path)), abs(dir, path)); }
         if (gone && await there(path) && !(await there(heldPath(planId, path)))) { await mkdir(dirname(abs(dir, heldPath(planId, path))), { recursive: true }); await rename(abs(dir, path), abs(dir, heldPath(planId, path))); }
       }
+    } else if (op === "restore" && !item.sidecar && !item.bench) {
+      // An export has no record: a restore cut short finishes moving whatever is still held (Codex on PR 3052).
+      for (const path of moves) if (await there(heldPath(planId, path)) && !(await there(path))) { await mkdir(dirname(abs(dir, path)), { recursive: true }); await rename(abs(dir, heldPath(planId, path)), abs(dir, path)); }
     } else if (op === "restore") {
       if (await recordGone()) result = "undone";
       else {

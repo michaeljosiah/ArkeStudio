@@ -8,7 +8,7 @@ import {
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 import { Ledger, readLedger, unsettled, type LedgerItem, type LedgerLine } from "./ledger.js";
-import { computePlan, type Planned } from "./plan.js";
+import { computePlan, namedSince, type Planned } from "./plan.js";
 import { heldPath, recoverIntent, removeHeld, restoreItem, runItem, type RunContext } from "./run.js";
 
 export interface WorldCleanupDeps {
@@ -39,6 +39,7 @@ export class WorldCleanup {
   private plans = new Map<string, Planned>();
   private run: CleanupRun | null = null;
   private running: AbortController | null = null;
+  private execution: Promise<void> | null = null;
   private worldId: string | null = null;
   private autoTimer: NodeJS.Timeout | null = null;
 
@@ -204,11 +205,12 @@ export class WorldCleanup {
     };
     this.running = control;
     if (!auto) this.run = run;
-    void this.execute(store, run, sorted, control).finally(() => { if (this.running === control) this.running = null; });
+    this.execution = this.execute(store, run, sorted, control).catch(() => {}).finally(() => { if (this.running === control) { this.running = null; this.execution = null; } });
   }
 
   private async execute(store: WorldStore, run: CleanupRun, items: Array<Planned["items"] extends Map<string, infer T> ? T : never>, control: AbortController): Promise<void> {
     const ctx = this.context(store), stoppedClasses = new Map<CleanupClass, string>();
+    let since: Set<unknown> | null = null;
     run.availableBefore = await available(store.dir);
     await ctx.ledger.append({ kind: "plan", planId: run.planId, holdUntil: run.holdUntil, items: items.length });
     for (const item of items) {
@@ -219,6 +221,11 @@ export class WorldCleanup {
       if (store.getBundle().externalEdits.length) { run.stopped = "outside-edits"; break; }
       const stopped = stoppedClasses.get(item.view.class);
       if (stopped) { row.skipped++; reason(stopped); run.done++; continue; }
+      // Holds come after links and mixes: the census is taken again once, right before the first.
+      if (item.action === "hold") {
+        since ??= await namedSince(store.dir, this.deps.appRoot(), items, store.closingSignal).catch(() => new Set<unknown>(items));
+        if (since.has(item)) { row.skipped++; reason("In use since plan"); run.done++; continue; }
+      }
       try {
         const step = () => runItem(ctx, run.planId, item);
         const outcome = item.bench ? await this.deps.serialiseTake(`${store.worldId}/${item.bench.sessionId}/${item.bench.takeId}`, step) : await step();
@@ -249,7 +256,11 @@ export class WorldCleanup {
     return { run: this.run, running: this.running !== null, held: await heldPlans(store.dir, lines, this.now()), refusal: await this.refusal(store), autoMixes: setting?.autoMixes ?? false };
   }
 
-  stop(): void { this.running?.abort(); if (this.autoTimer) clearTimeout(this.autoTimer); this.autoTimer = null; }
+  /** Stops before the next item and waits for the one under way, so nothing moves after the world is let go (Codex on PR 3052). */
+  async stop(): Promise<void> {
+    this.running?.abort(); if (this.autoTimer) clearTimeout(this.autoTimer); this.autoTimer = null;
+    await this.execution;
+  }
 }
 
 const refusalText: Record<CleanupRefusal, string> = {

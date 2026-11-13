@@ -181,6 +181,49 @@ describe("world clean-up (SPEC-066)", () => {
     assert.equal(census.unreadable, null);
   });
 
+  it("leaves an artifact a record named after the plan was made (R-21; Codex on PR 3052)", async () => {
+    const { dir, store, ask, settle } = await world();
+    const late = await artifact(store, "late.png", randomBytes(6_000));
+    const { plan } = await ask({ op: "plan" });
+    const item = plan!.items.find(i => i.label === "late.png")!;
+    // A chapter places the picture after the sheet opened: only that record names it.
+    const bench = await openBenchSession(dir, () => new Date().toISOString(), { fresh: true, defaultModel: { provider: "fal", model: "x" } });
+    await bench!.store.append({ type: "take-filed", takeId: `tk_${ulid()}` as never, artifactId: late.id as never }, { at: new Date().toISOString() });
+    await ask({ op: "run", planId: plan!.id, items: [item.id] });
+    const status = await settle();
+    assert.equal(status.run?.classes[0]?.skipped, 1);
+    assert.deepEqual(status.run?.classes[0]?.reasons, ["In use since plan"]);
+    assert.ok(await lstat(join(dir, "artifacts", "late.png")));
+  });
+
+  it("reads no ledger line that names a path outside the world (Codex on PR 3052)", async () => {
+    const dir = await tempDir("arke-ledger-paths-");
+    const planId = `cp_${ulid()}`, at = new Date().toISOString();
+    const item = (path: string) => ({ id: "ci_1", class: "old-exports", action: "hold", label: "x", bytes: 1, paths: [path], files: [{ path, size: 1, mtimeMs: 0 }] });
+    await writeFile(join(dir, "cleanup.jsonl"), [
+      { v: 1, kind: "intent", at, op: "run", planId: "..", item: item("exports/a.mp4") },
+      { v: 1, kind: "intent", at, op: "run", planId, item: item("../other-world/world.json") },
+      { v: 1, kind: "intent", at, op: "run", planId, item: item("C:/Windows/win.ini") },
+      { v: 1, kind: "intent", at, op: "run", planId, item: item("exports/fine.mp4") },
+    ].map(line => JSON.stringify(line)).join("\n") + "\n");
+    const lines = await readLedger(dir);
+    assert.equal(lines.length, 1);
+    assert.equal(lines[0]!.kind === "intent" ? lines[0]!.item.paths[0] : null, "exports/fine.mp4");
+  });
+
+  it("finishes an export restore a crash cut short (Codex on PR 3052)", async () => {
+    const { dir, store, cleanup } = await world();
+    const planId = `cp_${ulid()}`, ledger = new Ledger(dir, () => new Date().toISOString());
+    await mkdir(join(dir, ".held", planId, "exports"), { recursive: true });
+    await writeFile(join(dir, ".held", planId, "exports", "book.zip.json"), "{}");
+    await mkdir(join(dir, "exports"), { recursive: true });
+    await writeFile(join(dir, "exports", "book.zip"), "zip");
+    await ledger.append({ kind: "intent", op: "restore", planId, item: { id: "ci_1", class: "old-exports", action: "hold", label: "Player edition", bytes: 5, paths: ["exports/book.zip", "exports/book.zip.json"], files: [{ path: "exports/book.zip", size: 3, mtimeMs: 0 }, { path: "exports/book.zip.json", size: 2, mtimeMs: 0 }] } });
+    await cleanup.opened(store);
+    assert.ok(await lstat(join(dir, "exports", "book.zip.json")), "the rest of the unit came back");
+    assert.equal(unsettled(await readLedger(dir)).length, 0);
+  });
+
   it("the ledger skips a torn last line and the next append starts on its own line (R-19)", async () => {
     const dir = await tempDir("arke-ledger-");
     await writeFile(join(dir, "cleanup.jsonl"), `${JSON.stringify({ v: 1, kind: "setting", at: new Date().toISOString(), autoMixes: true })}\n{"v":1,"kind":"inte`);
