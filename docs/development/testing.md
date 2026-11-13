@@ -1489,8 +1489,9 @@ body, not in the container it mounted into: use `dialogRoot(container)` from
 SSR tests are unaffected, since `BodyLayer` renders in place on the server.
 
 Run `node scripts/smoke-dialog-overlays.mjs` from the root with Chrome installed (or
-`ARKE_CHROME`) after changing any of them. It opens Export and Import manuscript, the Cut's export
-and keyboard sheets, the voice catalogue and the clone dialog at 390, 820, 1440 and 2560 wide,
+`ARKE_CHROME`) after changing any of them. It opens Export manuscript from Publish and Import
+manuscript from Chapters, the Cut's export and keyboard sheets, the voice catalogue and the clone
+dialog at 390, 820, 1440 and 2560 wide,
 each from a page in which every ancestor of the opener has a transform (the worst the page can
 be), and checks each layer is on the body, has no containing ancestor, is inside the window and is
 centred (a phone's sheets are full width from the bottom). `--out <dir>` keeps the screenshots and
