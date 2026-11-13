@@ -28,6 +28,17 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN RESTART EXPORT 279
+  { group: "Restart and export · turn 279", screen: "Pending harness selection · desktop detail", frame: "279a", route: "Settings / Harness", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved for issues 1695 and 1610. See the notes for implementation scope."] },
+  { group: "Restart and export · turn 279", screen: "Pending harness selection · narrow detail", frame: "279b", route: "Settings / Harness", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved for issues 1695 and 1610. See the notes for implementation scope."] },
+  { group: "Restart and export · turn 279", screen: "No complete chapter · desktop detail", frame: "279c", route: "Story / Audiobook / Export", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved for issues 1695 and 1610. See the notes for implementation scope."] },
+  { group: "Restart and export · turn 279", screen: "No complete chapter · narrow detail", frame: "279d", route: "Story / Audiobook / Export", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved for issues 1695 and 1610. See the notes for implementation scope."] },
+  // END RESTART EXPORT 279
+
+
+
+
+
   // BEGIN WORLD CLEANUP 278
   { group: "Clean up · turn 278", screen: "The way in: Studio Storage, with Held and Clean up world", frame: "278a", route: "App chrome / Studio assistant / Storage", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
   { group: "Clean up · turn 278", screen: "The plan: eight classes, two totals, problems apart", frame: "278b", route: "App chrome / Studio assistant / Storage / Clean up", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Drawn 13 November 2026 for SPEC-066 (issue 3044). Awaiting the owner. Not built."] },
@@ -1371,6 +1382,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="cut-text-277.css">
 <link rel="stylesheet" href="../packages/client/src/components/studio-assistant.css">
 <link rel="stylesheet" href="world-cleanup-278.css">
+<link rel="stylesheet" href="restart-export-279.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">

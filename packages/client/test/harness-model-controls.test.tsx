@@ -572,6 +572,9 @@ describe("live harness model controls (#1123, #1124)", () => {
     assert.match(tabs.find((tab) => tab.textContent!.includes("Claude Code"))!.textContent!, /running now/);
     assert.match(tabs.find((tab) => tab.textContent!.includes("Codex"))!.textContent!, /next restart/);
     assert.match(container.textContent!, /Selected for the next restart/);
+    assert.match(container.textContent!, /Finish active work, then quit and reopen Arke Studio/);
+    assert.match(container.textContent!, /If remote access is running, choose Quit Arke Studio in the system tray/);
+    assert.match(container.textContent!, /Closing the window only hides it. Paired devices disconnect until Arke reopens/);
     assert.match(container.textContent!, /ARKE_HARNESS selects Claude Code at launch/);
     assert.match(container.textContent!, /C:\/tools\/codex.exe/);
     assert.doesNotMatch(container.textContent!, /C:\/tools\/claude.exe/);
@@ -581,6 +584,12 @@ describe("live harness model controls (#1123, #1124)", () => {
     assert.ok(sent.some((message) => message.kind === "clear-codex-executable"));
     await press("Advanced · which model runs each writing agent");
     assert.match(container.textContent!, /models from Claude Code/, "the pending selection must not relabel the running catalog");
+    await act(async () => __setStateForTest({ ...state, app: { ...state.app,
+      harness: { ...state.app.harness!, launchOverride: undefined },
+      harnessInfo: { ...state.app.harnessInfo!, generation: "codex" },
+    } }));
+    assert.match(container.textContent!, /Runs the authoring work/);
+    assert.doesNotMatch(container.textContent!, /Finish active work|Quit Arke Studio/, "restart instructions clear only when the selected engine is running");
   });
 
 
@@ -600,6 +609,7 @@ describe("live harness model controls (#1123, #1124)", () => {
     assert.match(tab("Claude Code").textContent!, /unavailable/);
     assert.match(container.textContent!, /Harness unavailable/);
     assert.match(container.textContent!, /Claude Code could not start/);
+    assert.doesNotMatch(container.textContent!, /Finish active work|Quit Arke Studio/, "the launch failure takes precedence over restart instructions");
     assert.doesNotMatch(container.textContent!, /next restart/);
     await act(async () => __setStateForTest({ ...state, app: { ...state.app, harness: { ...state.app.harness!, engine: "codex" } } }));
     assert.match(tab("Claude Code").textContent!, /unavailable/);
