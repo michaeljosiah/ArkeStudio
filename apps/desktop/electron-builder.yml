@@ -58,6 +58,7 @@ asarUnpack:
   - "node_modules/better-sqlite3-electron/**"
   # Node's ESM worker loader and PDF font reads use real files, without virtual asar hooks.
   - "dist/story-pdf-worker.mjs"
+  - "dist/png-worker.mjs"
   - "dist/fonts/**"
   - "dist/story-pdf-licenses/**"
 extraResources:

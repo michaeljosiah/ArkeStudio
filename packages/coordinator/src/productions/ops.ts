@@ -56,7 +56,8 @@ import {
   ComicSettingsSchema,
   DEFAULT_COMIC_SETTINGS,
 } from "@arke-studio/contracts";
-import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "../references/png.js";
+import { drawScaled, solidImage, type RgbaImage } from "../references/png.js";
+import { decodePngAsync as decodePng, encodePngAsync as encodePng } from "../references/png-runner.js";
 import { posterNameFor } from "../takes/poster.js";
 import { atomicWriteFile } from "../world/atomic.js";
 import { readChanges } from "../world/change-writer.js";
@@ -1665,12 +1666,12 @@ export async function compileBoard(
     if (cell === null) continue; // an empty slot stays a gap — same discipline as the grid
     try {
       const bytes = await readFile(toExtendedLength(cell));
-      drawScaled(canvas, decodePng(Uint8Array.from(bytes)), x, y, BOARD_CELL, BOARD_CELL);
+      drawScaled(canvas, await decodePng(Uint8Array.from(bytes)), x, y, BOARD_CELL, BOARD_CELL);
     } catch {
       /* an unreadable frame stays a gap rather than failing the board */
     }
   }
-  return encodePng(canvas);
+  return await encodePng(canvas);
 }
 
 /**

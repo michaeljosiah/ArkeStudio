@@ -23,8 +23,10 @@ import { AUDIOBOOK_LOOKS_SCHEMA_VERSION } from "../world/commit.js";
 import { sha256 } from "../world/text-files.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { WorldStateStaleError, type WorldStatePrecondition, type WorldStore } from "../world/store.js";
-import { decodePng, drawScaled, encodePng, solidImage, type RgbaImage } from "./png.js";
-import { composeLocationSheet, type LocationSheetPanel } from "./location-sheet.js";
+import { drawScaled, solidImage, type RgbaImage } from "./png.js";
+import { decodePngAsync as decodePng, encodePngAsync as encodePng } from "./png-runner.js";
+import type { LocationSheetPanel } from "./location-sheet.js";
+import { composeLocationSheetAsync as composeLocationSheet } from "./png-runner.js";
 
 /**
  * Kit operations (SPEC-010): every mutation goes through the world's one commit primitive, so
@@ -414,9 +416,9 @@ async function rebuildLocationSheet(
     const bytes = await readFile(
       toExtendedLength(join(store.dir, fromPortable(`references/${sheet.id}/${view.file}`))),
     );
-    panels.push({ id: view.id, name: view.name, image: decodePng(bytes) });
+    panels.push({ id: view.id, name: view.name, image: await decodePng(bytes) });
   }
-  const composed = composeLocationSheet(panels);
+  const composed = await composeLocationSheet(panels);
   await atomicWriteFile(join(store.dir, "references", sheet.id, composed.file), Buffer.from(composed.png));
   return {
     compilation: {
@@ -746,7 +748,7 @@ export async function compileGrid(store: WorldStore, sheet: Sheet, clock: () => 
       if (tile) {
         used.add(tile.file!);
         const bytes = await readFile(toExtendedLength(join(store.dir, "references", sheet.id, tile.file!)));
-        const image = decodePng(Uint8Array.from(bytes));
+        const image = await decodePng(Uint8Array.from(bytes));
         drawScaled(canvas, image, x, y, CELL, CELL);
         placedFiles.push(tile.file!);
       }
@@ -754,7 +756,7 @@ export async function compileGrid(store: WorldStore, sheet: Sheet, clock: () => 
     }
   }
 
-  const png = encodePng(canvas);
+  const png = await encodePng(canvas);
   const file = `model-sheet-v${sheet.version}-grid.png`;
   const compilation: Compilation = {
     file,

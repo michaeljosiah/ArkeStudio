@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { AGENT_MEDIA_LIMITS, AgentMediaInventorySchema, measureAudioSignal, type AgentMediaInventory, type AudioSignal } from "@arke-studio/contracts";
 import type { MediaProcessRunner } from "../audio/media-tools.js";
-import { decodePng } from "../references/png.js";
+import { decodePngAsync as decodePng } from "../references/png-runner.js";
 import { writeSpeechWav } from "../audio/speech-wav.js";
 
 export interface AgentMediaTools {
@@ -71,7 +71,7 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
         "-fps_mode", "passthrough", "-map_metadata", "-1", "-pix_fmt", "rgba", "-threads", "1", "-c:v", "png", "-f", "image2pipe", "pipe:1"], signal, 5 * 1024 * 1024);
       const value = result.stderr.match(/\bpts_time:([+-]?[\d.]+(?:e[+-]?\d+)?)/i)?.[1], actual = value === undefined ? null : finite(value);
       if (actual === null || actual < atSec - 0.000001 || actual >= endSec) throw new Error("No timestamped frame exists inside the requested interval");
-      const image = decodePng(result.stdout, AGENT_MEDIA_LIMITS.edge ** 2);
+      const image = await decodePng(result.stdout, AGENT_MEDIA_LIMITS.edge ** 2, signal);
       return { bytes: result.stdout, width: image.width, height: image.height, sourceTimeSec: actual };
     },
     async audio(path, stream, startSec, endSec, signal) {

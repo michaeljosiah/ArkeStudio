@@ -7,6 +7,8 @@ await copyFile("../../licenses/ming-audition-MIT.txt", "dist/ming-MIT.txt");
 await build({ entryPoints: ["src/index.ts", "src/local.ts"], outdir: "dist", bundle: true, splitting: true,
   platform: "node", format: "esm", target: "node22", external: ["better-sqlite3", "yaml", "zod"],
   banner: { js: 'import { createRequire as __engineCreateRequire } from "node:module"; const require = __engineCreateRequire(import.meta.url);' } });
+await build({ entryPoints: ["../coordinator/src/references/png-worker.ts"], outfile: "dist/png-worker.mjs",
+  bundle: true, platform: "node", format: "esm", target: "node22" });
 const entries = ["index", "local"];
 const declarations = generateDtsBundle(entries.map(name => ({ filePath: `src/${name}.ts`,
   libraries: { inlinedLibraries: ["@arke-studio/contracts"] }, output: { noBanner: true, exportReferencedTypes: false } })),
