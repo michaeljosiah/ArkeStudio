@@ -34,8 +34,13 @@ import { ClipGain, MixPanel, AudioClipSettings } from "./editor-audio.js";
 import { CueInspector, SubtitleSources } from "./editor-subtitles.js";
 import { TrimStrip } from "./editor-preview.js";
 import { SourceMeasurement, measurementSubject } from "./editor-media-measurement.js";
+import { TextInspector, type TextInspectorContext } from "./editor-text-inspector.js";
 
-export type CutSelection = { kind: "picture"; id: string } | { kind: "cue"; id: string } | { kind: "effect"; id: string };
+/**
+ * What the Cut has selected. `texts` is several titles at once (SPEC-065 R-31), always two or
+ * more: one title alone is a `picture` like any clip on a Picture track.
+ */
+export type CutSelection = { kind: "picture"; id: string } | { kind: "cue"; id: string } | { kind: "effect"; id: string } | { kind: "texts"; ids: readonly string[] };
 
 function InspectorRow({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -72,6 +77,9 @@ export function CutInspector({
   sourceLength,
   nameOf,
   onScrub,
+  selectedTexts = [],
+  text,
+  playheadFrame = 0,
 }: {
   worldId: string | undefined;
   prodId: string | undefined;
@@ -104,6 +112,11 @@ export function CutInspector({
   nameOf: (artifact: ArtifactSidecar) => string;
   /** Bring the viewer to the edge a stepped or typed trim moved (issue 1036). */
   onScrub: (frame: number) => void;
+  /** The titles selected together, as the lanes draw them, when the selection is several. */
+  selectedTexts?: readonly { clip: TimelineClip; track: TimelineTrack }[];
+  /** What the text Inspector needs beyond this one: the draft, Add's focus, the refusal routing. */
+  text?: TextInspectorContext;
+  playheadFrame?: number;
 }) {
   const { compact } = useCutLayout();
   const [takesOpen, setTakesOpen] = useState(false);
@@ -208,22 +221,17 @@ export function CutInspector({
     );
   }
 
-  // A text clip shows what is true of it and no control that would refuse (SPEC-065 R-2, R-14 –
-  // R-17): no source, take, in-point or sound; a Move, a Fade and an Appearance as a still has.
-  // The words and the look arrive with the Cut's own text controls.
-  if (selectedClip && selectedTrack && selectedTrack.kind === "picture" && selectedClip.source.kind === "text" && production) {
-    return (
-      <div className={`fy-cutinspect${compact ? " fy-cutinspect--compact" : ""}`}>
-        <div className="fy-cutinspect__eyebrow">TEXT</div>
-        <h2>{selectedClip.source.label}</h2>
-        <div className="fy-cutinspect__rows">
-          <InspectorRow label="Track">{selectedTrack.name}</InspectorRow>
-        </div>
-        <PictureClipTiming clip={selectedClip} clips={selectedTrack.clips} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={false} sourceIn={false} />
-        <PictureMotionInspector key={`motion-${selectedClip.id}`} clip={selectedClip} still={transitionStill(selectedClip, artifacts)} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} resetToken={timeline?.revision} />
-        <PictureAppearanceInspector key={selectedClip.id} clip={selectedClip} frameRate={frameRate} disabled={appearanceDisabled ?? commandsDisabled} onCommands={onCommands} resetToken={appearanceRevision ?? timeline?.revision} scopeLabel={appearanceScopeLabel} />
-      </div>
-    );
+  // A title shows its words and its look, then what a still shows, and no control that would
+  // refuse (SPEC-065 R-2, R-14 – R-17, R-31): no source, take, in-point or sound. Several titles
+  // show the look they share, and a change reaches all of them at once.
+  const titles = selection?.kind === "texts"
+    ? selectedTexts.flatMap(({ clip, track }) => (clip.source.kind === "text" ? [{ clip: { ...clip, source: clip.source }, track }] : []))
+    : selectedClip && selectedTrack && selectedTrack.kind === "picture" && selectedClip.source.kind === "text"
+      ? [{ clip: { ...selectedClip, source: selectedClip.source }, track: selectedTrack }] : [];
+  if (titles.length > 0 && production && text) {
+    return <TextInspector key={titles.map(({ clip }) => clip.id).join(" ")} clips={titles} timeline={timeline} artifacts={artifacts} frameRate={frameRate}
+      disabled={commandsDisabled} appearanceDisabled={appearanceDisabled ?? commandsDisabled} appearanceRevision={appearanceRevision} appearanceScopeLabel={appearanceScopeLabel}
+      onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} playheadFrame={playheadFrame} text={text} />;
   }
 
   if ((selectedShotId || selectedClip) && production && worldId && prodId) {

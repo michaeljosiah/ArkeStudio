@@ -350,6 +350,7 @@ import {
 import { recordFrameRunOutcome } from "./productions/frame-run-outcome.js";
 import { recordCompletedExport, readCompletedExports } from "./productions/export-receipts.js";
 import { serveTextPicture, sweepTextPictures, textPicturesForExport } from "./productions/editor-text-cache.js";
+import { TextDrafts } from "./productions/editor-text-drafts.js";
 import {
   interactiveFindings,
   type BeatVoices,
@@ -4062,6 +4063,11 @@ export class Coordinator {
     return this.runMingBatch(combined => this.opts.ming!.run(command, combined), signal, waiting);
   }
   private readonly effectAnalysis: EditorEffectAnalysisService;
+  /**
+   * Titles drawn while they are typed (SPEC-065 R-32), answered to the window that asked. It holds
+   * no world: a failure is logged by its kind alone, never with the words or the look.
+   */
+  private readonly textDrafts = new TextDrafts({ failed: () => void this.appLog?.append({ kind: "editor-text.draft-failed" }) });
   private readonly effectDependencies: EditorEffectDependencies;
   /**
    * The author's plans for free-tier keys (design turn 182), paid until settings are read. The
@@ -4656,6 +4662,10 @@ export class Coordinator {
       onMessage: (msg, requester) => {
         if (this.stopping) return;
         if (msg.kind === "voice-conversation") { if (requester) this.liveConversation().handle(msg, requester); return; }
+        // A text draft is answered on the asking socket and written nowhere, so it never reaches
+        // the command path, whose failures are broadcast to every window (SPEC-065 R-32).
+        if (msg.kind === "text-draft") { if (requester) this.textDrafts.ask(msg, requester); return; }
+        if (msg.kind === "text-typefaces") { if (requester) this.textDrafts.typefaces(msg, requester); return; }
         // Private Studio transport is separate from broadcast/world command handling.
         if (msg.kind === "studio-assistant") {
           const studio = requester && this.studioConversation();
@@ -21232,6 +21242,7 @@ export class Coordinator {
     const voiceStopped = this.liveVoiceHost?.stop();
     const backgroundVoiceStopped = this.voiceBackgroundOwner?.stop();
     const studioStopped = this.studioAssistantHost?.stop();
+    this.textDrafts.stop();
     this.worldInstalls.stopAll();
     const audioStudioStopped = this.audioStudioPreviews.stop();
     this.cataloguePreviews?.close();

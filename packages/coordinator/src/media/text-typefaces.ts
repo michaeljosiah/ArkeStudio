@@ -72,6 +72,21 @@ function textFacePath(beside: URL, file: string, from: string): string {
 
 const loaded = new Map<string, TextFace>();
 
+export type TextFaceBytes = { ok: true; bytes: Buffer } | { ok: false; reason: string };
+
+/**
+ * A shipped typeface file's bytes, checked against its recorded hash. A file that is missing or
+ * changed refuses by its own name (R-21). The painter reads a face through this, and so does the
+ * Typeface menu's copy of each Regular (§2.5), so the menu never shows a face the painter refuses.
+ */
+export function readTextFaceFile(file: string, sha256: string, from: string = import.meta.url): TextFaceBytes {
+  let bytes: Buffer;
+  try { bytes = readFileSync(textFacePath(new URL("./fonts/" + file, from), file, from)); }
+  catch { return { ok: false, reason: `${file} is missing` }; }
+  if (createHash("sha256").update(bytes).digest("hex") !== sha256) return { ok: false, reason: `${file} is not the file this app shipped with` };
+  return { ok: true, bytes };
+}
+
 /**
  * A shipped typeface file, checked against its recorded hash before a glyph is read from it. A
  * file that is missing or changed refuses by its own name (R-21); nothing else is tried in its
@@ -83,11 +98,9 @@ export function loadTextFaceFile(file: string, sha256: string, name: string, fro
   const beside = new URL("./fonts/" + file, from), key = [beside.href, sha256, name].join("\n");
   const kept = loaded.get(key);
   if (kept) return { ok: true, face: kept };
-  let bytes: Buffer;
-  try { bytes = readFileSync(textFacePath(beside, file, from)); }
-  catch { return { ok: false, reason: `${file} is missing` }; }
-  if (createHash("sha256").update(bytes).digest("hex") !== sha256) return { ok: false, reason: `${file} is not the file this app shipped with` };
-  const face = textFaceFromBytes(bytes, name);
+  const read = readTextFaceFile(file, sha256, from);
+  if (!read.ok) return read;
+  const face = textFaceFromBytes(read.bytes, name);
   loaded.set(key, face);
   return { ok: true, face };
 }

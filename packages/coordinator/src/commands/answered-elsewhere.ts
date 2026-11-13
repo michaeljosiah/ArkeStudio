@@ -10,5 +10,7 @@ export function answeredElsewhereCommands() {
     hello: { scope: "none", handle() {} },
     "voice-conversation": { scope: "none", handle() {} },
     "studio-assistant": { scope: "none", handle() {} },
+    "text-draft": { scope: "none", handle() {} },
+    "text-typefaces": { scope: "none", handle() {} },
   } satisfies CommandModule;
 }

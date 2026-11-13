@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AUDIO_TRACK_KINDS, type TimelineCommand, type TimelineTrack, type TimelineTrackId } from "@arke-studio/contracts";
 import { PageSheet } from "../components/page-sheet.js";
@@ -16,8 +16,12 @@ export function cutTime(frames: number, rate: number): string {
 
 const subscribe = () => () => {};
 /** A draft stays in one React subtree when its pane becomes a sheet or is put away. */
-export function EditorSheetSlot({ sheet, open, title, onClose, children, className = "", footer }: {
+export function EditorSheetSlot({ sheet, open, title, onClose, children, className = "", footer, style, onBack }: {
   sheet: boolean; open: boolean; title: string; onClose: () => void; children: ReactNode; className?: string; footer?: ReactNode;
+  /** Where the sheet starts, when the page decides it: a title's sheet starts under the Viewer (turn 277 rule 15). */
+  style?: CSSProperties;
+  /** A page inside the sheet goes back with this (the typeface list, 277k). */
+  onBack?: () => void;
 }) {
   const client = useSyncExternalStore(subscribe, () => true, () => false);
   const host = useMemo(() => client ? document.createElement("div") : null, [client]);
@@ -28,7 +32,7 @@ export function EditorSheetSlot({ sheet, open, title, onClose, children, classNa
   }, [host, sheet]);
   return <>
     <div ref={inline} className="fy-editor-slot" hidden={sheet} />
-    <PageSheet open={sheet && open} title={title} onClose={onClose} keepMounted className={`fy-cut-sheet ${className}`} footer={footer}><div ref={node => { modal.current = node; if (node && host && sheet) { host.style.display = "contents"; node.appendChild(host); } }} className="fy-editor-sheet-content" /></PageSheet>
+    <PageSheet open={sheet && open} title={title} onClose={onClose} keepMounted className={`fy-cut-sheet ${className}`} footer={footer} style={style} onBack={onBack}><div ref={node => { modal.current = node; if (node && host && sheet) { host.style.display = "contents"; node.appendChild(host); } }} className="fy-editor-sheet-content" /></PageSheet>
     {host ? createPortal(children, host) : children}
   </>;
 }

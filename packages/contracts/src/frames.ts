@@ -93,6 +93,7 @@ import { SingleActOperationSchema, SingleActUndoSchema } from "./single-act.js";
 import { DecideConversationActionSchema, PrepareConversationTakeReviewSchema } from "./arke-actions.js";
 import { StudioAssistantCommandSchema, StudioAssistantResponseSchema, type StudioAssistantResponse } from "./studio-assistant.js";
 import { SnapshotPageSchema, type SnapshotPage } from "./snapshot-page.js";
+import { TextDraftAnswerSchema, TextDraftCommandSchema, TextTypefaceBytesSchema, TextTypefacesCommandSchema, type TextDraftAnswer, type TextTypefaceBytes } from "./editor-text-draft.js";
 
 /**
  * Coordinator transport (SPEC-001 §2.5): one `snapshot` frame then events and requester-only
@@ -120,7 +121,10 @@ export type Frame =
   | { kind: "snapshot-page"; seq: number; snapshot: number; page: SnapshotPage }
   | { kind: "event"; seq: number; event: DomainEvent }
   | { kind: "studio-assistant"; seq: number; requestId: string; response: StudioAssistantResponse }
-  | { kind: "voice-conversation"; seq: number; session: string; response: VoiceConversationResponse };
+  | { kind: "voice-conversation"; seq: number; session: string; response: VoiceConversationResponse }
+  // A text draft and the typeface files answer the window that asked and no other (SPEC-065 R-32).
+  | { kind: "text-draft"; seq: number; requestId: string; answer: TextDraftAnswer }
+  | { kind: "text-typefaces"; seq: number; requestId: string; faces: TextTypefaceBytes[] };
 
 export const FrameSchema: z.ZodType<Frame, z.ZodTypeDef, unknown> = valueSchema(z.discriminatedUnion("kind", [
   // `resume` names the collections this barrier completed, for a reconnect to present (issue 2798).
@@ -129,6 +133,8 @@ export const FrameSchema: z.ZodType<Frame, z.ZodTypeDef, unknown> = valueSchema(
   z.object({ kind: z.literal("event"), seq: z.number().int().min(1), event: DomainEventSchema }).strict(),
   z.object({ kind: z.literal("voice-conversation"), seq: z.number().int().min(1), session: z.string().uuid(), response: VoiceConversationResponseSchema }).strict(),
   z.object({ kind: z.literal("studio-assistant"), seq: z.number().int().min(1), requestId: z.string().uuid(), response: StudioAssistantResponseSchema }).strict(),
+  z.object({ kind: z.literal("text-draft"), seq: z.number().int().min(1), requestId: z.string().uuid(), answer: TextDraftAnswerSchema }).strict(),
+  z.object({ kind: z.literal("text-typefaces"), seq: z.number().int().min(1), requestId: z.string().uuid(), faces: TextTypefaceBytesSchema }).strict(),
 ]));
 
 /** What a client may send up. Commands arrive with their owning specs. */
@@ -171,6 +177,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     action: z.enum(["save", "install", "finish"]).default("save") }).strict(),
   StudioAssistantCommandSchema,
   VoiceConversationCommandSchema,
+  TextDraftCommandSchema,
+  TextTypefacesCommandSchema,
   ProductionSetupCommandSchema,
   z.object({ kind: z.literal("save-production-narrative"), worldId: UlidSchema, productionId: SlugSchema,
     requestId: UlidSchema, expectedVersion: z.number().int().min(1).nullable(), narrative: NarrativeFieldsSchema }).strict(),

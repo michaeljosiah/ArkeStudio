@@ -159,6 +159,23 @@ const fields = (optional: boolean): string[] => Object.entries(LOOK).filter(([, 
 const styles = (id: TextTypefaceId): string[] =>
   TEXT_TYPEFACE_STYLES.filter(style => TEXT_TYPEFACES[id].files[style] !== undefined).map(style => style.replace("-", " "));
 
+const bound = (schema: ZodNumber) => Object.freeze({ min: schema.minValue ?? -Infinity, max: schema.maxValue ?? Infinity });
+/**
+ * Every number a look holds, by where it sits in the look, with the bounds the record holds it to
+ * (turn 277 rule 8). Read from the schema as the guide's are, so the Inspector can neither offer a
+ * value the record would refuse nor refuse one it would keep. The Inspector shows each as a per
+ * cent; these are the record's own fractions and ems.
+ */
+export const TEXT_LOOK_BOUNDS = Object.freeze({
+  size: bound(LOOK.size), tracking: bound(LOOK.tracking), leading: bound(LOOK.leading),
+  x: bound(LOOK.x), y: bound(LOOK.y), room: bound(LOOK.room),
+  "edge.width": bound(EDGE.width),
+  "shadow.opacity": bound(SHADOW.opacity), "shadow.blur": bound(SHADOW.blur), "shadow.dx": bound(SHADOW.dx), "shadow.dy": bound(SHADOW.dy),
+  "rule.length": bound(RULE.length), "rule.weight": bound(RULE.weight), "rule.gap": bound(RULE.gap),
+  "backing.opacity": bound(BACKING.opacity),
+});
+export type TextLookNumber = keyof typeof TEXT_LOOK_BOUNDS;
+
 /** What Arke is told about titles, one ` | ` clause each, read beside the command list. */
 export const TEXT_REQUEST_GUIDE = [
   `place may carry a title: clip.source {kind: "text", label: its first line, text, look}, sourceInFrames 0, on a Picture track, with no gain, audio, role or link`,

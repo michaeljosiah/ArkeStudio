@@ -35,8 +35,8 @@ import {
   type PictureGesture,
   type TimingField,
 } from "../lib/picture-edit.js";
-import { fileKindsFromTransfer, laneTakesFiles, reorderPreview, type DroppedKind } from "../lib/clip-gesture.js";
-import { Film } from "../components/icons.js";
+import { extendsSelection, fileKindsFromTransfer, laneTakesFiles, reorderPreview, type DroppedKind } from "../lib/clip-gesture.js";
+import { Film, TypeMark } from "../components/icons.js";
 import { pointerIsTouch, startClipGesture, type GestureUpdate } from "./editor-gesture.js";
 import { cutTime, useCutLayout, useCutTouch } from "./editor-responsive.js";
 import { DropTarget, GestureChip, chipSeconds } from "./editor-marks.js";
@@ -181,8 +181,8 @@ function PictureClip({ view, slug, frameRate, style, className, children, ...res
       {children}
       {view.clip.source.kind === "text" ? (
         // Text has no poster and no footage: a Film mark here would read as a missing picture,
-        // so the chip carries its first line alone (SPEC-065 R-33).
-        <span className="fy-cutseg__tag">{view.label}</span>
+        // so the chip carries a T and its first line (SPEC-065 R-33, turn 277 rule 3).
+        <TextChip label={view.label} />
       ) : view.gap ? (
         <span className="fy-pictclip__gap">{view.label}</span>
       ) : (
@@ -198,6 +198,11 @@ function PictureClip({ view, slug, frameRate, style, className, children, ...res
   );
 }
 
+/** A text clip's face on its lane: the T and the first line, which gives way to the T alone below 64px. */
+export function TextChip({ label }: { label: string }) {
+  return <span className="fy-textclip"><TypeMark size={14} /><b>{label}</b></span>;
+}
+
 export function PictureTrack({
   production,
   artifacts,
@@ -207,6 +212,7 @@ export function PictureTrack({
   totalFrames,
   frameRate,
   selectedClipId,
+  selectedClipIds,
   onSelect,
   onCommands,
   onPreview,
@@ -232,7 +238,10 @@ export function PictureTrack({
   totalFrames: number;
   frameRate: FrameRate;
   selectedClipId: string | null;
-  onSelect: (clipId: TimelineClipId) => void;
+  /** Several titles selected together (SPEC-065 R-31): each drawn selected. */
+  selectedClipIds?: ReadonlySet<string>;
+  /** `extend` is a press with Shift, Ctrl or Cmd held, which adds a title to the selection. */
+  onSelect: (clipId: TimelineClipId, extend?: boolean) => void;
   onCommands: (commands: TimelineClipCommand[], label?: string) => void;
   onPreview: (timeline: ProductionTimeline | null) => void;
   /** Bring the viewer to a frame while an edge moves, and park it there on release (issue 1036). */
@@ -318,7 +327,9 @@ export function PictureTrack({
    */
   const begin = (clipId: TimelineClipId, gesture: PictureGesture) => (event: React.PointerEvent) => {
     if (event.button !== 0 || disabled || tool !== "select") return;
-    if (!pointerIsTouch(event)) onSelect(clipId);
+    // A press that extends the selection leaves it to the click: selecting here would collapse
+    // the selection the click is about to add to.
+    if (!pointerIsTouch(event) && !extendsSelection(event)) onSelect(clipId);
     const clip = clips.find((candidate) => candidate.id === clipId);
     const element = event.currentTarget as HTMLElement;
     const lane = element.closest<HTMLElement>(".fy-track__lane");
@@ -427,6 +438,10 @@ export function PictureTrack({
       onSelect(clipId); setMenu({ clipId, x: box.left, y: box.bottom });
       event.preventDefault(); event.stopPropagation(); return;
     }
+    // One of several selected titles has the focus (a press focuses it): its keys are the
+    // selection's, not its own. Delete goes on to the Cut, which removes every one of them in one
+    // batch as its button does; the keys that act on one clip do nothing with several marked.
+    if (selectedClipIds !== undefined && selectedClipIds.size > 1 && selectedClipIds.has(clipId)) return;
     if (key === "Delete" || key === "Backspace") act(clipId, event.shiftKey ? "ripple" : "delete");
     else if (key === "[") act(clipId, "earlier");
     else if (key === "]") act(clipId, "later");
@@ -548,7 +563,7 @@ export function PictureTrack({
         )}
         {views.map((view) => {
           const { clip } = view;
-          const selected = clip.id === selectedClipId;
+          const selected = clip.id === selectedClipId || selectedClipIds?.has(clip.id) === true;
           const isGhost = dragging && drag.gesture === "move" && clip.id === drag.clipId;
           const shift = reorder?.shifts.get(clip.id) ?? 0;
           const left = isGhost && ghostStart !== null ? ghostStart : clip.startFrame + shift;
@@ -574,14 +589,15 @@ export function PictureTrack({
               }}
               aria-pressed={selected}
               aria-label={describeClip(view, frameRate)}
-              title={describeClip(view, frameRate)}
+              // A title's tip is its first line, the words the chip may be too narrow to show (rule 3).
+              title={clip.source.kind === "text" ? view.label : describeClip(view, frameRate)}
               disabled={disabled}
               onClick={(event) => {
                 if (tool === "blade") {
                   blade(clip.id)(event);
                   return;
                 }
-                onSelect(clip.id);
+                onSelect(clip.id, extendsSelection(event));
               }}
               onPointerDown={begin(clip.id, "move")}
               onKeyDown={onClipKeyDown(clip.id)}

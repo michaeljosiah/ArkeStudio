@@ -3,7 +3,7 @@ import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 import WebSocket from "ws";
-import { ProductionTimelineSchema, storyTimelineFingerprint, textPicturePath, ulid, TEXT_PICTURE_DIR, type TextLook, type TimelineClip, type TimelineCommand } from "@arke-studio/contracts";
+import { FrameSchema, ProductionTimelineSchema, storyTimelineFingerprint, textPicturePath, ulid, TEXT_PICTURE_DIR, TEXT_TYPEFACE_IDS, type TextDraftAnswer, type TextLook, type TimelineClip, type TimelineCommand } from "@arke-studio/contracts";
 import { Coordinator } from "../src/coordinator.js";
 import { FsWorldProvider } from "../src/world/provider.js";
 import { applyHumanTimelineCommand } from "../src/productions/timeline.js";
@@ -17,7 +17,9 @@ import { makeTempRoot, WORLD_ID } from "./world/helpers.js";
  * that is not exactly a kept picture's is not found, and a picture that cannot be drawn is not
  * found either, with its reason in the log and the capability nowhere. Then the two answers the
  * socket gives a text command: a rule-out of R-2 by name, and a bound of R-26 as `invalid` (O10).
- * Last, the sweep that opening a world runs: a kept picture nothing names any more goes (§2.3).
+ * Then the sweep that opening a world runs: a kept picture nothing names any more goes (§2.3).
+ * Last, a title drawn while it is typed (R-32): asked and answered on one socket, refused like any
+ * message before the capability, bounded by the wire, and written nowhere.
  */
 
 const PRODUCTION = "saltlight", ORIGIN = "http://localhost:5173";
@@ -213,4 +215,100 @@ test("opening a world sweeps the kept pictures nothing names, and leaves everyth
     // short, go. Anything else in the folder is not the sweep's to touch.
     assert.deepEqual((await readdir(folder)).sort(), [`${named}.png`, "notes.txt"].sort());
   } finally { await coordinator.stop(); await provider.close(); }
+});
+
+const DRAFT_ID = "12345678-1234-4234-8234-123456789abc";
+const draft = (text: string, requestId = DRAFT_ID) => ({ kind: "text-draft", requestId, frame: { width: 1920, height: 1080 }, ask: { kind: "paint", item: { text, look: LOOK } } });
+const isDraft = (requestId: string) => (message: Record<string, unknown>) => message.kind === "text-draft" && message.requestId === requestId;
+/** Lets any answer that should not come have time to arrive. */
+const quiet = () => new Promise(resolve => setTimeout(resolve, 400));
+/** A frame read as the window reads it, by the frame schema: a draft's answer and its sequence. */
+function answerOf(message: Record<string, unknown>): { seq: number; answer: TextDraftAnswer } {
+  const frame = FrameSchema.parse(message);
+  assert.equal(frame.kind, "text-draft");
+  if (frame.kind !== "text-draft") throw new Error("not a draft");
+  return frame;
+}
+
+test("a draft needs the capability: asked before hello, the socket closes and nothing is answered", async t => {
+  const { port, files } = await serve(t);
+  for (const opening of [[], [{ kind: "hello", token: "b".repeat(64), lastSeq: 0 }]]) {
+    const socket = new WebSocket(`ws://127.0.0.1:${port}`, { origin: ORIGIN });
+    const messages: unknown[] = [];
+    socket.on("message", data => messages.push(JSON.parse(String(data))));
+    await new Promise<void>((resolve, reject) => { socket.once("open", () => resolve()); socket.once("error", reject); });
+    const closed = new Promise<number>(resolve => socket.once("close", code => resolve(code)));
+    for (const message of opening) socket.send(JSON.stringify(message));
+    socket.send(JSON.stringify(draft("ADE")));
+    assert.equal(await closed, 1008, opening.length ? "a wrong capability" : "no hello");
+    assert.deepEqual(messages, [], "no snapshot, no draft, no refusal naming it");
+  }
+  assert.deepEqual(await files(), [], "and nothing painted to keep");
+});
+
+test("a draft is answered on the asking socket only; another window receives nothing", async t => {
+  const { port, token } = await serve(t);
+  const asking = await connect(port, token), other = await connect(port, token);
+  t.after(() => { asking.socket.close(); other.socket.close(); });
+  asking.send(draft("Harbour lights"));
+  const frame = answerOf(await asking.until(isDraft(DRAFT_ID), "the draft"));
+  if (frame.answer.kind !== "drawn") throw new Error(`answered ${frame.answer.kind}`);
+  assert.deepEqual(frame.answer.results, [{ ok: true, drawnSize: 0.08 }]);
+  const ref = textPicturePath({ text: "Harbour lights", look: LOOK }, { width: 1920, height: 1080 });
+  assert.ok(ref.ok);
+  assert.equal(frame.answer.picture?.name, ref.name);
+  const picture = decodePng(Buffer.from(frame.answer.picture.png, "base64"));
+  assert.deepEqual([picture.width, picture.height], [1920, 1080]);
+  assert.ok(Number.isInteger(frame.seq) && frame.seq > 0, "sequenced on its own connection like any frame");
+  // The typeface files answer the window that asked for them, too.
+  other.send({ kind: "text-typefaces", requestId: DRAFT_ID });
+  const faces = FrameSchema.parse(await other.until(message => message.kind === "text-typefaces", "the faces"));
+  assert.ok(faces.kind === "text-typefaces");
+  assert.deepEqual(faces.faces.map(face => face.id), [...TEXT_TYPEFACE_IDS]);
+  await quiet();
+  assert.equal(other.messages.some(message => message.kind === "text-draft" || JSON.stringify(message).includes("Harbour lights")), false, "the other window never sees the words");
+  assert.equal(asking.messages.some(message => message.kind === "text-typefaces"), false);
+});
+
+test("a draft of 51 items is refused as invalid with its request id", async t => {
+  const { port, token } = await serve(t);
+  const client = await connect(port, token); t.after(() => client.socket.close());
+  const items = (count: number) => Array.from({ length: count }, (_, index) => ({ text: `Name ${index}`, look: LOOK }));
+  client.send({ ...draft("ADE"), ask: { kind: "measure", items: items(51) } });
+  const refused = await client.until(message => message.kind === "command-refused", "the refusal");
+  assert.deepEqual(refused, { kind: "command-refused", refused: "invalid", command: "text-draft", requestId: DRAFT_ID });
+  // Fifty is answered, which is what shows the bound and not something else refused it.
+  const fifty = "12345678-1234-4234-8234-000000000050";
+  client.send({ ...draft("ADE", fifty), ask: { kind: "measure", items: items(50) } });
+  const { answer } = answerOf(await client.until(isDraft(fifty), "fifty measured"));
+  assert.ok(answer.kind === "drawn");
+  assert.equal(answer.results.length, 50);
+  assert.equal(answer.picture, undefined);
+  assert.equal(client.messages.some(isDraft(DRAFT_ID)), false, "the refused ask was never drawn");
+});
+
+test("a draft writes nothing: no file in the world, no event, no log line", async t => {
+  const { root, port, token, timelineFile, files } = await serve(t);
+  const client = await connect(port, token); t.after(() => client.socket.close());
+  const words = "Unsaved words 7f3a", timeline = await readFile(timelineFile, "utf8");
+  const logs = async () => Promise.all(["changes.jsonl", "app.jsonl"].map(file => readFile(join(root, "logs", file), "utf8").catch(() => "")));
+  client.send(draft(words));
+  // Answered before the next ask goes: a window holds one paint at a time, so a second ask sent at
+  // once would supersede this one, nothing would be painted, and what follows would prove nothing.
+  const painted = answerOf(await client.until(isDraft(DRAFT_ID), "the draft"));
+  assert.equal(painted.answer.kind, "drawn", "the draft was painted");
+  assert.ok(painted.answer.kind === "drawn" && painted.answer.picture !== undefined && painted.answer.picture.png.length > 0, "and its picture sent to the window");
+  // Words the face cannot draw are refused the same way, and are not written either.
+  client.send(draft("Unsaved ṣ 7f3a", "12345678-1234-4234-8234-000000000002"));
+  const refused = answerOf(await client.until(isDraft("12345678-1234-4234-8234-000000000002"), "the refusal"));
+  assert.deepEqual(refused.answer, { kind: "drawn", results: [{ ok: false, reason: "Geist has no ṣ", field: "words" }] });
+  await quiet();
+  assert.deepEqual(await files(), [], "no picture is kept");
+  assert.equal(await readFile(timelineFile, "utf8"), timeline, "no revision");
+  // Read by what they carry rather than counted: an idle coordinator may still say something of its own.
+  assert.equal(client.messages.some(message => message.kind === "event" && JSON.stringify(message).includes("7f3a")), false, "no event carries the words");
+  assert.equal(client.messages.some(message => message.kind === "event" && /text-draft|command\.failed/.test(JSON.stringify(message))), false, "nor answers the draft");
+  const after = await logs();
+  assert.deepEqual(after.map(text => text.includes("7f3a")), [false, false], "neither log holds the words");
+  assert.equal(after.some(text => text.includes(token)), false);
 });

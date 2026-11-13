@@ -14,6 +14,7 @@ import {
   emitEvent, pendingQueueRequests, lastTallProgress, guideDrafting, guideDraftingListeners,
   type HostOnlyRefusal, refuseInvalidCommand, gateRequests, gateAnswers, frameRunQuoteListeners,
   frameRunStartResultListeners, remoteRefusalListeners, studioAssistantReplyListeners, voiceConversationListeners,
+  textDraftListeners, textTypefaceListeners,
 } from "./events.js";
 import { forgetDoorAsks } from "./audiobook-door.js";
 import { askWorldChatSendStatus, sendResults, foldWorldChatEvent } from "./world-chat.js";
@@ -231,6 +232,14 @@ export function handleFrame(json: string): void {
     for (const listener of studioAssistantReplyListeners) {
       try { listener(frame); } catch { /* A private panel cannot interrupt shared state folding. */ }
     }
+    return;
+  }
+  if (frame.kind === "text-draft") {
+    for (const listener of textDraftListeners) { try { listener(frame); } catch { /* A draft on screen cannot interrupt state folding. */ } }
+    return;
+  }
+  if (frame.kind === "text-typefaces") {
+    for (const listener of textTypefaceListeners) { try { listener(frame); } catch { /* A menu's faces cannot interrupt state folding. */ } }
     return;
   }
   if (frame.kind === "snapshot") {

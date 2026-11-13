@@ -117,6 +117,7 @@ export function EditorDialog({
 export const EDITOR_KEYS: ReadonlyArray<readonly [string, string]> = [
   ["S", "split at the playhead"],
   ["D", "duplicate the selected clip"],
+  ["T", "add text at the playhead"],
   ["⌫", "delete the selected clip"],
   ["⇧⌫", "ripple delete, closing the gap"],
   ["[ ]", "move the selected clip earlier or later"],
