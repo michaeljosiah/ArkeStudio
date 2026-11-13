@@ -895,7 +895,8 @@ export function PictureClipTiming({
       <TimingRow label="Duration" value={clip.durationFrames} frameRate={frameRate} disabled={disabled} onStep={trimEnd} onEnter={typed("duration", "Trim clip tail")} />
       {!sourceTimes && sourceIn && <div className="fy-cutinspect__row">
         <span>Source in</span>
-        <strong>{formatFrames(clip.sourceInFrames, frameRate)}</strong>
+        {/* The source's own time: a re-timed clip counts its in-point in frames at its speed (SPEC-037 R-37). */}
+        <strong>{formatFrames(Math.round(clip.sourceInFrames * clipSpeed(clip)), frameRate)}</strong>
       </div>}
     </div>
   );

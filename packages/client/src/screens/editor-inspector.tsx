@@ -120,6 +120,10 @@ export function CutInspector({
   playheadFrame?: number;
 }) {
   const { compact } = useCutLayout();
+  // The phone's In and Out are source times, typed as an offset from the head. A clip at another
+  // speed or backwards has no such offset (its head may be its source's end), so it keeps the
+  // timeline's own times, as the wide Inspector shows them.
+  const pictureSourceTimes = compact && !(selectedClip !== null && clipRetimed(selectedClip));
   const [takesOpen, setTakesOpen] = useState(false);
   const selectedCue =
     selection?.kind === "cue" && timeline !== null
@@ -214,7 +218,7 @@ export function CutInspector({
             </div>
           )}
         </div>
-        <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={compact} />
+        <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={pictureSourceTimes} />
         {measurement}
         {artifact?.kind === "video" && <ClipSpeedInspector key={`speed-${selectedClip.id}`} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} resetToken={timeline?.revision} />}
         <PictureMotionInspector key={`motion-${selectedClip.id}`} clip={selectedClip} still={transitionStill(selectedClip, artifacts)} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} resetToken={timeline?.revision} />
@@ -258,7 +262,7 @@ export function CutInspector({
         </div>
         {measurement}
         {selectedClip && (<>
-          <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={compact} />
+          <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={pictureSourceTimes} />
         {selectedTrack?.kind === "picture" && <ClipSpeedInspector key={`speed-${selectedClip.id}`} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} resetToken={timeline?.revision} />}
         {selectedTrack?.kind === "picture" && <PictureMotionInspector key={`motion-${selectedClip.id}`} clip={selectedClip} still={false} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} resetToken={timeline?.revision} />}
         {selectedClip && selectedTrack?.kind === "picture" && <PictureAppearanceInspector key={selectedClip.id} clip={selectedClip} frameRate={frameRate} disabled={appearanceDisabled ?? commandsDisabled} onCommands={onCommands} resetToken={appearanceRevision ?? timeline?.revision} scopeLabel={appearanceScopeLabel} />}
