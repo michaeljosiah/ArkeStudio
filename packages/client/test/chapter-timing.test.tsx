@@ -5,21 +5,19 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import {
-  initialAudioArrangement, newAudioClip,
+  initialAudioArrangement,
+  newAudioClip,
   audiobookTextHash,
   timeChapter,
   type ArtifactSidecar,
   type BlockTiming,
-  type BlockTimingInput,
   type ChapterAudiobook,
   type ChapterSummary,
   type ChapterTiming,
   type ClientMessage,
   type ClientState,
-  type TimingProposal,
-
 } from "@arke-studio/contracts";
-import { BlockTimingPanel, betweenClocks, proposedView, TimingProposalCard, TimingSide, TimingView, timingInputs, timingLanes, type TimingRowLike } from "../src/screens/chapter-timing.js";
+import { BlockTimingPanel, betweenClocks, timingInputs, type TimingRowLike } from "../src/screens/chapter-timing.js";
 import { ReactionsPanel, soundsByTab } from "../src/components/audiobook-beds.js";
 import { playerChapters } from "../src/components/audiobook-player.js";
 import { ChapterScreen } from "../src/screens/chapter-workspace.js";
@@ -31,12 +29,7 @@ import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../s
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
-/**
- * The Timing view and the block panel's timing (design turn 187a, 187c): a lane a voice in order
- * of first speaking, bars at the clock's places, an interruption hatched, a drag that writes a
- * start, a trim, a pause or plays a bar under another, the Performed lock said where a field
- * would be, and the third view in the chapter's address.
- */
+/** Shared block timing, mix clocks, Audio Studio navigation and arrangement controls. */
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1600, innerHeight: 1000 });
@@ -130,111 +123,7 @@ afterEach(async () => {
 const q = (m: Mounted, selector: string) => m.container.querySelector(selector) as HTMLElement | null;
 const all = (m: Mounted, selector: string) => [...m.container.querySelectorAll(selector)] as HTMLElement[];
 
-/** A pointer gesture: down on `target`, moved by dx/dy, up on the track. */
-async function dragBy(m: Mounted, target: HTMLElement, dx: number, dy = 0): Promise<void> {
-  const fire = (node: Element, type: string, x: number, y: number) => {
-    const event = new dom.Event(type, { bubbles: true, cancelable: true }) as unknown as Record<string, unknown>;
-    Object.assign(event, { clientX: x, clientY: y, button: 0, pointerId: 1 });
-    node.dispatchEvent(event as unknown as Event);
-  };
-  const track = q(m, ".fy-tm__track")!;
-  await act(async () => fire(target, "pointerdown", 100, 100));
-  await act(async () => fire(track, "pointermove", 100 + dx, 100 + dy));
-  await act(async () => fire(track, "pointerup", 100 + dx, 100 + dy));
-}
-
-function view(held: ChapterAudiobook, writes: Array<[string, BlockTimingInput]>, extra: { reading?: "narrator" | "performed"; selected?: string | null; onSelect?: (key: string) => void } = {}) {
-  const timing = timingOf(held, extra.reading ?? "narrator");
-  return (
-    <TimingView
-      timing={timing}
-      lanes={timingLanes(ROWS)}
-      rows={ROWS}
-      selected={extra.selected ?? null}
-      onSelect={extra.onSelect ?? (() => {})}
-      onTiming={(key, input) => writes.push([key, input])}
-      playhead={0}
-      onPlayhead={() => {}}
-      locked={false}
-    />
-  );
-}
-
-describe("the Timing view (turn 187a)", () => {
-  it("draws a lane a voice — narration, then each speaker as they first speak — and beds last", async () => {
-    const m = await render(view(record(), []));
-    assert.deepEqual(all(m, ".fy-tm__name").map((name) => name.firstChild?.textContent), ["Narration", "Tunde", "Ade", "Beds & sounds"]);
-    assert.equal(all(m, "[data-testid=timing-bar]").length, 5);
-    const bar = (key: string) => q(m, `[data-testid=timing-bar][data-key="${key}"]`)!;
-    assert.equal(bar("p1.0").style.left, `${4.4 * 40}px`, "at its place on the clock, 40 px a second");
-    assert.match(bar("p1.0").textContent ?? "", /Ade, I am telling you/);
-    assert.equal(all(m, "[data-testid=timing-overlap]").length, 0);
-  });
-
-  it("hatches an interruption and says its start on the bar", async () => {
-    const m = await render(view(record({ "p2.0": { start: -0.4 } }), []));
-    assert.equal(all(m, "[data-testid=timing-overlap]").length, 1);
-    assert.match(q(m, `[data-key="p2.0"]`)!.textContent ?? "", /starts −0\.4 s/);
-    assert.ok(q(m, `[data-key="p2.0"]`)!.className.includes("fy-tm__bar--overlap"));
-  });
-
-  it("writes a start when a bar is dragged along its lane", async () => {
-    const writes: Array<[string, BlockTimingInput]> = [];
-    const m = await render(view(record(), writes));
-    await dragBy(m, q(m, `[data-key="p2.0"]`)!, -16);
-    assert.deepEqual(writes, [["p2.0", { start: -0.4 }]]);
-  });
-
-  it("plays a bar under another when it is dropped over it in another lane", async () => {
-    const writes: Array<[string, BlockTimingInput]> = [];
-    const m = await render(view(record(), writes));
-    // Ade's p2.0 (lane 2, at 7.4 s) dragged up a lane and back 2 s onto Tunde's p1.0 (4.4–7.4 s).
-    await dragBy(m, q(m, `[data-key="p2.0"]`)!, -80, -64);
-    assert.deepEqual(writes, [["p2.0", { under: { host: "p1.0", offset: 1 } }]]);
-  });
-
-  it("trims a take by its edges and sets the pause by the grip after it", async () => {
-    const writes: Array<[string, BlockTimingInput]> = [];
-    const m = await render(view(record(), writes));
-    await dragBy(m, q(m, `[data-key="p1.0"] [data-testid=timing-head]`)!, 8);
-    await dragBy(m, q(m, `[data-key="p1.0"] [data-testid=timing-tail]`)!, -4);
-    await dragBy(m, q(m, `[data-testid=timing-gap][data-key="p1.0"]`)!, 20);
-    assert.deepEqual(writes, [["p1.0", { trim: { head: 0.2, tail: 0 } }], ["p1.0", { trim: { head: 0, tail: 0.1 } }], ["p1.0", { pauseAfter: 0.5 }]]);
-  });
-
-  it("selects the block a bar is", async () => {
-    const chosen: string[] = [];
-    const m = await render(view(record(), [], { onSelect: (key) => chosen.push(key) }));
-    await act(async () => q(m, `[data-key="p3.0"]`)!.click());
-    assert.deepEqual(chosen, ["p3.0"]);
-  });
-});
-
-describe("the side and the block panel (turn 187a, 187c)", () => {
-  it("names a negative start against the block it cuts in on, and writes the field on Enter", async () => {
-    const writes: Array<[string, BlockTimingInput]> = [];
-    const held = record({ "p2.0": { start: -0.4 } });
-    const timing = timingOf(held);
-    const bar = timing.bars.find((candidate) => candidate.key === "p2.0")!;
-    const m = await render(<TimingSide bar={bar} row={ROWS[3]!} timing={timing} rows={ROWS} onTiming={(key, input) => writes.push([key, input])} onPlayFrom={() => {}} refused={null} locked={false} />);
-    assert.match(q(m, "[data-testid=timing-side]")!.textContent ?? "", /cuts in on Tunde/);
-    assert.match(q(m, "[data-testid=timing-side]")!.textContent ?? "", /Set byyou/);
-    const field = q(m, "[data-testid=timing-pause]") as HTMLInputElement;
-    field.value = "0.3";
-    // linkedom's blur raises no focusout of its own; the commit is the blur handler.
-    await act(async () => field.dispatchEvent(new dom.Event("focusout", { bubbles: true }) as unknown as Event));
-    assert.deepEqual(writes.at(-1), ["p2.0", { pauseAfter: 0.3 }]);
-  });
-
-  it("says a grouped request's inside is the reader's under Performed", async () => {
-    const held = record({}, ["p1.0", "p2.0", "p3.0"]);
-    const timing = timingOf(held, "performed");
-    const bar = timing.bars.find((candidate) => candidate.key === "p2.0")!;
-    const m = await render(<TimingSide bar={bar} row={ROWS[3]!} timing={timing} rows={ROWS} onTiming={() => {}} onPlayFrom={() => {}} refused={null} locked={false} />);
-    assert.match(q(m, "[data-testid=timing-start-locked]")!.textContent ?? "", /the reader's/);
-    assert.match(q(m, "[data-testid=timing-pause-locked]")!.textContent ?? "", /the reader's/);
-    assert.equal(q(m, "[data-testid=timing-start]"), null);
-  });
+describe("the block timing panel (turn 187c)", () => {
 
   it("offers the cut's nudge only between two cuts of one request, and plays a block with its neighbours", async () => {
     const windows: Array<[number, number]> = [];
@@ -269,13 +158,6 @@ describe("codex on PR 1500", () => {
     assert.equal(betweenClocks(shown, mixed, p1.at - 0.5), p1.at - 0.5, "half a second into the second's pause, not at the next block");
   });
 
-  it("never drags the chapter's first block away from its start", async () => {
-    const writes: Array<[string, BlockTimingInput]> = [];
-    const m = await render(view(record(), writes));
-    await dragBy(m, q(m, `[data-key="title"]`)!, 40);
-    assert.deepEqual(writes, []);
-  });
-
   it("lands a playhead in the pause before a block not read where the mix's clock stands (codex on PR 1506)", () => {
     // p1.0 not read and set to start a second after p0.0: the mix skips it and its pause.
     const held = { ...record({ "p1.0": { start: 1 } }), takes: Object.fromEntries(Object.entries(record().takes).filter(([key]) => key !== "p1.0")) };
@@ -287,50 +169,10 @@ describe("codex on PR 1500", () => {
     assert.equal(betweenClocks(shown, mixed, p1.at + 0.5), p0.at + p0.seconds);
   });
 
-  it("clears a pause after set back to nothing with Reset (codex on PR 1506)", async () => {
-    const writes: Array<[string, BlockTimingInput]> = [];
-    const held = record({ "p2.0": { start: 0 } });
-    const timing = timingOf(held);
-    const m = await render(<TimingSide bar={timing.bars.find((bar) => bar.key === "p1.0")!} row={ROWS[2]!} timing={timing} rows={ROWS} onTiming={(key, input) => writes.push([key, input])} onPlayFrom={() => {}} refused={null} locked={false} />);
-    await act(async () => q(m, "[data-testid=timing-reset]")!.click());
-    assert.deepEqual(writes, [["p1.0", { reset: true, pauseAfter: null }]]);
-  });
-
-  it("resets the pause after a block with the block", async () => {
-    const writes: Array<[string, BlockTimingInput]> = [];
-    const held = record({ "p2.0": { start: -0.4 } });
-    const timing = timingOf(held);
-    const m = await render(<TimingSide bar={timing.bars.find((bar) => bar.key === "p1.0")!} row={ROWS[2]!} timing={timing} rows={ROWS} onTiming={(key, input) => writes.push([key, input])} onPlayFrom={() => {}} refused={null} locked={false} />);
-    await act(async () => q(m, "[data-testid=timing-reset]")!.click());
-    assert.deepEqual(writes, [["p1.0", { reset: true, pauseAfter: null }]]);
-  });
-
-  it("selects a reaction's host block when the reaction is pressed", async () => {
-    const chosen: string[] = [];
-    const held: ChapterAudiobook = { ...record(), reactions: { x1: { host: { key: "p3.0", textHash: audiobookTextHash(TEXT["p3.0"]!) }, speaker: "tunde", sound: "laughs", offset: 0.5, by: "author", at: AT } } };
-    const m = await render(view(held, [], { onSelect: (key) => chosen.push(key) }));
-    await act(async () => q(m, `[data-key="x1"]`)!.click());
-    assert.deepEqual(chosen, ["p3.0"]);
-  });
-
   it("draws a take the coordinator found gone as not read", () => {
     const { blocks } = timingInputs(ROWS, record(), ARTIFACTS, [ARTIFACTS[2]!.id]);
     assert.equal(blocks[2]!.take, undefined);
     assert.ok(blocks[1]!.take !== undefined);
-  });
-
-  it("puts a refused value back when the answer lands", async () => {
-    const held = record();
-    const timing = timingOf(held);
-    const bar = timing.bars.find((candidate) => candidate.key === "p1.0")!;
-    const side = (revision: number) => <TimingSide bar={bar} row={ROWS[2]!} timing={timing} rows={ROWS} onTiming={() => {}} onPlayFrom={() => {}} refused={null} locked={false} revision={revision} />;
-    const m = await render(side(1));
-    const field = q(m, "[data-testid=timing-trim-head]") as HTMLInputElement;
-    field.value = "2.90";
-    await act(async () => field.dispatchEvent(new dom.Event("focusout", { bubbles: true }) as unknown as Event));
-    assert.equal(field.value, "2.90");
-    await act(async () => m.root.render(side(2)));
-    assert.equal((q(m, "[data-testid=timing-trim-head]") as HTMLInputElement).value, "0.00");
   });
 });
 
@@ -365,37 +207,6 @@ describe("beds, sounds and reactions on a block (turn 187d)", () => {
     assert.match(q(m, "[data-testid=audiobook-reaction]")!.textContent ?? "", /“mm”Tunde · under · 0\.5 s · not read/);
     await act(async () => (all(m, "[data-testid=audiobook-reaction] button")[0] as HTMLElement).click());
     assert.deepEqual(writes, [["x1", null]]);
-  });
-});
-
-describe("Propose timing (turn 187b)", () => {
-  const proposal: TimingProposal = {
-    starts: { "p2.0": { start: -0.6, why: "cuts in" }, "p0.0": { start: 1, why: "heading" } },
-    reactions: [{ host: "p3.0", speaker: "tunde", sound: "laughs", offset: 0.5 }],
-    beds: [],
-    kept: 1,
-    heard: 4,
-  };
-
-  it("says what it changes and what it read, and is accepted or discarded whole", async () => {
-    const pressed: string[] = [];
-    const m = await render(<TimingProposalCard proposal={proposal} onAccept={() => pressed.push("accept")} onDiscard={() => pressed.push("discard")} refused={null} locked={false} />);
-    assert.equal(q(m, "[data-testid=timing-proposal-counts]")!.textContent, "proposed · 3 changes · 1 overlap · 1 reaction · 1 pause · 0 of yours changed · 1 kept");
-    assert.match(q(m, "[data-testid=timing-proposal]")!.textContent ?? "", /Heardword times · this machine/);
-    await act(async () => q(m, "[data-testid=timing-proposal-accept]")!.click());
-    await act(async () => q(m, "[data-testid=timing-proposal-discard]")!.click());
-    assert.deepEqual(pressed, ["accept", "discard"]);
-  });
-
-  it("draws what it moves and adds dashed, and never the author's", async () => {
-    const held = record({ "p0.0": { start: 0.2 } });
-    const { record: shown, proposed } = proposedView(held, proposal, ROWS.map((row) => row.block));
-    assert.deepEqual([...proposed].sort(), ["p2.0", "x1"]);
-    assert.equal(shown!.timing!["p0.0"]!.start, 0.2, "the author's start stands");
-    const m = await render(
-      <TimingView timing={timingOf(shown!)} lanes={timingLanes(ROWS)} rows={ROWS} selected={null} onSelect={() => {}} onTiming={() => {}} playhead={0} onPlayhead={() => {}} locked proposed={proposed} />,
-    );
-    assert.deepEqual(all(m, ".fy-tm__bar--proposed").map((bar) => bar.dataset["key"]).sort(), ["p2.0", "x1"]);
   });
 });
 
@@ -484,7 +295,7 @@ describe("Audio Studio composes the existing editor around chapter timing", () =
     assert.equal(input.value, "0.7");
   });
 
-  it("plays through the chapter mixer callbacks and does not audition an unaccepted timing proposal", async () => {
+  it("plays through the chapter mixer callbacks and holds playback during arrangement review", async () => {
     const plays: number[] = [];
     const m = await render(studio({ onPlay: at => plays.push(at) }));
     await act(async () => q(m, '[aria-label="Play"]')!.click());
