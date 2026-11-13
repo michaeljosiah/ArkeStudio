@@ -24,7 +24,7 @@ if(master.includes('id="t279"')) master=master.replace(/<section class="dv-turn"
 else master=master.replace('<section class="dv-turn" id="t278">',turn+'<section class="dv-turn" id="t278">');
 write("Arke Studio.dc.html",master);
 let review=read("build-review.mjs").replace(/\n  \/\/ BEGIN RESTART EXPORT 279[\s\S]*?  \/\/ END RESTART EXPORT 279\n/g,"\n");
-review=review.replace("const SCREENS = [", "const SCREENS = [\n  // BEGIN RESTART EXPORT 279\n"+frames.map(f=>`  { group: "Restart and export · turn 279", screen: ${JSON.stringify(f.title)}, frame: "${f.id}", route: ${JSON.stringify(f.route)}, status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved for issues 1695 and 1610. See the notes for implementation scope."] },`).join("\n")+"\n  // END RESTART EXPORT 279\n");
+review=review.replace("const SCREENS = [", "const SCREENS = [\n  // BEGIN RESTART EXPORT 279\n"+frames.map(f=>`  { group: "Restart and export · turn 279", screen: ${JSON.stringify(f.title)}, frame: "${f.id}", route: ${JSON.stringify(f.route)}, status: "built", checked: "2026-11-13", controls: [], notes: ["Approved copy implemented for issues 1695 and 1610 in the existing Settings and export layouts. These drawings show the changed details only."] },`).join("\n")+"\n  // END RESTART EXPORT 279\n");
 if (!review.includes(styles)) review=review.replace('<link rel="stylesheet" href="${TOKENS}/fonts.css">', styles+'\n<link rel="stylesheet" href="${TOKENS}/fonts.css">');
 write("build-review.mjs",review);
 console.log("Turn 279: four HTML detail drawings approved by the owner.");

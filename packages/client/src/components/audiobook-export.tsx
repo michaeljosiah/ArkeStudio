@@ -85,7 +85,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
   const [wordTimingReady, setWordTimingReady] = useState(false);
   const highlights = options.captionStyle === "word" && (options.subtitles === "burn-in" || options.subtitles === "burn-in+sidecar");
   const state = useVideoState(worldId, production.meta.id, options, connection === "open" && kind === "video", again);
-  const quote = videoQuote(state, options);
+  const quote = plan === null || planRefused !== null ? null : videoQuote(state, options);
   useEffect(() => {
     const offPlan = subscribeAudiobookListening((answer) => {
       if (answer.requestId !== asked.current) return;
@@ -185,13 +185,14 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
   };
   const folder = result?.ok === true ? result.dir.slice("exports/".length) : null;
   const whole = plan === null ? [] : wholeChapters(plan);
+  const noCompleteChapters = plan !== null && planRefused === null && whole.length === 0;
   const incomplete = scope.kind === "chapter" && plan !== null && whole.length !== 1;
   const omitted = scope.kind === "book" ? (plan?.chapters.filter((chapter) => chapter.state !== "read" || chapter.blocks.length === 0) ?? []) : [];
   const missing = plan?.chapters.flatMap((chapter) => chapter.gaps.flatMap((gap) => Array.from({ length: gap.to - gap.from + 1 }, (_, index) => gap.from + index))) ?? [];
   const length = whole.reduce((sum, chapter) => sum + chapter.seconds, 0);
   const finished = kind === "video" && video?.ok === true ? video : null;
   const progress = held?.status === "running" ? Math.round(held.percent) : null;
-  const renderable = connection === "open" && quote !== null && !quote.empty && rendering === null && !incomplete && plan !== null && planRefused === null && (state?.blockers?.length ?? 0) === 0 && (!highlights || wordTimingReady);
+  const renderable = connection === "open" && quote !== null && !quote.empty && rendering === null && !incomplete && !noCompleteChapters && plan !== null && planRefused === null && (state?.blockers?.length ?? 0) === 0 && (!highlights || wordTimingReady);
   const sub = finished !== null ? `video · ${finished.made === 0 ? "nothing changed · " : ""}rendered ${stamp(finished.renderedAt)}` : plan === null ? "…" : `${whole.length} of ${plan.chapters.length} chapter${plan.chapters.length === 1 ? "" : "s"} read · ${clockTime(length)}`;
   const blockers = kind === "video" ? (video?.ok === false ? video.blockers : state?.blockers ?? []) : [];
   const selectScope = (kind: AudiobookScope["kind"]) => {
@@ -225,7 +226,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
     <>
       {planRefused !== null && <div className="fy-abv-warn" role="status">{planRefused}</div>}
       {incomplete && <div className="fy-abv-scope-notice" role="status" data-testid="audiobook-export-incomplete">
-        <b>Finish reading this chapter</b>
+        <b>{kind === "video" ? "Read this chapter in full to render a video." : "Finish reading this chapter"}</b>
         <span>{missing.length > 0 ? `${missing.length} block${missing.length === 1 ? " still needs" : "s still need"} a take. Export needs the whole chapter.` : "The chapter needs a complete saved reading."}</span>
         {onReadRemaining !== undefined && missing.length > 0 && <button type="button" className="fy-abv-btn" disabled={connection !== "open"} onClick={() => onReadRemaining(missing)}>Read remaining blocks…</button>}
       </div>}
@@ -319,8 +320,8 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
   );
   const estimate = (onMachine: boolean): ReactNode => (
     <div className="fy-abv-est" data-testid="audiobook-video-estimate">
-      <b>{quote === null ? "…" : `${quote.price}${onMachine && !quote.price.endsWith("already rendered") ? " on this machine" : ""}`}</b>
-      <span className="m">{progress !== null && held?.video !== undefined ? `rendering · ${progress}%` : remote ? "renders on the desktop" : (quote?.meta ?? "")}</span>
+      <b>{noCompleteChapters ? "Read a chapter in full to render a video." : quote === null ? "…" : `${quote.price}${onMachine && !quote.price.endsWith("already rendered") ? " on this machine" : ""}`}</b>
+      {!noCompleteChapters && <span className="m">{progress !== null && held?.video !== undefined ? `rendering · ${progress}%` : remote ? "renders on the desktop" : (quote?.meta ?? "")}</span>}
     </div>
   );
 
@@ -334,7 +335,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
       <div className="fy-abv-foot">
         <span className="grow" />
         <button type="button" className="fy-abv-btn" onClick={phone && highlights && !wordTimingReady ? () => choose({ ...options, captionStyle: "phrases" }) : onClose}>{phone && highlights && !wordTimingReady ? "Use phrases" : "Cancel"}</button>
-        <button type="button" className="fy-abv-btn pri" disabled={!renderable} onClick={render} data-testid="audiobook-video-render">{incomplete ? "Render video" : highlights && !wordTimingReady ? "Prepare timing first" : quote?.press ?? "Render video"}</button>
+        <button type="button" className="fy-abv-btn pri" disabled={!renderable} onClick={render} data-testid="audiobook-video-render">{incomplete || noCompleteChapters ? "Render video" : highlights && !wordTimingReady ? "Prepare timing first" : quote?.press ?? "Render video"}</button>
       </div>
     </div>
   );
@@ -439,7 +440,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
             ) : (
               <>
                 {!incomplete && <div className="fy-abv-exportcols"><div className="fy-abv-opts">
-                  <VideoOptionRows options={options} setOptions={choose} plan={plan} split={quote?.split ?? "…"} onShape={shape} />
+                  <VideoOptionRows options={options} setOptions={choose} plan={plan} split={noCompleteChapters ? "" : quote?.split ?? "…"} onShape={shape} />
                   {timingControl}<p className="fy-abv-note">Sidecar captions remain plain text.</p>
                 </div><aside>{framePreview}{estimate(true)}</aside></div>}
                 {blockers.map((blocker) => <div key={blocker} className="fy-abv-warn">{blocker}</div>)}
