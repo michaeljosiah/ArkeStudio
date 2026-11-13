@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { initStore } from "../lib/store.js";
 import { prepareRemoteSession, remoteFetch, RemoteBrowserError, withBrowserKey } from "../lib/remote-session.js";
-import { CloudWay, LaunchFoot, LaunchFrame, remoteStudio } from "../screens/launch.js";
+import { LaunchFrame, remoteStudio } from "../screens/launch.js";
 import { Laptop, Unplug } from "./icons.js";
 
 /** The clean bookmark loads this gate before any world data. Authentication stays in an
@@ -244,7 +244,7 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
         ) : (
           <>
             <h1>Welcome back</h1>
-            <p>Choose how you’d like to sign in.</p>
+            <p>Connect to your studio.</p>
           </>
         )}
       </div>
@@ -255,9 +255,7 @@ export function RemoteEntry({ children }: { children: ReactNode }) {
           <p className="fy-launch__body"><span className="fy-launch__host">{host ?? "this studio"}</span></p>
           {body}
         </section>
-        <CloudWay />
       </div>
-      <LaunchFoot />
     </LaunchFrame>
   );
 }

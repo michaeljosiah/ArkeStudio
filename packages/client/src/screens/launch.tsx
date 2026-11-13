@@ -4,7 +4,7 @@ import { LOCAL_AI_RUNTIMES, type ComponentHealth } from "@arke-studio/contracts"
 import { isRemoteSession } from "../lib/remote-session.js";
 import type { StartupState } from "../arke-bridge.js";
 import { SetupTransferControl } from "../components/setup-transfer-control.js";
-import { ArrowRight, Check, CircleAlert, Cloud, Laptop, LinkOff, Unplug } from "../components/icons.js";
+import { ArrowRight, Check, CircleAlert, Laptop, LinkOff, Unplug } from "../components/icons.js";
 import { reconnectNow, refreshComfyUi, refreshOllama, restartComfyUi, setupRetry, useEnvCheck, useSetup, useStore } from "../lib/store.js";
 
 /**
@@ -67,23 +67,23 @@ function dataSaver(): boolean {
 function setupSteps(
   connection: string,
   state: ReturnType<typeof useStore>["state"],
-  envChecked: boolean,
-): Array<{ label: string; state: string; settled: boolean }> {
-  const outcome = (health: ComponentHealth | undefined): { state: string; settled: boolean } => {
-    if (!health || health.status === "starting") return { state: "starting…", settled: false };
-    if (health.status === "healthy") return { state: "ready", settled: true };
-    return { state: health.reason ?? health.status, settled: true };
+  env: ReturnType<typeof useEnvCheck>,
+): Array<{ label: string; state: string; settled: boolean; passed: boolean }> {
+  const outcome = (health: ComponentHealth | undefined): { state: string; settled: boolean; passed: boolean } => {
+    if (!health || health.status === "starting") return { state: "starting…", settled: false, passed: false };
+    if (health.status === "healthy") return { state: "ready", settled: true, passed: true };
+    return { state: health.reason ?? health.status, settled: true, passed: false };
   };
   return [
     {
       label: "Studio core",
       ...(connection === "open" && state !== null
-        ? { state: "ready", settled: true }
-        : { state: (connection === "closed" || connection === "auth-refused") ? "retrying…" : "starting…", settled: false }),
+        ? { state: "ready", settled: true, passed: true }
+        : { state: (connection === "closed" || connection === "auth-refused") ? "retrying…" : "starting…", settled: false, passed: false }),
     },
     {
       label: "Your data folder",
-      ...(envChecked ? { state: "checked", settled: true } : { state: "checking…", settled: false }),
+      ...(env ? { state: env.pathBudgetOk && env.nativeIndexOk ? "checked" : "needs attention", settled: true, passed: env.pathBudgetOk && env.nativeIndexOk } : { state: "checking…", settled: false, passed: false }),
     },
     { label: "Authoring (OpenCode)", ...outcome(state?.app.health.harness) },
     { label: "Local voice (Voxa)", ...outcome(state?.app.health.voice) },
@@ -167,22 +167,6 @@ function Wordmark() {
   );
 }
 
-/** Named, not offered: present at reduced strength, and nothing on it can be pressed. */
-export function CloudWay() {
-  return (
-    <section className="fy-launch__way fy-launch__way--soon">
-      <span className="fy-launch__icon" aria-hidden><Cloud size={52} stroke={1.25} /></span>
-      <h2 className="fy-launch__title">Cloud Login</h2>
-      <span className="fy-launch__soon">Soon</span>
-      <p className="fy-launch__body">
-        <span className="fy-launch__body--long">Sign in to Arke Studio Cloud<br />to access your worlds anywhere.</span>
-        <span className="fy-launch__body--short">Your worlds, anywhere.</span>
-      </p>
-      <button type="button" className="fy-launch__action fy-launch__action--off" disabled>Coming soon</button>
-    </section>
-  );
-}
-
 export function StartupScreen() {
   const { connection, state } = useStore();
   const navigate = useNavigate();
@@ -229,9 +213,9 @@ export function StartupScreen() {
     const check = setup.localAi?.engines[id as keyof typeof LOCAL_AI_RUNTIMES];
     return { label: id === "comfyui" ? "ComfyUI" : "Ollama",
       state: check?.installed && check.healthy ? "ready" : check?.detail ?? "Waiting for runtime checks.",
-      settled: check?.installed === true && check.healthy };
+      settled: check?.installed === true && check.healthy, passed: check?.installed === true && check.healthy };
   });
-  const steps = [...setupSteps(connection, state, env !== null), ...runtimeSteps];
+  const steps = [...setupSteps(connection, state, env), ...runtimeSteps];
   const components = setup?.components ?? [];
 
   // Readiness checks plus work still in flight. Unselected/settled catalogue entries are
@@ -252,7 +236,7 @@ export function StartupScreen() {
     ? `${active.state === "installing" ? "installing" : active.state === "paused" ? "paused" : "downloading"} ${active.displayName.toLowerCase()}`
     : outstanding
       ? `checking ${outstanding.label.toLowerCase()}`
-      : "everything ready";
+      : steps.some(s => !s.passed) ? "checks need attention" : "everything ready";
 
   // Bytes and time remaining, only while there is something to measure.
   // This line names the active component, so its meter and ETA describe that transfer only.
@@ -376,8 +360,8 @@ export function StartupScreen() {
               <ul className="fy-launch__steps">
                 {steps.map((step) => (
                   <li key={step.label}>
-                    <i className={`fy-launch__dot ${step.settled ? "fy-launch__dot--ok" : "fy-launch__dot--run"}`} aria-hidden>
-                      {step.settled && <Check size={12} />}
+                    <i className={`fy-launch__dot ${step.passed ? "fy-launch__dot--ok" : step.settled ? "" : "fy-launch__dot--run"}`} aria-hidden>
+                      {step.passed ? <Check size={12} /> : step.settled ? <CircleAlert size={12} /> : null}
                     </i>
                     {step.label}
                     <span>{step.state}</span>
@@ -424,39 +408,28 @@ export function StartupScreen() {
         ) : (
           <>
             <div className="fy-launch__hello">
-              <h1>Welcome back</h1>
-              <p>Choose how you’d like to sign in.</p>
+              <h1>{state?.app.onboarding?.plan.step === "done" ? "Welcome back" : "Welcome"}</h1>
+              <p>{remote !== null ? "Connect to your studio." : "Your studio is on this device."}</p>
             </div>
             <div className="fy-launch__ways">
               <section className="fy-launch__way fy-launch__way--local">
                 <span className="fy-launch__icon" aria-hidden><Laptop size={52} stroke={1.25} /></span>
-                <h2 className="fy-launch__title">{remote !== null ? "Your studio" : "Local Login"}</h2>
+                <h2 className="fy-launch__title">Your studio</h2>
                 {!failed && <p className="fy-launch__body">
                   {remote !== null ? (
                     <span className="fy-launch__host">{remote}</span>
                   ) : (
                     <>
-                      <span className="fy-launch__body--long">Access your local Arke Studio<br />installation on this device.</span>
-                      <span className="fy-launch__body--short">Your Arke Studio on this device.</span>
+                      <span className="fy-launch__body--long">Write, build worlds and use your own media.<br />No Arke account needed.</span>
+                      <span className="fy-launch__body--short">Write, build worlds and use your own media. No Arke account needed.</span>
                     </>
                   )}
                 </p>}
                 {action}
               </section>
-              <CloudWay />
             </div>
-            <LaunchFoot />
           </>
         )}
     </LaunchFrame>
-  );
-}
-
-/** Inert with Cloud: both come alive together when Arke Cloud ships. */
-export function LaunchFoot() {
-  return (
-    <p className="fy-launch__foot" aria-disabled>
-      Don’t have an account?<span>Create account</span>
-    </p>
   );
 }

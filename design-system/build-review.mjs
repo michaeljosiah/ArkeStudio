@@ -28,6 +28,19 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN FIRST RUN DECISIONS CHAT 280
+  { group: "First run, decisions and chat · turn 280", screen: "Launch · first visit · narrow detail", frame: "280a", route: "Launch", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved detail drawing. Retain the surrounding application layout and existing controls; see the notes for durable reply and action-guide rules."] },
+  { group: "First run, decisions and chat · turn 280", screen: "Launch · first visit · desktop detail", frame: "280aw", route: "Launch", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved detail drawing. Retain the surrounding application layout and existing controls; see the notes for durable reply and action-guide rules."] },
+  { group: "First run, decisions and chat · turn 280", screen: "Setup · one primary action and visible warning · narrow detail", frame: "280b", route: "Setup / Review", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved detail drawing. Retain the surrounding application layout and existing controls; see the notes for durable reply and action-guide rules."] },
+  { group: "First run, decisions and chat · turn 280", screen: "Setup · one primary action and visible warning · desktop detail", frame: "280bw", route: "Setup / Review", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved detail drawing. Retain the surrounding application layout and existing controls; see the notes for durable reply and action-guide rules."] },
+  { group: "First run, decisions and chat · turn 280", screen: "Episodes · review the decision in place · narrow detail", frame: "280c", route: "Production / Episodes", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved detail drawing. Retain the surrounding application layout and existing controls; see the notes for durable reply and action-guide rules."] },
+  { group: "First run, decisions and chat · turn 280", screen: "Episodes · review the decision in place · desktop detail", frame: "280cw", route: "Production / Episodes", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved detail drawing. Retain the surrounding application layout and existing controls; see the notes for durable reply and action-guide rules."] },
+  { group: "First run, decisions and chat · turn 280", screen: "Chat · saved reply, action preparing · narrow detail", frame: "280d", route: "Production / Conversation", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved detail drawing. Retain the surrounding application layout and existing controls; see the notes for durable reply and action-guide rules."] },
+  { group: "First run, decisions and chat · turn 280", screen: "Chat · saved reply, action preparing · desktop detail", frame: "280dw", route: "Production / Conversation", status: "drawn", checked: "2026-11-13", controls: [], notes: ["Approved detail drawing. Retain the surrounding application layout and existing controls; see the notes for durable reply and action-guide rules."] },
+  // END FIRST RUN DECISIONS CHAT 280
+
+
+
   // BEGIN RESTART EXPORT 279
   { group: "Restart and export · turn 279", screen: "Pending harness selection · desktop detail", frame: "279a", route: "Settings / Harness", status: "built", checked: "2026-11-13", controls: [], notes: ["Approved copy implemented for issues 1695 and 1610 in the existing Settings and export layouts. These drawings show the changed details only."] },
   { group: "Restart and export · turn 279", screen: "Pending harness selection · narrow detail", frame: "279b", route: "Settings / Harness", status: "built", checked: "2026-11-13", controls: [], notes: ["Approved copy implemented for issues 1695 and 1610 in the existing Settings and export layouts. These drawings show the changed details only."] },
@@ -1384,6 +1397,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="../packages/client/src/components/studio-assistant.css">
 <link rel="stylesheet" href="world-cleanup-278.css">
 <link rel="stylesheet" href="restart-export-279.css">
+<link rel="stylesheet" href="first-run-decisions-chat-280.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">

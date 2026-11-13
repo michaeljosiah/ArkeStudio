@@ -4,6 +4,7 @@ import { NEW_ONBOARDING, componentIsSettled, harnessModelReference, onboardingCo
   onboardingWritingModels, onboardingWritingReadiness, type OnboardingPlan } from "@arke-studio/contracts";
 import { ArrowRight, Check, Cloud, Cpu, Folder, Laptop, Mic, Sliders, TriangleAlert } from "../components/icons.js";
 import { LaunchFrame } from "./launch.js";
+import { EnvironmentWarnings } from "../components/environment-warnings.js";
 import { VendorSignInRow } from "./settings.js";
 import { checkOnboarding, saveOnboarding, useStore, subscribeCommandFailures,
   refreshVendorAuth, listHarnessModels, chooseClaudeExecutable, chooseCodexExecutable,
@@ -38,6 +39,7 @@ export function OnboardingScreen() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const finishing = useRef(false);
+  const startAfterInstall = useRef(false);
   const expectedPlan = useRef<string | null>(null);
   const panel = useRef<HTMLDivElement>(null);
   const [ollamaUrl, setOllamaAddress] = useState("http://127.0.0.1:11434");
@@ -49,6 +51,9 @@ export function OnboardingScreen() {
   }, [connection, state]);
   useEffect(() => subscribeCommandFailures(event => {
     if (["save-onboarding", "check-onboarding", "set-agent-config", "set-ollama-url", "set-comfyui-url"].includes(event.command)) {
+      if (startAfterInstall.current) setPlan(current => ({ ...current, step: "review" }));
+      startAfterInstall.current = false;
+      expectedPlan.current = null;
       setError(event.reason); setPending(false); finishing.current = false;
     }
   }), []);
@@ -56,7 +61,16 @@ export function OnboardingScreen() {
     if (!saved) return;
     if (!restored.current) { restored.current = true; setPlan(saved.plan.step === "done" ? { ...NEW_ONBOARDING } : saved.plan); }
     if (finishing.current && saved.plan.step === "done") { navigate("/worlds", { replace: true }); return; }
-    if (expectedPlan.current === JSON.stringify(saved.plan)) { setPlan(saved.plan); setPending(false); expectedPlan.current = null; }
+    if (expectedPlan.current === JSON.stringify(saved.plan)) {
+      setPlan(saved.plan);
+      if (startAfterInstall.current) {
+        startAfterInstall.current = false;
+        const done = { ...saved.plan, step: "done" as const };
+        expectedPlan.current = JSON.stringify(done);
+        finishing.current = true;
+        saveOnboarding(done, "finish");
+      } else { setPending(false); expectedPlan.current = null; }
+    }
   }, [saved]);
   useEffect(() => { panel.current?.querySelector<HTMLElement>("h2")?.focus(); }, [plan.step]);
   const app = state?.app;
@@ -111,10 +125,10 @@ export function OnboardingScreen() {
     try { const result = await desktop?.chooseWorkspaceFolder?.(); if (result?.reason) setError(result.reason); }
     catch { setError("The folder chooser could not complete. Your current folder is unchanged."); }
   };
-  const location = <div className="ij-location"><Folder size={18} /><div><strong>Your Arke folder</strong>
+  const location = <><div className="ij-location"><Folder size={18} /><div><strong>Your Arke folder</strong>
     <span>{saved?.workspace?.path ?? "Checking your workspace…"}{app?.runtime?.probes.diskFreeMb != null ? ` · ${size(app.runtime.probes.diskFreeMb)} free` : ""}</span>
     {saved?.workspace?.detail && <span role="alert">{saved.workspace.detail}</span>}</div>
-    <Action onClick={() => { void changeFolder(); }} disabled={pending || !desktop?.chooseWorkspaceFolder}>Change folder</Action></div>;
+    <Action onClick={() => { void changeFolder(); }} disabled={pending || !desktop?.chooseWorkspaceFolder}>Change folder</Action></div><EnvironmentWarnings /></>;
   const back = (step: OnboardingPlan["step"]) => <Action onClick={() => update({ step })} disabled={pending}>Back</Action>;
   const enter = <Action primary disabled={pending || !connected || !saved?.workspace?.ready} onClick={() => update({}, "finish")}>Start using Arke</Action>;
   let body: ReactNode;
@@ -212,9 +226,10 @@ export function OnboardingScreen() {
     <p className="ij-note">Only missing selected files count. Setup checks each actual destination before downloading. These catalogue estimates do not guarantee the final installed size.</p>
     {missing.some(c => c.blockedBy === "disk") && <p className="ij-note">Some selected downloads need more space. Their destination and required space are shown below. You can change the selection or start writing while you make room.</p>}
     <details><summary>{advanced ? "Dependencies and destinations" : "Download details"}</summary>{selected.map(c => <Row key={c.id} title={c.displayName} detail={c.installLocation ?? "Managed by the selected service"} state={componentIsSettled(c.state) ? "Already here" : size(c.sizeMb)} />)}</details>
-    <div className="ij-actions">{back(advanced ? "capabilities" : "writing")}<Action onClick={recheck}>Check again</Action>
-      {selected.length > 0 && <Action primary disabled={pending || !saved?.workspace?.ready} onClick={() => update({}, "install")}>{advanced ? "Install selected" : "Set up these tools"}</Action>}</div>
-    <div className="ij-actions">{enter}</div>
+    {missing.length > 0 && <p className="ij-note">Downloads continue while you work. Follow their progress in Settings.</p>}
+    <div className="ij-actions">{back(advanced ? "capabilities" : "writing")}<Action disabled={pending} onClick={recheck}>Check again</Action>
+      {missing.length > 0 ? <><Action disabled={pending || !connected || !saved?.workspace?.ready} onClick={() => update({}, "finish")}>Skip downloads</Action>
+        <Action primary disabled={pending || !connected || !saved?.workspace?.ready} onClick={() => { startAfterInstall.current = true; update({}, "install"); }}>Set up and start</Action></> : enter}</div>
   </>;
   else if (plan.step === "progress") {
     const needsAttention = missing.some(c => ["paused", "failed", "blocked"].includes(c.state));
@@ -238,7 +253,7 @@ export function OnboardingScreen() {
     {app?.sampleWorld.available && <Row title="Sample world" detail={app.sampleWorld.download ? "Explore the optional story download later." : "Explore the sample included with this build."} state={app.sampleWorld.download ? "Optional" : "Included"} />}
     <div className="ij-facts"><div><span>Extra downloads</span><strong>None</strong></div><div><span>Account needed</span><strong>No</strong></div></div>
     <p className="ij-note">Write and organise without an account or internet connection. Add AI help whenever you want it.</p>
-    {!saved?.workspace?.ready && <>{location}<Action onClick={recheck}>Check workspace again</Action></>}
+    {!saved?.workspace?.ready ? <>{location}<Action onClick={recheck}>Check workspace again</Action></> : <EnvironmentWarnings />}
     <div className="ij-actions"><Action onClick={() => update({ writing: "account", harness: "opencode", step: "accounts" })}>Set up an AI writing agent</Action>
       {detected.length > 0 && <Action onClick={() => update({ step: "assistant" })}>Use an existing assistant</Action>}</div>
     <div className="ij-actions">{back("choose")}{enter}</div>

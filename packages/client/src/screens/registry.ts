@@ -20,7 +20,6 @@ export const SCREENS: ScreenEntry[] = [
 
   { id: "startup", samplePath: "/" },
   { id: "onboarding", samplePath: "/setup" },
-  { id: "first-run", samplePath: "/first-run" },
   { id: "world-picker", samplePath: "/worlds" },
   { id: "publications", samplePath: "/publications" },
   { id: "new-world", samplePath: "/worlds/new" },

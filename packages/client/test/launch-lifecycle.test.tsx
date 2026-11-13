@@ -45,6 +45,38 @@ it("accepts Continue before the snapshot, holds the press, then enters the ready
   } finally { await unmount(); }
 });
 
+it("greets a new studio truthfully and reserves Welcome back for completed setup (#2790)", async () => {
+  const { element, unmount } = await mount();
+  try {
+    assert.equal(element.querySelector(".fy-launch__hello h1")?.textContent, "Welcome");
+    assert.doesNotMatch(element.textContent!, /Cloud Login|Create account|Coming soon/);
+    const state = structuredClone(FIXTURE_STATE);
+    state.app.onboarding = { plan: { version: 1, persona: "lightweight", step: "done", writing: "none", harness: "opencode", account: null, modelId: null, voice: false, media: false }, workspace: null, localModel: null };
+    await act(async () => { __setStateForTest(state); await flush(); });
+    assert.equal(element.querySelector(".fy-launch__hello h1")?.textContent, "Welcome back");
+  } finally { await unmount(); }
+});
+
+it("does not draw failed startup checks as passed (#2790)", async () => {
+  const state = structuredClone(FIXTURE_STATE);
+  state.app.env = { pathBudgetOk: false, pathBudgetDetail: "Folder too deep", nativeIndexOk: true, nativeIndexDetail: null, diskFreeMb: 100000 };
+  state.app.health.harness = { status: "unavailable", reason: "Offline" };
+  state.app.setup = { running: true, diskFreeMb: 100000, diskCheckedAt: null, components: [{
+    id: "tts-kokoro-82m", displayName: "Voice", purpose: "Read aloud", sizeMb: 88, installLocation: "models", state: "downloading", bytesDone: 1, bytesTotal: 100, bytesPerSecond: null, pauseSupported: false,
+  }] };
+  __setStateForTest(state);
+  const { element, unmount } = await mount();
+  try {
+    await act(async () => { element.querySelector<HTMLButtonElement>(".fy-launch__action")!.click(); await flush(); });
+    for (const label of ["Your data folder", "Authoring"]) {
+      const row = [...element.querySelectorAll(".fy-launch__steps li")].find(li => li.textContent?.includes(label));
+      assert.ok(row);
+      assert.equal(row.querySelector(".fy-launch__dot--ok"), null);
+    }
+    assert.match(element.textContent!, /needs attention/);
+  } finally { await unmount(); }
+});
+
 for (const componentState of ["queued", "downloading", "paused", "installing"] as const) {
   it("keeps " + componentState + " setup on the surface until settled", async () => {
     const state = structuredClone(FIXTURE_STATE);
