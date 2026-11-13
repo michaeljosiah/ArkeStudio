@@ -2,7 +2,7 @@ import { GlobalChatProvider } from "./components/global-chat.js";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { Suspense, useEffect, useRef } from "react";
 import { isSettingsPath, rememberSettingsReturn, settingsReturnPath } from "./lib/settings-return.js";
-import { FirstRunScreen, SessionRefusal, ShellChrome, WorldPickerScreen } from "./screens/shell.js";
+import { SessionRefusal, ShellChrome, WorldPickerScreen } from "./screens/shell.js";
 import { NewWorldScreen } from "./screens/new-world.js";
 import {
   SettingsAboutScreen, SettingsAppearanceScreen, SettingsLayout, SettingsIndex,
@@ -306,7 +306,7 @@ function AppRoutes() {
         <Route path="/building/:worldId" element={<BuildingScreen />} />
 
         <Route element={<ShellChrome />}>
-          <Route path="/first-run" element={<FirstRunScreen />} />
+          <Route path="/first-run" element={<Navigate to="/starting" replace />} />
           <Route path="/worlds" element={<WorldPickerScreen />} />
           <Route path="/publications" element={<PublicationsScreen />} />
           <Route path="/worlds/new" element={<NewWorldScreen />} />

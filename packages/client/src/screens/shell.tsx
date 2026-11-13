@@ -3,6 +3,7 @@ import { importWorld, subscribeWorldImport } from "../lib/store.js";
 import { Outlet, useLocation, useNavigate } from "react-router";
 import { remoteStudio } from "./launch.js";
 import { Button, Callout, cx } from "../components/ui.js";
+import { EnvironmentWarnings } from "../components/environment-warnings.js";
 import { BodyLayer } from "../components/body-layer.js";
 import { isRemoteSession } from "../lib/remote-session.js";
 import { Archive, Book, More, Plus, Sparkle, Upload, ArrowRight } from "../components/icons.js";
@@ -13,7 +14,7 @@ import { AppChrome } from "../components/chrome.js";
 import { Portrait } from "../components/portrait.js";
 import { relativeDate, shortDateTime } from "../lib/format.js";
 import {
-  archiveWorld, installSampleWorld, useSampleWorld, useArchiveNote, useEnvCheck, useStore,
+  archiveWorld, installSampleWorld, useSampleWorld, useArchiveNote, useStore,
 } from "../lib/store.js";
 
 
@@ -61,104 +62,6 @@ export function WaitingForCoordinator() {
     <Callout tone="warning" title="Waiting for the coordinator">
       The app keeps retrying on its own. Check that your Studio server is running.
     </Callout>
-  );
-}
-
-// ---- First run -------------------------------------------------------------
-
-export function FirstRunScreen() {
-  const navigate = useNavigate();
-  const env = useEnvCheck();
-  const sample = useSampleWorld();
-  return (
-    <div className="fy-app" data-screen="first-run">
-      <AppChrome divided={false} />
-      {/* Below 1100 the page centres when it fits (design turn 159), so the classes carry the
-          sizes the three widths need rather than inline values none of them can reach. */}
-      <div className="fy-content fy-firstrun">
-        <div className="fy-hero fy-firstrun__hero">
-          <div className="fy-hero__eyebrow">Welcome</div>
-          <h1 className="fy-hero__title fy-firstrun__title">
-            Every world starts as a name.
-          </h1>
-          <p className="fy-hero__lede fy-firstrun__lede">Give yours one.</p>
-        </div>
-        {env && (!env.pathBudgetOk || !env.nativeIndexOk) && (
-          <div className="fy-firstrun__warnings">
-            {!env.pathBudgetOk && (
-              <Callout tone="warning" title="Your data folder sits too deep">
-                {env.pathBudgetDetail}
-              </Callout>
-            )}
-            {!env.nativeIndexOk && (
-              <Callout tone="warning" title="The search index could not load">
-                {env.nativeIndexDetail}
-              </Callout>
-            )}
-          </div>
-        )}
-        <div className="fy-firstrun__doors">
-          <div className="fy-firstrun__flank fy-firstrun__flank--left" />
-          <div className="fy-fan__drift">
-            <div className="fy-createcard" onClick={() => navigate("/worlds/new")}>
-              <div className="fy-createcard__ring">
-                <Plus size={22} />
-              </div>
-              <div className="fy-createcard__title">Your first world</div>
-
-              <div style={{ marginTop: 4 }}>
-                <Button variant="primary">Create a world</Button>
-              </div>
-            </div>
-          </div>
-          {/* A blank name is a hard place to start from if you have never seen one of these
-              finished. The sample world takes the other side of the fan — solid rather than
-              dashed, because unlike the card beside it, this one is not an empty slot. */}
-          {sample?.available === true ? (
-            <div className="fy-fan__drift" style={{ animationDelay: "0.6s" }}>
-              <div
-                className="fy-createcard fy-createcard--filled"
-                onClick={() => {
-                  if (sample.installing) return;
-                  if (sample.download) navigate("/settings/sample-world"); else installSampleWorld();
-                }}
-              >
-                <div className="fy-createcard__ring">
-                  <Sparkle size={22} />
-                </div>
-                <div className="fy-createcard__title">Or start from ours</div>
-                <div className="fy-createcard__sub">
-                  {sample.download ? "The Undersong: an illustrated novel and editable world. Audiobook and video unfinished. Download separately." : "The Undersong: a cast, its canon, and a production part-way through. Yours to take apart."}
-                </div>
-                <div style={{ marginTop: 4 }}>
-                  <Button disabled={sample.installing}>
-                    {sample.installing ? "Installing…" : sample.download ? "Explore the story download" : "Install the sample world"}
-                  </Button>
-                </div>
-                {sample.note?.refused === true && (
-                  <div className="fy-createcard__sub" style={{ color: "var(--destructive)" }}>
-                    {sample.note.text}
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="fy-firstrun__flank fy-firstrun__flank--right" />
-          )}
-        </div>
-        <div className="fy-firstrun__docs">
-          <span>Already have a canon in documents? </span>
-          <span
-            className="fy-firstrun__docslink"
-            title="Create the world first; then use Artifacts → Add files to file documents and lift facts."
-            onClick={() => navigate("/worlds/new")}
-          >
-            Add documents
-          </span>
-          <span className="fy-firstrun__docstail">. It files into artifacts, ready to link.</span>
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -283,7 +186,7 @@ export function WorldPickerScreen() {
             <div className="fy-home-label">All worlds</div>
           </div>
         )}
-        {worlds.length === 0 ? <WelcomeWorldCards /> : <div className="fy-home-cards">
+        {worlds.length === 0 ? <><EnvironmentWarnings /><WelcomeWorldCards /></> : <div className="fy-home-cards">
           <button type="button" className="fy-worldcard fy-newworldcard" onClick={() => navigate("/worlds/new")}>
             <span className="fy-worldcard__frame fy-worldcard__empty fy-worldcard__empty--art" aria-hidden="true"><img src="./worlds/new-world.webp" alt="" /><Plus size={28} /></span>
             <span className="fy-worldcard__name">Create a world</span>

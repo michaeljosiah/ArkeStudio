@@ -50,7 +50,7 @@ function nestedButtons(html: string): string[] {
 }
 
 describe("screen inventory", () => {
-  it("covers the full screen inventory (66 screens)", () => {
+  it("covers the full screen inventory (72 screens)", () => {
     // The number is written three times on purpose — it is a tripwire, not a fact being derived,
     // so `SCREENS.length` on both sides would assert nothing. It does mean two branches that each
     // add a screen merge cleanly and land a count that was right for neither: #268 and #243 did
@@ -65,8 +65,9 @@ describe("screen inventory", () => {
     // A graphic novel's Pages (design turn 247).
     // Locations and factions are hand-edited at their own addresses (issue 2773).
     // Every production's Publish page (design turn 276).
-    assert.equal(SCREENS.length, 73);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 73, "screen ids are unique");
+    // Obsolete First run redirects to current entry (design turn 280).
+    assert.equal(SCREENS.length, 72);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 72, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {
@@ -86,14 +87,14 @@ describe("screen inventory", () => {
     }
   });
 
-  it("opens every start on the launch surface, two ways in (design turn 158)", () => {
+  it("opens every start with one working way in (design turn 280)", () => {
     const html = renderAt("/");
     assert.ok(html.includes('data-screen="startup"'), "/ mounts the launch surface");
     assert.ok(html.includes("launch-creation.webp"), "the loop's still is up from the first frame");
-    assert.ok(html.includes("Welcome back"));
+    assert.ok(html.includes("Welcome"));
+    assert.ok(!html.includes("Welcome back"));
     assert.ok(html.includes("Continue Locally"), "the local way is live at once");
-    assert.ok(html.includes("Cloud Login") && html.includes("Coming soon"), "cloud is named, not offered");
-    assert.match(html, /<button[^>]*disabled[^>]*>Coming soon<\/button>/, "and cannot be pressed");
+    assert.doesNotMatch(html, /Cloud Login|Coming soon|Create account/);
     assert.ok(html.includes("fy-launch__version"), "with the version on the loop");
     for (const chatter of ["Setting up your studio", "One-time setup", "everything ready"]) {
       assert.ok(!html.includes(chatter), `"${chatter}" belongs to the start that is actually setting up`);

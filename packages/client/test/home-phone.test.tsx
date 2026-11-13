@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { renderToString } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import { FirstRunScreen, WorldPickerScreen } from "../src/screens/shell.js";
+import { WorldPickerScreen } from "../src/screens/shell.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { dialogRoot } from "./dialog-root.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -91,9 +91,14 @@ it("confirms archiving in a sheet on a phone, and in the card elsewhere", async 
   }
 });
 
-it("draws First run from classes the widths can reach", () => {
-  const html = renderToString(<MemoryRouter initialEntries={["/first-run"]}><FirstRunScreen /></MemoryRouter>);
-  assert.ok(html.includes("fy-firstrun__title") && html.includes("fy-firstrun__doors"));
-  assert.ok(!html.includes("font-size:56px"), "no inline title size");
-  assert.ok(html.includes("fy-firstrun__flank--left"), "the flanks are classes a narrower width can drop");
+it("shows environment warnings before the empty Home creation controls", () => {
+  __setStateForTest({ ...FIXTURE_STATE, worlds: [], app: { ...FIXTURE_STATE.app, env: {
+    pathBudgetOk: false, pathBudgetDetail: "Move your data folder higher.", diskFreeMb: 100000,
+    nativeIndexOk: false, nativeIndexDetail: "Search is unavailable.",
+  } } });
+  const html = renderToString(<MemoryRouter initialEntries={["/worlds"]}><WorldPickerScreen /></MemoryRouter>);
+  assert.ok(html.includes("Your data folder sits too deep"));
+  assert.ok(html.includes("The search index could not load"));
+  assert.ok(html.indexOf("Move your data folder higher.") < html.indexOf("Create a world"));
+  assert.ok(html.includes("fy-firstrun__doors"));
 });

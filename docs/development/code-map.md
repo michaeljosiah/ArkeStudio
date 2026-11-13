@@ -605,7 +605,7 @@ transport and delegates initialization/draining to the application. Desktop and 
 See [running the standalone server](standalone-server.md) and coordinator
 `test/studio-server.test.ts` for the browser prose, authentication and lifecycle journey.
 
-Every start opens on the launch surface (design turn 158): `/` is it at rest, with the two ways in, and `/starting` is the same surface after Continue, which goes on by itself once the studio is ready or shows first-start setup while runtime parts download. The connection, snapshot and setup checks run behind it from boot. `StartupScreen` in client `screens/launch.tsx` owns readiness, setup progress, recovery and the remote-session states; its layout (split on a wide landscape window, a stacked band on phones and an unfolded Fold) is `screens/launch.css`. `LaunchArt` plays the bundled `public/launch-creation.mp4` silently on local sessions, using `launch-creation.webp` for reduced motion, Save-Data and remote access (SPEC-001 R-8).
+Every start opens on the launch surface (design turn 158): `/` is it at rest, with one working way in, and `/starting` is the same surface after Continue, which goes on by itself once the studio is ready or shows first-start setup while runtime parts download. The connection, snapshot and setup checks run behind it from boot. `StartupScreen` in client `screens/launch.tsx` owns readiness, setup progress, recovery and the remote-session states; its layout (split on a wide landscape window, a stacked band on phones and an unfolded Fold) is `screens/launch.css`. `LaunchArt` plays the bundled `public/launch-creation.mp4` silently on local sessions, using `launch-creation.webp` for reduced motion, Save-Data and remote access (SPEC-001 R-8).
 
 Client `components/remote-entry.tsx` shares `LaunchFrame` for pairing, and
 `components/pairing-prompt.tsx` asks the owner over the current desktop screen through private
@@ -1181,7 +1181,7 @@ Contracts `setup.ts` and Coordinator project installation/health into `setup.loc
 before detection and refreshed by both engine subscriptions. This full-stack status no longer
 gates manual app entry (approved turns 242–244, SPEC-016 R-21–R-28). `contracts/src/onboarding.ts`
 owns the saved journey and readiness decisions; client `screens/onboarding.tsx` implements the
-three paths at `/setup`. Coordinator `setup/onboarding.ts` checks workspace writability; existing
+three paths at `/setup`. Review queues selected downloads before finishing, with an explicit secondary skip; `components/environment-warnings.tsx` carries environment problems on setup and empty Home. The old `/first-run` redirects through `/starting` (approved turn 280, #2790). Coordinator `setup/onboarding.ts` checks workspace writability; existing
 settings, discovery, vendor sign-in and setup services persist and execute choices. Desktop
 `workspace-location.ts` remembers a library selection without moving worlds or copying credentials;
 main/preload restart after confirmed shutdown. `world/import-world.ts` checks a chosen closed world

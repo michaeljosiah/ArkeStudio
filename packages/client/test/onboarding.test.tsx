@@ -109,3 +109,51 @@ it("a stale setup address returns to Worlds without restarting completed onboard
     } finally { await unmount(); commands = []; }
   }
 });
+
+for (const choice of ["Set up and start", "Skip downloads", "refused"] as const) {
+  it(`review handles ${choice} without silently losing selected downloads (#2790)`, async () => {
+    const { element, state, unmount } = await mount({ ...NEW_ONBOARDING, persona: "guided", step: "review", voice: true });
+    try {
+      state.app.setup = { running: false, diskFreeMb: 100000, diskCheckedAt: null, components: [{
+        id: "tts-kokoro-82m", displayName: "Voice", purpose: "Read aloud", sizeMb: 88, installLocation: "models",
+        state: "available", bytesDone: 0, bytesTotal: 0, bytesPerSecond: null, pauseSupported: false,
+      }] };
+      await act(async () => { __setStateForTest(state); await flush(); });
+      assert.equal(element.querySelectorAll(".ij-primary").length, 1);
+      assert.match(element.querySelector(".ij-primary")!.textContent!, /Set up and start/);
+      await click(element, choice === "refused" ? "Set up and start" : choice);
+      const saved = () => commands.filter(c => c.kind === "save-onboarding");
+      assert.equal(saved().at(-1)?.action, choice === "Skip downloads" ? "finish" : "install");
+      assert.equal(where, "/setup", "wait for the authoritative acknowledgement");
+      if (choice === "refused") {
+        await act(async () => {
+          __handleFrameForTest({ kind: "event", seq: 1, event: { at: "2026-11-13T12:00:00Z", type: "command.failed",
+            command: "save-onboarding", requestId: null, reason: "Not enough space" } }); await flush();
+        });
+        assert.match(element.textContent!, /Not enough space/);
+        assert.match(element.textContent!, /Set up and start/);
+        assert.equal(saved().some(c => c.action === "finish"), false);
+      } else {
+        await acknowledge();
+        if (choice === "Set up and start") {
+          assert.deepEqual(saved().map(c => c.action), ["install", "finish"]);
+          assert.equal(where, "/setup");
+          await acknowledge();
+        } else assert.equal(saved().some(c => c.action === "install"), false);
+        assert.equal(where, "/worlds");
+      }
+    } finally { await unmount(); }
+  });
+}
+
+it("keeps environment warnings visible on lightweight setup (#2790)", async () => {
+  const { element, state, unmount } = await mount({ ...NEW_ONBOARDING, persona: "lightweight", step: "lightweight" });
+  try {
+    state.app.env = { pathBudgetOk: true, pathBudgetDetail: null, diskFreeMb: 100000, nativeIndexOk: false, nativeIndexDetail: "Search is unavailable." };
+    await act(async () => { __setStateForTest(state); await flush(); });
+    assert.match(element.textContent!, /The search index could not load/);
+    assert.match(element.textContent!, /Search is unavailable/);
+    await click(element, "Start using Arke"); await acknowledge();
+    assert.equal(where, "/worlds", "a search problem does not block manual writing");
+  } finally { await unmount(); }
+});
