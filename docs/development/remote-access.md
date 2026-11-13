@@ -205,6 +205,10 @@ Arke session: https://studio.tail1234.ts.net/#/?arke-session=…
 **4. Open that link on the other device.** The page removes the capability from the address bar
 and keeps it only in that browser tab. A new tab needs the link again.
 
+When moving to another browser, copy the original full **Arke session** link from the terminal,
+not the cleaned address in the current tab. The new browser does not have that tab's saved
+capability. On a phone, open the link in the browser where you intend to keep using Studio.
+
 Use the **Arke session** link, not Vite's **Local** link. `127.0.0.1` or `localhost` on a phone
 means the phone itself, not the PC, and typically reports that the connection was refused.
 
@@ -268,6 +272,7 @@ not only these two.
 | Pictures and video don't load | The 8443 mapping. Media comes from the server, not from Vite. |
 | The console shows `Refused to connect to 'wss://…'` | The page was served without the proxied settings. Restart Vite with all three. |
 | Studio works, but a source edit does not appear | Check the browser console for `[vite] connected.`. Hot reload uses the frontend's HTTPS origin (443 in this guide), separately from the coordinator on 8443. Keep both mappings, and check whether the edit needs a full page reload. |
+| Hot reload stops after switching away from the browser | The phone may close background sockets. Vite needs its reconnect worker to recover; the proxied development page permits that worker. If the console reports a blocked blob worker, update Studio and refresh the tab once to load the corrected page policy. |
 
 ## What the browser can't do
 
@@ -322,14 +327,23 @@ establish that another device can connect.
 The temporary fixture contained no world data or session capability. It was removed after
 the check. Desktop pairing has separate live HTTPS coverage described in [testing](testing.md#remembered-remote-access).
 
-### Complete the other-device checks
+### Phone verification — 2026-11-13
 
-[Issue #1305](https://github.com/michaeljosiah/ArkeStudio/issues/1305) remains open until both
-the phone and a second computer complete the development-session journey. At the host check,
-the Android phone was online in Tailscale; no second computer was connected. Being online
-does not establish that the browser journey passed.
+A Samsung Galaxy Z Fold7 running Edge (reported version **157.0.4341.53**) loaded the fixture
+world and artwork through real Serve and retained its session across a same-tab refresh.
+The host used Tailscale **1.104.2** and Vite **7.3.6**. The phone's Tailscale and Android versions
+were not recorded.
 
-On **each** other device:
+Switching from Edge to chat closed the phone's development socket. A host-side forced disconnect
+reproduced a blocked blob SharedWorker: Vite's reconnect worker could not run under the page
+policy. The proxied development policy now permits that worker, and the host automatically
+reconnected after the same forced disconnect. The owner then confirmed a visible live style
+update on the phone; the temporary stylesheet change and diagnostics were removed afterward.
+
+For [issue #1305](https://github.com/michaeljosiah/ArkeStudio/issues/1305), the owner accepted this
+phone coverage and dropped the second-computer requirement. No second-computer result is claimed.
+
+For future checks on another device:
 
 1. Connect Tailscale. Record the device OS, browser name/version and Tailscale version.
 2. Open the private **Arke session** link from the host's Vite terminal, rather than its Local
@@ -340,9 +354,11 @@ On **each** other device:
    same tab and confirm it still connects.
 4. With that page open, make a small, reversible visible source edit on the host. Check that
    the browser updates without a manual reload, then restore the edit and verify it updates
-   back. Record whether Vite applied a hot update or automatically reloaded the whole page.
-5. Record the result and any exact error in #1305. A phone-sized window on the host is not a
-   substitute for either device. Close the issue only when both device results are recorded.
+   back. Keep the browser in the foreground for both changes; switching to a chat app to report
+   the result can close its background socket. Then switch away and return, and check that live
+   updates recover. Record whether Vite applied a hot update or automatically reloaded the page.
+5. Record the device, versions, result and any exact error. A phone-sized window on the host
+   is not a substitute for a real-device check.
 
 
 ## Large worlds and slow connections
