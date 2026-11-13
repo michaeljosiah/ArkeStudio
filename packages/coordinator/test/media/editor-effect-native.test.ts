@@ -7,7 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { applyTimelineCommands, ArtifactSidecarSchema, buildFfmpegArgs, buildRenderPlan, compositeRgba, addWeightedPicture, compositeWeightedTrack, defaultEffectClip, EFFECT_PRESET_CATALOGUE, pictureMotionAt,
-  pictureMotionProgress, pictureMotionWindow, pictureTransitionWeight, prepareEffectReactions, renderEffectLayersRgba, seedEmptyPictureTimeline, textLabel, textPicturePath,
+  pictureMotionProgress, pictureMotionWindow, pictureSourceSec, PICTURE_SAMPLE_TOLERANCE_SEC, pictureTransitionWeight, prepareEffectReactions, renderEffectLayersRgba, seedEmptyPictureTimeline, textLabel, textPicturePath,
   type ExportPlan, type ProductionBundle, type RenderPictureLayer, type TextLook, type TimelineClip } from "@arke-studio/contracts";
 import { analysisFixture } from "./effect-analysis-fixture.js";
 import { createNodeEffectRasterHost } from "../../src/media/node-effect-renderer.js";
@@ -230,6 +230,51 @@ test("real source sampling keeps the previous 30fps frame at nonaligned 24fps in
       samples.push({ sourceName, sourceInSec, actual, expected });
     }
     report.sourceSampling = { sourceFps: 30, outputFps: 24, samples };
+  } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
+});
+
+test("a film at another speed or backwards exports, at every frame, the source frame the Viewer seeks to", { skip: !hasFfmpeg }, async () => {
+  const dir = await fixtureDir("clip-speed");
+  try {
+    // Sixty frames, each grey level its own number, at the film's rate and at another: at 24 fps
+    // every other source frame starts exactly on a sample at 2x, the tie the export must not flip.
+    for (const rate of [24, 30]) {
+      const input = Buffer.concat(Array.from({ length: 60 }, (_, frame) => Buffer.from(Array.from({ length: 4 }, () => [frame * 4, frame * 4, frame * 4, 255]).flat())));
+      await processBytes(["-y", "-f", "rawvideo", "-pixel_format", "rgba", "-video_size", "2x2", "-framerate", String(rate), "-i", "pipe:0", "-c:v", "ffv1", "-pix_fmt", "bgra", join(dir, `source-${rate}.mkv`)], input);
+      await processBytes(["-y", "-i", join(dir, `source-${rate}.mkv`), "-vf", "scale=32:32", "-c:v", "libx264", "-crf", "0", "-pix_fmt", "yuv420p", join(dir, `source-${rate}.mp4`)]);
+    }
+    const samples = [];
+    const cases: Array<{ speed?: number; reverse?: true }> = [{ speed: 2 }, { speed: .5 }, { speed: 1.25 }, { speed: 1.05 }, { reverse: true }, { speed: 2, reverse: true }, { speed: .75, reverse: true }, { speed: 4 }];
+    for (const rate of [24, 30]) for (const extension of ["mkv", "mp4"]) for (const retime of cases) for (const [startFrame, endFrame] of [[48, 66], [53, 61]] as const) {
+      const sourceOutSec = 60 / rate;
+      const layer: RenderPictureLayer = { clipId: "source", trackId: "source", order: 0, kind: "media", label: "source", path: `source-${rate}.${extension}`, still: false,
+        startFrame: 48, endFrame: 66, sourceInSec: .25, sourceOutSec, sourceSize: { width: 2, height: 2 }, fit: "contain", matte: "source-alpha", ...retime };
+      const count = endFrame - startFrame;
+      const plan: ExportPlan = { preset: "review-cut", frameRate: 24, items: [], overlays: [], audio: [], totalSec: count / 24,
+        effectRender: { rendererVersion: "software-rgba-v2", width: 2, height: 2, frameRate: 24, startFrame, endFrame, effectLayers: [], issues: [], pictureLayers: [layer] } };
+      const name = `${rate}-${extension}-${retime.speed ?? 1}${retime.reverse ? "r" : ""}-${startFrame}`;
+      const output = join(dir, `result-${name}.mkv`), args = buildFfmpegArgs(plan, dir, output, "unused.ttf", []);
+      args[args.indexOf("-pix_fmt") + 1] = "bgra"; args.splice(args.length - 1, 0, "-c:v", "ffv1");
+      await processBytes(args);
+      const frames = await processBytes(["-i", output, "-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"]);
+      assert.equal(frames.length, count * 16, name);
+      const actual = Array.from({ length: count }, (_, i) => Math.round(frames[i * 16]! / 4));
+      // Where each source frame begins, as its file says: Matroska stamps to the millisecond, so
+      // frame 10 of 24 begins at 0.417 there and at 10/24 in the MP4.
+      const begins = (frame: number) => extension === "mkv" ? Math.round(frame * 1000 / rate) / 1000 : frame / rate;
+      // What the Viewer's pool seeks to: the frame's source second, a tolerance inside it, held at
+      // the source's end. It shows the last frame that has begun by then.
+      const expected = Array.from({ length: count }, (_, i) => {
+        const sought = Math.max(0, Math.min(sourceOutSec - .0001, pictureSourceSec(layer, startFrame + i, 24) + PICTURE_SAMPLE_TOLERANCE_SEC));
+        return Array.from({ length: 60 }, (_, frame) => frame).findLast(frame => begins(frame) <= sought + 1e-9)!;
+      });
+      assert.deepEqual(actual, expected, name);
+      samples.push({ name, actual });
+    }
+    // Backwards at its own speed, a film ends on the frame it began on and shows what it showed forwards, last first.
+    const ends = samples.find(row => row.name === "24-mp4-1r-48")!.actual;
+    assert.deepEqual(ends, Array.from({ length: 18 }, (_, i) => 6 + 17 - i));
+    report.clipSpeed = { outputFps: 24, cases: samples.length, samples: samples.filter(row => row.name.startsWith("30-mp4")) };
   } finally { if (!evidence) await rm(dir, { recursive: true, force: true }); await evidenceReport(); }
 });
 

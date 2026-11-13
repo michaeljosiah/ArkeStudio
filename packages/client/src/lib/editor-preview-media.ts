@@ -1,4 +1,4 @@
-import { containedPictureRect, EFFECT_SLATE_STYLE, pictureMotionWindow, type PictureMotionPosition } from "@arke-studio/contracts";
+import { containedPictureRect, EFFECT_SLATE_STYLE, PICTURE_SAMPLE_TOLERANCE_SEC, pictureMotionWindow, type PictureMotionPosition } from "@arke-studio/contracts";
 
 /** Browser decoding only. Effect simulation, fitting and blending never use a second clock. */
 export interface PreviewMediaSource {
@@ -10,7 +10,18 @@ export interface PreviewMediaSource {
   sourceOutSec?: number;
   /** Where a moving still has got to at this frame. */
   motion?: PictureMotionPosition;
+  /** A video at another speed: `sourceSec` already counts it, and playback runs at it. */
+  speed?: number;
+  /** A video last frame first: `sourceSec` falls as the film runs. */
+  reverse?: true;
 }
+
+/**
+ * How far, in source seconds, the frame on a reversed clip's element may be from the frame wanted
+ * and still stand in for it while the film plays. Past this it is the wrong picture rather than
+ * a late one: the top of the file, shown before the first seek to the window's end has landed.
+ */
+const REVERSE_STAND_IN_SEC = 0.5;
 
 export interface PreviewPicturePixels {
   rect: { x: number; y: number; width: number; height: number };
@@ -26,6 +37,8 @@ interface Decoder {
   url: string;
   failed: boolean;
   wanted: number | null;
+  /** The source second the element last settled on, for a reversed clip in playback. */
+  shown: number | null;
   playedAt: number;
   discontinuous: boolean;
   cleanup: () => void;
@@ -73,7 +86,7 @@ export class PreviewMediaPool {
         video.playsInline = true;
         video.preload = "auto";
       }
-      decoder = { element, still: source.still, url, failed: false, wanted: null, playedAt: -Infinity, discontinuous: false, cleanup: () => {
+      decoder = { element, still: source.still, url, failed: false, wanted: null, shown: null, playedAt: -Infinity, discontinuous: false, cleanup: () => {
         for (const event of events) element.removeEventListener(event, changed);
         element.removeEventListener("error", error);
         if (!source.still) (element as HTMLVideoElement).pause();
@@ -98,13 +111,31 @@ export class PreviewMediaPool {
       // land just before frame 10; sample inside it. At a physical end use the last source
       // sample, not one output-frame interval earlier (source and production rates may differ).
       const lastSample = end === Infinity ? Infinity : Math.max(0, end - 0.0001);
-      const target = Math.max(0, Math.min(source.sourceSec + 0.0001, lastSample));
+      const target = Math.max(0, Math.min(source.sourceSec + PICTURE_SAMPLE_TOLERANCE_SEC, lastSample));
       const hold = source.sourceSec >= lastSample;
+      // Left to run, the element keeps the clip's own speed, so it drifts no faster than a clip at 1.
+      const rate = source.speed ?? 1;
+      if (video.playbackRate !== rate) video.playbackRate = rate;
       if (decoder.discontinuous) {
-        decoder.discontinuous = false; decoder.wanted = target;
+        decoder.discontinuous = false; decoder.wanted = target; decoder.shown = null;
         if (Math.abs(video.currentTime - target) > 0.0001) { video.currentTime = target; return null; }
       }
-      if (!playing || hold) {
+      if (source.reverse && playing && !hold) {
+        /*
+         * A video element does not run backwards, so every frame of a reversed clip is a seek, and
+         * a seek back through a long run of frames takes longer than a frame lasts. Waiting for the
+         * exact frame, as a paused step does, would wait for ever while the film plays: each seek
+         * lands on a frame the transport has already left. So one seek is in flight at a time, and
+         * the frame the last one landed on stands in until the next lands. The picture moves, a
+         * little late; stopped, it is the exact frame, by the branch below.
+         */
+        if (!video.paused) video.pause();
+        if (!video.seeking) {
+          decoder.shown = video.currentTime;
+          if (Math.abs(video.currentTime - target) > 0.0001) { decoder.wanted = target; video.currentTime = target; }
+        }
+        if (decoder.shown === null || Math.abs(decoder.shown - target) > REVERSE_STAND_IN_SEC) return null;
+      } else if (!playing || hold) {
         if (!video.paused) video.pause();
         // Unlike the free-running monitor, paused frame steps cannot use a 120 ms tolerance.
         if (decoder.wanted !== target || Math.abs(video.currentTime - target) > 0.0001) {
@@ -121,7 +152,8 @@ export class PreviewMediaPool {
           void video.play().catch(() => {});
         }
       }
-      if (video.seeking) return null;
+      // A reversed clip in playback draws through its seek; everything else waits for its frame.
+      if (video.seeking && !(source.reverse && playing && !hold)) return null;
     }
     const rect = previewContainRect(intrinsicWidth, intrinsicHeight, width, height);
     this.canvas.width = rect.width; this.canvas.height = rect.height;

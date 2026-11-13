@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { effectsForPicture, pictureMotionAt, pictureMotionProgress, pictureStackAtFrame, pictureTransitionWeight, type EffectRenderProjection } from "@arke-studio/contracts";
+import { effectsForPicture, pictureMotionAt, pictureMotionProgress, pictureSourceSec, pictureStackAtFrame, pictureTransitionWeight, type EffectRenderProjection } from "@arke-studio/contracts";
 import { PreviewMediaPool } from "../lib/editor-preview-media.js";
 import { PreviewFrameQueue, previewReactionMappingKey, type PreviewAnalysisInstall, type PreviewAnalysisResult, type PreviewFrameRequest, type PreviewFrameResult, type PreviewReactionSources } from "../lib/editor-preview-frame.js";
 import type { Transport } from "./editor-transport.js";
@@ -134,8 +134,9 @@ export function EditorPicturePreview({ projection, transport, urlFor, resolution
             }
             if (!layer.path) throw new Error(`Picture ${layer.label} has no media.`);
             const captured = pool.capture({ id: layer.clipId, path: layer.path, still: layer.still,
-              sourceSec: layer.sourceInSec + (at - layer.startFrame) / projection.frameRate,
+              sourceSec: pictureSourceSec(layer, at, projection.frameRate),
               ...(layer.sourceOutSec === undefined ? {} : { sourceOutSec: layer.sourceOutSec }),
+              ...(layer.speed === undefined ? {} : { speed: layer.speed }), ...(layer.reverse ? { reverse: true as const } : {}),
               ...(layer.motion ? { motion: pictureMotionAt(layer.motion, pictureMotionProgress(layer, at)) } : {}),
             }, width, height, live.current.playing, nowMs, projection.frameRate);
             if (!captured) { waiting = true; continue; }
