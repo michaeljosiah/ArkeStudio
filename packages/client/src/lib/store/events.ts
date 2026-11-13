@@ -179,8 +179,6 @@ export function subscribeAudioStudio(listener: (answer: AudioStudioAnswer) => vo
 export function subscribeAudiobookMix(listener: (answer: AudiobookMixAnswer) => void): () => void { return onEvent("audiobook.mix", listener); }
 
 /** Arke's timing for a chapter (design turn 187b): answered to the ask that named it. */
-export type AudiobookTimingProposalAnswer = Extract<DomainEvent, { type: "audiobook.timing-proposal" }>;
-export function subscribeAudiobookTimingProposal(listener: (answer: AudiobookTimingProposalAnswer) => void): () => void { return onEvent("audiobook.timing-proposal", listener); }
 
 export type BenchSubjectOpened = Extract<DomainEvent, { type: "bench.subject-opened" }>;
 export function subscribeBenchSubjectOpened(listener: (answer: BenchSubjectOpened) => void): () => void { return onEvent("bench.subject-opened", listener); }

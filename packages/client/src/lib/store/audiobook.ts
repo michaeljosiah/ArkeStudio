@@ -336,18 +336,6 @@ export function setAudiobookSound(worldId: string, productionId: string, chapter
   return send({ kind: "set-audiobook-sound", worldId, productionId, chapterFile, key, sound, requestId }) ? requestId : null;
 }
 
-/** Propose timing (design turn 187b, R-86): answered as `audiobook.timing-proposal` under the id returned. */
-export function proposeAudiobookTiming(worldId: string, productionId: string, chapterFile: string): string | null {
-  const requestId = ulid();
-  return send({ kind: "propose-audiobook-timing", worldId, productionId, chapterFile, requestId }) ? requestId : null;
-}
-
-/** A proposal accepted whole (R-86): answered as `audiobook.record` under the id returned. */
-export function acceptAudiobookTiming(worldId: string, productionId: string, chapterFile: string, proposal: import("@arke-studio/contracts").TimingProposal): string | null {
-  const requestId = ulid();
-  return send({ kind: "accept-audiobook-timing", worldId, productionId, chapterFile, proposal, requestId }) ? requestId : null;
-}
-
 /** The chapter as it sounds with its timing, or a window of it (R-85): answered as `audiobook.mix` under the id returned. */
 export function renderAudiobookMix(worldId: string, productionId: string, chapterFile: string, window?: { from: number; to: number }): string | null {
   const requestId = ulid();
