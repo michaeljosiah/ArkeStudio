@@ -18,7 +18,7 @@ export type LedgerOp = "run" | "restore" | "expire" | "empty" | "auto";
 const PLAN_ID = /^cp_[0-9A-HJKMNP-TV-Z]{26}$/;
 /** A world-relative path: forward slashes, no `.` or `..` segment, no drive, no absolute start. */
 export const isWorldPath = (path: unknown): path is string =>
-  typeof path === "string" && path.length > 0 && path.length <= 1024 && !/[\\:\u0000]/.test(path) && !path.startsWith("/") &&
+  typeof path === "string" && path.length > 0 && path.length <= 1024 && !/[\\:]/.test(path) && !path.includes("\u0000") &&!path.startsWith("/") &&
   path.split("/").every(part => part !== "" && part !== "." && part !== "..");
 /**
  * A ledger travels with a world, so an imported one is read as untrusted: a line whose plan id
