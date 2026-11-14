@@ -1004,3 +1004,32 @@ describe("text in the cut's plan (SPEC-065)", () => {
     assert.equal(lowest.totalSec, 2, "the hidden words keep their time");
   });
 });
+
+describe("a film at another speed or backwards (SPEC-037 R-40, R-41)", () => {
+  const value = production({ cut: { audio: [], overlays: [] } });
+  const placed = (trackId: "tr_picture" | "tr_over") => applyTimelineCommands(seedEmptyPictureTimeline(value), [
+    ...(trackId === "tr_over" ? [{ kind: "add-track" as const, trackId, trackKind: "picture" as const, name: "Over" }] : []),
+    { kind: "place", trackId, clip: { id: "cl_insert", startFrame: 0, durationFrames: 50, sourceInFrames: 25, source: { kind: "artifact", artifactId: INSERT, label: "Insert" } } },
+  ]);
+  const planFor = (timeline: ProductionTimeline, list: RenderArtifact[] = artifacts) =>
+    planOf(buildRenderPlan({ production: value, artifacts: list, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "review-cut" }));
+
+  for (const trackId of ["tr_picture", "tr_over"] as const) {
+    it(`a re-timed, reversed film on ${trackId} is one compositor layer at its speed, from the same source second, with no sound`, () => {
+      const plain = planFor(placed(trackId));
+      assert.equal(plain.effectRender, undefined, "a film at its own speed needs no compositor");
+      assert.deepEqual(plain.audio.map(item => [item.clipId, item.sourceInSec, item.endSec]), [["cl_insert", 1, 2]]);
+      const timeline = applyTimelineCommands(placed(trackId), [{ kind: "set-clip-speed", clipId: "cl_insert", speed: .5 }, { kind: "set-clip-reverse", clipId: "cl_insert", reverse: true }]);
+      const plan = planFor(timeline), layer = plan.effectRender!.pictureLayers.find(row => row.clipId === "cl_insert")!;
+      // Two seconds of source from one second in, now four seconds on screen.
+      assert.deepEqual([layer.startFrame, layer.endFrame, layer.sourceInSec, layer.speed, layer.reverse], [0, 100, 1, .5, true]);
+      assert.equal(plan.totalSec, 4);
+      assert.deepEqual(plan.audio, [], "sound slowed and turned round is not the clip's sound");
+      // Unmeasured, it is not named as sound left out either: there is none to leave out.
+      assert.equal(planFor(timeline, artifacts.map(row => row.id === INSERT ? { id: row.id, file: row.file, kind: row.kind } : row)).unmeasuredAudio, undefined);
+      // Back at its own speed and forwards, the sound is back: the record's `audio` was never touched.
+      const back = applyTimelineCommands(timeline, [{ kind: "set-clip-speed", clipId: "cl_insert", speed: 1 }, { kind: "set-clip-reverse", clipId: "cl_insert", reverse: false }]);
+      assert.deepEqual(planFor(back).audio.map(item => [item.clipId, item.sourceInSec, item.endSec]), [["cl_insert", 1, 2]]);
+    });
+  }
+});

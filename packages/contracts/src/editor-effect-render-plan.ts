@@ -40,6 +40,12 @@ export interface RenderPictureLayer {
   fadeOut?: { startFrame: number; durationFrames: number };
   /** A still's move runs across all of this layer's time on screen, a crossfade's overlap included. */
   motion?: PictureMotion;
+  /**
+   * A video at another speed, or last frame first (SPEC-037 R-40). `sourceInSec` is where its
+   * source window begins either way; `pictureSourceSec` is the one reading of these two.
+   */
+  speed?: number;
+  reverse?: true;
 }
 
 /** How far through its time on screen a layer is at `frame`: what a moving still's window is read at. */

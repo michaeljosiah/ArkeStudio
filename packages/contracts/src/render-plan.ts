@@ -41,6 +41,7 @@ import { projectEffectLayers, type EffectRenderProjection, type RenderPictureLay
 import { effectRenderCapabilityProblem } from "./editor-effect-catalogue.js";
 import { projectPictureTransitions } from "./editor-effect-render-plan.js";
 import { textPictureFrame, textPicturePath } from "./editor-text-pictures.js";
+import { clipRetimed, clipSourceInSec } from "./editor-clip-speed.js";
 import type { TextFrame } from "./editor-text.js";
 import { soundFadeAt } from "./editor-sound-fade.js";
 
@@ -167,6 +168,14 @@ export interface RenderPlanInput {
 }
 
 const STILL_KINDS: ReadonlySet<string> = new Set(["image", "board"]);
+
+/**
+ * A picture clip that brings no sound of its own: muted, or playing at another speed or backwards
+ * (SPEC-037 R-41). Sound stretched or turned round is a different sound, and the browser and
+ * FFmpeg would not make the same one; the record's `audio` is left alone, so the sound is back
+ * the moment the clip plays as it was shot.
+ */
+const silentPicture = (clip: TimelineClip): boolean => clip.audio === "mute" || clipRetimed(clip);
 
 /** Legacy placed sound had no role: it is never ducked, exactly as it never was. */
 function legacyAudio(clips: readonly ExportAudioClip[]): RenderAudioItem[] {
@@ -297,14 +306,14 @@ function overlaysFromTimeline(
         const takeId = clip.source.takeId;
         const resolved = resolveTakeMedia(production, takeId);
         if (resolved === null) return { ok: false, reason: `${clip.source.label} cites a take with no media` };
-        const sourceInSec = resolved.inSec + (clip.source.offsetSec ?? 0) + framesToSeconds(clip.sourceInFrames, frameRate);
-        if (clip.audio !== "mute" && audible.has(track.id) && !anySolo && production.takeMediaInfo[resolved.measuredId] === undefined && production.takes.find(take => take.id === resolved.measuredId)?.kind === "clip") {
+        const sourceInSec = resolved.inSec + (clip.source.offsetSec ?? 0) + clipSourceInSec(clip, frameRate);
+        if (!silentPicture(clip) && audible.has(track.id) && !anySolo && production.takeMediaInfo[resolved.measuredId] === undefined && production.takes.find(take => take.id === resolved.measuredId)?.kind === "clip") {
           unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec, source: { kind: "take" as const, takeId: resolved.measuredId } }, sourceInSec, resolved.outSec));
         }
         overlays.push({ path: resolved.path, startSec, endSec, still: false, ...(sourceInSec > 0 ? { sourceInSec } : {}) });
         pictures.push(pictureLayer(clip, track, resolved.path, false, sourceInSec, resolved.outSec,
           production.takeMediaInfo[resolved.measuredId]?.mediaInfo));
-        if (clip.audio !== "mute" && production.takeMediaInfo[resolved.measuredId]?.mediaInfo.hasAudio === true && audible.has(track.id) && !anySolo) {
+        if (!silentPicture(clip) && production.takeMediaInfo[resolved.measuredId]?.mediaInfo.hasAudio === true && audible.has(track.id) && !anySolo) {
           sound.push(...segmentSound({ path: resolved.path, startSec, endSec, gainDb: clip.gainDb ?? 0, role: "picture", sourceInSec, clipId: clip.id }, resolved.outSec));
         }
         continue;
@@ -328,21 +337,21 @@ function overlaysFromTimeline(
       if (!still && artifact.kind !== "video") {
         return { ok: false, reason: `${clip.source.label} is ${artifact.kind} and has no picture` };
       }
-      const sourceInSec = framesToSeconds(clip.sourceInFrames, frameRate);
-      if (!still && clip.audio !== "mute" && audible.has(track.id) && !anySolo && artifact.mediaInfo === undefined) {
+      const sourceInSec = clipSourceInSec(clip, frameRate);
+      if (!still && !silentPicture(clip) && audible.has(track.id) && !anySolo && artifact.mediaInfo === undefined) {
         unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec, source: { kind: "artifact", artifactId } });
       }
       overlays.push({ path: `artifacts/${artifact.file}`, startSec, endSec, still, ...(!still && sourceInSec > 0 ? { sourceInSec } : {}) });
       pictures.push(pictureLayer(clip, track, `artifacts/${artifact.file}`, still, sourceInSec, artifact.mediaInfo?.durationSec, artifact.mediaInfo));
       // A placed video's own sound plays while it is kept and the world knows it has some (R-12).
-      if (!still && clip.audio !== "mute" && artifact.mediaInfo?.hasAudio === true && audible.has(track.id) && !anySolo) {
+      if (!still && !silentPicture(clip) && artifact.mediaInfo?.hasAudio === true && audible.has(track.id) && !anySolo) {
         sound.push({
           path: `artifacts/${artifact.file}`,
           startSec,
           endSec,
           gainDb: clip.gainDb ?? 0,
           role: "picture",
-          sourceInSec: framesToSeconds(clip.sourceInFrames, frameRate),
+          sourceInSec: clipSourceInSec(clip, frameRate),
           clipId: clip.id,
         });
       }
@@ -358,7 +367,8 @@ function pictureLayer(clip: TimelineClip, track: TimelineTrack, path: string, st
     ...(!still && sourceOutSec !== undefined ? { sourceOutSec } : {}),
     ...(size?.width && size.height ? { sourceSize: { width: size.width, height: size.height } } : {}),
     fit: "contain", matte: "source-alpha", ...(clip.visual ? { blendMode: clip.visual.blendMode, opacity: clip.visual.opacity } : {}),
-    ...(still && clip.motion ? { motion: clip.motion } : {}) };
+    ...(still && clip.motion ? { motion: clip.motion } : {}),
+    ...(!still && clip.speed !== undefined && clip.speed !== 1 ? { speed: clip.speed } : {}), ...(!still && clip.reverse ? { reverse: true as const } : {}) };
 }
 
 /**
@@ -379,12 +389,13 @@ function textPicture(clip: TimelineClip, track: TimelineTrack, frame: TextFrame)
   return { ok: true, path: kept.path, layer: pictureLayer(clip, track, kept.path, true, 0, undefined, size) };
 }
 
-/** A timeline the software compositor must draw: an effect, a crossfade, an appearance, a move, a fade, or
- *  text. The Viewer's preset and the export's projection ask this one question, so the two cannot drift: a
- *  text clip is a picture only the compositor places (SPEC-065 R-18). */
+/** A timeline the software compositor must draw: an effect, a crossfade, an appearance, a move, a fade,
+ *  text, or a video at another speed or backwards. The Viewer's preset and the export's projection ask this
+ *  one question, so the two cannot drift: a text clip is a picture only the compositor places (SPEC-065
+ *  R-18), and a re-timed clip's frames are chosen by the one rule the compositor reads (SPEC-037 R-40). */
 export function timelineUsesCompositor(timeline: Pick<ProductionTimeline, "tracks" | "transitions">): boolean {
   return Boolean(timeline.transitions?.length) || timeline.tracks.some(track => Boolean(track.effects?.length)
-    || track.clips.some(clip => Boolean(clip.visual || clip.motion || clip.fade) || clip.source.kind === "text"));
+    || track.clips.some(clip => Boolean(clip.visual || clip.motion || clip.fade) || clip.source.kind === "text" || clipRetimed(clip)));
 }
 
 /** The effect clock and bindings remain authored; a delivery window never restarts their phase. */
@@ -469,7 +480,7 @@ function audioFromTimeline(
         endSec,
         gainDb: clip.gainDb ?? 0,
         role: effectiveAudioRole(track, clip),
-        sourceInSec: physicalInSec ?? (segmentInSec + framesToSeconds(clip.sourceInFrames, frameRate)),
+        sourceInSec: physicalInSec ?? (segmentInSec + clipSourceInSec(clip, frameRate)),
         clipId: clip.id,
         ...soundFadeWindows(clip, frameRate),
       }, sourceOutSec);
@@ -639,7 +650,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
       if (!resolved.ok) return { ok: false, reason: `${clip.source.label} cites ${resolved.reason}` };
       const artifact = resolved.artifact;
-      const inSec = framesToSeconds(clip.sourceInFrames, frameRate);
+      const inSec = clipSourceInSec(clip, frameRate);
       if (base !== null) basePictures.push(pictureLayer(clip, base, `artifacts/${artifact.file}`, STILL_KINDS.has(artifact.kind), inSec, artifact.mediaInfo?.durationSec, artifact.mediaInfo));
       if (STILL_KINDS.has(artifact.kind)) {
         items.push({ type: "black", durationSec: entry.durationSec });
@@ -647,7 +658,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
         continue;
       }
       if (artifact.kind !== "video") return { ok: false, reason: `${clip.source.label} is ${artifact.kind} and has no picture` };
-      if (baseAudible && clip.audio !== "mute" && artifact.mediaInfo === undefined) {
+      if (baseAudible && !silentPicture(clip) && artifact.mediaInfo === undefined) {
         unmeasuredAudio.push({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec, source: { kind: "artifact", artifactId } });
       }
       items.push({
@@ -657,7 +668,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
         durationSec: entry.durationSec,
         label: entry.label,
       });
-      if (baseAudible && clip.audio !== "mute" && artifact.mediaInfo?.hasAudio === true) {
+      if (baseAudible && !silentPicture(clip) && artifact.mediaInfo?.hasAudio === true) {
         baseSound.push({
           path: `artifacts/${artifact.file}`,
           startSec,
@@ -678,8 +689,8 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       const segment = take?.segment;
       const pass = take === undefined ? undefined : segment === undefined ? take : production.takes.find((candidate) => candidate.id === segment.passTakeId);
       if (take === undefined || pass?.media === undefined) return { ok: false, reason: `${clip.source.label} cites a take with no media` };
-      const inSec = (segment?.inSec ?? 0) + (clip.source.offsetSec ?? 0) + framesToSeconds(clip.sourceInFrames, frameRate);
-      if (baseAudible && clip.audio !== "mute" && pass.kind === "clip" && production.takeMediaInfo[pass.id] === undefined) {
+      const inSec = (segment?.inSec ?? 0) + (clip.source.offsetSec ?? 0) + clipSourceInSec(clip, frameRate);
+      if (baseAudible && !silentPicture(clip) && pass.kind === "clip" && production.takeMediaInfo[pass.id] === undefined) {
         unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec, source: { kind: "take" as const, takeId: pass.id } }, inSec, segment?.outSec));
       }
       const path = `productions/${production.meta.id}/takes/${pass.id}/${pass.media}`;
@@ -692,7 +703,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
         durationSec: entry.durationSec,
         label: entry.label,
       });
-      if (baseAudible && clip.audio !== "mute" && production.takeMediaInfo[pass.id]?.mediaInfo.hasAudio === true) {
+      if (baseAudible && !silentPicture(clip) && production.takeMediaInfo[pass.id]?.mediaInfo.hasAudio === true) {
         baseSound.push(...segmentSound({ path, startSec, endSec: startSec + entry.durationSec, gainDb: clip.gainDb ?? 0, role: "picture", sourceInSec: inSec, clipId: clip.id }, segment?.outSec));
       }
       continue;
@@ -718,10 +729,10 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
       const takeId = entry.takeId;
       const accepted = takeId === null ? undefined : production.takes.find((candidate) => candidate.id === takeId);
       const measuredId = accepted?.segment !== undefined ? accepted.segment.passTakeId : takeId;
-      if (clip !== undefined && clip.audio !== "mute" && baseAudible && measuredId !== null && production.takeMediaInfo[measuredId] === undefined && accepted?.kind === "clip") {
+      if (clip !== undefined && !silentPicture(clip) && baseAudible && measuredId !== null && production.takeMediaInfo[measuredId] === undefined && accepted?.kind === "clip") {
         unmeasuredAudio.push(...segmentSoundWindow({ clipId: clip.id, label: clip.source.label, startSec, endSec: startSec + entry.durationSec, source: { kind: "take" as const, takeId: measuredId } }, entry.media.inSec ?? 0, entry.media.outSec));
       }
-      if (clip !== undefined && clip.audio !== "mute" && baseAudible && measuredId !== null && production.takeMediaInfo[measuredId]?.mediaInfo.hasAudio === true) {
+      if (clip !== undefined && !silentPicture(clip) && baseAudible && measuredId !== null && production.takeMediaInfo[measuredId]?.mediaInfo.hasAudio === true) {
         baseSound.push(...segmentSound({
           path: entry.media.path,
           startSec,

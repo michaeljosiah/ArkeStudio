@@ -5,6 +5,8 @@ import { EffectCommandSchema, isEffectCommand, patchEffect, moveEffect, trimEffe
 import { PictureAppearanceSchema, PictureAppearanceCommandSchema, isPictureAppearanceCommand, applyPictureAppearanceCommand, duplicatePictureAppearance, pictureAppearanceStructureProblem, pictureAppearanceProtectionProblem, type PictureAppearanceCommand } from "./editor-picture-appearance.js";
 import { PictureMotionSchema, PictureFadeSchema, PictureMotionCommandSchema, isPictureMotionCommand, applyPictureMotionCommand, splitPictureFade, pictureMotionStructureProblem, type PictureMotionCommand } from "./editor-picture-motion.js";
 import { SoundFadeSchema, SoundFadeCommandSchema, isSoundFadeCommand, applySoundFadeCommand, splitSoundFade } from "./editor-sound-fade.js";
+import { ClipSpeedSchema, ClipSpeedCommandSchema, isClipSpeedCommand, clipRetimed, clipSourceInSec, clipSpeedProblem, clipSpeedStructureProblem,
+  retimedClip, retimedSourceFrames, reversedClip, splitSourceIns, trimmedSourceIn } from "./editor-clip-speed.js";
 import { TextSourceSchema, textSourceWritten } from "./editor-text.js";
 import { TextSetCommandSchema, isTextSetCommand, applyTextSetCommand, textClipProblem, type TextSetCommand } from "./editor-text-set.js";
 import { EffectProtectionRuleSchema, captureEffectProtectionRule, refreshEffectProtectionRules, checkEffectProtection, duplicateEffectProtectionRules, type EffectProtectionRule } from "./editor-effect-protection.js";
@@ -132,6 +134,13 @@ const TimelineClipObjectSchema = z
     fade: PictureFadeSchema.optional(),
     /** Audio clips: a fade in and out of the clip's sound at its own edges (SPEC-038 R-37). */
     soundFade: SoundFadeSchema.optional(),
+    /**
+     * A video's speed and direction on a Picture track (SPEC-037 R-35). Absent is its own speed,
+     * forwards. At another speed `sourceInFrames` and `durationFrames` count frames of the
+     * re-timed source, so every boundary stays a whole frame of the production clock.
+     */
+    speed: ClipSpeedSchema.optional(),
+    reverse: z.literal(true).optional(),
   })
   .strict();
 /**
@@ -399,6 +408,8 @@ export const ProductionTimelineSchema = z
     if (visualProblem) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks"], message: visualProblem });
     const motionProblem = pictureMotionStructureProblem(timeline.tracks);
     if (motionProblem) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks"], message: motionProblem });
+    const speedProblem = clipSpeedStructureProblem(timeline.tracks);
+    if (speedProblem) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["tracks"], message: speedProblem });
     const trackIds = new Set<TimelineTrackId>();
     if (new Set((timeline.transitions ?? []).map(transitionKey)).size !== (timeline.transitions?.length ?? 0)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["transitions"], message: "Each clip pair has at most one transition" });
     const trackOrders = new Set<number>();
@@ -527,6 +538,7 @@ export const TimelineCommandSchema = z.discriminatedUnion("kind", [
   ...PictureAppearanceCommandSchema.options,
   ...PictureMotionCommandSchema.options,
   SoundFadeCommandSchema,
+  ...ClipSpeedCommandSchema.options,
   TextSetCommandSchema,
   z.object({ kind: z.literal("set-performance-source"), clipId: TimelineClipIdSchema, sourceClipId: TimelineClipIdSchema.nullable() }).strict(),
   z.object({ kind: z.literal("move-adjacent"), clipId: TimelineClipIdSchema, direction: TimelineMoveDirectionSchema }).strict(),
@@ -619,12 +631,13 @@ export type TimelineClipCommand = Exclude<TimelineCommand, { kind: "switch-take"
 
 /** Why a clip cannot sit on a track of this kind, or null when it can (R-22). */
 export function sourceProblem(kind: TimelineTrackKind,
-  clip: Pick<TimelineClip, "source" | "audio" | "performanceSourceClipId" | "role"> & Partial<Pick<TimelineClip, "gainDb" | "linkedClipId" | "sourceInFrames" | "soundFade">>): string | null {
+  clip: Pick<TimelineClip, "source" | "audio" | "performanceSourceClipId" | "role"> & Partial<Pick<TimelineClip, "gainDb" | "linkedClipId" | "sourceInFrames" | "soundFade" | "speed" | "reverse">>): string | null {
   // A placed or pasted clip can arrive with one; a video's kept sound has no fade, as it has no gain (SPEC-038 R-39).
   if (clip.soundFade !== undefined && !AUDIO_TRACK_KINDS.has(kind)) return "A sound fade belongs only to a clip on an audio track";
   // Text first, so it is named on whatever track it was put: it is picture, with no sound, gain, link or in-point (SPEC-065 R-2).
   if (clip.source.kind === "text") return kind === "picture" ? textClipProblem(clip) : "Text belongs on a Picture track";
   if (kind === "effect") return "an effect track holds procedural effects, not media clips";
+  if ((clip.speed !== undefined || clip.reverse !== undefined) && kind !== "picture") return "Speed and direction belong to a video on a Picture track";
   if (clip.role !== undefined && !AUDIO_TRACK_KINDS.has(kind)) return "Only audio clips have an audio role";
   if (clip.performanceSourceClipId && (kind !== "picture" || clip.source.kind !== "shot")) return "master playback belongs to a shot on a Picture track";
   if (kind === "subtitle") return "a Subtitle track holds cues, not clips";
@@ -649,6 +662,7 @@ export function describeTimelineCommand(command: TimelineCommand): string {
   if (isPictureAppearanceCommand(command)) return command.kind === "picture-appearance" ? "Change picture appearance" : command.kind === "picture-protect" ? "Protect picture appearance" : "Release picture protection";
   if (isPictureMotionCommand(command)) return command.kind === "picture-fade" ? "Set picture fade" : command.motion ? "Set picture motion" : "Remove picture motion";
   if (isSoundFadeCommand(command)) return "Set sound fade";
+  if (isClipSpeedCommand(command)) return command.kind === "set-clip-speed" ? `Set speed to ${command.speed}x` : command.reverse ? "Play backwards" : "Play forwards";
   if (isTextSetCommand(command)) return command.clipIds.length === 1 ? "Change text" : `Change text on ${command.clipIds.length} clips`;
   switch (command.kind) {
     case "move-adjacent":
@@ -1232,6 +1246,7 @@ function swapAdjacent(clips: TimelineClip[], firstIndex: number, secondIndex: nu
 /**
  * How many frames a clip's source can supply from its first frame, when that is known (SPEC-038
  * R-10, SPEC-013 R-5a). Unknown is `undefined` — not measured, never zero — and bounds nothing.
+ * Counted at the clip's own speed, as its in-point and length are (SPEC-037 R-37).
  */
 export type SourceLengthFrames = (clip: TimelineClip) => number | undefined;
 
@@ -1603,6 +1618,11 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
     case "trim": {
       const { track, clip, ordered, index } = findClip(working, command.clipId);
       const delta = command.deltaFrames;
+      // Backwards, the tail is where the source window starts, so the two edges trade places in
+      // the source and keep them on the timeline (SPEC-037 R-39).
+      const sourceIn = trimmedSourceIn(clip, command.edge, delta);
+      // Asked of the sum, not of what is stored: a text clip's head extends no earlier than a still's at in-point 0.
+      if (sourceIn < 0) throw new TimelineOperationRefused(`${clip.id} has no source before its first frame`);
       let next: TimelineClip;
       if (command.edge === "start") {
         next = {
@@ -1610,21 +1630,22 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
           startFrame: clip.startFrame + delta,
           durationFrames: clip.durationFrames - delta,
           // Text has no source to be partway into, so its in-point stays 0 wherever its head is cut (SPEC-065 R-2).
-          sourceInFrames: clip.source.kind === "text" ? 0 : clip.sourceInFrames + delta,
+          sourceInFrames: clip.source.kind === "text" ? 0 : sourceIn,
         };
-        // Asked of the sum, not of what is stored: a text clip's head extends no earlier than a still's at in-point 0.
-        if (clip.sourceInFrames + delta < 0) throw new TimelineOperationRefused(`${clip.id} has no source before its first frame`);
         const previous = ordered[index - 1];
         if (previous !== undefined && next.startFrame < clipEnd(previous)) {
           throw new TimelineOperationRefused(`${clip.id} cannot extend into ${previous.id}`);
         }
       } else {
-        next = { ...clip, durationFrames: clip.durationFrames + delta };
+        next = { ...clip, durationFrames: clip.durationFrames + delta, sourceInFrames: sourceIn };
         const following = ordered[index + 1];
         if (following !== undefined && clipEnd(next) > following.startFrame) {
           throw new TimelineOperationRefused(`${clip.id} cannot extend into ${following.id}`);
         }
-        // A tail that reaches past the measured source is an impossible range, not a held frame.
+      }
+      // The edge that moves the far end of the source window: the tail forwards, the head backwards.
+      if ((command.edge === "end") !== (clip.reverse === true)) {
+        // A window that reaches past the measured source is an impossible range, not a held frame.
         const available = working.sourceLength(clip);
         if (available !== undefined && next.sourceInFrames + next.durationFrames > available) {
           throw new TimelineOperationRefused(`${clip.id} has only ${Math.max(0, available - next.sourceInFrames)} source frames from its in point`);
@@ -1644,15 +1665,17 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       }
       const offset = command.atFrame - clip.startFrame;
       const visualIdentity = track.kind === "picture" ? { visualOriginId: clip.visualOriginId ?? clip.id } : {};
-      const left: TimelineClip = { ...clip, ...visualIdentity, durationFrames: offset };
+      // The right half of text starts at 0 as the left does: the words are whole on both (SPEC-065 R-2, R-14).
+      // Backwards, the left half plays the later part of the window and the right the earlier (SPEC-037 R-39).
+      const [leftIn, rightIn] = clip.source.kind === "text" ? [0, 0] : splitSourceIns(clip, offset);
+      const left: TimelineClip = { ...clip, ...visualIdentity, durationFrames: offset, sourceInFrames: leftIn };
       const right: TimelineClip = {
         ...clip,
         ...visualIdentity,
         id: command.newClipId,
         startFrame: command.atFrame,
         durationFrames: clip.durationFrames - offset,
-        // The right half of text starts at 0 as the left does: the words are whole on both (SPEC-065 R-2, R-14).
-        sourceInFrames: clip.source.kind === "text" ? 0 : clip.sourceInFrames + offset,
+        sourceInFrames: rightIn,
       };
       // Each half keeps the fade at its own outer edge, picture or sound: the cut between them is hard.
       const [first, second] = splitSoundFade(...splitPictureFade(left, right));
@@ -1741,6 +1764,31 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       const { performanceSourceClipId: _previous, ...rest } = clip;
       replaceTrackClips(working, track.id, ordered.map(candidate => candidate.id === clip.id
         ? { ...rest, ...(command.sourceClipId === null ? {} : { performanceSourceClipId: command.sourceClipId }) } : candidate));
+      return;
+    }
+    case "set-clip-speed":
+    case "set-clip-reverse": {
+      const { track, clip, ordered, index } = findClip(working, command.clipId);
+      const problem = clipSpeedProblem(track, clip, working.sources ? value => !transitionStill(value, working.sources!.artifacts) : undefined);
+      if (problem !== null) throw new TimelineOperationRefused(problem);
+      let next: TimelineClip;
+      if (command.kind === "set-clip-reverse") {
+        if (command.reverse === (clip.reverse === true)) return;
+        next = reversedClip(clip, command.reverse);
+      } else {
+        const speed = Math.round(command.speed * 100) / 100;
+        if (speed === (clip.speed ?? 1)) return;
+        // The same stretch of source at the new speed (R-37): its length at that speed bounds it,
+        // and it grows no further than the clip after it. Never a ripple.
+        const following = ordered[index + 1];
+        const available = working.sourceLength({ ...clip, speed });
+        next = retimedClip(clip, speed, {
+          ...(available !== undefined ? { available } : {}),
+          ...(following !== undefined ? { room: following.startFrame - clip.startFrame } : {}),
+        });
+      }
+      touch(working, track.id, clip.id, clip);
+      replaceTrackClips(working, track.id, ordered.map(candidate => candidate.id === clip.id ? next : candidate));
       return;
     }
     case "set-clip-audio": {
@@ -2394,7 +2442,7 @@ export function sourceLengthFramesFor(
     const seconds = production.takeMediaInfo[takeId]?.mediaInfo.durationSec;
     return seconds === undefined ? undefined : secondsToFrames(seconds, frameRate);
   };
-  return (clip) => {
+  const own = (clip: TimelineClip): number | undefined => {
     // Text is drawn, not read from a file: no length bounds its tail (SPEC-065 R-1).
     if (clip.source.kind === "text") return undefined;
     if (clip.source.kind === "artifact") {
@@ -2426,6 +2474,11 @@ export function sourceLengthFramesFor(
     if (take.segment !== undefined) return Math.max(1, secondsToFrames(take.segment.outSec - take.segment.inSec - trim, frameRate));
     const whole = measured(take.id);
     return whole === undefined ? undefined : Math.max(1, whole - secondsToFrames(trim, frameRate));
+  };
+  // A re-timed clip counts frames of the re-timed source, so its source is that many frames long.
+  return (clip) => {
+    const frames = own(clip);
+    return frames === undefined || clip.speed === undefined ? frames : retimedSourceFrames(frames, clip.speed);
   };
 }
 
@@ -2533,9 +2586,9 @@ export function resolvePictureTimeline(
       const pass = take?.segment ? production.takes.find(item => item.id === take.segment!.passTakeId) : take;
       // Imported picture is playable footage, with no synthetic shot to fill or generate.
       const media: CutEntry["media"] = artifact && ["video", "image", "board"].includes(artifact.kind)
-        ? { path: `artifacts/${artifact.file}`, inSec: framesToSeconds(clip.sourceInFrames, frameRate) }
+        ? { path: `artifacts/${artifact.file}`, inSec: clipSourceInSec(clip, frameRate) }
         : pass?.media ? { path: `productions/${production.meta.id}/takes/${pass.id}/${pass.media}`,
-          inSec: (take?.segment?.inSec ?? 0) + (source.kind === "take" ? source.offsetSec ?? 0 : 0) + framesToSeconds(clip.sourceInFrames, frameRate),
+          inSec: (take?.segment?.inSec ?? 0) + (source.kind === "take" ? source.offsetSec ?? 0 : 0) + clipSourceInSec(clip, frameRate),
           ...(take?.segment ? { outSec: take.segment.outSec } : {}) } : null;
       entries.push({
         clipId: clip.id,
@@ -2579,7 +2632,7 @@ export function resolvePictureTimeline(
       });
       continue;
     }
-    const sourceInSec = framesToSeconds(clip.sourceInFrames, frameRate);
+    const sourceInSec = clipSourceInSec(clip, frameRate);
     let media = entry.media;
     if (media !== null && sourceInSec > 0) {
       const inSec = (media.inSec ?? 0) + sourceInSec;
@@ -2630,6 +2683,8 @@ export function detachAudioCommands(production: ProductionBundle, timeline: Prod
   if (!clip || track?.kind !== "picture") throw new TimelineOperationRefused("Select a video clip to detach its audio");
   if (clip.source.kind === "text") throw new TimelineOperationRefused("Text has no sound");
   if (clip.audio === "mute") throw new TimelineOperationRefused("This picture's embedded audio is already muted");
+  // Its sound is not in the film to take (SPEC-037 R-41), and a sound clip has no speed to carry it at.
+  if (clipRetimed(clip)) throw new TimelineOperationRefused("A clip at another speed or backwards plays no sound to detach");
   let source = clip.source;
   const sourceInFrames = clip.sourceInFrames;
   let measured: { hasAudio: boolean } | undefined;

@@ -38,7 +38,7 @@ const fixture = cutLayoutFixture();
 const base = "/w/" + fixture.world!.meta.worldId + "/p/saltlight";
 let review: ReturnType<typeof useEffectProposalReview> | null = null;
 function ReviewProbe() { review = useEffectProposalReview(fixture.world!.meta.worldId, "saltlight"); return null; }
-async function mount(size = 390, remote = false, tail?: number, withEffect = false, withReview = false, withTransition = false) {
+async function mount(size = 390, remote = false, tail?: number, withEffect = false, withReview = false, withTransition = false, withReverse = false) {
   width = size; sent = [];
   const host = dom.document.createElement("div"); dom.document.body.append(host); root = createRoot(host);
   if (remote) { const marker = dom.document.createElement("meta"); marker.name = "arke-remote"; marker.content = "true"; dom.document.head.append(marker); }
@@ -53,6 +53,14 @@ async function mount(size = 390, remote = false, tail?: number, withEffect = fal
     state.world!.artifacts.push(still);
     for (const clip of track.clips.slice(0, 2)) clip.source = { kind: "artifact", artifactId: still.id, label: "Harbour" };
     timeline.timeline.transitions = [{ type: "crossfade", trackId: track.id, leftClipId: track.clips[0]!.id, rightClipId: track.clips[1]!.id, durationFrames: 24, protectJoin: false, protectDuration: true }];
+    timeline.timeline.history = { undo: [], redo: [] };
+  }
+  if (withReverse && timeline?.status === "ready") {
+    // A reversed clip is drawn by the compositor, whose canvas and worker this fixture leaves out.
+    Object.getPrototypeOf(document.createElement("canvas")).getContext = () => null;
+    Object.assign(globalThis, { requestAnimationFrame: () => 1, cancelAnimationFrame() {} });
+    const clip = timeline.timeline.tracks.find(track => track.kind === "picture")!.clips.find(row => row.id === "cl_12")!;
+    Object.assign(clip, { reverse: true, sourceInFrames: 24 });
     timeline.timeline.history = { undo: [], redo: [] };
   }
   if (tail !== undefined && timeline?.status === "ready") timeline.timeline.tracks[0]!.endFrame = tail;
@@ -243,6 +251,20 @@ it("trim parses compact source timecodes", async () => {
   input.value = "0:00.12";
   await act(async () => props(input).onBlur!({ currentTarget: input } as never));
   assert.deepEqual(timelineCommands()[0], { kind: "trim", clipId: "cl_12", edge: "start", deltaFrames: 12 });
+});
+
+it("a reversed clip's phone trim reads and takes the timeline's own times", async () => {
+  // Its head is its source's end, so a source time typed as an offset from the head named the
+  // wrong frame: Out stayed where it was and each entry shortened the clip again.
+  const state = await mount(390, false, undefined, false, false, false, true);
+  const timeline = state.world!.productions[0]!.timeline, clip = timeline?.status === "ready" ? timeline.timeline.tracks.find(track => track.kind === "picture")!.clips.find(row => row.id === "cl_12")! : assert.fail("the fixture saves a timeline");
+  const shown = (frames: number) => `${Math.floor(frames / 24 / 60)}:${String(Math.floor(frames / 24) % 60).padStart(2, "0")}.${String(frames % 24).padStart(2, "0")}`;
+  await click(find('[data-clip="cl_12"]')); await click(find('.fy-cut-tools button:nth-child(3)'));
+  const start = find('.fy-cut-trim-sheet input[aria-label="In timecode"]') as HTMLInputElement, end = find('.fy-cut-trim-sheet input[aria-label="Out timecode"]') as HTMLInputElement;
+  assert.equal(start.value, shown(clip.startFrame)); assert.equal(end.value, shown(clip.startFrame + clip.durationFrames));
+  end.value = shown(clip.startFrame + clip.durationFrames - 10);
+  await act(async () => props(end).onBlur!({ currentTarget: end } as never));
+  assert.deepEqual(timelineCommands()[0], { kind: "trim", clipId: "cl_12", edge: "end", deltaFrames: -10 });
 });
 
 it("the inspector retains its field and uncommitted draft across phone and desktop", async () => {

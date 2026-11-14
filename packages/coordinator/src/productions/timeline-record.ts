@@ -36,6 +36,24 @@ export function carriesPictureMotion(raw: string): boolean {
 }
 
 /**
+ * SPEC-037 R-42: a clip's speed or direction, on the clip, in Undo or Redo, or in a request's
+ * commands. Both are strict clip fields an older Cut refuses to read, and one that read past them
+ * would play the clip forwards at its own speed from the wrong frame. An effect's motion has a
+ * `speed` too, under `motion`, so the key is counted only where a clip or a command holds it.
+ */
+export function carriesClipSpeed(raw: string): boolean {
+  const carries = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.some(carries);
+    if (!value || typeof value !== "object") return false;
+    const row = value as Record<string, unknown>;
+    if (row.kind === "set-clip-speed" || row.kind === "set-clip-reverse") return true;
+    if ((Object.hasOwn(row, "speed") || Object.hasOwn(row, "reverse")) && Object.hasOwn(row, "durationFrames") && Object.hasOwn(row, "source")) return true;
+    return Object.values(row).some(carries);
+  };
+  try { return carries(JSON.parse(raw)); } catch { return false; }
+}
+
+/**
  * SPEC-038 R-43: a sound clip's fades, on a clip, in Undo or Redo, or in a request's commands.
  * Its own field name is what lets this be read from the raw record: a picture's `fade` raises the
  * floor above, and a build at that floor refuses the same field on a sound clip.

@@ -64,13 +64,17 @@ export function pictureDragCommand(
     const target = others.filter((candidate) => candidate.startFrame + candidate.durationFrames / 2 < centre).length;
     return target === index ? null : { kind: "move-to-order", clipId, index: target };
   }
+  // What the source holds before the clip's window and after it. A clip playing backwards shows
+  // the window's end at its head and its start at its tail, so the two bound the other edge.
+  const available = sourceLength(clip);
+  const after = available === undefined ? Number.MAX_SAFE_INTEGER : available - clip.sourceInFrames - clip.durationFrames;
+  const [headRoom, tailRoom] = clip.reverse ? [after, clip.sourceInFrames] : [clip.sourceInFrames, after];
   if (gesture === "trim-start") {
-    const earliest = -Math.min(clip.sourceInFrames, clip.startFrame - (previous ? previous.startFrame + previous.durationFrames : 0));
+    const earliest = -Math.min(headRoom, clip.startFrame - (previous ? previous.startFrame + previous.durationFrames : 0));
     const delta = clamp(deltaFrames, earliest, clip.durationFrames - 1);
     return delta === 0 ? null : { kind: "trim", clipId, edge: "start", deltaFrames: delta };
   }
-  const available = sourceLength(clip);
-  const bySource = available === undefined ? Number.MAX_SAFE_INTEGER : available - clip.sourceInFrames - clip.durationFrames;
+  const bySource = tailRoom;
   const latest = Math.min(following ? following.startFrame - (clip.startFrame + clip.durationFrames) : Number.MAX_SAFE_INTEGER, bySource);
   const delta = clamp(deltaFrames, -(clip.durationFrames - 1), latest);
   return delta === 0 ? null : { kind: "trim", clipId, edge: "end", deltaFrames: delta };

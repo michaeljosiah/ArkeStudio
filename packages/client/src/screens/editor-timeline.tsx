@@ -4,6 +4,8 @@ import { ClipMenu, ClipMenuLabel, ExtractAudioMenuItem } from "./editor-clip-men
 import {
   artifactPicturePath,
   basePictureTrack,
+  clipSourceInSec,
+  clipSpeed,
   detachAudioCommands,
   type ArtifactSidecar,
   formatFrames,
@@ -101,7 +103,7 @@ export function pictureClipViews(
       // `resolvePictureTimeline`); only the legacy derivation, which knows shots and not clips,
       // leaves the offset to be added here.
       footage: mediaPath && !still
-        ? { path: mediaPath, inSec: entry?.media?.inSec ?? clip.sourceInFrames / frameRate }
+        ? { path: mediaPath, inSec: entry?.media?.inSec ?? clipSourceInSec(clip, frameRate) }
         : null,
       // A text clip has no file behind it and is never a gap: it always resolves (SPEC-065 R-3).
       gap: !mediaPath && clip.source.kind !== "text",
@@ -137,15 +139,19 @@ export function useMeasuredWidth(ref: React.RefObject<HTMLElement | null>): numb
 }
 
 /** Frames across a video clip (issue 1037), over its poster until each one has decoded. */
-export function Filmstrip({ slug, footage, durationSec, widthPx, heightPx = FILMSTRIP_HEIGHT_PX }: {
+export function Filmstrip({ slug, footage, durationSec, widthPx, heightPx = FILMSTRIP_HEIGHT_PX, reverse = false }: {
   slug: string | undefined;
   footage: { path: string; inSec: number } | null;
+  /** How much of the source the clip plays: its time on screen times its speed. */
   durationSec: number;
   widthPx: number;
   heightPx?: number;
+  /** A clip playing backwards shows its last frame first, and so does its strip. */
+  reverse?: boolean;
 }) {
   const src = footage !== null && slug !== undefined ? mediaUrl(slug, footage.path) : null;
-  const frames = useFilmstrip({ src, inSec: footage?.inSec ?? 0, durationSec, widthPx, heightPx });
+  const forwards = useFilmstrip({ src, inSec: footage?.inSec ?? 0, durationSec, widthPx, heightPx });
+  const frames = reverse ? [...forwards].reverse() : forwards;
   if (frames.every((frame) => frame === null)) return null;
   return (
     <span className="fy-filmstrip" aria-hidden="true" data-frames={frames.filter((frame) => frame !== null).length}>
@@ -190,7 +196,7 @@ function PictureClip({ view, slug, frameRate, style, className, children, ...res
           {view.poster === null || posterMissing
             ? <div className="fy-portrait--fallback"><Film size={18} /></div>
             : <Portrait worldSlug={slug} path={view.poster} label="" radius={0} onAvailabilityChange={(available) => setMissingFor(available ? null : pictureKey)} />}
-          <Filmstrip slug={slug} footage={view.footage} durationSec={view.clip.durationFrames / frameRate} widthPx={width} />
+          <Filmstrip slug={slug} footage={view.footage} durationSec={view.clip.durationFrames * clipSpeed(view.clip) / frameRate} widthPx={width} reverse={view.clip.reverse === true} />
           <span className="fy-cutseg__tag">{compact && view.clip.source.kind === "shot" ? view.clip.source.shotNumber : view.label.replace(/^shot /, "")}</span>
         </>
       )}
@@ -889,7 +895,8 @@ export function PictureClipTiming({
       <TimingRow label="Duration" value={clip.durationFrames} frameRate={frameRate} disabled={disabled} onStep={trimEnd} onEnter={typed("duration", "Trim clip tail")} />
       {!sourceTimes && sourceIn && <div className="fy-cutinspect__row">
         <span>Source in</span>
-        <strong>{formatFrames(clip.sourceInFrames, frameRate)}</strong>
+        {/* The source's own time: a re-timed clip counts its in-point in frames at its speed (SPEC-037 R-37). */}
+        <strong>{formatFrames(Math.round(clip.sourceInFrames * clipSpeed(clip)), frameRate)}</strong>
       </div>}
     </div>
   );
