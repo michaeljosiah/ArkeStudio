@@ -72,6 +72,8 @@ const param = () => ({
   cancelScheduledValues() {},
 });
 const node = () => ({ connect() {}, disconnect() {} });
+/** The level each voice was last asked for, in the order the voices were made. */
+const gains: Array<ReturnType<typeof param>> = [];
 /** Every context the hook has built; the last is the one the case under test is using. */
 const contexts: FakeAudioContext[] = [];
 const context = (): FakeAudioContext => contexts[contexts.length - 1]!;
@@ -94,7 +96,9 @@ class FakeAudioContext {
     return node();
   }
   createGain() {
-    return { ...node(), gain: param() };
+    const gain = param();
+    gains.push(gain);
+    return { ...node(), gain };
   }
   resume(): Promise<void> {
     this.resumes += 1;
@@ -173,9 +177,35 @@ function Harness({ plan, playing, at, discontinuityRef }: { plan: RenderPlan; pl
 describe("the monitor mix survives a re-render", () => {
   beforeEach(() => {
     made.length = 0;
+    gains.length = 0;
     frames = [];
     timeRef.current = 0;
     contexts.length = 0;
+  });
+
+  /**
+   * The monitor plays a fade (SPEC-038 R-37, R-38, R-42): the level it asks its gain node for is
+   * the plan's own function of the moment, the same two straight lines the export's graph draws,
+   * on top of the clip's gain.
+   */
+  it("plays a fading clip at the plan's level: its gain times how far through the fade it is", async () => {
+    const container = dom.document.createElement("div"), root = createRoot(container as unknown as HTMLElement);
+    const plan = bedPlan(), gain = Math.pow(10, -6 / 20);
+    plan.audio[0] = { ...plan.audio[0]!, gainDb: -6, fadeIn: { startSec: 0, durationSec: 2 }, fadeOut: { startSec: 9, durationSec: 3 } };
+    const levelAt = async (at: number, ms: number) => {
+      await act(async () => root.render(<Harness plan={plan} playing at={at} />));
+      await act(async () => runFrame(ms));
+      return gains[0]!.value;
+    };
+    const near = (actual: number, expected: number, message: string) => assert.ok(Math.abs(actual - expected) < 1e-9, `${message}: ${actual} is not ${expected}`);
+    try {
+      near(await levelAt(0.5, 0), gain * 0.25, "a quarter of the way up the fade in");
+      near(await levelAt(1, 16), gain * 0.5, "halfway up");
+      near(await levelAt(5, 32), gain, "its own gain between the fades");
+      near(await levelAt(10.5, 48), gain * 0.5, "halfway down the fade out");
+      near(await levelAt(11.97, 64), gain * 0.01, "almost silent at its last frames");
+      assert.equal(gains.length, 1, "one voice throughout");
+    } finally { await act(async () => root.unmount()); }
   });
 
   it("re-seeks a short loop exactly without creating a second soundtrack", async () => {

@@ -43,6 +43,7 @@ import { projectPictureTransitions } from "./editor-effect-render-plan.js";
 import { textPictureFrame, textPicturePath } from "./editor-text-pictures.js";
 import { clipRetimed, clipSourceInSec } from "./editor-clip-speed.js";
 import type { TextFrame } from "./editor-text.js";
+import { soundFadeAt } from "./editor-sound-fade.js";
 
 /**
  * One render plan, two executors (SPEC-038 R-1..R-11, D1; issue #680).
@@ -408,6 +409,22 @@ function effectProjection(record: ProductionTimeline, pictures: RenderPictureLay
     effectLayers, issues };
 }
 
+/**
+ * A clip's fades as windows on the production clock, each no longer than the clip (SPEC-038 R-37).
+ *
+ * Read from the clip's frames and never from the sound it makes: a performance speaks inside its
+ * clip and a filed segment can stop before its clip does, and a fade measured from either would
+ * move when the take was swapped. The record keeps what the author set; the limit is applied here,
+ * so a clip trimmed shorter than its fade plays it whole again once it is lengthened (R-41).
+ */
+export function soundFadeWindows(clip: Pick<TimelineClip, "startFrame" | "durationFrames" | "soundFade">, frameRate: FrameRate): Pick<ExportAudioClip, "fadeIn" | "fadeOut"> {
+  const inFrames = Math.min(clip.soundFade?.inFrames ?? 0, clip.durationFrames), outFrames = Math.min(clip.soundFade?.outFrames ?? 0, clip.durationFrames);
+  return {
+    ...(inFrames > 0 ? { fadeIn: { startSec: framesToSeconds(clip.startFrame, frameRate), durationSec: framesToSeconds(inFrames, frameRate) } } : {}),
+    ...(outFrames > 0 ? { fadeOut: { startSec: framesToSeconds(clip.startFrame + clip.durationFrames - outFrames, frameRate), durationSec: framesToSeconds(outFrames, frameRate) } } : {}),
+  };
+}
+
 /** Typed audio tracks become mixed sound (R-12, R-13, R-19); each clip conformed to its window. */
 function audioFromTimeline(
   timeline: ProductionTimeline,
@@ -465,6 +482,7 @@ function audioFromTimeline(
         role: effectiveAudioRole(track, clip),
         sourceInSec: physicalInSec ?? (segmentInSec + clipSourceInSec(clip, frameRate)),
         clipId: clip.id,
+        ...soundFadeWindows(clip, frameRate),
       }, sourceOutSec);
       audio.push(...sound);
       if (effectiveAudioRole(track, clip) === "dialogue") speech.push(...sound.map(item => ({ startSec: item.startSec, endSec: item.endSec })));
@@ -842,7 +860,13 @@ export function windowPlan(plan: RenderPlan, startSec: number, endSec: number, s
     const cut = clipRange(clip);
     if (cut === null) return [];
     const head = Math.max(0, startSec - clip.startSec);
-    return [head === 0 ? cut : { ...cut, sourceInSec: clip.sourceInSec + head }];
+    // A fade moves onto the window's clock whole and is never cut to it: a window that opens
+    // inside a fade starts partway up the slope, where the whole film is at that moment (R-42).
+    const fades = {
+      ...(clip.fadeIn ? { fadeIn: { ...clip.fadeIn, startSec: clip.fadeIn.startSec - startSec } } : {}),
+      ...(clip.fadeOut ? { fadeOut: { ...clip.fadeOut, startSec: clip.fadeOut.startSec - startSec } } : {}),
+    };
+    return [{ ...cut, ...fades, ...(head === 0 ? {} : { sourceInSec: clip.sourceInSec + head }) }];
   });
   /*
    * A speech region outside the window still ducks inside it through its look-ahead and release
@@ -974,9 +998,18 @@ export function audioGainDbAt(plan: Pick<RenderPlan, "mix" | "speech">, item: Pi
   return item.gainDb + plan.mix.duckingDb * duckingEnvelope(plan.speech, plan.mix, sec);
 }
 
-/** The sound mixed under one moment, each at the gain it plays at (R-12..R-19). */
-export function audioAtSec(plan: RenderPlan, sec: number): Array<RenderAudioItem & { effectiveGainDb: number }> {
+/**
+ * The level a sound plays at, as a linear multiplier: its gain and any ducking, times its fade
+ * (R-38). Linear because a fade reaches silence, which no figure in dB states. The browser sets
+ * its gain node to this, and the export's two volume stages multiply to the same number.
+ */
+export function audioLevelAt(plan: Pick<RenderPlan, "mix" | "speech">, item: Pick<RenderAudioItem, "gainDb" | "role" | "fadeIn" | "fadeOut">, sec: number): number {
+  return Math.pow(10, audioGainDbAt(plan, item, sec) / 20) * soundFadeAt(item, sec);
+}
+
+/** The sound mixed under one moment, each at the gain it plays at and how far through a fade it is (R-12..R-19, R-37). */
+export function audioAtSec(plan: RenderPlan, sec: number): Array<RenderAudioItem & { effectiveGainDb: number; fade: number }> {
   return plan.audio
     .filter((clip) => sec >= clip.startSec && sec < clip.endSec)
-    .map((clip) => ({ ...clip, effectiveGainDb: audioGainDbAt(plan, clip, sec) }));
+    .map((clip) => ({ ...clip, effectiveGainDb: audioGainDbAt(plan, clip, sec), fade: soundFadeAt(clip, sec) }));
 }

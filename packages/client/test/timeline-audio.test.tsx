@@ -224,6 +224,51 @@ describe("typed tracks on the editor (issue 681)", () => {
     }
   });
 
+  it("fades a sound clip in and out from the Inspector, under its gain, and marks the clip that fades (SPEC-038 R-44)", async () => {
+    const { state, timeline } = migratedState(), id = "cl_ov-01J8G0000000000000000000A1", second = timeline.frameRate;
+    const screen = await mountCut(state);
+    const type = async (label: string, value: string) => {
+      const found = [...screen.container.querySelectorAll("label")].find((row) => row.childNodes[0]?.textContent === label);
+      assert.ok(found, `${label} is a field`);
+      const input = document.getElementById(found.getAttribute("for")!) as HTMLInputElement;
+      await act(async () => { input.value = value; input.dispatchEvent(new Event("input", { bubbles: true })); });
+      await act(async () => { const event = new Event("keydown", { bubbles: true }); Object.assign(event, { key: "Enter" }); input.dispatchEvent(event); });
+    };
+    try {
+      await act(async () => screen.container.querySelector<HTMLButtonElement>(`[data-clip='${id}']`)!.click());
+      const section = screen.container.querySelector('[aria-label="Sound fade"]');
+      assert.ok(section, "a sound clip shows its fades");
+      assert.equal(section.querySelector("h3")?.textContent, "Fade");
+      assert.deepEqual([...section.querySelectorAll("label")].map((row) => row.childNodes[0]?.textContent), ["Fade in", "Fade out"]);
+      const inspector = screen.container.querySelector(".fy-cutinspect")!.innerHTML;
+      assert.ok(inspector.indexOf("Gain 1 dB quieter") < inspector.indexOf('aria-label="Sound fade"'), "under Gain");
+
+      await type("Fade in", "1");
+      assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "sound-fade", clipId: id, inFrames: second }], "one edge, in frames; the other is left alone");
+      assert.equal(commandsSent(screen).at(-1)?.label, "Set sound fade");
+      // The clip is two seconds long, and a fade is no longer than its clip.
+      const before = commandsSent(screen).length;
+      await type("Fade out", "5");
+      assert.equal(commandsSent(screen).length, before, "a fade longer than its clip refuses before anything is sent");
+
+      // What the coordinator would send back: the clip says it fades, to the eye and aloud.
+      state.world!.productions[0]!.timeline = { status: "ready", timeline: applyTimelineCommands(timeline, [{ kind: "sound-fade", clipId: id, inFrames: second, outFrames: 12 }]) };
+      await act(async () => __setStateForTest(structuredClone(state) as ClientState));
+      const faded = screen.container.querySelector<HTMLButtonElement>(`[data-clip='${id}']`)!;
+      assert.match(faded.getAttribute("aria-label") ?? "", /to 00:00:03:00, fades in, fades out$/);
+      assert.deepEqual([...faded.querySelectorAll(".fy-typedclip__gain")].map((chip) => chip.textContent), ["FADE"]);
+      await type("Fade out", "0");
+      assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "sound-fade", clipId: id, outFrames: 0 }], "zero removes that edge");
+
+      // With no clip selected the rows go with the rest of the clip's Inspector. Asked as a
+      // boolean: a failed comparison of a DOM node makes the runner print the whole document.
+      await act(async () => screen.container.querySelector<HTMLElement>(".fy-timeline__canvas")!.click());
+      assert.equal(screen.container.querySelector('[aria-label="Sound fade"]') === null, true);
+    } finally {
+      await close(screen);
+    }
+  });
+
   it("edits an unsaved cut's legacy placements as typed clips, fenced for the first write", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions[0]!;

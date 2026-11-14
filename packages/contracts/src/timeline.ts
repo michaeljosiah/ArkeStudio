@@ -4,6 +4,7 @@ import { effectTimelineCapabilityProblem } from "./editor-effect-catalogue.js";
 import { EffectCommandSchema, isEffectCommand, patchEffect, moveEffect, trimEffect, duplicateEffect, type EffectCommand } from "./editor-effect-commands.js";
 import { PictureAppearanceSchema, PictureAppearanceCommandSchema, isPictureAppearanceCommand, applyPictureAppearanceCommand, duplicatePictureAppearance, pictureAppearanceStructureProblem, pictureAppearanceProtectionProblem, type PictureAppearanceCommand } from "./editor-picture-appearance.js";
 import { PictureMotionSchema, PictureFadeSchema, PictureMotionCommandSchema, isPictureMotionCommand, applyPictureMotionCommand, splitPictureFade, pictureMotionStructureProblem, type PictureMotionCommand } from "./editor-picture-motion.js";
+import { SoundFadeSchema, SoundFadeCommandSchema, isSoundFadeCommand, applySoundFadeCommand, splitSoundFade } from "./editor-sound-fade.js";
 import { ClipSpeedSchema, ClipSpeedCommandSchema, isClipSpeedCommand, clipRetimed, clipSourceInSec, clipSpeedProblem, clipSpeedStructureProblem,
   retimedClip, retimedSourceFrames, reversedClip, splitSourceIns, trimmedSourceIn } from "./editor-clip-speed.js";
 import { TextSourceSchema, textSourceWritten } from "./editor-text.js";
@@ -131,6 +132,8 @@ const TimelineClipObjectSchema = z
     /** A still's slow move across its time on screen, and its fades at an open edge. */
     motion: PictureMotionSchema.optional(),
     fade: PictureFadeSchema.optional(),
+    /** Audio clips: a fade in and out of the clip's sound at its own edges (SPEC-038 R-37). */
+    soundFade: SoundFadeSchema.optional(),
     /**
      * A video's speed and direction on a Picture track (SPEC-037 R-35). Absent is its own speed,
      * forwards. At another speed `sourceInFrames` and `durationFrames` count frames of the
@@ -534,6 +537,7 @@ export const TimelineCommandSchema = z.discriminatedUnion("kind", [
   ...EffectCommandSchema.options,
   ...PictureAppearanceCommandSchema.options,
   ...PictureMotionCommandSchema.options,
+  SoundFadeCommandSchema,
   ...ClipSpeedCommandSchema.options,
   TextSetCommandSchema,
   z.object({ kind: z.literal("set-performance-source"), clipId: TimelineClipIdSchema, sourceClipId: TimelineClipIdSchema.nullable() }).strict(),
@@ -627,7 +631,9 @@ export type TimelineClipCommand = Exclude<TimelineCommand, { kind: "switch-take"
 
 /** Why a clip cannot sit on a track of this kind, or null when it can (R-22). */
 export function sourceProblem(kind: TimelineTrackKind,
-  clip: Pick<TimelineClip, "source" | "audio" | "performanceSourceClipId" | "role"> & Partial<Pick<TimelineClip, "gainDb" | "linkedClipId" | "sourceInFrames" | "speed" | "reverse">>): string | null {
+  clip: Pick<TimelineClip, "source" | "audio" | "performanceSourceClipId" | "role"> & Partial<Pick<TimelineClip, "gainDb" | "linkedClipId" | "sourceInFrames" | "soundFade" | "speed" | "reverse">>): string | null {
+  // A placed or pasted clip can arrive with one; a video's kept sound has no fade, as it has no gain (SPEC-038 R-39).
+  if (clip.soundFade !== undefined && !AUDIO_TRACK_KINDS.has(kind)) return "A sound fade belongs only to a clip on an audio track";
   // Text first, so it is named on whatever track it was put: it is picture, with no sound, gain, link or in-point (SPEC-065 R-2).
   if (clip.source.kind === "text") return kind === "picture" ? textClipProblem(clip) : "Text belongs on a Picture track";
   if (kind === "effect") return "an effect track holds procedural effects, not media clips";
@@ -655,6 +661,7 @@ export function describeTimelineCommand(command: TimelineCommand): string {
   if (isEffectCommand(command)) return command.kind === "effect-create" ? `Add ${command.effect.preset.id}` : command.kind === "effect-protect" ? "Protect effect from suggestions" : command.kind === "effect-release" ? "Release effect protection" : `${command.kind.slice(7)} effect ${command.clipId}`;
   if (isPictureAppearanceCommand(command)) return command.kind === "picture-appearance" ? "Change picture appearance" : command.kind === "picture-protect" ? "Protect picture appearance" : "Release picture protection";
   if (isPictureMotionCommand(command)) return command.kind === "picture-fade" ? "Set picture fade" : command.motion ? "Set picture motion" : "Remove picture motion";
+  if (isSoundFadeCommand(command)) return "Set sound fade";
   if (isClipSpeedCommand(command)) return command.kind === "set-clip-speed" ? `Set speed to ${command.speed}x` : command.reverse ? "Play backwards" : "Play forwards";
   if (isTextSetCommand(command)) return command.clipIds.length === 1 ? "Change text" : `Change text on ${command.clipIds.length} clips`;
   switch (command.kind) {
@@ -1534,6 +1541,17 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
     } catch (error) { throw new TimelineOperationRefused(error instanceof Error ? error.message : String(error)); }
     return;
   }
+  if (isSoundFadeCommand(command)) {
+    try {
+      // A value already held comes back as the same clip, touches nothing and writes no revision (SPEC-038 R-40).
+      const next = applySoundFadeCommand(working.tracks, command);
+      for (const track of working.tracks) for (const clip of track.clips) {
+        if (next.find(row => row.id === track.id)?.clips.find(row => row.id === clip.id) !== clip) touch(working, track.id, clip.id, clip);
+      }
+      working.tracks = next;
+    } catch (error) { throw new TimelineOperationRefused(error instanceof Error ? error.message : String(error)); }
+    return;
+  }
   if (isTextSetCommand(command)) {
     try {
       // All of it or none: the command refuses before a clip is touched, and a clip that comes back
@@ -1659,8 +1677,8 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
         durationFrames: clip.durationFrames - offset,
         sourceInFrames: rightIn,
       };
-      // Each half keeps the fade at its own outer edge: the cut between them is hard.
-      const [first, second] = splitPictureFade(left, right);
+      // Each half keeps the fade at its own outer edge, picture or sound: the cut between them is hard.
+      const [first, second] = splitSoundFade(...splitPictureFade(left, right));
       touch(working, track.id, clip.id, clip);
       touch(working, track.id, right.id, null);
       replaceTrackClips(working, track.id, [...ordered.map((candidate) => (candidate.id === clip.id ? first : candidate)), second]);
