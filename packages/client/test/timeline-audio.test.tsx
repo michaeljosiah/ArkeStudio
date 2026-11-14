@@ -224,6 +224,33 @@ describe("typed tracks on the editor (issue 681)", () => {
     }
   });
 
+  it("sets the film's look from the Inspector with no clip selected, after the mix, as one command (SPEC-038 R-45..R-50)", async () => {
+    const { state, timeline } = migratedState();
+    const screen = await mountCut(state);
+    try {
+      // With a clip selected the Inspector is the clip's, and the film's look is not in it.
+      await act(async () => screen.container.querySelector<HTMLButtonElement>("[data-clip='cl_ov-01J8G0000000000000000000A1']")!.click());
+      assert.equal(screen.container.querySelector('[aria-label="Look"]') === null, true);
+      await act(async () => screen.container.querySelector<HTMLElement>(".fy-timeline__canvas")!.click());
+      const inspector = screen.container.querySelector(".fy-cutinspect")!;
+      assert.equal(inspector.querySelector(".fy-cutinspect__eyebrow")?.textContent, "CUT");
+      assert.ok(inspector.innerHTML.indexOf('aria-label="Mix"') < inspector.innerHTML.indexOf('aria-label="Look"'), "the look follows the mix");
+      await act(async () => byLabel(screen, "Grain light").click());
+      assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "set-picture-look", look: { grain: "light" } }]);
+      assert.equal(commandsSent(screen).at(-1)?.label, "Change the look");
+
+      // What the coordinator would send back: the chip is pressed, and turning it off again clears the look.
+      state.world!.productions[0]!.timeline = { status: "ready", timeline: applyTimelineCommands(timeline, [{ kind: "set-picture-look", look: { grain: "light" } }]) };
+      await act(async () => __setStateForTest(structuredClone(state) as ClientState));
+      assert.equal(byLabel(screen, "Grain light").getAttribute("aria-pressed"), "true");
+      await act(async () => byLabel(screen, "Grain off").click());
+      assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "set-picture-look", look: null }]);
+      assert.equal(commandsSent(screen).at(-1)?.label, "Clear the look");
+    } finally {
+      await close(screen);
+    }
+  });
+
   it("fades a sound clip in and out from the Inspector, under its gain, and marks the clip that fades (SPEC-038 R-44)", async () => {
     const { state, timeline } = migratedState(), id = "cl_ov-01J8G0000000000000000000A1", second = timeline.frameRate;
     const screen = await mountCut(state);

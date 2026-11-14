@@ -582,6 +582,18 @@ Contracts `cut.ts` owns export presets and aspect-based `defaultExportPreset`; c
 shows the delivered dimensions and production clock (issue #1252). Coverage includes client
 `test/publications.test.tsx` and coordinator `test/publications/video.test.ts` with real media tools.
 
+A cut's picture look (SPEC-038 R-45..R-50) is one optional timeline field, `pictureLook`: a film
+grade, film grain, or both, over the whole picture. Contracts `editor-picture-look.ts` holds the
+record, the `set-picture-look` command and the FFmpeg chain; `timeline.ts` owns the command and its
+Undo/Redo, and schema 134 includes retained history. `render-plan.ts` carries the look on the plan
+without choosing the compositor, and `cut.ts` lays it over the finished picture before burned-in
+subtitles, whichever way the picture was made. The Viewer shows an approximation in CSS (client
+`screens/editor-look.tsx`, `fy-cutlook-*` in `fidelity.css`), outside the shared renderer's frames;
+the same file holds the Inspector's Look panel, shown with no clip selected. Arke's editor requests
+do not carry the command. Start with contracts `test/editor-picture-look.test.ts`, coordinator
+`test/productions/timeline-picture-look.test.ts` and `test/media/picture-look-native.test.ts`
+(real FFmpeg, skipped without it), and client `test/editor-look.test.tsx`.
+
 Inspect `TimelineCommandRefused` and existing migration/history handling when changing edits. A client drag preview is not a successful persisted edit. Start with coordinator `test/productions/timeline.test.ts`, `timeline-migration.test.ts` and client `test/timeline-editing-guards.test.tsx`, `plan-playback.test.ts`.
 
 Render planning, migration and inspector validation receive the whole world's artifact catalog. Contracts `artifact-access.ts` (`resolveProductionArtifact`) distinguishes missing media from another production's scoped material; the same decision guards timeline/Library placement, editor-request preparation and legacy writes. Render planning's `legacyArtifactScopeRefusal` checks unmigrated audio and song masters before preview or export; `legacyCutArtifactReferences` normalizes both legacy audio encodings for the planner and bulk-save validation. New picker offers remain scoped to the current production, while existing unavailable Library memberships stay visible for removal (SPEC-020 R-13).

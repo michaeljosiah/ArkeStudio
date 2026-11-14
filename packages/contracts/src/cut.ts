@@ -14,6 +14,7 @@ import type { PictureBlendMode } from "./editor-effects.js";
 import { pictureMotionAt } from "./editor-picture-motion.js";
 import type { SoundFadeWindow } from "./editor-sound-fade.js";
 import { pictureSourceSec, PICTURE_SAMPLE_TOLERANCE_SEC } from "./editor-clip-speed.js";
+import { timelinePictureLookFilters, type TimelinePictureLook } from "./editor-picture-look.js";
 
 /**
  * The cut (SPEC-013 §2.8, D9): derived from selections and scene order, never stored — a
@@ -444,6 +445,11 @@ export interface ExportPlan {
     style: { fontFamily: string; relativeSize: number; color: string; background: "none" | "box" | "outline"; bottomMargin: number };
     cues: Array<{ text: string; startSec: number; endSec: number }>;
   };
+  /**
+   * A grade and grain over the whole picture (SPEC-038 R-45..R-50). Absent on every plan whose film has
+   * none, which leaves the video chain exactly as it was.
+   */
+  pictureLook?: TimelinePictureLook;
 }
 
 // ---------------------------------------------------------------------------
@@ -1015,6 +1021,18 @@ export function buildFfmpegArgs(plan: ExportPlan, worldDir: string, outFile: str
     last = next;
   });
   inputIndex = plan.items.length + plan.overlays.length;
+  }
+
+  /*
+   * The look (SPEC-038 R-45..R-50), where the two ways of making the picture have met: over everything
+   * the film shows, and before the subtitles, which are words about the film and not part of its
+   * picture. Graded and grained with it they would soften and lose their colour. The compositor's
+   * frame is its own size and rate; any other film's are the preset's and the plan's.
+   */
+  if (plan.pictureLook !== undefined) {
+    const frame = plan.effectRender ?? { width: p.width, height: p.height, frameRate: fps };
+    filters.push(...timelinePictureLookFilters(plan.pictureLook, frame.width, frame.height, frame.frameRate, last, "look"));
+    last = "look";
   }
 
   /*

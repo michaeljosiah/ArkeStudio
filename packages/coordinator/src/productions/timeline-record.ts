@@ -68,6 +68,23 @@ export function carriesSoundFade(raw: string): boolean {
   try { return carries(JSON.parse(raw)); } catch { return false; }
 }
 
+/**
+ * SPEC-038 R-45..R-50: a picture look, on the record or in Undo or Redo, where it is the entry's
+ * before and after. Both are strict fields an older Cut refuses to read. Its own field name is
+ * what lets this be read from the raw record: a title's source has a `look` of its own, which
+ * raises nothing here, and typed words are values, never keys. A request cannot carry the command
+ * today; its kind is counted so the floor is already right on the day one can.
+ */
+export function carriesPictureLook(raw: string): boolean {
+  const carries = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.some(carries);
+    if (!value || typeof value !== "object") return false;
+    const row = value as Record<string, unknown>;
+    return row.kind === "set-picture-look" || Object.hasOwn(row, "pictureLook") || Object.values(row).some(carries);
+  };
+  try { return carries(JSON.parse(raw)); } catch { return false; }
+}
+
 /** Inspect presence even in history/proposals so older readers never strip newly authored data. */
 export function carriesEditorAppearance(raw: string): boolean {
   const carries = (value: unknown): boolean => {

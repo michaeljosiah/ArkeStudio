@@ -7,6 +7,7 @@ import { PictureMotionSchema, PictureFadeSchema, PictureMotionCommandSchema, isP
 import { SoundFadeSchema, SoundFadeCommandSchema, isSoundFadeCommand, applySoundFadeCommand, splitSoundFade } from "./editor-sound-fade.js";
 import { ClipSpeedSchema, ClipSpeedCommandSchema, isClipSpeedCommand, clipRetimed, clipSourceInSec, clipSpeedProblem, clipSpeedStructureProblem,
   retimedClip, retimedSourceFrames, reversedClip, splitSourceIns, trimmedSourceIn } from "./editor-clip-speed.js";
+import { TimelinePictureLookSchema, TimelinePictureLookCommandSchema, timelinePictureLookWritten, type TimelinePictureLook, type TimelinePictureLookCommand } from "./editor-picture-look.js";
 import { TextSourceSchema, textSourceWritten } from "./editor-text.js";
 import { TextSetCommandSchema, isTextSetCommand, applyTextSetCommand, textClipProblem, type TextSetCommand } from "./editor-text-set.js";
 import { EffectProtectionRuleSchema, captureEffectProtectionRule, refreshEffectProtectionRules, checkEffectProtection, duplicateEffectProtectionRules, type EffectProtectionRule } from "./editor-effect-protection.js";
@@ -343,6 +344,8 @@ export const TimelineChangeHistoryEntrySchema = z
     transitions: z.object({ before: z.array(CrossfadeSchema).max(4000), after: z.array(CrossfadeSchema).max(4000) }).strict().optional(),
     effectProtection: z.object({ before: z.array(EffectProtectionRuleSchema).max(EFFECT_CLIP_LIMIT), after: z.array(EffectProtectionRuleSchema).max(EFFECT_CLIP_LIMIT) }).strict().optional(),
     mix: z.object({ before: MixSettingsSchema, after: MixSettingsSchema }).strict().optional(),
+    /** The picture look before and after, when the action changed it; null on a side that had none (SPEC-038 R-45..R-50). */
+    pictureLook: z.object({ before: TimelinePictureLookSchema.nullable(), after: TimelinePictureLookSchema.nullable() }).strict().optional(),
     /** The Library before and after, when the action changed it. */
     library: z
       .object({ before: z.array(TimelineLibraryItemSchema).max(MAX_LIBRARY_ITEMS), after: z.array(TimelineLibraryItemSchema).max(MAX_LIBRARY_ITEMS) })
@@ -364,6 +367,7 @@ export const TimelineChangeHistoryEntrySchema = z
       entry.effectProtection !== undefined ||
       entry.transitions !== undefined ||
       entry.mix !== undefined ||
+      entry.pictureLook !== undefined ||
       entry.library !== undefined,
     "a history entry must change something",
   );
@@ -394,6 +398,8 @@ export const ProductionTimelineSchema = z
     effectProtection: z.array(EffectProtectionRuleSchema).max(EFFECT_CLIP_LIMIT).optional(),
     /** Defaulted so a record written before the mix existed reads with the documented policy. */
     mix: MixSettingsSchema.default(DEFAULT_MIX),
+    /** A grade and grain over the whole picture (SPEC-038 R-45..R-50). Absent means none: no record holds an empty one. */
+    pictureLook: TimelinePictureLookSchema.optional(),
     /** The Library (SPEC-039 R-8). Defaulted, so a record from before it existed opens empty. */
     library: z.array(TimelineLibraryItemSchema).max(MAX_LIBRARY_ITEMS).default([]),
     /**
@@ -587,6 +593,7 @@ export const TimelineCommandSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("add-to-library"), items: z.array(TimelineLibraryItemSchema).min(1).max(200) }).strict(),
   z.object({ kind: z.literal("remove-from-library"), items: z.array(TimelineLibraryItemSchema).min(1).max(200) }).strict(),
   z.object({ kind: z.literal("set-mix"), mix: MixSettingsSchema.partial().strict() }).strict(),
+  TimelinePictureLookCommandSchema,
   /** Subtitles (SPEC-038 R-21..R-26): a language track, and the cues on it. */
   z
     .object({
@@ -707,6 +714,8 @@ export function describeTimelineCommand(command: TimelineCommand): string {
       return `Remove ${command.items.length} item${command.items.length === 1 ? "" : "s"} from the library`;
     case "set-mix":
       return "Change the mix";
+    case "set-picture-look":
+      return command.look === null ? "Clear the look" : "Change the look";
     case "add-subtitle-track":
       return `Add ${command.language} subtitles`;
     case "add-cue":
@@ -979,7 +988,8 @@ export function storyShotFrames(durationSec: number | undefined, frameRate: Fram
 
 export interface SceneAssembly {
   // An assembly places shots and beds; it never changes words, so a request can carry what it makes (SPEC-065 R-25 is a person's command in slice 2).
-  commands: Exclude<TimelineClipCommand, { kind: "detach-audio" } | EffectCommand | TransitionCommand | PictureAppearanceCommand | PictureMotionCommand | TextSetCommand>[];
+  // Nor does it set the film's look, which no request carries (SPEC-038 R-45..R-50).
+  commands: Exclude<TimelineClipCommand, { kind: "detach-audio" } | EffectCommand | TransitionCommand | PictureAppearanceCommand | PictureMotionCommand | TextSetCommand | TimelinePictureLookCommand>[];
   /** What the assembly does, in the lines the banner and the Arke pane say (SPEC-039 R-34). */
   notes: string[];
   placed: string[];
@@ -1255,6 +1265,8 @@ interface Working {
   sources?: { production: ProductionBundle; artifacts: readonly ArtifactSidecar[] };
   tracks: TimelineTrack[];
   mix: MixSettings;
+  /** Undefined while the film has none, as the record's absent field is. */
+  pictureLook: TimelinePictureLook | undefined;
   library: TimelineLibraryItem[];
   sourceLength: SourceLengthFrames;
   /** Every clip touched so far, keyed by id, with the state it had before the first touch. */
@@ -1876,6 +1888,11 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       working.mix = MixSettingsSchema.parse({ ...working.mix, ...command.mix });
       return;
     }
+    case "set-picture-look": {
+      // The look the film already has, or none where it has none, changes nothing and writes no revision (SPEC-038 R-45..R-50).
+      working.pictureLook = timelinePictureLookWritten(command.look);
+      return;
+    }
     case "add-to-library": {
       const present = new Set(working.library.map(libraryItemKey));
       // The same item twice in one command is one item: the set is kept while accepting, not only before.
@@ -2015,8 +2032,14 @@ function authoredTimelineMaterial(timeline: ProductionTimeline): string {
   return canonical({ ...timeline, history: undefined });
 }
 
+/** The record with `look` as its picture look, and no key at all where there is none: a cleared look leaves nothing behind. */
+function withPictureLook(timeline: ProductionTimeline, look: TimelinePictureLook | undefined): ProductionTimeline {
+  const { pictureLook: _was, ...record } = timeline;
+  return look === undefined ? record : { ...record, pictureLook: look };
+}
+
 function workingTimeline(working: Working): ProductionTimeline {
-  return {
+  return withPictureLook({
     ...working.timeline,
     tracks: working.tracks,
     mix: working.mix,
@@ -2024,7 +2047,7 @@ function workingTimeline(working: Working): ProductionTimeline {
     ...(working.timeline.transitions !== undefined || working.transitions.length ? { transitions: working.transitions } : {}),
     ...(working.timeline.effectProtection !== undefined || working.effectProtection.length ? { effectProtection: working.effectProtection } : {}),
     history: { undo: [], redo: [] },
-  };
+  }, working.pictureLook);
 }
 
 /** Check the coherent segment, so an intermediate split or restored value grants no authority. */
@@ -2091,6 +2114,8 @@ function timelineNetChanges(timeline: ProductionTimeline, working: Working): Tim
     cues.push({ trackId, before, after });
   }
   const mix = canonical(working.mix) === canonical(timeline.mix) ? undefined : { before: timeline.mix, after: working.mix };
+  const pictureLook = canonical(working.pictureLook ?? null) === canonical(timeline.pictureLook ?? null) ? undefined
+    : { before: timeline.pictureLook ?? null, after: working.pictureLook ?? null };
   const library = canonical(working.library) === canonical(timeline.library) ? undefined : { before: timeline.library, after: working.library };
   return {
     clips, tracks, cues,
@@ -2098,6 +2123,7 @@ function timelineNetChanges(timeline: ProductionTimeline, working: Working): Tim
     ...(effectClips.length ? { effectClips } : {}),
     ...(effectProtection ? { effectProtection } : {}),
     ...(mix !== undefined ? { mix } : {}),
+    ...(pictureLook !== undefined ? { pictureLook } : {}),
     ...(library !== undefined ? { library } : {}),
   };
 }
@@ -2118,6 +2144,7 @@ export function compileTrustedTimelineSteps(
     sources: options.sources,
     tracks: timeline.tracks,
     mix: timeline.mix,
+    pictureLook: timeline.pictureLook,
     library: timeline.library,
     sourceLength: options.sourceLength ?? (() => undefined),
     touched: new Map(),
@@ -2165,7 +2192,7 @@ export function finishTrustedTimelineSteps(
   if (proof.baseMaterial !== authoredTimelineMaterial(timeline)) throw new TimelineOperationRefused("timeline reduction was compiled against a different authored base");
   const changes = structuredClone(proof.changes);
   const selections = [...(options.selections ?? [])].filter((change) => canonical(change.before) !== canonical(change.after));
-  if (changes.clips.length === 0 && selections.length === 0 && changes.tracks.length === 0 && changes.cues.length === 0 && changes.mix === undefined && changes.library === undefined && changes.effectClips === undefined && changes.effectProtection === undefined && changes.transitions === undefined) {
+  if (changes.clips.length === 0 && selections.length === 0 && changes.tracks.length === 0 && changes.cues.length === 0 && changes.mix === undefined && changes.pictureLook === undefined && changes.library === undefined && changes.effectClips === undefined && changes.effectProtection === undefined && changes.transitions === undefined) {
     return { kind: "unchanged", timeline };
   }
   const entry: TimelineChangeHistoryEntry = {
@@ -2333,6 +2360,13 @@ function replayMix(mix: MixSettings, entry: TimelineHistoryEntry, phase: "undo" 
   return phase === "undo" ? entry.mix.before : entry.mix.after;
 }
 
+function replayPictureLook(look: TimelinePictureLook | undefined, entry: TimelineHistoryEntry, phase: "undo" | "redo"): TimelinePictureLook | undefined {
+  if (entry.kind !== "change" || entry.pictureLook === undefined) return look;
+  const expected = phase === "undo" ? entry.pictureLook.after : entry.pictureLook.before;
+  if (canonical(look ?? null) !== canonical(expected)) throw new TimelineOperationRefused(`saved history is not in its ${phase} position for the look`);
+  return (phase === "undo" ? entry.pictureLook.before : entry.pictureLook.after) ?? undefined;
+}
+
 function replayLibrary(library: readonly TimelineLibraryItem[], entry: TimelineHistoryEntry, phase: "undo" | "redo"): TimelineLibraryItem[] {
   if (entry.kind !== "change" || entry.library === undefined) return [...library];
   const expected = phase === "undo" ? entry.library.after : entry.library.before;
@@ -2362,6 +2396,7 @@ function replayEntry(tracks: readonly TimelineTrack[], entry: TimelineHistoryEnt
 function replayProblem(timeline: ProductionTimeline, stack: "undo" | "redo"): { index: number; message: string } | null {
   let tracks: readonly TimelineTrack[] = timeline.tracks;
   let mix = timeline.mix;
+  let pictureLook = timeline.pictureLook;
   let library: readonly TimelineLibraryItem[] = timeline.library;
   let protection = timeline.effectProtection;
   let transitions = timeline.transitions;
@@ -2370,6 +2405,7 @@ function replayProblem(timeline: ProductionTimeline, stack: "undo" | "redo"): { 
       const entry = timeline.history[stack][index]!;
       tracks = replayEntry(tracks, entry, stack);
       mix = replayMix(mix, entry, stack);
+      pictureLook = replayPictureLook(pictureLook, entry, stack);
       library = replayLibrary(library, entry, stack);
       protection = replayEffectProtection(protection, entry, stack);
       transitions = replayTransitions(transitions, entry, stack);
@@ -2397,7 +2433,7 @@ export function historySelectionChanges(entry: TimelineHistoryEntry, phase: "und
 export function undoTimelineHistory(timeline: ProductionTimeline): ProductionTimeline {
   const entry = timeline.history.undo.at(-1);
   if (entry === undefined) throw new TimelineOperationRefused("timeline has nothing to undo");
-  return {
+  return withPictureLook({
     ...timeline,
     revision: nextRevision(timeline),
     tracks: replayEntry(timeline.tracks, entry, "undo"),
@@ -2406,13 +2442,13 @@ export function undoTimelineHistory(timeline: ProductionTimeline): ProductionTim
     library: replayLibrary(timeline.library, entry, "undo"),
     ...(timeline.effectProtection !== undefined || (entry.kind === "change" && entry.effectProtection) ? { effectProtection: replayEffectProtection(timeline.effectProtection, entry, "undo") } : {}),
     history: { undo: timeline.history.undo.slice(0, -1), redo: bounded([...timeline.history.redo, entry]) },
-  };
+  }, replayPictureLook(timeline.pictureLook, entry, "undo"));
 }
 
 export function redoTimelineHistory(timeline: ProductionTimeline): ProductionTimeline {
   const entry = timeline.history.redo.at(-1);
   if (entry === undefined) throw new TimelineOperationRefused("timeline has nothing to redo");
-  return {
+  return withPictureLook({
     ...timeline,
     revision: nextRevision(timeline),
     tracks: replayEntry(timeline.tracks, entry, "redo"),
@@ -2421,7 +2457,7 @@ export function redoTimelineHistory(timeline: ProductionTimeline): ProductionTim
     library: replayLibrary(timeline.library, entry, "redo"),
     ...(timeline.effectProtection !== undefined || (entry.kind === "change" && entry.effectProtection) ? { effectProtection: replayEffectProtection(timeline.effectProtection, entry, "redo") } : {}),
     history: { undo: bounded([...timeline.history.undo, entry]), redo: timeline.history.redo.slice(0, -1) },
-  };
+  }, replayPictureLook(timeline.pictureLook, entry, "redo"));
 }
 
 /** The first slice's names, kept for its callers. */

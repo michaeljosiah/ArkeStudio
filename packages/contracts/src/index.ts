@@ -228,6 +228,7 @@ export * from "./editor-picture-appearance.js";
 export * from "./editor-picture-motion.js";
 export * from "./editor-sound-fade.js";
 export * from "./editor-clip-speed.js";
+export * from "./editor-picture-look.js";
 export * from "./editor-text-typefaces.js";
 export * from "./world-cleanup.js";
 export * from "./editor-text.js";

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { effectsForPicture, pictureMotionAt, pictureMotionProgress, pictureSourceSec, pictureStackAtFrame, pictureTransitionWeight, type EffectRenderProjection } from "@arke-studio/contracts";
+import { effectsForPicture, pictureMotionAt, pictureMotionProgress, pictureSourceSec, pictureStackAtFrame, pictureTransitionWeight, type EffectRenderProjection, type TimelinePictureLook } from "@arke-studio/contracts";
+import { cx } from "../components/ui.js";
+import { LookGrain, lookPictureClass } from "./editor-look.js";
 import { PreviewMediaPool } from "../lib/editor-preview-media.js";
 import { PreviewFrameQueue, previewReactionMappingKey, type PreviewAnalysisInstall, type PreviewAnalysisResult, type PreviewFrameRequest, type PreviewFrameResult, type PreviewReactionSources } from "../lib/editor-preview-frame.js";
 import type { Transport } from "./editor-transport.js";
@@ -11,12 +13,17 @@ export function previewProductionFrame(projection: Pick<EffectRenderProjection, 
 
 const EMPTY_REACTIONS: PreviewReactionSources = { manifestsByKey: {}, manifestKeyByEffectId: {} };
 
-export function EditorPicturePreview({ projection, transport, urlFor, resolution = 1, reactions = EMPTY_REACTIONS, children }: {
+export function EditorPicturePreview({ projection, transport, urlFor, resolution = 1, reactions = EMPTY_REACTIONS, look, children }: {
   projection: EffectRenderProjection;
   transport: Transport;
   urlFor: (path: string) => string | null;
   resolution?: 1 | 0.5;
   reactions?: PreviewReactionSources;
+  /**
+   * The film's look, approximated on the canvas element and over it (SPEC-038 R-45..R-50). Never in the
+   * frames the worker draws: those are the shared renderer's, and stay the pixels they were.
+   */
+  look?: TimelinePictureLook | undefined;
   children?: ReactNode;
 }) {
   const host = useRef<HTMLDivElement>(null);
@@ -198,7 +205,8 @@ export function EditorPicturePreview({ projection, transport, urlFor, resolution
 
   return <div ref={host} className="fy-effectpreview">
     <div ref={stage} className="fy-effectpreview__stage">
-      <canvas ref={canvas} className="fy-effectpreview__picture" aria-label="Picture and effects preview" />
+      <canvas ref={canvas} className={cx("fy-effectpreview__picture", lookPictureClass(look))} aria-label="Picture and effects preview" />
+      <LookGrain look={look} />
       {children}
     </div>
     {error && <span className="fy-effectpreview__error" role="alert">Preview unavailable · {error}</span>}

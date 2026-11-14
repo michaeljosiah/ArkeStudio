@@ -1809,6 +1809,25 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
 .fy-effectpreview { position: absolute; inset: 0; overflow: hidden; }
 .fy-effectpreview__stage { position: absolute; container-type: size; overflow: hidden; }
 .fy-effectpreview__picture { display: block; width: 100%; height: 100%; }
+/* The Cut's look in the Viewer (SPEC-038 R-45..R-50): an approximation of what the export makes,
+   never the export's own chain. The grade is a filter on the elements that show picture, so the
+   cue and the controls over them keep their colour. The grain is one layer of tiled noise over the
+   picture and under the cue; it jumps rather than slides, since grain is new on every frame, and
+   is still under reduced motion. Overlay leaves black and white alone, as the export's grain does.
+   The noise is made in sRGB, not the filter's default linear light, so it sits at mid-grey, where
+   overlay neither lightens nor darkens the film. */
+.fy-cutlook-film { filter: saturate(0.86) contrast(0.98); }
+.fy-cutlook-grain { position: absolute; inset: 0; pointer-events: none; mix-blend-mode: overlay; background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n' x='0' y='0' width='100%25' height='100%25' color-interpolation-filters='sRGB'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='.5 .5 .5 0 -.25 .5 .5 .5 0 -.25 .5 .5 .5 0 -.25 0 0 0 0 1'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 160px 160px; animation: fy-cutlook-grain 0.5s steps(1, end) infinite; }
+.fy-cutlook-grain--light { opacity: 0.25; }
+.fy-cutlook-grain--medium { opacity: 0.4; }
+@keyframes fy-cutlook-grain {
+  0% { background-position: 0 0; }
+  20% { background-position: -53px 31px; }
+  40% { background-position: 37px -71px; }
+  60% { background-position: -19px -43px; }
+  80% { background-position: 61px 17px; }
+}
+@media (prefers-reduced-motion: reduce) { .fy-cutlook-grain { animation: none; } }
 .fy-effectpreview__quality { position: absolute; top: 8px; right: 8px; display: flex; align-items: center; gap: 6px; padding: 4px 7px; border-radius: 4px; color: var(--neutral-50); background: var(--neutral-950); font: 11px var(--font-sans); }
 .fy-effectpreview__quality select { color: inherit; background: inherit; font: inherit; border: 1px solid var(--neutral-600); border-radius: 3px; }
 .fy-effectpreview__notice { position: absolute; top: 40px; left: 8px; right: 8px; width: fit-content; max-width: calc(100% - 16px); padding: 5px 8px; color: var(--neutral-50); background: var(--neutral-950); font: 11px/1.4 var(--font-sans); }
