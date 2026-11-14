@@ -16,9 +16,11 @@ import type { TimelineClip, TimelineClipId, TimelineTrack } from "./timeline.js"
  * it finds a clock read. This module may take the timeline's types; the record's may not.
  */
 export type TextClipCarries = Pick<TimelineClip, "source">
-  & Partial<Pick<TimelineClip, "sourceInFrames" | "audio" | "gainDb" | "role" | "linkedClipId" | "performanceSourceClipId">>;
+  & Partial<Pick<TimelineClip, "sourceInFrames" | "audio" | "gainDb" | "role" | "linkedClipId" | "performanceSourceClipId" | "speed" | "reverse">>;
 export function textClipProblem(clip: TextClipCarries): string | null {
   if (clip.source.kind !== "text") return null;
+  // Drawn words have no frames to play faster or last first (SPEC-037 R-36).
+  if (clip.speed !== undefined || clip.reverse !== undefined) return "Text has no speed";
   if (clip.audio !== undefined || clip.role !== undefined || clip.performanceSourceClipId !== undefined) return "Text has no sound";
   if (clip.gainDb !== undefined) return "Text has no gain";
   if (clip.linkedClipId !== undefined) return "Text has no linked clip";

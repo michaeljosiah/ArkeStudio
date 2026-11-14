@@ -1,7 +1,8 @@
 import { PictureAppearanceInspector } from "./editor-picture-appearance.js";
 import { PictureMotionInspector } from "./editor-picture-motion.js";
+import { ClipSpeedInspector } from "./editor-clip-speed.js";
 import {
-  resolvedAuthoredDuration, transitionStill,
+  clipRetimed, resolvedAuthoredDuration, transitionStill,
 } from "@arke-studio/contracts";
 import { useState, type ReactNode } from "react";
 import { useCutLayout } from "./editor-responsive.js";
@@ -119,6 +120,10 @@ export function CutInspector({
   playheadFrame?: number;
 }) {
   const { compact } = useCutLayout();
+  // The phone's In and Out are source times, typed as an offset from the head. A clip at another
+  // speed or backwards has no such offset (its head may be its source's end), so it keeps the
+  // timeline's own times, as the wide Inspector shows them.
+  const pictureSourceTimes = compact && !(selectedClip !== null && clipRetimed(selectedClip));
   const [takesOpen, setTakesOpen] = useState(false);
   const selectedCue =
     selection?.kind === "cue" && timeline !== null
@@ -208,12 +213,14 @@ export function CutInspector({
           {artifact?.kind === "video" && (
             <div className="fy-cutinspect__row">
               <span>Own sound</span>
-              <strong>{selectedClip.audio === "mute" ? "muted" : "kept where measured"}</strong>
+              {/* Said only while it is true: a clip at another speed or backwards brings no sound (SPEC-037 R-41). */}
+              <strong>{selectedClip.audio === "mute" ? "muted" : clipRetimed(selectedClip) ? (selectedClip.reverse ? "off backwards" : "off at this speed") : "kept where measured"}</strong>
             </div>
           )}
         </div>
-        <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={compact} />
+        <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={pictureSourceTimes} />
         {measurement}
+        {artifact?.kind === "video" && <ClipSpeedInspector key={`speed-${selectedClip.id}`} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} resetToken={timeline?.revision} />}
         <PictureMotionInspector key={`motion-${selectedClip.id}`} clip={selectedClip} still={transitionStill(selectedClip, artifacts)} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} resetToken={timeline?.revision} />
         {selectedClip && selectedTrack?.kind === "picture" && <PictureAppearanceInspector key={selectedClip.id} clip={selectedClip} frameRate={frameRate} disabled={appearanceDisabled ?? commandsDisabled} onCommands={onCommands} resetToken={appearanceRevision ?? timeline?.revision} scopeLabel={appearanceScopeLabel} />}
         {timeline && selectedTrack?.kind === "picture" && <DetachAudio production={production} timeline={timeline} artifacts={artifacts} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} mintClipId={mintClipId} />}
@@ -255,7 +262,8 @@ export function CutInspector({
         </div>
         {measurement}
         {selectedClip && (<>
-          <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={compact} />
+          <PictureClipTiming clip={selectedClip} clips={selectedTrack?.clips ?? [selectedClip]} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} onScrub={onScrub} sourceLength={sourceLength} timeline={timeline} sourceTimes={pictureSourceTimes} />
+        {selectedTrack?.kind === "picture" && <ClipSpeedInspector key={`speed-${selectedClip.id}`} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} resetToken={timeline?.revision} />}
         {selectedTrack?.kind === "picture" && <PictureMotionInspector key={`motion-${selectedClip.id}`} clip={selectedClip} still={false} frameRate={frameRate} disabled={commandsDisabled} onCommands={onCommands} resetToken={timeline?.revision} />}
         {selectedClip && selectedTrack?.kind === "picture" && <PictureAppearanceInspector key={selectedClip.id} clip={selectedClip} frameRate={frameRate} disabled={appearanceDisabled ?? commandsDisabled} onCommands={onCommands} resetToken={appearanceRevision ?? timeline?.revision} scopeLabel={appearanceScopeLabel} />}
         {timeline && selectedTrack?.kind === "picture" && <DetachAudio production={production} timeline={timeline} artifacts={artifacts} clip={selectedClip} disabled={commandsDisabled} onCommands={onCommands} mintClipId={mintClipId} />}

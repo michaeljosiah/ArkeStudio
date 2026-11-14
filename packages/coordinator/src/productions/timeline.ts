@@ -480,6 +480,12 @@ export function refuseUnrenderablePlacements(
       const still = source?.kind === "text" || source?.kind === "artifact" && artifacts.some(artifact => artifact.id === source.artifactId && (artifact.kind === "image" || artifact.kind === "board"));
       if (source && !still) refuse("Motion needs a still image");
     }
+    // The same for speed and direction (SPEC-037 R-36): a still or a title has no frames to re-time.
+    if (command.kind === "set-clip-speed" || command.kind === "set-clip-reverse") {
+      const source = sources.get(command.clipId);
+      if (source?.kind === "text") refuse("Text has no speed");
+      if (source?.kind === "artifact" && artifacts.some(artifact => artifact.id === source.artifactId && artifact.kind !== "video")) refuse("Speed and direction need a video");
+    }
     if (command.kind !== "place") continue;
     sources.set(command.clip.id, command.clip.source);
     const kind = kinds.get(command.trackId);
@@ -493,6 +499,7 @@ export function refuseUnrenderablePlacements(
       const carriesPicture = artifact.kind === "image" || artifact.kind === "board" || artifact.kind === "video";
       if (audio && !carriesSound) refuse(`${command.clip.id} cites ${artifact.file}, which is not known to carry sound`);
       if (!audio && kind !== "subtitle" && !carriesPicture) refuse(`${command.clip.id} cites ${artifact.file}, which is ${artifact.kind} and has no picture`);
+      if ((command.clip.speed !== undefined || command.clip.reverse !== undefined) && artifact.kind !== "video") refuse("Speed and direction need a video");
     } else if (source.kind === "take") {
       const take = takesById.get(source.takeId);
       const segment = take?.segment;

@@ -12,6 +12,7 @@ import type { FrameRate } from "./world.js";
 import { containedPictureRect, EFFECT_SLATE_STYLE, type EffectRenderProjection, type RenderPictureLayer } from "./editor-effect-render-plan.js";
 import type { PictureBlendMode } from "./editor-effects.js";
 import { pictureMotionAt } from "./editor-picture-motion.js";
+import { pictureSourceSec, PICTURE_SAMPLE_TOLERANCE_SEC } from "./editor-clip-speed.js";
 
 /**
  * The cut (SPEC-013 §2.8, D9): derived from selections and scene order, never stored — a
@@ -707,9 +708,11 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
       if (!picture.path || !picture.sourceSize) throw new Error(`Picture ${picture.clipId} needs measured dimensions before effect export`);
       rect = containedPictureRect(picture.sourceSize.width, picture.sourceSize.height, width, height);
       let sourceAt = 0;
+      const speed = picture.still ? 1 : picture.speed ?? 1, reverse = !picture.still && picture.reverse === true;
       // A still is read once and held. Looped, it was decoded and scaled again for every frame.
       if (!picture.still) {
-        sourceAt = picture.sourceInSec + (from - picture.startFrame) / fps;
+        // Backwards, the frames are read forwards from the last one shown and then turned round.
+        sourceAt = pictureSourceSec(picture, reverse ? to - 1 : from, fps);
         sourceAt = Math.max(0, picture.sourceOutSec === undefined ? sourceAt : Math.min(sourceAt, picture.sourceOutSec - 0.0001));
         if (picture.sourceOutSec !== undefined) args.push("-to", String(picture.sourceOutSec));
       }
@@ -723,7 +726,23 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
       } else {
         // Keep the last source frame at or before the production sample, including a non-aligned
         // in-point. Input seeking would discard that predecessor and pick the following frame.
-        filters.push(`[${inputIndex++}:v]format=gbrap,scale=${rect.width}:${rect.height}:flags=bilinear,setsar=1,setpts=PTS-STARTPTS-${sourceAt}/TB,fps=fps=${fps}:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=${seconds},trim=end_frame=${count},settb=expr=1/${fps},setpts=N+${shiftFrames}[${source}]`);
+        // A film at another speed or backwards is read on a finer clock. `setpts` drops what is
+        // left of a tick, and in the source's own ticks (a millisecond in Matroska) that moved a
+        // frame which starts just after a sample onto it: a reversed film opened a frame late.
+        // So its stamps go to microseconds first, and a frame within the Viewer's own tolerance
+        // of the sample counts as on it. A frame that starts exactly on a sample (every other
+        // one at 2x) then falls the same way in the Viewer and here (SPEC-037 R-40).
+        // Its last frame is also held before the frames are counted, not only after. `fps` ends
+        // its output where the source ends, rounded as every stamp is, and at 4x the last source
+        // frames sit closer than the film's: the frame the film should end on was never let out,
+        // and the hold after it held the frame before.
+        const retime = speed === 1 && !reverse ? `setpts=PTS-STARTPTS-${sourceAt}/TB`
+          : `settb=expr=1/1000000,setpts=(PTS-STARTPTS-${sourceAt + PICTURE_SAMPLE_TOLERANCE_SEC}/TB)/${speed},tpad=stop_mode=clone:stop_duration=${seconds + 1}`;
+        const conform = `${retime},fps=fps=${fps}:round=up:start_time=0,tpad=stop_mode=clone:stop_duration=${seconds},trim=end_frame=${count}`;
+        const sized = `format=gbrap,scale=${rect.width}:${rect.height}:flags=bilinear,setsar=1`;
+        // `reverse` holds every frame it turns round, so it takes them as the source made them,
+        // before they are scaled to the frame and given an alpha plane.
+        filters.push(`[${inputIndex++}:v]${reverse ? `${conform},reverse,${sized}` : `${sized},${conform}`},settb=expr=1/${fps},setpts=N+${shiftFrames}[${source}]`);
       }
       for (const [layer, overlay] of alpha.filter(value => value.pictureClipId === picture.clipId).entries()) {
         args.push("-i", overlay.path);
