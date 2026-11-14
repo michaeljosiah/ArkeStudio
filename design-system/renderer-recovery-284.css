@@ -1,0 +1,18 @@
+.recovery284{width:680px;height:410px;padding:32px;box-sizing:border-box;display:grid;place-items:center;background:#e5e5e5;color:#171717;font:var(--type-body);font-family:"Segoe UI",sans-serif}
+.dark .recovery284{background:#111;color:#f5f5f5}
+.recovery284 .native-dialog{width:100%;border:1px solid #b8b8b8;border-radius:8px;overflow:hidden;background:#fafafa;box-shadow:0 12px 32px #0003}
+.dark .recovery284 .native-dialog{background:#292929;border-color:#555}
+.recovery284 .native-title{padding:12px 18px;display:flex;justify-content:space-between;align-items:center;font:var(--type-body);font-family:inherit}
+.recovery284 .native-close{border:0;background:transparent;color:inherit;font:inherit;padding:0 4px}
+.recovery284 .native-content{display:grid;grid-template-columns:30px minmax(0,1fr);gap:16px;padding:18px 24px 26px}
+.recovery284 .native-icon{color:#ac6800;font:var(--type-title)}
+.dark .recovery284 .native-icon{color:#f3c361}
+.recovery284 h3{margin:0 0 16px;font:var(--type-section);font-family:inherit}
+.recovery284 p{margin:0 0 16px;line-height:1.5}
+.recovery284 p:last-child{margin:0}
+.recovery284 .native-actions{padding:18px 24px;display:flex;justify-content:flex-end;gap:12px;background:#f0f0f0;border-top:1px solid #ddd}
+.dark .recovery284 .native-actions{background:#202020;border-color:#414141}
+.recovery284 .native-actions button{padding:8px 18px;min-height:38px;border-radius:4px;border:1px solid #aaa;background:#fff;color:#171717;font:inherit}
+.dark .recovery284 .native-actions button{background:#343434;color:#f5f5f5;border-color:#666}
+.recovery284 .native-actions .reload{background:#0067c0;color:#fff;border-color:#0067c0;outline:2px solid #0067c0;outline-offset:3px}
+.dark .recovery284 .native-actions .reload{background:#83c9ff;color:#07243a;border-color:#83c9ff;outline-color:#83c9ff}
