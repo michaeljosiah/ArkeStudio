@@ -874,6 +874,14 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
  */
 export const MIX_FORMAT = "aresample=48000,pan=stereo|FL=FL+FC|FR=FR+FC";
 
+/**
+ * Raised whenever the same sounds would mix to different samples. 2 is `MIX_FORMAT` on every sound
+ * (SPEC-038 R-51). The sound analysis folds it into its decoder identity. Without it, an analysis
+ * made on the mix before would pass for the mix after wherever the observed format is the same: a
+ * film whose first sound was already 48 kHz stereo, whose one-channel sounds are now 3 dB up.
+ */
+export const MIX_GRAPH_REVISION = 2;
+
 /** The canonical audible graph shared by export and SPEC-053 analysis. Paths are resolved by the host.
  * Optional contribution taps preserve the complete mix; callers must consume every tap.
  * `preLimiter` replaces the final filter only when reconstructing a source's contribution. */

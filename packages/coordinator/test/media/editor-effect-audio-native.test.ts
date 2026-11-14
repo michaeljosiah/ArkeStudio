@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { buildCanonicalAudioGraph, type ExportPlan, type EffectAudioNativeDescriptor } from "@arke-studio/contracts";
+import { buildCanonicalAudioGraph, MIX_GRAPH_REVISION, type ExportPlan, type EffectAudioNativeDescriptor } from "@arke-studio/contracts";
 import { createNodeEffectAudioAnalysisHost, type FrozenAudioInput } from "../../src/media/node-effect-audio.js";
 import { createNodeMediaProcessRunner, hashMediaFile } from "../../src/media/node-media-host.js";
 import { ffmpegGraphFileOption } from "../../src/media/ffmpeg-graph-option.js";
@@ -94,6 +95,10 @@ test("native audible analysis hears the film's one mix format from any order of 
       const inputs: FrozenAudioInput[] = await Promise.all(paths.map(async (absolutePath, audioIndex) => ({ audioIndex, absolutePath, clipId: `clip-${audioIndex}`, sourceHash: await hashMediaFile(absolutePath, signal()) })));
       const descriptor = await host.describe({ plan, inputs, signal: signal() });
       assert.equal(descriptor.canonical.sampleRate, 48000); assert.equal(descriptor.canonical.channels, 2);
+      // "stereo-first" observed 48 kHz stereo before R-51 too, with its one-channel sound 3 dB lower: only the
+      // mix graph's revision in the identity tells an analysis of that mix from one of this.
+      assert.equal(descriptor.decoder.versionConfigHash, createHash("sha256").update(version.stdout).update(`\nmix-graph:${MIX_GRAPH_REVISION}`).digest("hex"));
+      assert.notEqual(descriptor.decoder.versionConfigHash, createHash("sha256").update(version.stdout).digest("hex"));
       const graph = buildCanonicalAudioGraph(plan, paths);
       graph.filters[graph.filters.length - 1] = `${graph.preLimiter},${graph.limiter},aresample=48000:resampler=swr:filter_size=32:phase_shift=10:linear_interp=1:exact_rational=1[aout]`;
       const baseline = floats(await run([...graph.args, "-filter_complex", graph.filters.join(";"), "-map", "[aout]", "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"]));
