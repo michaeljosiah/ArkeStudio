@@ -31,12 +31,18 @@ async function run(args: string[]): Promise<Uint8Array> {
 const RATE = 48000, TONE = 0.5, HEARD = TONE / Math.SQRT2;
 type Mix = Pick<ExportPlan, "audio" | "mix" | "speech" | "totalSec">;
 
-/** The mix as mono samples. Levels are read before the limiter, which is transparent here and delays what it passes. */
+/**
+ * The mix's left channel. A film's sound is in two channels whatever its sounds are (SPEC-038 R-51),
+ * and a one-channel tone is whole in each, so one channel is the level the plan states; folding
+ * the two into one would add them. Levels are read before the limiter, which is transparent here
+ * and delays what it passes.
+ */
 async function heard(plan: Mix, limited = false): Promise<Float32Array> {
   const graph = buildCanonicalAudioGraph(plan, plan.audio.map(clip => clip.path));
   if (!limited) graph.filters[graph.filters.length - 1] = `${graph.preLimiter}[aout]`;
-  const bytes = await run([...graph.args, "-filter_complex", graph.filters.join(";"), "-map", "[aout]", "-ac", "1", "-ar", String(RATE), "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"]);
-  return new Float32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  const bytes = await run([...graph.args, "-filter_complex", graph.filters.join(";"), "-map", "[aout]", "-ar", String(RATE), "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"]);
+  const both = new Float32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
+  return both.filter((_, index) => index % 2 === 0);
 }
 
 /** Eight whole cycles of the 400 Hz tone around `sec`, so a steady level measures exactly. */
@@ -49,7 +55,7 @@ test("the export plays a fade at the plan's level, with gain and ducking on top,
   const dir = await mkdtemp(join(tmpdir(), "arke-sound-fade-"));
   try {
     const path = join(dir, "tone.wav");
-    // Mono, so nothing between the graph and the measurement remixes channels and rescales the level.
+    // One channel, which the graph puts whole in both of the film's: the measurement reads one of them.
     await run(["-y", "-f", "lavfi", "-i", `aevalsrc=${TONE}*sin(2*PI*400*t):s=${RATE}:d=4`, "-c:a", "pcm_f32le", path]);
     // A bed from 0.5s to 3.5s at -6 dB: a second up, a second and a half down, a line spoken over the end of the fade in.
     const bed: RenderAudioItem = { path, clipId: "cl_bed", startSec: 0.5, endSec: 3.5, gainDb: -6, role: "music", sourceInSec: 0,

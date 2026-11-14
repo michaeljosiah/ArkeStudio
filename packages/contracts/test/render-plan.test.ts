@@ -793,6 +793,7 @@ describe("text in the cut's plan (SPEC-065)", () => {
 
   it("a timeline with no text plans and encodes exactly as it did (R-40)", () => {
     // Recorded from the planner before the text member existed; never regenerated after it.
+    // Its sound chains carry the 48 kHz stereo step added by hand for SPEC-038 R-51: see the cases' header.
     const recorded: unknown = JSON.parse(readFileSync(new URL("./fixtures/render-plan-no-text.json", import.meta.url), "utf8"));
     assert.ok(Array.isArray(recorded));
     assert.equal(recorded.length, RENDER_PLAN_NO_TEXT_CASES.length);
