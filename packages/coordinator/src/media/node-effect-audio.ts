@@ -4,7 +4,7 @@ import { constants } from "node:fs";
 import { access, lstat, mkdtemp, realpath, rmdir, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
-import { buildCanonicalAudioGraph, EffectAudioNativeDescriptorSchema, EFFECT_ANALYSIS_PROFILE,
+import { buildCanonicalAudioGraph, EffectAudioNativeDescriptorSchema, EFFECT_ANALYSIS_PROFILE, MIX_GRAPH_REVISION,
   type EffectAudioNativeDescriptor, type ExportPlan } from "@arke-studio/contracts";
 import { hashMediaFile } from "./media-file-hash.js";
 import { createNodeMediaProcessRunner } from "./node-media-process.js";
@@ -27,7 +27,6 @@ export interface EffectAudioAnalysisHost {
 export const EFFECT_AUDIO_NATIVE_LIMITS = Object.freeze({ graphBytes: 2 * 1024 * 1024, chunkFrames: 32768,
   stderrBytes: 16384, describeMs: 30000, idleMs: 60000, maxWallTimeMs: 60 * 60_000 });
 const EPSILON = 0.000001;
-const sha256 = (value: string | Uint8Array) => createHash("sha256").update(value).digest("hex");
 
 async function executablePath(command: string): Promise<string> {
   if (isAbsolute(command) || /[\\/]/.test(command)) return realpath(resolve(command));
@@ -97,7 +96,10 @@ export function createNodeEffectAudioAnalysisHost(options: { ffmpeg: string }): 
     const path = await executablePath(options.ffmpeg), executableHash = await hashMediaFile(path, signal);
     const result = await createNodeMediaProcessRunner({ ffmpeg: path, ffprobe: "" }).run("ffmpeg", ["-version"], { signal, timeoutMs: 10000, maxStdoutBytes: 65536, maxStderrBytes: 16384 });
     if (result.code !== 0) throw new Error("Audio analysis decoder identity is unavailable");
-    return { path, graphFileOption: ffmpegGraphFileOption(result.stdout), decoder: { executableHash, versionConfigHash: sha256(result.stdout) } };
+    // The graph that mixes the sounds is part of what decodes them, so its revision is in the identity:
+    // a manifest cached for the mix before is then stale and made again, not served for the mix after.
+    const versionConfigHash = createHash("sha256").update(result.stdout).update(`\nmix-graph:${MIX_GRAPH_REVISION}`).digest("hex");
+    return { path, graphFileOption: ffmpegGraphFileOption(result.stdout), decoder: { executableHash, versionConfigHash } };
   };
   return {
     async describe(request) {

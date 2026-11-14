@@ -29,6 +29,11 @@ import {
  * on the composition, on a track and on one clip; typed sound; burned-in subtitles; the old cut's
  * overlays; and every delivery preset.
  *
+ * One thing in the recording has been changed since, by hand and not by recording again: every
+ * sound's chain gained the step that brings it to 48 kHz in two channels, when the export began
+ * to mix at that whatever its first sound is (SPEC-038 R-51). It changes how a film's sound is
+ * mixed with or without text, so it says nothing about R-40; everything else is as recorded.
+ *
  * Nothing here may gain text. A case that needs it belongs in the text tests, where its plan is
  * expected to differ; a case added here later has no recording from before the change, so it
  * proves nothing about R-40.

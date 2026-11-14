@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { buildCanonicalAudioGraph, type ExportPlan, type EffectAudioNativeDescriptor } from "@arke-studio/contracts";
+import { buildCanonicalAudioGraph, MIX_GRAPH_REVISION, type ExportPlan, type EffectAudioNativeDescriptor } from "@arke-studio/contracts";
 import { createNodeEffectAudioAnalysisHost, type FrozenAudioInput } from "../../src/media/node-effect-audio.js";
 import { createNodeMediaProcessRunner, hashMediaFile } from "../../src/media/node-media-host.js";
 import { ffmpegGraphFileOption } from "../../src/media/ffmpeg-graph-option.js";
@@ -73,7 +74,9 @@ test("the installed decoder loads a graph larger than Windows argv from a spaced
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test("native audible analysis preserves canonical mono/stereo, ordered mixed-rate negotiation and shared limiter contribution", { skip: !available }, async () => {
+// The mix is 48 kHz in two channels whatever its sounds are and whichever comes first (SPEC-038 R-51); it used
+// to be whatever FFmpeg negotiated from the first input, and the analysis followed it there.
+test("native audible analysis hears the film's one mix format from any order of mono, stereo and mixed-rate sounds, with the shared limiter's contribution", { skip: !available }, async () => {
   const dir = await mkdtemp(join(evidence ? resolve(evidence) : tmpdir(), "arke-effect-audio-test-"));
   try {
     const cases = [
@@ -91,10 +94,13 @@ test("native audible analysis preserves canonical mono/stereo, ordered mixed-rat
       const plan = planFor(paths);
       const inputs: FrozenAudioInput[] = await Promise.all(paths.map(async (absolutePath, audioIndex) => ({ audioIndex, absolutePath, clipId: `clip-${audioIndex}`, sourceHash: await hashMediaFile(absolutePath, signal()) })));
       const descriptor = await host.describe({ plan, inputs, signal: signal() });
-      assert.equal(descriptor.canonical.sampleRate, fixture.rates[0]); assert.equal(descriptor.canonical.channels, fixture.channels[0]);
+      assert.equal(descriptor.canonical.sampleRate, 48000); assert.equal(descriptor.canonical.channels, 2);
+      // "stereo-first" observed 48 kHz stereo before R-51 too, with its one-channel sound 3 dB lower: only the
+      // mix graph's revision in the identity tells an analysis of that mix from one of this.
+      assert.equal(descriptor.decoder.versionConfigHash, createHash("sha256").update(version.stdout).update(`\nmix-graph:${MIX_GRAPH_REVISION}`).digest("hex"));
+      assert.notEqual(descriptor.decoder.versionConfigHash, createHash("sha256").update(version.stdout).digest("hex"));
       const graph = buildCanonicalAudioGraph(plan, paths);
-      const mono = descriptor.canonical.channels === 1 ? ",pan=stereo|c0=c0|c1=c0" : "";
-      graph.filters[graph.filters.length - 1] = `${graph.preLimiter},${graph.limiter}${mono},aresample=48000:resampler=swr:filter_size=32:phase_shift=10:linear_interp=1:exact_rational=1[aout]`;
+      graph.filters[graph.filters.length - 1] = `${graph.preLimiter},${graph.limiter},aresample=48000:resampler=swr:filter_size=32:phase_shift=10:linear_interp=1:exact_rational=1[aout]`;
       const baseline = floats(await run([...graph.args, "-filter_complex", graph.filters.join(";"), "-map", "[aout]", "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"]));
       const composition = await render(plan, inputs, descriptor, null);
       assert.deepEqual(composition, baseline, `${fixture.name}: composition differs from canonical graph`);
@@ -138,7 +144,9 @@ test("native audio analysis keeps trims, placement and ducking, refuses changed 
     await assert.rejects(host.renderAudiblePcm({ plan, inputs, descriptor, selectedClipIds: null, signal: pendingConsumer.signal,
       onPcm: () => { setTimeout(() => pendingConsumer.abort(), 10); return new Promise<void>(() => {}); } }), /cancel|abort/i);
     const surround = await source(dir, "surround.wav", 48000, 6, .1);
-    await assert.rejects(host.describe({ plan: planFor([surround]), inputs: [{ audioIndex: 0, absolutePath: surround, sourceHash: await hashMediaFile(surround, signal()) }], signal: signal() }), /mono or stereo/);
+    // A surround source keeps its front three in the film's two channels, so it is analysed like any other.
+    const surroundDescriptor = await host.describe({ plan: planFor([surround]), inputs: [{ audioIndex: 0, absolutePath: surround, sourceHash: await hashMediaFile(surround, signal()) }], signal: signal() });
+    assert.equal(surroundDescriptor.canonical.channels, 2); assert.equal(surroundDescriptor.canonical.sampleRate, 48000);
     const late = planFor([path]); late.totalSec = 1800; late.audio[0] = { ...late.audio[0]!, startSec: 1799, endSec: 1800 };
     const lateStarted = performance.now();
     const lateDescriptor = await host.describe({ plan: late, inputs, signal: signal() });

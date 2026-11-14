@@ -871,6 +871,23 @@ function effectPictureGraph(plan: ExportPlan, worldDir: string, slateFont: strin
   return { last, inputIndex };
 }
 
+/**
+ * What every sound is converted to before the mix, and so what the film's sound is: 48 kHz in two
+ * channels. `pan` and not `aformat`, for the one-channel sound: `aformat` puts it 3 dB down in each
+ * channel, and the Viewer plays it at full level in both. Named channels let one step serve any
+ * source without knowing its layout: a one-channel sound is its centre, so it lands whole in both;
+ * a stereo one has no centre and passes as it is; surround keeps its front three.
+ */
+export const MIX_FORMAT = "aresample=48000,pan=stereo|FL=FL+FC|FR=FR+FC";
+
+/**
+ * Raised whenever the same sounds would mix to different samples. 2 is `MIX_FORMAT` on every sound
+ * (SPEC-038 R-51). The sound analysis folds it into its decoder identity. Without it, an analysis
+ * made on the mix before would pass for the mix after wherever the observed format is the same: a
+ * film whose first sound was already 48 kHz stereo, whose one-channel sounds are now 3 dB up.
+ */
+export const MIX_GRAPH_REVISION = 2;
+
 /** The canonical audible graph shared by export and SPEC-053 analysis. Paths are resolved by the host.
  * Optional contribution taps preserve the complete mix; callers must consume every tap.
  * `preLimiter` replaces the final filter only when reconstructing a source's contribution. */
@@ -913,8 +930,17 @@ export function buildCanonicalAudioGraph(plan: Pick<ExportPlan, "audio" | "mix" 
      */
     const fade = fadeExpression(clip);
     const faded = fade === null ? "" : `,asetnsamples=n=64:p=0,volume=eval=frame:volume='${fade}'`;
+    /*
+     * Every sound is brought to the film's format before anything else is done to it (SPEC-038
+     * R-51). FFmpeg's mixer takes its sample rate and channel count from its first input and
+     * converts the rest to that, so a film whose first sound was a voice take, 24 kHz in one
+     * channel, was mixed whole at 24 kHz in one channel: its music lost everything above 12 kHz
+     * and its stereo, and a film was delivered that way before anyone measured it. Converting
+     * after the mixer does not mend this; it converts a mix already made narrow. So the step
+     * heads each chain, which also leaves the fade the last stage, as it has to be.
+     */
     filters.push(
-      `[${index}:a]apad=whole_dur=${d},atrim=duration=${d},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,${volume}${faded}[ac${i}]`,
+      `[${index}:a]${MIX_FORMAT},apad=whole_dur=${d},atrim=duration=${d},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,${volume}${faded}[ac${i}]`,
     );
     if (tapContributions) filters.push(`[ac${i}]asplit[am${i}][at${i}]`);
     audioLabels.push(tapContributions ? `[am${i}]` : `[ac${i}]`);
