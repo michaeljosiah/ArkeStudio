@@ -29,8 +29,9 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  */
 const SCREENS = [
   // BEGIN RENDERER RECOVERY 284
-  { group: "Desktop recovery · turn 284", screen: "Native crash recovery prompt", frame: "284a", route: "Desktop / renderer failure", status: "drawn", checked: "2026-11-14", controls: ["Not now", "Reload window"], notes: ["Proposed native prompt; awaiting approval. OS appearance may vary; see turn 284 notes."] },
+  { group: "Desktop recovery · turn 284", screen: "Native crash recovery prompt", frame: "284a", route: "Desktop / renderer failure", status: "built", checked: "2026-11-14", controls: ["Not now", "Reload window"], notes: ["Approved native recovery prompt. OS appearance may vary; see turn 284 notes."] },
   // END RENDERER RECOVERY 284
+
 
   // BEGIN VOICE DIALOG 283
   { group: "Voice confirmation · turn 283", screen: "Phone · hosted reader with its existing notice", frame: "283a", route: "Voice upload confirmation", status: "built", checked: "2026-11-13", controls: ["Not now", "Send recording"], notes: ["Approved narrow modal fix; see turn 283 notes."] },

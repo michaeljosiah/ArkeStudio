@@ -1,6 +1,6 @@
 # Turn 284 — Recover a crashed desktop window (#1815)
 
-Proposed 14 November 2026; awaiting owner approval before implementation.
+Approved by the owner, 14 November 2026. Implemented in the desktop host.
 
 Use an operating-system message box, owned by Electron main, so it remains usable
 when the renderer has crashed. The HTML drawings specify copy and actions; the
@@ -28,7 +28,7 @@ successful intervening load. A failed reload can be offered again on return.
 The original OOM investigation is historical context. Its snapshot/client fixes
 are already covered by #2279–#2283. This turn does not claim that a long-session
 OOM has been reproduced or eliminated. SPEC-001 is draft; amend its desktop
-lifecycle requirements alongside the implementation after design approval.
+lifecycle requirements alongside the implementation.
 
 Verification: lifecycle tests for reload/dismiss/repeated failure/shutdown and a
 deliberate renderer crash in a sandboxed Electron file page. Check recovery of the
