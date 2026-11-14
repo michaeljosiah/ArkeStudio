@@ -32,6 +32,7 @@ import {
   TakePicker,
 } from "./editor-timeline.js";
 import { ClipGain, ClipSoundFade, MixPanel, AudioClipSettings } from "./editor-audio.js";
+import { LookPanel } from "./editor-look.js";
 import { CueInspector, SubtitleSources } from "./editor-subtitles.js";
 import { TrimStrip } from "./editor-preview.js";
 import { SourceMeasurement, measurementSubject } from "./editor-media-measurement.js";
@@ -321,8 +322,8 @@ export function CutInspector({
         the editor, so this list is the only route from "a gap exists" to the clip with its takes
         shown. It goes when the gap carries its own control in the lane, which is what 121 drew.
 
-        What stays besides is authoring: the mix and the subtitle sources are things this panel
-        *does*, not things it reports.
+        What stays besides is authoring: the mix, the look and the subtitle sources are things
+        this panel *does*, not things it reports.
       */}
       {cut !== null && spineCut === null && (() => {
         // Text has no media and needs none: it is drawn, not chosen (SPEC-065 R-3).
@@ -346,6 +347,7 @@ export function CutInspector({
         );
       })()}
       {timeline !== null && <MixPanel mix={timeline.mix} disabled={commandsDisabled} onCommands={onCommands} />}
+      {timeline !== null && <LookPanel look={timeline.pictureLook} disabled={commandsDisabled} onCommands={onCommands} />}
       {timeline !== null && (
         <SubtitleSources
           timeline={timeline}

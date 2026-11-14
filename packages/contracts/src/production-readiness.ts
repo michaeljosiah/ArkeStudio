@@ -76,7 +76,9 @@ export function productionExportFingerprint(world: ReadinessWorld, production: P
     ...(shape.hasChapters || shape.isBranching ? {worldName:world.meta.name} : {}),
     chapters:production.chapters.filter(c=>!c.retired),scenes:production.scenes,
     selections:production.selections,performanceSelections:production.performanceReview.selections,spine:production.spine,cut:production.cut,routing:production.routing,
-    timeline:timeline ? {frameRate:timeline.frameRate,tracks:timeline.tracks,mix:timeline.mix,migratedCut:timeline.migratedCut} : production.timeline};
+    // The look changes every frame of the export; named only when set, so a film without one keeps the fingerprint its exports carry.
+    timeline:timeline ? {frameRate:timeline.frameRate,tracks:timeline.tracks,mix:timeline.mix,migratedCut:timeline.migratedCut,
+      ...(timeline.pictureLook ? {pictureLook:timeline.pictureLook} : {})} : production.timeline};
   const refs = JSON.stringify(content), takeIds = new Set(production.takes.filter(t=>refs.includes(t.id)).map(t=>t.id));
   for (const take of production.takes) if (takeIds.has(take.id) && take.segment) takeIds.add(take.segment.passTakeId);
   const takes = production.takes.filter(t=>takeIds.has(t.id));

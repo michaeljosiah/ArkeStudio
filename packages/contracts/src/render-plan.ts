@@ -813,6 +813,9 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlanResult {
     ...(burnIn && subtitles.subtitles !== null
       ? { burnIn: { style: subtitles.subtitles.style, cues: subtitles.subtitles.cues.map(({ text, startSec, endSec }) => ({ text, startSec, endSec })) } }
       : {}),
+    // The look is laid over whatever picture the plan makes (SPEC-038 R-45..R-50), so it changes neither
+    // the items nor which of the two renderers draws them: a film with none plans as it always did.
+    ...(record.pictureLook !== undefined ? { pictureLook: record.pictureLook } : {}),
   };
   return { ok: true, plan };
 }

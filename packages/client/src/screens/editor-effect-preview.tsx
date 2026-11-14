@@ -51,7 +51,7 @@ export function EffectCutPreview({ slug, plan, projection, transport, totalSec, 
   const otherIssues = projection.issues.filter(issue => issue.kind !== "analysis-required");
   const reacting = analysis.readiness.filter(row => row.state.status !== "off");
   return <div className={cx("fy-cutviewer fy-cutviewer--effects", effectControls && "fy-cutviewer--effect-controls")}>
-    <EditorPicturePreview projection={projection} transport={transport} urlFor={urlFor} resolution={resolution} reactions={analysis.sources}>
+    <EditorPicturePreview projection={projection} transport={transport} urlFor={urlFor} resolution={resolution} reactions={analysis.sources} look={plan.pictureLook}>
       {cue && <span className={cx("fy-cutviewer__cue", style?.background === "box" && "fy-cutviewer__cue--box")} data-cue={cue.id} aria-live="off"
         style={style ? { color: style.color, fontSize: `${(style.relativeSize * 100).toFixed(2)}cqh`, bottom: `${(style.bottomMargin * 100).toFixed(2)}%`,
           textShadow: style.background === "outline" ? "0 0 3px var(--neutral-950), 0 0 6px var(--neutral-950)" : "none" } : undefined}>{cue.text}</span>}

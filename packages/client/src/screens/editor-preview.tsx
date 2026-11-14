@@ -4,6 +4,7 @@ import {
   cueAtSec,
   type SubtitleStyle,
   type RenderPlan,
+  type TimelinePictureLook,
 } from "@arke-studio/contracts";
 import { cx } from "../components/ui.js";
 import {
@@ -19,6 +20,7 @@ import {
 } from "../lib/store.js";
 import { type Transport } from "./editor-transport.js";
 import { EffectCutPreview } from "./editor-effect-preview.js";
+import { LookGrain, lookPictureClass } from "./editor-look.js";
 import type { EffectAnalysisContext } from "./editor-effect-analysis.js";
 import type { EffectAuthoringProps } from "../lib/editor-effect-authoring.js";
 
@@ -61,9 +63,10 @@ export function CutPreview(props: CutPreviewProps) {
     seek(0);
     setPlaying(true);
   }, [restartToken, seek, setPlaying]);
+  // The look goes to whichever of the two draws the film: it belongs to the plan, not to a renderer (SPEC-038 R-45..R-50).
   return preview.plan?.effectRender
     ? <EffectCutPreview {...preview} plan={preview.plan} projection={preview.plan.effectRender} />
-    : <LegacyCutPreview {...preview} />;
+    : <LegacyCutPreview {...preview} look={preview.plan?.pictureLook} />;
 }
 
 function LegacyCutPreview({
@@ -75,12 +78,15 @@ function LegacyCutPreview({
   cueAt = null,
   compact = false,
   hidePlay = false,
+  look,
 }: {
   slug: string | undefined;
   spans: PlaybackSpan[];
   totalSec: number;
   transport: Transport;
   hidePlay?: boolean;
+  /** The film's look, approximated: a filter on the picture elements, grain over them and under the cue. */
+  look?: TimelinePictureLook | undefined;
   /** The saved subtitle style, worn in full so the preview and the burn-in agree (SPEC-038 R-26). */
   cueStyle?: SubtitleStyle | null;
   /** The cue at a film second, read on the frame clock like the picture (round three). */
@@ -144,6 +150,8 @@ function LegacyCutPreview({
    * exactly the mistake the video loop exists to avoid.
    */
   const stillLayer = useRef<HTMLSpanElement>(null);
+  // Every element that shows picture wears this, the still's image included, and nothing else does.
+  const pictureClass = cx("fy-cutviewer__video", lookPictureClass(look));
   const paintStill = useCallback((span: PlaybackSpan | null) => {
     const layer = stillLayer.current;
     const el = video.current;
@@ -155,17 +163,19 @@ function LegacyCutPreview({
       } else {
         if (img === null) {
           img = layer.ownerDocument.createElement("img");
-          img.className = "fy-cutviewer__video";
+          img.className = pictureClass;
           img.alt = "";
           img.src = src;
           layer.append(img);
         }
         // Assigning an identical src would restart the decode every frame.
         if (img.getAttribute("src") !== src) img.setAttribute("src", src);
+        // A still already on screen when the grade is chosen takes it at this paint, not at its next picture.
+        if (img.className !== pictureClass) img.className = pictureClass;
       }
     }
     if (el !== null) el.style.opacity = videoSrcFor(span) === null ? "0" : "1";
-  }, [slug]);
+  }, [slug, pictureClass]);
 
   /*
    * The sync runs on its own frame loop off `timeRef`, not off `time`.
@@ -231,7 +241,7 @@ function LegacyCutPreview({
     <div className="fy-cutviewer">
       <video
         ref={video}
-        className="fy-cutviewer__video"
+        className={pictureClass}
         playsInline
         muted
         style={{ opacity: showingVideo === null ? 0 : 1 }}
@@ -239,7 +249,7 @@ function LegacyCutPreview({
       {/* A video overlay over the base: its own element, synced on the same frame clock (round nine). */}
       <video
         ref={overlayVideo}
-        className="fy-cutviewer__video"
+        className={pictureClass}
         playsInline
         muted
         style={{ opacity: overlayVideoSrcFor(current) === null ? 0 : 1 }}
@@ -249,6 +259,7 @@ function LegacyCutPreview({
         * waiting for the throttled transport render, and disappear when there is no still source.
         */}
       <span ref={stillLayer} />
+      <LookGrain look={look} />
       {showing === null && (
         <span className="fy-cutviewer__empty">
           {current ? current.label : "nothing here yet"}
