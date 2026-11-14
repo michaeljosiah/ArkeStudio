@@ -11,6 +11,7 @@ import { DesktopRemoteAccess, remoteGatewayPort } from "./remote-access.js";
 import { createPerformanceSpool } from "./performance-spool.js";
 import { fullscreenAllowed, microphoneAllowed } from "./microphone-permission.js";
 import { LEAVE_PAGE_FULL_SCREEN } from "./focus-escape.js";
+import { installRendererRecovery } from "./renderer-recovery.js";
 import { audioMediaOptions, createMediaProcessRunner } from "./media-tools.js";
 import { PublicationHost } from "./publication-host.js";
 import { publicationMedia } from "./publication-media.js";
@@ -718,6 +719,15 @@ async function createWindow(): Promise<void> {
     void stageExporter?.cancelAll();
     void publicationHost?.resetPlayback().catch(() => traceDesktop("publication.playback-cleanup-failed"));
     traceDesktop("window.render-process-gone", { reason: details.reason, exitCode: details.exitCode });
+  });
+  const recoveryWindow = window;
+  installRendererRecovery(recoveryWindow, {
+    canRecover: () => window === recoveryWindow && !shuttingDown && !allowQuit && !normalShutdown && !closeForUpdate,
+    prompt: async options => {
+      revealWindow();
+      return (await dialog.showMessageBox(recoveryWindow, options)).response;
+    },
+    report: () => traceDesktop("window.recovery-failed"),
   });
   window.on("close", (event) => {
     if (!allowQuit && !shuttingDown && remoteAccess?.status().running && !updateController?.shouldKeepWindowVisible()) {

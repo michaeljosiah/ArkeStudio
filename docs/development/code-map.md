@@ -661,6 +661,12 @@ Desktop `startup.ts` keeps one shutdown drain alive through slow owners and prom
 coordinator `onShutdownWait` names the pending service in the desktop log even after sockets
 close. The existing queue disposal preserves unsubmitted storage-held jobs (issue 2353).
 
+Desktop `renderer-recovery.ts`, installed by `main.ts`, offers a native reload prompt after
+an unexpected renderer exit (#1815, design turn 284). It owns prompt/reload generations and
+re-offers a dismissed prompt only after leaving and returning to that window. The coordinator
+and accepted jobs remain running; this path sends no provider commands. Tests are desktop
+`test/renderer-recovery.test.ts` and `scripts/smoke-renderer-recovery.mjs`.
+
 Transport snapshot refreshes coalesce in 250 ms windows before projection/serialization.
 The narrative save receipt requests an immediate kept snapshot so it follows its saved state.
 Only hello/reconnect replays transient startup events; client world-keyed live runs and

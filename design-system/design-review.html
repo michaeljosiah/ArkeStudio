@@ -52,6 +52,7 @@
 <link rel="stylesheet" href="sketches-navigation-281.css">
 <link rel="stylesheet" href="story-spend-282.css">
 <link rel="stylesheet" href="voice-upload-dialog-283.css">
+<link rel="stylesheet" href="renderer-recovery-284.css">
 <link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/fonts.css">
 <link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/colors.css">
 <link rel="stylesheet" href="_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/tokens/typography.css">
@@ -1204,6 +1205,9 @@ x-import[hint-size^="100%"] { width: 100%; }
     <h2 class="rail__title">Design review</h2>
     <p class="rail__sub">The master's latest frame for each screen, in the order a person uses them, with what shipped beside it.</p>
     
+      <div class="rail__group">Desktop recovery · turn 284</div>
+      <a class="rail__item" href="#native-crash-recovery-prompt"><i class="dot dot--built"></i><span>Native crash recovery prompt</span><b>284a</b></a>
+
       <div class="rail__group">Voice confirmation · turn 283</div>
       <a class="rail__item" href="#phone-hosted-reader-with-its-existing-notice"><i class="dot dot--built"></i><span>Phone · hosted reader with its existing notice</span><b>283a</b></a>
       <a class="rail__item" href="#desktop-remote-engine-confirmation"><i class="dot dot--built"></i><span>Desktop · remote engine confirmation</span><b>283b</b></a>
@@ -2030,10 +2034,21 @@ x-import[hint-size^="100%"] { width: 100%; }
   <main class="main">
     <div class="top">
       <h1>Arke Studio · design review</h1>
-      <p>Generated 2026-11-13 from <code>Arke Studio.dc.html</code> by <code>npm run design:review</code>; this page never edits the master. Each screen is its latest frame, copied verbatim, then what shipped, then the turn's binding rules. A screen the master has deliberately not drawn says so. The build refuses a missing frame, a bitmap in place of a drawing, and a frame that does not carry a control the build shipped.</p>
+      <p>Generated 2026-11-14 from <code>Arke Studio.dc.html</code> by <code>npm run design:review</code>; this page never edits the master. Each screen is its latest frame, copied verbatim, then what shipped, then the turn's binding rules. A screen the master has deliberately not drawn says so. The build refuses a missing frame, a bitmap in place of a drawing, and a frame that does not carry a control the build shipped.</p>
     </div>
     <div class="legend"><span><i class="dot dot--built"></i> built</span><span><i class="dot dot--drifted"></i> built · drifted from the drawing</span><span><i class="dot dot--drawn"></i> drawn · not built</span></div>
     
+    <section class="screen" id="native-crash-recovery-prompt">
+      <div class="screen__head">
+        <div><h2>Native crash recovery prompt</h2><div class="screen__meta"><span class="tag tag--built">built</span><code>Desktop / renderer failure</code><span>checked 2026-11-14</span></div></div>
+        <a class="screen__frame" href="Arke%20Studio.dc.html#284a">284a in the master →</a>
+      </div>
+      <p class="screen__caption">Native desktop recovery prompt</p>
+      <div class="stage" id="284a" data-width="1360"><div class="stage__scale" style="width:1360px"><div class="recovery284" data-screen-label="Native desktop recovery prompt"><div class="native-dialog" role="alertdialog" aria-label="The window stopped working"><div class="native-title"><span>Arke Studio</span><button class="native-close" aria-label="Not now">×</button></div><div class="native-content"><span class="native-icon" aria-hidden="true">⚠</span><div><h3>The window stopped working</h3><p>Reload the window to return to your work. Background jobs keep running and will not be submitted again.</p><p>Unsaved changes in this window may be lost.</p></div></div><div class="native-actions"><button>Not now</button><button class="reload">Reload window</button></div></div></div></div></div>
+      <div class="built built--built"><div class="built__head"><span class="tag tag--built">built</span><span class="built__label">what shipped</span></div><ul><li>Approved native recovery prompt. OS appearance may vary; see turn 284 notes.</li></ul></div>
+      <div class="rules"><div class="rules__head">Binding · turn <a href="Arke%20Studio.dc.html#t284">284</a> <span>Renderer crash recovery · issue 1815</span></div><p class="dv-rule">Native operating-system prompt after a desktop renderer failure. Reload window has focus and reloads only that window; Not now, Escape and close leave jobs running and offer recovery on the next return to the window. No automatic retries or job resubmission. Retain crash receipts, guard shutdown and stale responses, and show only one prompt. Unsaved changes may be lost. Native typography, theme and geometry follow the operating system; this HTML records copy and actions. See the notes for lifecycle and validation.</p></div>
+    </section>
+
     <section class="screen" id="phone-hosted-reader-with-its-existing-notice">
       <div class="screen__head">
         <div><h2>Phone · hosted reader with its existing notice</h2><div class="screen__meta"><span class="tag tag--built">built</span><code>Voice upload confirmation</code><span>checked 2026-11-13</span></div></div>

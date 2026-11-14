@@ -28,6 +28,11 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN RENDERER RECOVERY 284
+  { group: "Desktop recovery · turn 284", screen: "Native crash recovery prompt", frame: "284a", route: "Desktop / renderer failure", status: "built", checked: "2026-11-14", controls: ["Not now", "Reload window"], notes: ["Approved native recovery prompt. OS appearance may vary; see turn 284 notes."] },
+  // END RENDERER RECOVERY 284
+
+
   // BEGIN VOICE DIALOG 283
   { group: "Voice confirmation · turn 283", screen: "Phone · hosted reader with its existing notice", frame: "283a", route: "Voice upload confirmation", status: "built", checked: "2026-11-13", controls: ["Not now", "Send recording"], notes: ["Approved narrow modal fix; see turn 283 notes."] },
   { group: "Voice confirmation · turn 283", screen: "Desktop · remote engine confirmation", frame: "283b", route: "Voice upload confirmation", status: "built", checked: "2026-11-13", controls: ["Not now", "Send recording"], notes: ["Approved narrow modal fix; see turn 283 notes."] },
@@ -1427,6 +1432,7 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="sketches-navigation-281.css">
 <link rel="stylesheet" href="story-spend-282.css">
 <link rel="stylesheet" href="voice-upload-dialog-283.css">
+<link rel="stylesheet" href="renderer-recovery-284.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">

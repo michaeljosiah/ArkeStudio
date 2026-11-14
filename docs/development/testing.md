@@ -1421,6 +1421,20 @@ file page and built preload to verify hidden first paint, readiness fallback, ho
 and visible failure recovery. It exercises Windows and macOS login inputs on the current
 machine; it does not claim an actual macOS or OS sign-in test.
 
+### Desktop renderer crash recovery
+
+Run desktop `test/renderer-recovery.test.ts` with the startup, preload-auth and transport-auth
+tests. After building, run `node --import tsx apps/desktop/scripts/smoke-renderer-recovery.mjs`.
+It deliberately crashes a sandboxed Electron file-page renderer, reloads through the production
+recovery helper and built preload, and reconnects to the same authenticated coordinator. An
+already-accepted fake-provider job completes with exactly one submission and no cancellation;
+the same fixture world remains open. All settings, jobs and artifacts are disposable.
+
+The smoke supplies the native button responses and focus transitions deterministically; it
+does not automate the OS message box or prove installed-app appearance. Turn 284 records the
+approved copy/actions; native styling belongs to the operating system. This is crash recovery
+coverage, not a reproduction or long-session qualification of the original OOM in #1815.
+
 ### Snapshot size and slow remote delivery
 
 Run contracts `test/job-summary.test.ts`, coordinator `test/socket-writer.test.ts`,
