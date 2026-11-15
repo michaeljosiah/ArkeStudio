@@ -35,6 +35,30 @@ export const WORLD_MODEL_CAPABILITIES: readonly Capability[] = ["image", "video"
 export const PRODUCTION_MODEL_CAPABILITIES: readonly Capability[] = ["image", "video"];
 
 /**
+ * What to call the thing a model comes from, which is not the same word on both halves.
+ *
+ * A keyed service is its own source and names itself. A local model's is the **engine**, which
+ * is what Providers' rail is keyed on: `Voxa · Kokoro 82M` rather than `Kokoro · Kokoro 82M`,
+ * because the reader who wants to act on it goes to Voxa's pane. The id is what carries the
+ * mark (SPEC-042 R-20), and the engine's mark is the engine's.
+ */
+function sourceOf(model: ManifestModel): { id: string; label: string } {
+  const engine = engineOfProvider(model.provider);
+  return engine === undefined
+    ? { id: model.provider, label: PROVIDER_TABLE[model.provider].displayName }
+    : { id: engine, label: ENGINE_LABEL[engine] };
+}
+
+/**
+ * A model as the card names it: its source, then the model (`OpenAI · GPT Image 2`). Two routes to
+ * one model share a display name, so a list that names the model alone shows two identical
+ * entries (issue 3107); every picker that lists routes uses this name.
+ */
+export function modelLabel(model: ManifestModel): string {
+  return `${sourceOf(model).label} · ${model.displayName}`;
+}
+
+/**
  * What a model row says about the model it holds, in the state cell's three words (design turn
  * 149). Shared by Settings › General and the Models card, because a card that called a model
  * `connected` while General called the same model `not tested` would be two answers to one
@@ -71,20 +95,6 @@ export function modelFacts(state: State) {
     if (status?.validation === "invalid") return "key rejected";
     if (status?.configured !== true) return providerState(model.provider);
     return "not unlocked";
-  };
-  /**
-   * What to call the thing a model comes from, which is not the same word on both halves.
-   *
-   * A keyed service is its own source and names itself. A local model's is the **engine**, which
-   * is what Providers' rail is keyed on: `Voxa · Kokoro 82M` rather than `Kokoro · Kokoro 82M`,
-   * because the reader who wants to act on it goes to Voxa's pane. The id is what carries the
-   * mark (SPEC-042 R-20), and the engine's mark is the engine's.
-   */
-  const sourceOf = (model: ManifestModel): { id: string; label: string } => {
-    const engine = engineOfProvider(model.provider);
-    return engine === undefined
-      ? { id: model.provider, label: PROVIDER_TABLE[model.provider].displayName }
-      : { id: engine, label: ENGINE_LABEL[engine] };
   };
   /**
    * Where a model actually runs (SPEC-034 R-16a), from the resolved engine rather than the
@@ -148,8 +158,7 @@ export function ModelsCard({
   const manifest = state?.app.manifest ?? null;
   const defaults = state?.app.routing.defaults ?? {};
   const eligibility = eligibilityInputs(state);
-  const { strandState, sourceOf, runsOn } = modelFacts(state);
-  const name = (model: ManifestModel) => `${sourceOf(model).label} · ${model.displayName}`;
+  const { strandState, runsOn } = modelFacts(state);
 
   return (
     <section className="fy-models" aria-label="Models" data-testid="models-card">
@@ -174,7 +183,7 @@ export function ModelsCard({
         const offered = all.filter((m) => m.id !== defaultId && usable(m));
         const ownUnlisted = own !== undefined && !offered.some((m) => m.id === own);
         const label = CARD_LABEL[capability] ?? CAPABILITY_LABEL[capability];
-        const defaultName = defaultModel ? name(defaultModel) : defaultId ?? "Default · not set";
+        const defaultName = defaultModel ? modelLabel(defaultModel) : defaultId ?? "Default · not set";
         // When Settings catches up with a kept choice, clearing and keeping still differ.
         // Only that open-list collision needs a second label; the selected override stays plain.
         const defaultLabel = own !== undefined && own === defaultId ? `${defaultName} · default` : defaultName;
@@ -192,10 +201,10 @@ export function ModelsCard({
               <option value="">{defaultLabel}</option>
               {/* The stored choice stays visible when it can no longer be offered, so the control
                   shows what is kept rather than silently reading as the default. */}
-              {ownUnlisted && <option value={own}>{ownModel ? name(ownModel) : own}</option>}
+              {ownUnlisted && <option value={own}>{ownModel ? modelLabel(ownModel) : own}</option>}
               {offered.map((m) => (
                 <option key={m.id} value={m.id}>
-                  {name(m)}
+                  {modelLabel(m)}
                 </option>
               ))}
             </Select>
@@ -224,7 +233,7 @@ export function ModelsCard({
               <IconButton
                 className="fy-models__reset"
                 label="Use the default"
-                hint={defaultModel ? name(defaultModel) : "Settings"}
+                hint={defaultModel ? modelLabel(defaultModel) : "Settings"}
                 disabled={disabled}
                 onClick={() => onChange(capability, null)}
               >
