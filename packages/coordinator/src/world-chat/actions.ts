@@ -4761,15 +4761,27 @@ export function worldChatActionAdapters(
      * landed. Sent back, its points are live on the rail again and can be saved against the
      * scene as it is now. Only while the proposal is still the one the card prepared: a revision
      * made on it since belongs to whoever made it, and is theirs to decide.
+     *
+     * Checked and removed under one gate (codex on PR 3124): checked here and discarded later, an
+     * edit queued in between landed and was then deleted. The points go back, as `returnToRail`
+     * sends them, before the directory goes, so an interrupted removal leaves them live beside a
+     * proposal still standing to be decided, and startup finishes it.
      */
     settleStale: async (action) => {
       if (!gate) return;
-      const proposal = await gate.readManifest(action.authority.id).catch(() => null);
-      if (!proposal || proposal.draftRevision !== action.authorityRevision) return;
       const log = new WorldChatStore(conversationDir(store.dir, action.conversationId));
       if (!(await log.readMeta())) return;
-      const { returnToRail } = await import("./wrapup.js");
-      await returnToRail(log, gate, proposal, now);
+      await gate.discardRevision(action.authority.id, action.authorityRevision, async (proposal) => {
+        await log.append(
+          {
+            type: "proposal.resolved",
+            proposalId: proposal.id as ProposalId,
+            outcome: "sent-back",
+            candidateIds: (proposal.worldChatOrigins ?? []).map((origin) => origin.candidateId as CandidateId),
+          },
+          { at: now(), requestId: `conversation-action-proposal:${action.actionId}:sent-back` },
+        );
+      });
     },
     reconcile: async (action) => {
       if (!gate) return null;
