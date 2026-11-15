@@ -655,6 +655,25 @@ describe("frame-run quote authorization", () => {
     assert.match(one(item, '[aria-label="Image model"] [aria-checked="true"]')?.textContent ?? "", /^FAL · Square imageno 16:9 · 4 refs$/);
   });
 
+  // A frame's prompt never has the look pasted in (SPEC-012 R-14): a production style set to make
+  // a music video's frames look filmed reached none of them, and nothing said so (issue 3188).
+  it("names the look a frame run does not add on its primary", async () => {
+    const primary = (item: Mounted) =>
+      [...one(item, ".fy-swgen")!.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLButtonElement;
+    const inherited = await mount(stateWith());
+    await click(named(inherited, "Generate frames"));
+    assert.equal(primary(inherited).title, "World look not added · Arke writes it into shot prompts");
+    assert.ok(primary(inherited).classList.contains("fy-tip--end"), "the tip hangs inside the footer");
+
+    const styled = stateWith();
+    const production = styled.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.meta = { ...production.meta, styleOverride: "Photographed on 35 mm colour negative film." };
+    const item = await mount(styled);
+    await click(named(item, "Generate frames"));
+    assert.equal(primary(item).title, "Production style not added · Arke writes it into shot prompts");
+    assert.equal(primary(item).dataset.tip, primary(item).title, "said on focus as well as under the pointer");
+  });
+
   describe("the production's image model (issue 3107)", () => {
     const nano = { ...IMAGE_MODEL, id: "nano-like", displayName: "Nano image" };
     const openai: ManifestModel = {

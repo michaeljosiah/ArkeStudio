@@ -318,8 +318,11 @@ export function GenerateScreen() {
                 : `World look · v${world.artDirection.version}`}
             </span>
             <small>
-              {shot?.promptOverride ? "edited by you" : production.meta.styleOverride?.trim() || "inherited"} · carries
-              as text
+              {/* The look is never pasted into a shot's prompt; Arke reads it when it writes one
+                  (SPEC-012 R-14). "carries as text" told a music video's owner otherwise (issue 3188). */}
+              {shot?.promptOverride
+                ? "edited by you · carries as text"
+                : `${production.meta.styleOverride?.trim() || "inherited"} · Arke writes it into shot prompts`}
             </small>
           </div>
         )}

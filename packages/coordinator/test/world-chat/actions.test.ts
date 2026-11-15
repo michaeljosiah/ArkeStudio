@@ -1993,6 +1993,12 @@ describe("World Chat authority adapters", () => {
       w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.meta.styleOverride,
       "Bleached salt print",
     );
+    // A shot's prompt never has the style pasted in (SPEC-012 R-14); the card promised a music
+    // video's frames a look they were then drawn without (issue 3188).
+    assert.deepEqual((await loaded(w.log)).actions[0]!.shown.ripples, [
+      "Shot prompts Arke writes from now on use this style; it is not added to frame or clip prompts.",
+      "Accepted assets remain pinned.",
+    ]);
 
     const result = await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!);
     assert.equal(result.status, "completed");
