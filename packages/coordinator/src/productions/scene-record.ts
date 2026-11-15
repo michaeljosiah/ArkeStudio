@@ -464,6 +464,19 @@ export function carriesStagePlate(raw: string): boolean {
   catch { return false; }
 }
 
+/**
+ * A scene's place in the song (issue 3100; SPEC-012 R-VSETUP-19): `songWindow` on a setup draft's
+ * scene and on the scene record creation makes of it. Both are strict, so a build before it
+ * refuses the whole setup, and drops the scene on scan. Raised with the first draft update or
+ * scene bytes that carry one. `mark-sections-from-scenes` needs no boundary of its own: it is
+ * refused until a scene carries a window, and by then the world is past this one.
+ */
+export const SCENE_SONG_WINDOW_SCHEMA_VERSION = 135;
+export function carriesSongWindow(raw: string): boolean {
+  try { return parseSceneRecord(raw).songWindow !== undefined; }
+  catch { return false; }
+}
+
 /** Evaluator-versioned playblast pins must not make a scene disappear in older readers (#1128). */
 export function carriesStageEvaluatorVersion(raw: string): boolean {
   try { return orderedShots(parseSceneRecord(raw)).some(shot => shot.staging?.playblast?.evaluatorVersion !== undefined); }

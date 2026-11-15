@@ -1,4 +1,8 @@
-import { productionShape, type ArtifactSidecar, type AudioSpineCommand, type ProductionSpine } from "@arke-studio/contracts";
+import {
+  formatSeconds, orderedShots, pinnedInWindowSec, productionShape, sceneSections,
+  type ArtifactSidecar, type AudioSpineCommand, type ProductionSpine, type SceneRecord, type SongWindow,
+} from "@arke-studio/contracts";
+import { runtimeSeconds } from "./format.js";
 
 /**
  * A music video's song (issue 3088): the master track its audio spine is cut to.
@@ -41,4 +45,40 @@ export function songCommand(
   if (spine === null) return { baseRevision: null, command: { kind: "create", trackArtifactId: artifactId } };
   if (spine.trackArtifactId === artifactId) return null;
   return { baseRevision: spine.revision, command: { kind: "assign-track", trackArtifactId: artifactId } };
+}
+
+/** A scene's place in the song (issue 3100), as every clock in the app reads: `0:16–0:44`. */
+export function songWindowLabel(window: SongWindow): string {
+  return `${formatSeconds(window.startSec)}–${formatSeconds(window.endSec)}`;
+}
+
+/**
+ * A scene's length in the song (issue 3101): its window, and how much of it its shots are pinned
+ * to. A music video's scene read "0 shots · 0s" until it had shots, with its sixteen seconds of
+ * the song only in its title. Null where there is nothing to say — no master track, or a scene
+ * with no place in it — and the scene then shows its shots' own lengths, as it always has.
+ */
+export function sceneSongLine(production: Pick<SongProduction, "spine">, scene: SceneRecord): string | null {
+  const window = scene.songWindow;
+  if (production.spine === null || window === undefined) return null;
+  const pinned = pinnedInWindowSec(window, production.spine, orderedShots(scene).map((shot) => shot.id));
+  return `${songWindowLabel(window)} · ${runtimeSeconds(pinned)} of ${runtimeSeconds(window.endSec - window.startSec)} pinned`;
+}
+
+/**
+ * Mark N sections from the scenes (issue 3100): the sections the scenes' places would give a
+ * song that has none, and the one command that marks them. Null when it is not offered: no song,
+ * a song that already has a section, or no scene with a place in it. Null too when a scene starts
+ * past the end of the song, which the authority refuses, as a press it will refuse is not offered.
+ */
+export function sectionsFromScenes(
+  production: Pick<SongProduction, "spine"> & { scenes: readonly SceneRecord[] },
+  trackDurationSec: number | undefined,
+): { count: number; baseRevision: number; command: AudioSpineCommand } | null {
+  const spine = production.spine;
+  if (spine === null || spine.markers.some((marker) => marker.kind === "section")) return null;
+  const sections = sceneSections(production.scenes);
+  if (sections.length === 0) return null;
+  if (trackDurationSec !== undefined && sections.some((section) => section.atSec > trackDurationSec)) return null;
+  return { count: sections.length, baseRevision: spine.revision, command: { kind: "mark-sections-from-scenes" } };
 }

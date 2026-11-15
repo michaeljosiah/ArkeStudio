@@ -28,6 +28,7 @@ import {
 import { productionModel, resolveModel } from "../../components/dispatch-bar.js";
 import { initials, seconds } from "../../lib/format.js";
 import { mediaUrl } from "../../lib/media.js";
+import { sceneSongLine } from "../../lib/song.js";
 import { acceptedTakeId, takesForShot } from "../../lib/selectors.js";
 import {
   frameRunCommand,
@@ -558,7 +559,7 @@ export function SceneWorkspace({
                   </button>
                 )}
               </div>
-              <div className="fy-sw__metrics" aria-label="Scene metrics"><span><ImageMark size={16} />{aspect}</span><span><Film size={16} />{shots.length} shot{shots.length === 1 ? "" : "s"}</span><span><Timer size={16} />{seconds(totalSec)}</span></div>
+              <div className="fy-sw__metrics" aria-label="Scene metrics"><span><ImageMark size={16} />{aspect}</span><span><Film size={16} />{shots.length} shot{shots.length === 1 ? "" : "s"}</span><span data-testid="scene-length"><Timer size={16} />{sceneSongLine(production, scene) ?? seconds(totalSec)}</span></div>
               <details className="fy-sw__details" onKeyDown={(event) => {
                 if (event.key !== "Escape" || event.defaultPrevented) return;
                 event.currentTarget.open = false;

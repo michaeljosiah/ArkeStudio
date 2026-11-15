@@ -240,8 +240,8 @@ import {
   exportBoard,
   landBoard,
 } from "../productions/ops.js";
-import { AudioSpineCommandRefused, applyProductionSpineCommand, previewAudioSpineCommand, type AudioSpineCommandPreview } from "../productions/spine.js";
-import { applyAudioSpineCommand, type WorldBundle } from "@arke-studio/contracts";
+import { AudioSpineCommandRefused, applyProductionSpineCommand, applySpineCommand, previewAudioSpineCommand, type AudioSpineCommandPreview } from "../productions/spine.js";
+import type { WorldBundle } from "@arke-studio/contracts";
 import { applySceneCommand, applySceneCommands, sceneCommandFrom } from "../productions/scene-commands.js";
 import { sceneActionCommands, sequenceTurnActions, dependencyPreviewWorld, type TurnActionGroup } from "./action-sequencing.js";
 import { modelActionInputRefusal } from "./model-action-input.js";
@@ -2153,7 +2153,8 @@ async function spineAfterDependencies(
     for (const parent of byId.get(id)?.dependencies ?? []) visit(parent);
   };
   for (const id of card.dependencies) visit(id);
-  let spine = bundle.productions.find((production) => production.meta.id === productionId)?.spine ?? null;
+  const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
+  let spine = production?.spine ?? null;
   const before = spine;
   // Conversation order is turn order, and an after names only an earlier card.
   for (const action of actions) {
@@ -2162,7 +2163,7 @@ async function spineAfterDependencies(
     if (prepared?.kind !== "world-chat-audio-spine-command" || prepared.action.productionId !== productionId) continue;
     if (prepared.action.baseRevision !== (spine?.revision ?? null)) continue;
     try {
-      spine = applyAudioSpineCommand(spine, prepared.action.command, store.now());
+      spine = applySpineCommand(production, spine, prepared.action.command, store.now());
     } catch {
       // That card says why on its own; this one is previewed against the spine before it.
     }

@@ -89,6 +89,30 @@ export const SpineAnchorSchema = z
 export type SpineAnchor = z.infer<typeof SpineAnchorSchema>;
 
 /**
+ * A scene's planned stretch of the song (issue 3100): `[startSec, endSec)` on the master track,
+ * kept on the setup scene and on the scene record it becomes.
+ *
+ * Setup fits a music video's scenes to the song's sections, and with nowhere to keep the times
+ * they went into titles as words — "Verse 1: the phone (0:16–0:44)" — which nothing could read
+ * back. This is the plan, never a second clock: where a shot plays is still its anchor above, and
+ * a scene whose shots are pinned elsewhere is simply a plan that was not followed.
+ *
+ * Not held to the song's length. Setup has no song to measure against, and a track changed later
+ * must not make a scene that was readable yesterday unreadable today.
+ */
+export const SongWindowSchema = z
+  .object({
+    startSec: z.number().min(0),
+    endSec: z.number().positive(),
+  })
+  .strict()
+  .refine((value) => value.endSec > value.startSec, {
+    message: "endSec must be greater than startSec",
+    path: ["endSec"],
+  });
+export type SongWindow = z.infer<typeof SongWindowSchema>;
+
+/**
  * `productions/<productionId>/spine.json`.
  *
  * `revision` increments exactly once per accepted edit and is what a stale write is caught by:
@@ -176,6 +200,11 @@ const AudioSpineCommandBaseSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("set-anchor"), shotId: ShotIdSchema, anchor: SpineAnchorSchema }).strict(),
   z.object({ kind: z.literal("set-anchor-audio"), shotId: ShotIdSchema, clipAudio: ClipAudioPolicySchema }).strict(),
   z.object({ kind: z.literal("delete-anchor"), shotId: ShotIdSchema }).strict(),
+  /**
+   * The song's first sections, one from each scene that has a window (issue 3100). It carries no
+   * markers: the authority reads the scenes when it applies, so what lands is what they say then.
+   */
+  z.object({ kind: z.literal("mark-sections-from-scenes") }).strict(),
   z.object({ kind: z.literal("delete-spine") }).strict(),
 ]);
 
@@ -208,11 +237,16 @@ function authoredSpine(spine: ProductionSpine): Omit<ProductionSpine, "revision"
   return authored;
 }
 
-/** Apply one command in memory. Cross-record artifact, duration and shot checks stay with the coordinator authority. */
+/**
+ * Apply one command in memory. Cross-record artifact, duration and shot checks stay with the
+ * coordinator authority, and so does reading the scenes: `sceneSections` is what
+ * `mark-sections-from-scenes` adds, made by the caller with `sceneSectionMarkers`.
+ */
 export function applyAudioSpineCommand(
   current: ProductionSpine | null,
   command: AudioSpineCommand,
   updatedAt: string,
+  sceneSections: readonly SpineMarker[] = [],
 ): ProductionSpine | null {
   if (command.kind === "create") {
     if (current !== null) throw new AudioSpineOperationRefused("the production already has an audio spine");
@@ -289,6 +323,20 @@ export function applyAudioSpineCommand(
       const anchors = { ...current.anchors };
       delete anchors[command.shotId];
       next = { ...next, anchors };
+      break;
+    }
+    case "mark-sections-from-scenes": {
+      // A song's first sections only. Added to sections somebody placed, each scene would sit
+      // beside the mark it was planned from, and nothing here can tell which of the two to keep.
+      if (current.markers.some((marker) => marker.kind === "section")) {
+        throw new AudioSpineOperationRefused("the song already has sections");
+      }
+      if (sceneSections.length === 0) throw new AudioSpineOperationRefused("no scene has a place in the song");
+      const markers = orderedMarkers([...current.markers, ...sceneSections]);
+      if (new Set(markers.map((marker) => marker.id)).size !== markers.length) {
+        throw new AudioSpineOperationRefused("the scenes' marker ids conflict with retained markers");
+      }
+      next = { ...next, markers };
       break;
     }
   }
@@ -372,6 +420,49 @@ export function anchorProblems(
 /** The shot's window in seconds — the budget every spine-aware plan measures material against. */
 export function anchorBudgetSec(anchor: SpineAnchor): number {
   return anchor.endSec - anchor.startSec;
+}
+
+// ---------------------------------------------------------------------------
+// Scene windows (issues 3100, 3101): the plan read beside the clock
+// ---------------------------------------------------------------------------
+
+/** What these read of a scene. Structural, so this file needs nothing of the scene's own schema. */
+type WindowedScene = { title: string; number: number; songWindow?: SongWindow | undefined };
+
+/**
+ * The sections a production's scenes describe: one for each scene that has a window, named as the
+ * scene is and placed where its window starts, in song order. A scene with no window gives none.
+ */
+export function sceneSections(scenes: readonly WindowedScene[]): Array<{ label: string; atSec: number }> {
+  return scenes
+    .flatMap((scene) => scene.songWindow === undefined
+      ? []
+      : [{ label: scene.title.trim() || `Scene ${scene.number}`, atSec: scene.songWindow.startSec }])
+    .sort((a, b) => a.atSec - b.atSec);
+}
+
+/**
+ * Those sections as markers. `manual`, because a person's press placed them and no file did: a
+ * source of their own would be a value no earlier build can read in spine.json. `mintId` is
+ * injected so the caller owns id generation and this stays pure.
+ */
+export function sceneSectionMarkers(scenes: readonly WindowedScene[], mintId: () => string): SpineMarker[] {
+  return sceneSections(scenes).map((section): SpineMarker => ({
+    kind: "section", id: mintId(), label: section.label, atSec: section.atSec, source: "manual",
+  }));
+}
+
+/**
+ * How much of a scene's window its shots are pinned to (issue 3101): the part of each shot's
+ * anchor that falls inside the window. Anchors on an accepted spine never overlap, so this is
+ * never more than the window's own length.
+ */
+export function pinnedInWindowSec(window: SongWindow, spine: ProductionSpine, shotIds: readonly string[]): number {
+  return shotIds.reduce((sum, shotId) => {
+    const anchor = spine.anchors[shotId];
+    if (anchor === undefined) return sum;
+    return sum + Math.max(0, Math.min(anchor.endSec, window.endSec) - Math.max(anchor.startSec, window.startSec));
+  }, 0);
 }
 
 // ---------------------------------------------------------------------------

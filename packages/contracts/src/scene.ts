@@ -3,6 +3,7 @@ import { z } from "zod";
 import { ArtifactIdSchema, IsoDateTimeSchema, prefixedIdSchema, SceneIdSchema, Sha256Schema, ShotIdSchema, SlugSchema, TakeIdSchema, WorldFilePathSchema } from "./ids.js";
 import { FullSha256Schema } from "./audio.js";
 import { PropIdSchema, PropStateIdSchema } from "./prop.js";
+import { SongWindowSchema } from "./spine.js";
 
 /**
  * A scene-script block (SPEC-023 R-13): the smallest stable thing a shot can cite. Block ids
@@ -713,6 +714,15 @@ export const SceneBaseShape = {
       })
       .strict()
       .optional(),
+    /**
+     * The stretch of the production's song this scene was planned for (issue 3100; SPEC-012
+     * R-VSETUP-19), carried from setup. A plan, read by the scene's header and by the sections
+     * marked from the scenes; the spine's anchors remain where its shots actually play.
+     *
+     * Optional, and absent means no place was planned — this schema is a read path, and every
+     * scene ever written parses unchanged.
+     */
+    songWindow: SongWindowSchema.optional(),
     /**
      * The scene's cast by character sheet id (SPEC-044 R-6..R-8): who is in it beyond the names
      * its shots cite, and what each brings. Absent, the cast is the citations alone, every

@@ -241,6 +241,19 @@ describe("production setup interaction (issue #976)", () => {
     assert.match(m.container.textContent!, /Tone: Quiet unease/);
   });
 
+  it("shows a scene's place in the song beside its title, and nothing where it has none (issue 3100)", async () => {
+    const setup = draft();
+    setup.draft.kind = "music-video";
+    setup.draft.scenes = [
+      { key: "verse-1", title: "Verse 1: the phone", songWindow: { startSec: 16, endSec: 44 } },
+      { key: "bridge", title: "Bridge" },
+    ];
+    const m = await mount(fixture(setup));
+    await answer(m.commands()[0]!, setup);
+    assert.deepEqual([...m.container.querySelectorAll("#setup-outline ol li")].map(row => row.textContent),
+      ["Verse 1: the phone · 0:16–0:44", "Bridge"]);
+  });
+
   it("the film door opens a private conversation without sending create-production", async () => {
     const m = await mount(FIXTURE_STATE, true);
     const film = [...m.container.querySelectorAll("button")].find(button => button.textContent?.includes("Make a film"));
