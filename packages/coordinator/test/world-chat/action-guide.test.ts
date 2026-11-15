@@ -59,10 +59,12 @@ it("tells Arke how a spine is created, how markers are named and when they can f
   const entry = describeAction("audio-spine-command")!;
   assert.match(entry.description, /create \{trackArtifactId\} with baseRevision null/);
   assert.match(entry.description, /mk_ and a 26-character ULID/);
-  assert.match(entry.description, /in the turn after the spine card is approved/);
+  // Chained in one turn since issue 3103; before it, they had to wait for a later turn.
+  assert.match(entry.description, /chain with after, each naming the revision the card before it leaves: a create leaves 1/);
   for (const budget of [HUGE, 1000]) {
     const guide = renderActionGuide(["world", "production"], budget, { kind: "cut", productionId: "saltlight" }).text;
     assert.match(guide, /The first master is create with baseRevision null/);
+    assert.match(guide, /may follow in the same turn as cards chained with after/);
   }
 });
 

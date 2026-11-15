@@ -4016,4 +4016,59 @@ describe("Arke sets a production's song (issue 3081)", () => {
     assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
     assert.equal(w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.spine?.trackArtifactId, w.song);
   });
+
+  // Four set-anchor cards chained with after: the first prepared and the rest were refused, each
+  // previewed against the live spine rather than the one the cards before it leave (issue 3103).
+  it("prepares the song, its marks and pinned shots chained in one turn, and approves them in order (issue 3103)", async () => {
+    const w = await songWorld();
+    const spine = () => w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.spine;
+    const shots = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.scenes
+      .map((scene) => orderedShots(scene)).find((ordered) => ordered.length >= 2)!.slice(0, 2);
+    const read = spineRead(w.store);
+    const card = (ref: string, after: string[], baseRevision: number | null, command: unknown) => ModelWorldChatActionSchema.parse({
+      kind: "audio-spine-command", productionId: PRODUCTION, ref, ...(after.length > 0 ? { after } : {}), baseRevision, command, checkReceiptIds: [read.id] });
+    const marker = (index: number, label: string, atSec: number) => ({ kind: "section", id: `mk_01J8G${"0".repeat(20)}${index}`, label, atSec, source: "json" });
+    const oneTurn = turn(w.conversationId, context, { receipts: [read], actions: [
+      card("song", [], null, { kind: "create", trackArtifactId: w.song }),
+      card("marks", ["song"], 1, { kind: "import-markers", format: "json", markers: [marker(1, "Intro", 0), marker(2, "Verse 1", 16)] }),
+      card("first", ["marks"], 2, { kind: "set-anchor", shotId: shots[0]!.id, anchor: { startSec: 0, endSec: 4 } }),
+      card("second", ["first"], 3, { kind: "set-anchor", shotId: shots[1]!.id, anchor: { startSec: 4, endSec: 9 } }),
+    ] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const cards = (await loaded(w.log)).actions;
+    assert.equal(cards.length, 4, "every card prepares against the spine the ones before it leave");
+    assert.equal(spine(), null, "preparing writes nothing");
+    assert.equal((await decide(w.lifecycle, w.log, cards[3]!)).reason, "dependency-blocked");
+    for (const one of cards) assert.equal((await decide(w.lifecycle, w.log, one)).status, "completed", one.shown.title);
+    assert.equal(spine()?.revision, 4);
+    assert.deepEqual(spine()?.markers.map((one) => one.kind === "section" ? one.label : one.text), ["Intro", "Verse 1"]);
+    assert.deepEqual(Object.keys(spine()?.anchors ?? {}).sort(), shots.map((shot) => shot.id).sort());
+  });
+
+  // Its spine read moves under the cards it waits on, but the shots and tracks that read showed do
+  // not: a shot rewritten after the card was prepared must not be pinned unseen (codex on PR 3129).
+  it("goes stale when a shot it pins changes after it was prepared, though the spine it waits on may move", async () => {
+    const w = await songWorld();
+    const production = () => w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+    const scene = production().scenes.find((candidate) => orderedShots(candidate).length > 0)!;
+    const shot = orderedShots(scene)[0]!;
+    const read = spineRead(w.store);
+    const card = (ref: string, after: string[], baseRevision: number | null, command: unknown) => ModelWorldChatActionSchema.parse({
+      kind: "audio-spine-command", productionId: PRODUCTION, ref, ...(after.length > 0 ? { after } : {}), baseRevision, command, checkReceiptIds: [read.id] });
+    const oneTurn = turn(w.conversationId, context, { receipts: [read], actions: [
+      card("song", [], null, { kind: "create", trackArtifactId: w.song }),
+      card("pin", ["song"], 1, { kind: "set-anchor", shotId: shot.id, anchor: { startSec: 0, endSec: 4 } }),
+    ] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const [song, pin] = (await loaded(w.log)).actions;
+    assert.equal((await decide(w.lifecycle, w.log, song!)).status, "completed");
+    await applySceneCommand(w.store, { productionId: PRODUCTION, sceneId: scene.id, sceneFile: production().sceneFiles[scene.id]!,
+      baseVersion: scene.version, command: { kind: "edit-shot", shotId: shot.id, change: { title: "A different shot now" } } });
+    assert.equal((await decide(w.lifecycle, w.log, pin!)).reason, "stale");
+    assert.deepEqual(production().spine?.anchors, {}, "nothing is pinned");
+  });
 });
