@@ -3587,6 +3587,58 @@ describe("cards for different scenes in one turn (issue 3149)", () => {
     assert.ok(!orderedShots(sceneOf(w, scene.id)).some(one => one.id === doomed.id));
   });
 
+  // A card may delete a shot it adds itself, by its ref; only the last new shot survives, and the
+  // first one it numbered is gone from its result (codex on PR 3157).
+  it("lands a card that removes one of its own new shots, before the other scene's card", async () => {
+    const w = await songWorld();
+    const [hook, outro] = production(w).scenes.filter(s => orderedShots(s).length > 0).slice(0, 2);
+    const { id: _id, number: _number, visualFacts: _facts, ...shot } = orderedShots(hook!)[0]!;
+    const receipts = [currentReceipt(w.store, "scenes", `${PRODUCTION}:${hook!.id}`), currentReceipt(w.store, "scenes", `${PRODUCTION}:${outro!.id}`)];
+    const act = (scene: SceneRecord, extra: Record<string, unknown>) => ModelWorldChatActionSchema.parse({ kind: "production-scene-command",
+      productionId: PRODUCTION, sceneId: scene.id, checkReceiptIds: receipts.map(r => r.id), ...extra });
+    const last = orderedShots(outro!).at(-1)!.id;
+    const oneTurn = turn(w.conversationId, context, { receipts, actions: [
+      act(hook!, { command: { kind: "insert-shot", at: { atStart: true }, shot: { ...shot, title: "The hook lands" } } }),
+      act(outro!, { ref: "draft", command: { kind: "insert-shot", at: { after: last }, shot: { ...shot, title: "A draft" } } }),
+      act(outro!, { ref: "keep", command: { kind: "insert-shot", at: { after: "ref:draft" }, shot: { ...shot, title: "The outro fades" } } }),
+      act(outro!, { command: { kind: "delete-shot", shotId: "ref:draft" } }),
+    ] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared); await bindAll(w.lifecycle, prepared);
+    const [hookCard, outroCard] = (await loaded(w.log)).actions;
+    assert.equal((await decide(w.lifecycle, w.log, outroCard!)).status, "completed",
+      (await loaded(w.log)).actions.find(a => a.actionId === outroCard!.actionId)?.statusDetail);
+    assert.equal((await decide(w.lifecycle, w.log, hookCard!)).status, "completed");
+    assert.deepEqual(added(outro!, sceneOf(w, outro!.id)).map(one => one.title), ["The outro fades"]);
+    const ids = production(w).scenes.flatMap(s => orderedShots(s).map(one => one.id));
+    assert.equal(new Set(ids).size, ids.length);
+  });
+
+  // A card prepared before the song fence existed holds only the spine read it cited; it must
+  // still go stale when the song changes (codex on PR 3157).
+  it("keeps the spine read of a card prepared before the song fence existed", async () => {
+    const w = await songWorld();
+    const [hook] = production(w).scenes.filter(s => orderedShots(s).length > 0);
+    const spine = { ...currentReceipt(w.store, "spine", PRODUCTION), observedRevisionOrDigest: spineFence(production(w), w.store.getBundle().artifacts) };
+    const scenes = currentReceipt(w.store, "scenes", `${PRODUCTION}:${hook!.id}`);
+    const oneTurn = turn(w.conversationId, context, { receipts: [spine, scenes], actions: [ModelWorldChatActionSchema.parse({ kind: "production-scene-command",
+      productionId: PRODUCTION, sceneId: hook!.id, command: { kind: "edit-scene", synopsis: "Cut to the beat" }, checkReceiptIds: [spine.id, scenes.id] })] });
+    // As an earlier build prepared it: the cited spine read, and no song fence beside it.
+    const older = prepareWorldChatActions(w.store, w.lifecycle, oneTurn).map(({ intent, payload }) => {
+      const strip = <T extends { target: string }>(observations: readonly T[]) => observations.filter(one => !one.target.endsWith(":song"));
+      assert.ok(payload.kind === "world-chat-production-scene-command" && payload.scenePlan);
+      const old = { ...payload, scenePlan: { ...payload.scenePlan, expectedObservations: strip(payload.scenePlan.expectedObservations) } };
+      return { payload: old, intent: { ...intent, baseObservations: strip(intent.baseObservations), payloadDigest: conversationActionDigest(old) } };
+    });
+    assert.ok(older[0]!.intent.baseObservations.some(one => one.requirement === "spine" && one.target === PRODUCTION));
+    await appendTurn(w.log, oneTurn, older); await bindAll(w.lifecycle, older);
+    const card = (await loaded(w.log)).actions[0]!;
+    await applyProductionSpineCommand(w.store, { productionId: PRODUCTION, baseRevision: 1, command: { kind: "add-marker",
+      marker: { kind: "section", id: `mk_${ulid()}`, label: "Chorus", atSec: 40, source: "manual" } } }, { source: "test" });
+    assert.equal((await decide(w.lifecycle, w.log, card)).reason, "stale");
+    assert.notEqual(sceneOf(w, hook!.id).synopsis, "Cut to the beat");
+  });
+
   it("refuses a new shot whose id another scene took after the card was prepared", async () => {
     const w = await songWorld();
     const { hook, outro, cards } = await twoScenes(w);

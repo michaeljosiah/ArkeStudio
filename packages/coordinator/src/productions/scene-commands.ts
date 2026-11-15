@@ -126,12 +126,38 @@ export interface SceneBatchContext {
   readonly reserved: readonly string[];
 }
 
+/** Every shot id a batch's commands name, where the commands name shots. */
+function namedShotIds(commands: readonly SceneCommand[]): string[] {
+  const named: string[] = [];
+  const visit = (value: unknown, key?: string): void => {
+    if (typeof value === "string") {
+      if (["shotId", "fromShotId", "toShotId", "before", "after"].includes(key ?? "")) named.push(value);
+    } else if (Array.isArray(value)) {
+      for (const item of value) {
+        if (key === "members" || key === "memberShotIds") named.push(String(item));
+        else visit(item);
+      }
+    } else if (value && typeof value === "object") {
+      for (const [name, item] of Object.entries(value)) visit(item, name);
+    }
+  };
+  visit(commands);
+  return named;
+}
+
 /**
  * The production as a planned batch was planned in, as far as the batch can tell: its own scene,
  * numbered from just below the first id it minted (issue 3149).
+ *
+ * What it minted is every id its result or its commands hold that its scene did not: a shot a
+ * batch adds and then deletes by its ref survives only in the deleting command (codex on PR 3157),
+ * and read off the result alone the numbering started past it.
  */
-function plannedBatchContext(bundle: WorldBundle, productionId: string, plan: { before: SceneRecord; after: SceneRecord }): SceneBatchContext {
-  const minted = addedShotIds(plan).flatMap(id => /^sh_(\d+)$/.exec(id)?.[1] ?? []).map(BigInt);
+function plannedBatchContext(bundle: WorldBundle, productionId: string, plan: { before: SceneRecord; after: SceneRecord },
+  commands: readonly SceneCommand[]): SceneBatchContext {
+  const before = new Set(orderedShots(plan.before).map(shot => shot.id));
+  const minted = [...addedShotIds(plan), ...namedShotIds(commands).filter(id => !before.has(id))]
+    .flatMap(id => /^sh_(\d+)$/.exec(id)?.[1] ?? []).map(BigInt);
   const first = minted.reduce<bigint | null>((low, n) => low === null || n < low ? n : low, null);
   return {
     bundle: { ...bundle, productions: bundle.productions.map(p => p.meta.id !== productionId ? p :
@@ -168,7 +194,7 @@ export function replannedSceneBatch(
     // Minted past a shot another scene gained, a later command can miss the id it names. The
     // context it was planned in answers for it, refusal and all.
   }
-  const planned = plannedBatchContext(bundle, productionId, plan);
+  const planned = plannedBatchContext(bundle, productionId, plan, commands);
   const after = sceneCommandBatchCandidate(planned.bundle, productionId, plan.before, commands, planned.reserved);
   return isDeepStrictEqual(after, plan.after) ? { ...planned, after } : null;
 }

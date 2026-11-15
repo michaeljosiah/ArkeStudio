@@ -2100,6 +2100,10 @@ function approvalObservations(payload: WorldChatPreparedAction, action: Pick<Con
  * reads are kept, and the song as it bears on the scene (`sceneSongObservation`) stands for the
  * spine read. Shot ids, the one thing it takes from the other scenes, are held to the ids it was
  * planned with when the batch is made again (`replannedSceneBatch`).
+ *
+ * Only where the card carries that song fence (codex on PR 3157): a card prepared before it
+ * existed holds the spine read alone, and dropped, nothing at all would stand for the song it was
+ * prepared against.
  */
 function ownSceneObservations<T extends Pick<ConversationActionPrepareIntent, "baseObservations">>(
   payload: WorldChatPreparedAction,
@@ -2109,9 +2113,11 @@ function ownSceneObservations<T extends Pick<ConversationActionPrepareIntent, "b
   if (payload.kind !== "world-chat-production-scene-command") return observed;
   const { productionId, sceneId } = payload.action;
   const own = [`${productionId}:${sceneId}`, `${productionId}:${sceneId}:script`];
+  const song = `${productionId}:${sceneId}${SCENE_SONG_TARGET_SUFFIX}`;
+  const fencedOnSong = observed.baseObservations.some(observation => observation.requirement === "spine" && observation.target === song);
   return { baseObservations: observed.baseObservations.filter(observation =>
     (observation.requirement !== "scenes" || own.includes(observation.target)) &&
-    (observation.requirement !== "spine" || (observation.target === `${productionId}:${sceneId}${SCENE_SONG_TARGET_SUFFIX}` && !songLater))) };
+    (observation.requirement !== "spine" || !fencedOnSong || (observation.target === song && !songLater))) };
 }
 
 /** The song as it bears on a scene card's own scene, standing for the spine read it cites (issue 3149). */
