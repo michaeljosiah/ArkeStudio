@@ -248,6 +248,20 @@ describe("parsing a turn result", () => {
     assert.equal(parseTurnResult(raw).ok, false);
   });
 
+  it("names the shot positions when an insert's at is a guess (issue 3084)", () => {
+    const example = WORLD_CHAT_SHAPE_EXAMPLES.worldActions["production-scene-command"];
+    assert.equal(parseTurnResult(turn({ actions: [example] }), true).ok, true, "the example is an insert that parses");
+    const { command: _command, ...action } = example;
+    for (const at of [{ kind: "end" }, { index: 1 }]) {
+      const guessed = [{ ...action, commands: [{ kind: "insert-shot", at, shot: { title: "The bell", description: "The bell swings." } }] }];
+      const parsed = parseTurnResult(turn({ actions: guessed as unknown as WorldChatTurnResult["actions"] }), true);
+      assert.equal(parsed.ok, false);
+      // "matches none of the allowed shapes" was the whole line, and Arke's next guess failed too.
+      if (!parsed.ok) assert.match(correctiveMessage(parsed.problems),
+        /actions\.0\.commands\.0\.at must be \{"atStart":true\}, \{"after":shotId\} or \{"before":shotId\}.*There is no end or index/);
+    }
+  });
+
   it("rejects an oversized merged scene batch before turn completion", () => {
     const { command: _command, ...action } = WORLD_CHAT_SHAPE_EXAMPLES.worldActions["production-scene-command"];
     const raw = turn({ actions: [{ ...action, commands: Array.from({ length: 24 }, () => ({ kind: "edit-scene" as const, title: "The bell" })) },

@@ -211,3 +211,11 @@ it("details only the thread's prioritised kinds and keeps the rest discoverable 
   assert.equal(renderActionGuide(["world", "production"], 1000, { kind: "production", productionId: "saltlight" }).mode, "compact");
   for (const refused of ACTION_GUIDE_ENTRIES.filter(item => item.unavailable !== null)) assert.ok(production.text.includes(refused.unavailable!));
 });
+
+it("tells Arke where a new shot can go and how several go in order on one card (issue 3084)", () => {
+  const entry = describeAction("production-scene-command")!;
+  assert.match(entry.description, /\{"atStart":true\}, \{"after":shotId\} or \{"before":shotId\}, nothing else: there is no end or index/);
+  assert.match(entry.description, /one production-scene-command per new shot on the same scene, each with its own ref and no after/);
+  assert.match(entry.description, /each next at \{"after":"ref:<previous ref>"\}/);
+  assert.ok("example" in entry && entry.example?.kind === "production-scene-command" && entry.example.command?.kind === "insert-shot");
+});
