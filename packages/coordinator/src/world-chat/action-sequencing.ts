@@ -23,6 +23,12 @@ export function sequenceTurnActions(bundle: WorldBundle, actions: readonly Model
   const groups: TurnActionGroup[] = turnActionGroups(actions).map(group => ({ action: actions[group.members[0]!]!,
     members: group.members.map(index => actions[index]!), dependencies: group.dependencies }));
   const created = new Map<string, CreatedShots>();
+  /*
+   * Shot ids each production's scene cards in this turn have already given their new shots (issue
+   * 3149). Each card is planned against the production as it is, so cards for two scenes each gave
+   * a new shot the same next id, and approving one left the other unable to keep the id it showed.
+   */
+  const minted = new Map<string, string[]>();
   for (const group of groups) {
     const ancestors = new Set<number>();
     const visit = (index: number) => {
@@ -56,6 +62,7 @@ export function sequenceTurnActions(bundle: WorldBundle, actions: readonly Model
     const before = production?.scenes.find(scene => scene.id === action.sceneId);
     if (!before) throw new Error("That scene is unavailable for the dependency dry run.");
     const beforeBundle = working;
+    const reserved = minted.get(action.productionId) ?? [];
     let record = before;
     const commands: NonNullable<SceneAction["commands"]> = [];
     for (const member of group.members as SceneAction[]) {
@@ -63,14 +70,16 @@ export function sequenceTurnActions(bundle: WorldBundle, actions: readonly Model
       for (const raw of sceneActionCommands(member)) {
         const command = resolveShotRefs(raw, allowedRefs, created, action);
         const previous = new Set(orderedShots(record).map(shot => shot.id));
-        record = sceneCommandCandidate(working, action.productionId, record, sceneCommandFrom(command));
+        record = sceneCommandCandidate(working, action.productionId, record, sceneCommandFrom(command), reserved);
         inserted.push(...orderedShots(record).filter(shot => !previous.has(shot.id)).map(shot => shot.id));
         working = replaceScene(working, action.productionId, record);
         commands.push(command);
       }
       if (member.ref) { created.set(member.ref, { productionId: action.productionId, sceneId: action.sceneId, shotIds: inserted }); allowedRefs.add(member.ref); }
     }
-    const after = sceneCommandBatchCandidate(beforeBundle, action.productionId, before, commands.map(sceneCommandFrom));
+    const after = sceneCommandBatchCandidate(beforeBundle, action.productionId, before, commands.map(sceneCommandFrom), reserved);
+    const kept = new Set(orderedShots(before).map(shot => shot.id));
+    minted.set(action.productionId, [...reserved, ...orderedShots(after).map(shot => shot.id).filter(id => !kept.has(id))]);
     const blockers = shotDeletionBlockers(beforeBundle, action.productionId, before, commands);
     if (blockers.length > 0) throw new SceneCommandRefused(blockers);
     group.scene = { before, after, beforeBundle };

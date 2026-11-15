@@ -32,8 +32,13 @@ export type SemanticSceneCommand =
 
 
 /** The same graph candidate for a preview and the locked scene authority (SPEC-051 R-15/R-16).
- * Caller supplies the complete production snapshot, including preceding dry-run commands. */
-export function sceneCommandCandidate(bundle: WorldBundle, productionId: string, record: SceneRecord, command: SemanticSceneCommand): GraphScene {
+ * Caller supplies the complete production snapshot, including preceding dry-run commands.
+ *
+ * `reserved` names shot ids promised outside the snapshot, which a new shot must not take
+ * (issue 3149): a turn's cards for two scenes are planned side by side, and without it each
+ * gave its new shot the same id. */
+export function sceneCommandCandidate(bundle: WorldBundle, productionId: string, record: SceneRecord, command: SemanticSceneCommand,
+  reserved: readonly string[] = []): GraphScene {
   switch (command.kind) {
     case "set-beat-line": {
       const shots = orderedShots(record), shot = shots.find(one => one.id === command.shotId);
@@ -143,7 +148,7 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
       if (!production) throw new SceneOperationRefused([`production ${productionId} is not in this world`]);
       // Ids clear the WHOLE production, never just this scene: takes and selections key by bare
       // shot id, so a per-scene number would collide with another scene's shot 3.
-      const taken = production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => shot.id));
+      const taken = [...production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => shot.id)), ...reserved];
       return insertShot(record, {
         shot: { ...command.shot, id: nextShotIdIn(taken) } as Omit<Shot, "number">,
         at: command.at,
@@ -154,7 +159,7 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
     case "duplicate-shot": {
       const production = bundle.productions.find(p => p.meta.id === productionId);
       if (!production) throw new SceneOperationRefused([`production ${productionId} is not in this world`]);
-      const taken = production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => shot.id));
+      const taken = [...production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => shot.id)), ...reserved];
       return duplicateShot(record, { shotId: command.shotId, newShotId: nextShotIdIn(taken) });
     }
     case "edit-shot": {
@@ -218,13 +223,14 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
 }
 
 /** One prospective version with production-wide identities reserved by preceding commands. */
-export function sceneCommandBatchCandidate(bundle: WorldBundle, productionId: string, record: SceneRecord, commands: readonly SemanticSceneCommand[]): GraphScene {
+export function sceneCommandBatchCandidate(bundle: WorldBundle, productionId: string, record: SceneRecord, commands: readonly SemanticSceneCommand[],
+  reserved: readonly string[] = []): GraphScene {
   if (commands.length === 0 || commands.length > 24) throw new SceneOperationRefused(["A scene batch needs between one and 24 commands."]);
   let next = record;
   for (const command of commands) {
     const working = { ...bundle, productions: bundle.productions.map(p => p.meta.id !== productionId ? p :
       { ...p, scenes: p.scenes.map(s => s.id === record.id ? next : s) }) };
-    next = sceneCommandCandidate(working, productionId, next, command);
+    next = sceneCommandCandidate(working, productionId, next, command, reserved);
   }
   // JSON is the durable representation: explicit undefined patches must not make a recovered
   // plan differ from the same resulting record calculated at approval.

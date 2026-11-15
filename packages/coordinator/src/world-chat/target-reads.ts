@@ -487,6 +487,28 @@ export function spineFence(production: ProductionBundle | undefined, artifacts: 
   return fence(spineRows(production, artifacts).map((row) => row.value), spine?.revision ?? "absent");
 }
 
+/** The observation target a scene card's song fence is kept under, `<productionId>:<sceneId>:song` (issue 3149). */
+export const SCENE_SONG_TARGET_SUFFIX = ":song";
+
+/**
+ * What a scene card read from the spine that bears on its own scene (issue 3149): the song, its
+ * marks, and where the scene's own shots sit in it.
+ *
+ * The spine read lists every shot of the production, so a card for the outro that cited it went
+ * stale the moment the hook's card added a shot. No revision or time is in it: a spine card the
+ * scene card waits on is projected without either, and what it changed is the content.
+ */
+export function sceneSongFence(production: ProductionBundle | undefined, sceneId: string): string {
+  const spine = production?.spine ?? null;
+  const scene = production?.scenes.find((candidate) => candidate.id === sceneId);
+  const shots = new Set(scene ? orderedShots(scene).map((shot) => shot.id) : []);
+  return fence({
+    track: spine?.trackArtifactId ?? null,
+    markers: spine?.markers ?? [],
+    anchors: Object.entries(spine?.anchors ?? {}).filter(([shotId]) => shots.has(shotId)).sort(([a], [b]) => a.localeCompare(b)),
+  }, spine === null ? "absent" : "song");
+}
+
 /** The observation target a chained spine card's shots-and-tracks fence is kept under (issue 3103). */
 export const SPINE_MEDIA_TARGET_SUFFIX = ":shots-and-tracks";
 

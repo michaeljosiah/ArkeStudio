@@ -1,4 +1,4 @@
-import { sameVoiceAssignment, shotDeleteBlockers, SceneOperationRefused, sceneCommandCandidate, sceneCommandBatchCandidate, type SemanticSceneCommand as SceneCommand, type SceneRecord, type GraphScene, type Shot, type WorldBundle } from "@arke-studio/contracts";
+import { orderedShots, sameVoiceAssignment, shotDeleteBlockers, SceneOperationRefused, sceneCommandCandidate, sceneCommandBatchCandidate, type SemanticSceneCommand as SceneCommand, type SceneRecord, type GraphScene, type Shot, type WorldBundle } from "@arke-studio/contracts";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -114,6 +114,65 @@ export interface SceneCommandsInput extends Omit<SceneCommandInput, "command"> {
   precondition?: () => string | null;
 }
 
+/** The shot ids a planned batch adds: those its result holds and its scene before did not. */
+function addedShotIds(plan: { before: SceneRecord; after: SceneRecord }): string[] {
+  const before = new Set(orderedShots(plan.before).map(shot => shot.id));
+  return orderedShots(plan.after).map(shot => shot.id).filter(id => !before.has(id));
+}
+
+/** Where a planned batch is made again: a production snapshot, and ids its new shots must pass. */
+export interface SceneBatchContext {
+  readonly bundle: WorldBundle;
+  readonly reserved: readonly string[];
+}
+
+/**
+ * The production as a planned batch was planned in, as far as the batch can tell: its own scene,
+ * numbered from just below the first id it minted (issue 3149).
+ */
+function plannedBatchContext(bundle: WorldBundle, productionId: string, plan: { before: SceneRecord; after: SceneRecord }): SceneBatchContext {
+  const minted = addedShotIds(plan).flatMap(id => /^sh_(\d+)$/.exec(id)?.[1] ?? []).map(BigInt);
+  const first = minted.reduce<bigint | null>((low, n) => low === null || n < low ? n : low, null);
+  return {
+    bundle: { ...bundle, productions: bundle.productions.map(p => p.meta.id !== productionId ? p :
+      { ...p, scenes: p.scenes.filter(s => s.id === plan.before.id) }) },
+    reserved: first === null ? [] : [`sh_${first - 1n}`],
+  };
+}
+
+/**
+ * Where a planned batch makes exactly the result that was reviewed, or null when it no longer
+ * does anywhere (issue 3149).
+ *
+ * New shot ids are minted past every shot in the production. Made again against the production
+ * as it is, a batch gave its new shots other ids as soon as any other scene had gained a shot, so
+ * its card went stale though its own scene had not moved: approving a turn's card for the hook
+ * staled its card for the outro. So where the production as it is no longer gives the reviewed
+ * ids, the batch is made again from its own scene with the numbering it was planned at. Either way
+ * it is refused when another scene now holds one of its new ids, because takes and selections key
+ * by bare shot id and two shots may never share one.
+ */
+export function replannedSceneBatch(
+  bundle: WorldBundle,
+  productionId: string,
+  plan: { before: SceneRecord; after: SceneRecord },
+  commands: readonly SceneCommand[],
+): (SceneBatchContext & { after: GraphScene }) | null {
+  const elsewhere = new Set((bundle.productions.find(p => p.meta.id === productionId)?.scenes ?? [])
+    .filter(scene => scene.id !== plan.before.id).flatMap(scene => orderedShots(scene).map(shot => shot.id)));
+  if (addedShotIds(plan).some(id => elsewhere.has(id))) return null;
+  try {
+    const after = sceneCommandBatchCandidate(bundle, productionId, plan.before, commands);
+    if (isDeepStrictEqual(after, plan.after)) return { bundle, reserved: [], after };
+  } catch {
+    // Minted past a shot another scene gained, a later command can miss the id it names. The
+    // context it was planned in answers for it, refusal and all.
+  }
+  const planned = plannedBatchContext(bundle, productionId, plan);
+  const after = sceneCommandBatchCandidate(planned.bundle, productionId, plan.before, commands, planned.reserved);
+  return isDeepStrictEqual(after, plan.after) ? { ...planned, after } : null;
+}
+
 /** Scene, selection cleanup and released kit claims land together or not at all (SPEC-051 R-16). */
 export async function applySceneCommands(store: WorldStore, input: SceneCommandsInput, deps: SceneCommandDeps = {}): Promise<void> {
   const stem = stemOrThrow(input.sceneFile), path = `productions/${input.productionId}/scenes/${stem}.json`;
@@ -124,18 +183,21 @@ export async function applySceneCommands(store: WorldStore, input: SceneCommands
     const record = parseSceneRecord(raw);
     fenceOrThrow(input, record, stem);
     if (!isDeepStrictEqual(record, input.expectedBefore)) throw new SceneCommandRefused(["The scene differs from the dependency result this batch reviewed."]);
-    const after = sceneCommandBatchCandidate(store.getBundle(), input.productionId, record, input.commands);
-    if (!isDeepStrictEqual(after, input.expectedAfter)) throw new SceneCommandRefused(["The resulting scene or its fixed shot identities changed after review."]);
+    const planned = replannedSceneBatch(store.getBundle(), input.productionId, { before: input.expectedBefore, after: input.expectedAfter }, input.commands);
+    if (!planned) throw new SceneCommandRefused(["The resulting scene or its fixed shot identities changed after review."]);
+    const after = planned.after;
+    // Each command is applied again for the files that land with it, in the context that made the
+    // reviewed result, so a later command naming a shot an earlier one adds finds it by its id.
     let working: SceneRecord = record;
     const files: CommitFileInput[] = [];
     for (const command of input.commands) {
-      const bundle: WorldBundle = { ...store.getBundle(), productions: store.getBundle().productions.map(p => p.meta.id !== input.productionId ? p :
+      const bundle: WorldBundle = { ...planned.bundle, productions: planned.bundle.productions.map(p => p.meta.id !== input.productionId ? p :
         { ...p, scenes: p.scenes.map(s => s.id === record.id ? working : s) }) };
       if (command.kind === "delete-shot") {
         const blockers = await deletionBlockers(store, { ...input, command }, command.shotId, deps, bundle);
         if (blockers.length) throw new SceneCommandRefused(blockers);
       }
-      working = await candidateFor(store, { ...input, command }, working, files, bundle);
+      working = await candidateFor(store, { ...input, command }, working, files, bundle, planned.reserved);
     }
     const unique = new Map(files.map(file => [file.path, file]));
     unique.set(path, { path, action: "replace", content: JSON.stringify(after, null, 2) + "\n", baseHash: sha256(raw) });
@@ -277,6 +339,7 @@ async function candidateFor(
   record: SceneRecord,
   files: CommitFileInput[],
   bundle: WorldBundle = store.getBundle(),
+  reserved: readonly string[] = [],
 ): Promise<GraphScene> {
   const command = input.command;
   if (command.kind === "edit-scene") {
@@ -329,7 +392,7 @@ async function candidateFor(
     }
   }
   if (command.kind === "delete-shot") await appendSelectionCleanup(store, input.productionId, command.shotId, files);
-  return sceneCommandCandidate(bundle, input.productionId, record, command);
+  return sceneCommandCandidate(bundle, input.productionId, record, command, reserved);
 }
 
 /**

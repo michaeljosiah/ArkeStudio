@@ -42,6 +42,7 @@ import {
   type Job,
   type HarnessAdapter,
   type MessageId,
+  type SceneRecord,
   type WorldChangeCandidate,
   type WorldChatContext,
   type WorldChatCheckReceipt,
@@ -3460,6 +3461,145 @@ it("shows every omitted viewpoint beyond the card title limit (#967)", async () 
   const notice = card.shown.body.fields.find((field) => field.label === "Viewpoint characters")!.after!;
   assert.ok(notice.length > 200);
   for (let index = 1; index <= 20; index++) assert.ok(notice.includes(`chapter ${index}`));
+});
+
+/*
+ * Arke prepared a card for the hook and a card for the outro in one turn. Approving the hook card
+ * made the outro card "Needs a fresh review · The scenes changed after this action was prepared",
+ * though nothing in the outro had changed (issue 3149).
+ */
+describe("cards for different scenes in one turn (issue 3149)", () => {
+  const context = { kind: "production" as const, productionId: PRODUCTION };
+  const production = (w: Awaited<ReturnType<typeof setup>>) => w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!;
+  const sceneOf = (w: Awaited<ReturnType<typeof setup>>, sceneId: string) => production(w).scenes.find(s => s.id === sceneId)!;
+  async function songWorld() {
+    const w = await setup(context);
+    const source = join(w.store.dir, "why-you-do-me-like-that.mp3");
+    await writeFile(source, "song fixture");
+    const filed = await fileArtifact(w.store, { sourcePath: source, production: PRODUCTION,
+      mediaProbe: { async durationSec() { return 227.64; }, async info() { return { durationSec: 227.64, hasAudio: true }; } } });
+    assert.ok(filed.outcome === "filed");
+    await applyProductionSpineCommand(w.store, { productionId: PRODUCTION, baseRevision: null, command: { kind: "create", trackArtifactId: filed.artifact.id } }, { source: "test" });
+    return w;
+  }
+  /**
+   * One card per scene, each adding a shot at the scene's end, as Arke cites its reads: the scene
+   * list, both scenes it read, and the song. Only the scene a card edits is its own business.
+   */
+  async function twoScenes(w: Awaited<ReturnType<typeof setup>>, commandFor?: (scene: SceneRecord) => unknown) {
+    const [hook, outro] = production(w).scenes.filter(s => orderedShots(s).length > 0).slice(0, 2);
+    const { id: _id, number: _number, visualFacts: _facts, ...shot } = orderedShots(hook!)[0]!;
+    const receipts = [currentReceipt(w.store, "scenes", PRODUCTION), currentReceipt(w.store, "scenes", `${PRODUCTION}:${hook!.id}`),
+      currentReceipt(w.store, "scenes", `${PRODUCTION}:${outro!.id}`),
+      { ...currentReceipt(w.store, "spine", PRODUCTION), observedRevisionOrDigest: spineFence(production(w), w.store.getBundle().artifacts) }];
+    const card = (scene: SceneRecord, title: string) => ModelWorldChatActionSchema.parse({ kind: "production-scene-command", productionId: PRODUCTION, sceneId: scene.id,
+      command: commandFor?.(scene) ?? { kind: "insert-shot", at: { after: orderedShots(scene).at(-1)!.id }, shot: { ...shot, title } }, checkReceiptIds: receipts.map(r => r.id) });
+    const oneTurn = turn(w.conversationId, context, { receipts, actions: [card(hook!, "The hook lands"), card(outro!, "The outro fades")] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared); await bindAll(w.lifecycle, prepared);
+    const cards = (await loaded(w.log)).actions;
+    assert.equal(cards.length, 2, "one card for each scene");
+    return { hook: structuredClone(hook!), outro: structuredClone(outro!), cards };
+  }
+  const added = (before: SceneRecord, after: SceneRecord) => orderedShots(after).filter(s => !orderedShots(before).some(old => old.id === s.id));
+
+  for (const order of ["hook first", "outro first"] as const) it(`lands both, ${order}, each with a shot of its own`, async () => {
+    const w = await songWorld();
+    const { hook, outro, cards } = await twoScenes(w);
+    for (const card of order === "hook first" ? cards : [...cards].reverse()) {
+      const result = await decide(w.lifecycle, w.log, card);
+      assert.equal(result.status, "completed", `${card.shown.title}: ${(await loaded(w.log)).actions.find(a => a.actionId === card.actionId)?.statusDetail ?? result.detail}`);
+    }
+    const [hookShot] = added(hook, sceneOf(w, hook.id)), [outroShot] = added(outro, sceneOf(w, outro.id));
+    assert.equal(hookShot?.title, "The hook lands");
+    assert.equal(outroShot?.title, "The outro fades");
+    assert.notEqual(hookShot!.id, outroShot!.id, "the two new shots never share an id");
+    const ids = production(w).scenes.flatMap(s => orderedShots(s).map(one => one.id));
+    assert.equal(new Set(ids).size, ids.length);
+  });
+
+  it("lands two edits to different scenes in either order", async () => {
+    for (const reversed of [false, true]) {
+      const w = await songWorld();
+      const { hook, outro, cards } = await twoScenes(w, scene => ({ kind: "edit-scene", synopsis: `Reviewed ${scene.title}` }));
+      for (const card of reversed ? [...cards].reverse() : cards) assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+      assert.equal(sceneOf(w, hook.id).synopsis, `Reviewed ${hook.title}`);
+      assert.equal(sceneOf(w, outro.id).synopsis, `Reviewed ${outro.title}`);
+    }
+  });
+
+  it("still goes stale when its own scene changes", async () => {
+    const w = await songWorld();
+    const { outro, cards } = await twoScenes(w);
+    await applySceneCommand(w.store, { productionId: PRODUCTION, sceneId: outro.id, sceneFile: production(w).sceneFiles[outro.id]!,
+      baseVersion: outro.version, command: { kind: "edit-scene", synopsis: "Edited by hand" } });
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed", "the hook's card is not the outro's business");
+    assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).reason, "stale");
+    assert.equal(added(outro, sceneOf(w, outro.id)).length, 0);
+  });
+
+  it("still goes stale when its own shots' place in the song changes", async () => {
+    const w = await songWorld();
+    const { outro, cards } = await twoScenes(w);
+    await applyProductionSpineCommand(w.store, { productionId: PRODUCTION, baseRevision: 1,
+      command: { kind: "set-anchor", shotId: orderedShots(outro)[0]!.id, anchor: { startSec: 200, endSec: 204, clipAudio: { mode: "mute" } } } }, { source: "test" });
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed", "another scene's pins are not the hook's business");
+    assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).reason, "stale");
+  });
+
+  it("still makes one card of a turn's commands for one scene, as issue 3087 left it", async () => {
+    const w = await songWorld();
+    const [hook] = production(w).scenes.filter(s => orderedShots(s).length > 0);
+    const { id: _id, number: _number, visualFacts: _facts, ...shot } = orderedShots(hook!)[0]!;
+    const receipts = [currentReceipt(w.store, "scenes", PRODUCTION), currentReceipt(w.store, "scenes", `${PRODUCTION}:${hook!.id}`)];
+    const insert = (title: string) => ModelWorldChatActionSchema.parse({ kind: "production-scene-command", productionId: PRODUCTION, sceneId: hook!.id,
+      command: { kind: "insert-shot", at: { atStart: true }, shot: { ...shot, title } }, checkReceiptIds: receipts.map(r => r.id) });
+    const oneTurn = turn(w.conversationId, context, { receipts, actions: [insert("First"), insert("Second")] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    assert.equal(prepared.length, 1, "one card for the scene");
+    await appendTurn(w.log, oneTurn, prepared); await bindAll(w.lifecycle, prepared);
+    assert.equal((await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!)).status, "completed");
+    assert.deepEqual(added(hook!, sceneOf(w, hook!.id)).map(one => one.title).sort(), ["First", "Second"]);
+  });
+
+  // The song a scene card read is taken as the spine cards it waits on leave it, so the deletion
+  // after an unpin (issue 3136) is not stale for the very pins the unpin clears.
+  it("lands a deletion that waits on an unpin and cites the song", async () => {
+    const w = await songWorld();
+    const scene = production(w).scenes.find(s => orderedShots(s).length >= 2)!;
+    const doomed = orderedShots(scene)[0]!;
+    await applyProductionSpineCommand(w.store, { productionId: PRODUCTION, baseRevision: 1,
+      command: { kind: "set-anchor", shotId: doomed.id, anchor: { startSec: 0, endSec: 4, clipAudio: { mode: "mute" } } } }, { source: "test" });
+    const spine = { ...currentReceipt(w.store, "spine", PRODUCTION), observedRevisionOrDigest: spineFence(production(w), w.store.getBundle().artifacts) };
+    const scenes = currentReceipt(w.store, "scenes", `${PRODUCTION}:${scene.id}`);
+    const oneTurn = turn(w.conversationId, context, { receipts: [spine, scenes], actions: [
+      ModelWorldChatActionSchema.parse({ kind: "audio-spine-command", productionId: PRODUCTION, ref: "unpin", baseRevision: 2,
+        command: { kind: "delete-anchors", shotIds: [doomed.id] }, checkReceiptIds: [spine.id] }),
+      ModelWorldChatActionSchema.parse({ kind: "production-scene-command", productionId: PRODUCTION, sceneId: scene.id, after: ["unpin"],
+        command: { kind: "delete-shot", shotId: doomed.id }, checkReceiptIds: [spine.id, scenes.id] }),
+    ] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared); await bindAll(w.lifecycle, prepared);
+    const [unpin, remove] = (await loaded(w.log)).actions;
+    assert.ok(remove, "the deletion card is offered");
+    assert.equal((await decide(w.lifecycle, w.log, unpin!)).status, "completed");
+    assert.equal((await decide(w.lifecycle, w.log, remove)).status, "completed");
+    assert.ok(!orderedShots(sceneOf(w, scene.id)).some(one => one.id === doomed.id));
+  });
+
+  it("refuses a new shot whose id another scene took after the card was prepared", async () => {
+    const w = await songWorld();
+    const { hook, outro, cards } = await twoScenes(w);
+    // A shot added by hand elsewhere takes the next id, which the hook's card had planned for its own.
+    const elsewhere = production(w).scenes.find(s => s.id !== hook.id && s.id !== outro.id && orderedShots(s).length > 0)!;
+    const { id: _id, number: _number, visualFacts: _facts, ...shot } = orderedShots(elsewhere)[0]!;
+    await applySceneCommand(w.store, { productionId: PRODUCTION, sceneId: elsewhere.id, sceneFile: production(w).sceneFiles[elsewhere.id]!,
+      baseVersion: elsewhere.version, command: { kind: "insert-shot", at: { atStart: true }, shot } });
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).reason, "stale");
+    assert.equal(added(hook, sceneOf(w, hook.id)).length, 0);
+    const ids = production(w).scenes.flatMap(s => orderedShots(s).map(one => one.id));
+    assert.equal(new Set(ids).size, ids.length, "no two shots share an id");
+  });
 });
 
 describe("turn-local scene action sequencing (#1417)", () => {

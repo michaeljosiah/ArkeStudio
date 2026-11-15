@@ -20,7 +20,7 @@ import { WorldChatProductionStageConstructActionSchema, WorldChatPropAuthoringAc
 import { createProp, addPropState, renameProp, acceptPropStateReference } from "../references/props.js";
 import { artifactShortHash } from "../artifacts/short-hash.js";
 import { isDeepStrictEqual } from "node:util";
-import { sceneCommandBatchCandidate, CHAT_SEQUENCING_SCHEMA_VERSION } from "@arke-studio/contracts";
+import { CHAT_SEQUENCING_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { readContainedImageReferences } from "../world/reference-files.js";
 import { readFile, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -243,7 +243,7 @@ import {
 } from "../productions/ops.js";
 import { AudioSpineCommandRefused, applyProductionSpineCommand, previewAudioSpineCommand, type AudioSpineCommandPreview } from "../productions/spine.js";
 import { applyAudioSpineCommand, type WorldBundle } from "@arke-studio/contracts";
-import { SceneCommandRefused, applySceneCommand, applySceneCommands, sceneCommandFrom } from "../productions/scene-commands.js";
+import { SceneCommandRefused, applySceneCommand, applySceneCommands, replannedSceneBatch, sceneCommandFrom } from "../productions/scene-commands.js";
 import { sceneActionCommands, sequenceTurnActions, dependencyPreviewWorld, shotDeletionBlockers, type TurnActionGroup } from "./action-sequencing.js";
 import { modelActionInputRefusal } from "./model-action-input.js";
 import { filePlayblast, conversationStagePlayblastArtifact } from "../productions/stage-playblast.js";
@@ -315,6 +315,8 @@ import {
   spineFence,
   spineMediaFence,
   SPINE_MEDIA_TARGET_SUFFIX,
+  sceneSongFence,
+  SCENE_SONG_TARGET_SUFFIX,
   timelineFence,
   takesFence,
   voicesFence,
@@ -688,6 +690,11 @@ function currentWorldObservation(
       if (productionId.endsWith(SPINE_MEDIA_TARGET_SUFFIX)) {
         const owner = productionId.slice(0, -SPINE_MEDIA_TARGET_SUFFIX.length);
         return { target: productionId, fence: spineMediaFence(bundle.productions.find((candidate) => candidate.meta.id === owner), bundle.artifacts) };
+      }
+      // A scene card's fence on the song as it bears on that scene (issue 3149); never a read's target.
+      if (productionId.endsWith(SCENE_SONG_TARGET_SUFFIX)) {
+        const [owner, sceneId = ""] = productionId.slice(0, -SCENE_SONG_TARGET_SUFFIX.length).split(":");
+        return { target: productionId, fence: sceneSongFence(bundle.productions.find((candidate) => candidate.meta.id === owner), sceneId) };
       }
       return { target: productionId, fence: spineFence(bundle.productions.find((candidate) => candidate.meta.id === productionId), bundle.artifacts) };
     }
@@ -1659,7 +1666,8 @@ export function prepareWorldChatActions(
       resolveChapterViewpointEdit(store, action.productionId, action.change.changes.viewpointCharacter);
     }
     const actionId = actionIds[index]!;
-    const baseObservations = withSpineMediaFence(worldActionObservations(store, turn.receipts ?? [], action, deps), action, group, store.getBundle());
+    const baseObservations = sceneSongObservation(withSpineMediaFence(worldActionObservations(store, turn.receipts ?? [], action, deps), action, group, store.getBundle()),
+      action, group.scene?.beforeBundle ?? store.getBundle());
     // Checked whole before the turn completes (issue 1883): refused only at staging, a draft was
     // lost behind a reply that said it had been written, and Arke never heard why.
     if (action.kind === "production-episode-script") episodeScriptDraft(store, action);
@@ -2072,14 +2080,50 @@ function preparationObservations(payload: WorldChatPreparedAction, intent: Conve
   const dependent = (payload.kind === "world-chat-production-scene-command" && payload.scenePlan) || ("dependencyPreview" in payload && payload.dependencyPreview);
   const observed = dependent ? { baseObservations: intent.baseObservations.filter(observation => observation.requirement !== "scenes") } : intent;
   // A media fence taken against the scenes the dependencies leave is checked at approval, as
-  // their scene reads are.
-  return withoutChainedSpineRead(payload, intent, observed, Boolean(dependent));
+  // their scene reads are, and so is a scene card's song taken against the spine cards it waits on.
+  return ownSceneObservations(payload, withoutChainedSpineRead(payload, intent, observed, Boolean(dependent)), intent.dependencies.length > 0);
 }
 
 function approvalObservations(payload: WorldChatPreparedAction, action: Pick<ConversationActionPrepareIntent, "baseObservations" | "dependencies">) {
   const observed = payload.kind === "world-chat-production-scene-command" && payload.scenePlan ? { baseObservations: payload.scenePlan.expectedObservations } :
     "dependencyPreview" in payload && payload.dependencyPreview ? { baseObservations: payload.dependencyPreview.expectedObservations } : action;
-  return withoutChainedSpineRead(payload, action, observed, false);
+  return ownSceneObservations(payload, withoutChainedSpineRead(payload, action, observed, false));
+}
+
+/**
+ * A scene card is fenced on its own scene, not on the production around it (issue 3149).
+ *
+ * Arke cites what it read: the scene list, every scene it looked at, the song. A card for the hook
+ * and a card for the outro, prepared in one turn, each carried all of that, so approving the hook
+ * changed a read the outro's card held and it went stale though its own scene had not moved. What
+ * a scene command does depends on its own scene and on nothing else in the list: its own scene's
+ * reads are kept, and the song as it bears on the scene (`sceneSongObservation`) stands for the
+ * spine read. Shot ids, the one thing it takes from the other scenes, are held to the ids it was
+ * planned with when the batch is made again (`replannedSceneBatch`).
+ */
+function ownSceneObservations<T extends Pick<ConversationActionPrepareIntent, "baseObservations">>(
+  payload: WorldChatPreparedAction,
+  observed: T,
+  songLater = false,
+): T | { baseObservations: T["baseObservations"] } {
+  if (payload.kind !== "world-chat-production-scene-command") return observed;
+  const { productionId, sceneId } = payload.action;
+  const own = [`${productionId}:${sceneId}`, `${productionId}:${sceneId}:script`];
+  return { baseObservations: observed.baseObservations.filter(observation =>
+    (observation.requirement !== "scenes" || own.includes(observation.target)) &&
+    (observation.requirement !== "spine" || (observation.target === `${productionId}:${sceneId}${SCENE_SONG_TARGET_SUFFIX}` && !songLater))) };
+}
+
+/** The song as it bears on a scene card's own scene, standing for the spine read it cites (issue 3149). */
+function sceneSongObservation(
+  observations: ArkeReadObservation[],
+  action: ModelWorldChatAction,
+  bundle: WorldBundle,
+): ArkeReadObservation[] {
+  if (action.kind !== "production-scene-command") return observations;
+  if (!observations.some((observation) => observation.requirement === "spine" && observation.target === action.productionId)) return observations;
+  return [...observations, { requirement: "spine", target: `${action.productionId}:${action.sceneId}${SCENE_SONG_TARGET_SUFFIX}`, complete: true,
+    revisionOrDigest: sceneSongFence(bundle.productions.find((production) => production.meta.id === action.productionId), action.sceneId) }];
 }
 
 /**
@@ -5427,8 +5471,10 @@ export function worldChatActionAdapters(
           if (dependencyChanged) throw new Error(dependencyChanged);
           if (input.kind === "world-chat-production-scene-command" && input.scenePlan) {
             const scene = store.getBundle().productions.find(p => p.meta.id === input.action.productionId)?.scenes.find(s => s.id === input.action.sceneId);
-            if (!scene || !isDeepStrictEqual(scene, input.scenePlan.before) || !isDeepStrictEqual(
-              sceneCommandBatchCandidate(store.getBundle(), input.action.productionId, scene, sceneActionCommands(input.action).map(sceneCommandFrom)), input.scenePlan.after)) {
+            // Made again as planned (issue 3149), so a shot another scene gained is no reason to
+            // stale this one, while an id of its own that another scene now holds still is.
+            if (!scene || !isDeepStrictEqual(scene, input.scenePlan.before) ||
+              !replannedSceneBatch(store.getBundle(), input.action.productionId, input.scenePlan, sceneActionCommands(input.action).map(sceneCommandFrom))) {
               throw new Error("The dependency result or fixed shot identities differ from this preview.");
             }
           }
