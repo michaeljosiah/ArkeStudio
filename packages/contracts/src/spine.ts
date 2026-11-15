@@ -422,6 +422,20 @@ export function anchorBudgetSec(anchor: SpineAnchor): number {
   return anchor.endSec - anchor.startSec;
 }
 
+/**
+ * `0:16`, `1:02.5`: a place in the song as a player shows it, exact to the millisecond given.
+ *
+ * Here rather than with the card that first used it, so the page and the card say one time one
+ * way: a scene's window rounded to whole seconds read `0:17–0:44` beside a section the same
+ * window had marked at 0:16.5 (codex on PR 3133).
+ */
+export function songTime(sec: number): string {
+  const ms = Math.round(sec * 1000);
+  const fraction = ms % 1000;
+  return `${Math.floor(ms / 60_000)}:${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")}${
+    fraction === 0 ? "" : `.${String(fraction).padStart(3, "0").replace(/0+$/, "")}`}`;
+}
+
 // ---------------------------------------------------------------------------
 // Scene windows (issues 3100, 3101): the plan read beside the clock
 // ---------------------------------------------------------------------------

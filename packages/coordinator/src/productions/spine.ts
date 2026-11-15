@@ -6,6 +6,7 @@ import {
   newId,
   orderedShots,
   sceneSectionMarkers,
+  songTime,
   type AudioSpineCommand,
   type AudioSpineModelAction,
   type ProductionSpine,
@@ -90,13 +91,8 @@ function validatedNext(
   return { current, next, durationSec };
 }
 
-/** `0:16`, `1:02.5`: a place in the song as a player shows it, exact to the millisecond given. */
-export function songTime(sec: number): string {
-  const ms = Math.round(sec * 1000);
-  const fraction = ms % 1000;
-  return `${Math.floor(ms / 60_000)}:${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")}${
-    fraction === 0 ? "" : `.${String(fraction).padStart(3, "0").replace(/0+$/, "")}`}`;
-}
+// The song's clock is the contracts' now, so a scene's window on the page reads as its card does.
+export { songTime };
 
 function counted(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;

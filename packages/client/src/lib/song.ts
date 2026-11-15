@@ -1,5 +1,5 @@
 import {
-  formatSeconds, orderedShots, pinnedInWindowSec, productionShape, sceneSections,
+  orderedShots, pinnedInWindowSec, productionShape, sceneSections, songTime,
   type ArtifactSidecar, type AudioSpineCommand, type ProductionSpine, type SceneRecord, type SongWindow,
 } from "@arke-studio/contracts";
 import { runtimeSeconds } from "./format.js";
@@ -47,9 +47,13 @@ export function songCommand(
   return { baseRevision: spine.revision, command: { kind: "assign-track", trackArtifactId: artifactId } };
 }
 
-/** A scene's place in the song (issue 3100), as every clock in the app reads: `0:16–0:44`. */
+/**
+ * A scene's place in the song (issue 3100): `0:16–0:44`, and `0:16.5–0:44.25` where it is not on
+ * the second. The song's own clock, as a spine card reads it: rounded to whole seconds, a window
+ * read a different time from the section it marks, and one under a second read as a single moment.
+ */
 export function songWindowLabel(window: SongWindow): string {
-  return `${formatSeconds(window.startSec)}–${formatSeconds(window.endSec)}`;
+  return `${songTime(window.startSec)}–${songTime(window.endSec)}`;
 }
 
 /**

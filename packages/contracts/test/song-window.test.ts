@@ -16,6 +16,7 @@ import {
   projectSceneRecord,
   sceneSectionMarkers,
   sceneSections,
+  songTime,
   type ProductionSetupDraft,
   type Scene,
   type SpineMarker,
@@ -47,6 +48,14 @@ describe("the window itself", () => {
     assert.throws(() => SongWindowSchema.parse({ startSec: -1, endSec: 16 }));
     assert.throws(() => SongWindowSchema.parse({ startSec: 0 }));
     assert.throws(() => SongWindowSchema.parse({ startSec: 0, endSec: 16, label: "Intro" }));
+  });
+
+  it("reads on the song's clock, exact to what was given", () => {
+    assert.equal(songTime(0), "0:00");
+    assert.equal(songTime(16), "0:16");
+    assert.equal(songTime(16.5), "0:16.5");
+    assert.equal(songTime(44.25), "0:44.25");
+    assert.equal(songTime(227.6), "3:47.6");
   });
 
   it("is not held to any song's length", () => {

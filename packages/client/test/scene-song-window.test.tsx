@@ -76,7 +76,10 @@ describe("a scene's line in the song (issue 3101)", () => {
   it("reads as its window and how much of it is pinned", () => {
     const production = pinnedFilm().world!.productions[0]!;
     assert.equal(songWindowLabel({ startSec: 16, endSec: 44 }), "0:16–0:44");
-    assert.equal(songWindowLabel({ startSec: 196.4, endSec: 227.6 }), "3:16–3:48");
+    // The song's own clock, not whole seconds: a window reads the time the section it marks is at.
+    assert.equal(songWindowLabel({ startSec: 16.5, endSec: 44.25 }), "0:16.5–0:44.25");
+    assert.equal(songWindowLabel({ startSec: 196.4, endSec: 227.6 }), "3:16.4–3:47.6");
+    assert.equal(songWindowLabel({ startSec: 16.1, endSec: 16.4 }), "0:16.1–0:16.4", "a window under a second is still two times");
     assert.equal(sceneSongLine(production, production.scenes[0]!), "0:16–0:44 · 12s of 28s pinned");
     assert.equal(sceneSongLine({ spine: spineOn() }, production.scenes[0]!), "0:16–0:44 · 0s of 28s pinned", "nothing pinned yet");
   });
