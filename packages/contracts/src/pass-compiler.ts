@@ -25,6 +25,7 @@ import {
   dispatchDuration,
   estimateMicroUsd,
   frameDispatchFor,
+  promptedShapeLine,
   sceneImageOutput,
   type ManifestModel,
   type TaskMode,
@@ -340,6 +341,7 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
       const worst = stale[0]!;
       throw new Error(`shot ${worst.number}'s start frame is unusable: ${worst.detail}`);
     }
+    const shapeLine = promptedShapeLine(model, plan.aspect);
     return plan.shots.map((entry) => {
       // The route, before anything priced or packed reads it (issue 398): a boundary frame takes
       // the first-frame route, references take the edit sibling, and the words below say so.
@@ -399,7 +401,11 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
           // Preamble + overridable body + derived negatives (SPEC-019 R-3, R-13). The array
           // below comes from the same bound records the preamble numbers, so the stated order
           // and the sent order are one structure rather than two that can drift (R-2, D2).
-          prompt: composePrompt(entry.parts),
+          // A route that sizes its own pictures hears the shape first, because the words are
+          // the only way to ask it for one (issue 3106).
+          prompt: composePrompt(shapeLine === null
+            ? entry.parts
+            : { ...entry.parts, structure: [shapeLine, entry.parts.structure].filter(Boolean).join("\n") }),
           ...(entry.audioReferences && (entry.audioReferences.disabled || entry.audioReferences.references.length) ? { audioReferences: entry.audioReferences } : {}),
           artDirection: styleSource(entry.prompt.overridden),
           // A continued shot sends no images at all: the extend route declares one video field

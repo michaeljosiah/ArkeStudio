@@ -67,6 +67,16 @@ const ENUMERATED_IMAGE: ManifestModel = {
   limits: { storyboardPanels: 6, aspects: ["16:9"] },
   pricing: { kind: "perMegapixel", microUsdPerMegapixel: 1000 },
 };
+/** The shipped row's shape: no size field, two shapes measured from the prompt (issue 3106). */
+const CODEX_IMAGE: ManifestModel = {
+  id: "codex-image",
+  provider: "codex",
+  capability: "image",
+  displayName: "Codex Image",
+  accepts: { referenceImages: 4, referenceRoles: false, startFrame: false, endFrame: false },
+  limits: { providerSelectedSize: true, promptedSizes: { "9:16": { width: 941, height: 1672 }, "16:9": { width: 1672, height: 941 } } },
+  pricing: { kind: "included-plan" },
+};
 
 async function fixture() {
   const dir = await makeTempWorld();
@@ -762,6 +772,57 @@ describe("frame-run coordinator service", () => {
     assert.deepEqual(retried.dispatch.output, step.dispatch.routeOutput);
     assert.deepEqual(retried.dispatch.params["output"], step.dispatch.routeOutput);
     assert.equal(retried.dispatch.estimatedMicroUsd, step.dispatch.cellEstimatedMicroUsd);
+  });
+
+  it("makes a 9:16 production's frames on Codex Image by asking for the shape in words (issue 3106)", async () => {
+    const vertical = (value: Awaited<ReturnType<typeof fixture>>, aspect: string) =>
+      ({ ...value.production, meta: { ...value.production.meta, aspect } });
+    const perShot = await fixture();
+    const run = await start(perShot, "per-shot", "all", vertical(perShot, "9:16"), perShot.world, CODEX_IMAGE);
+    assert.ok(run.steps.length > 0);
+    for (const step of run.steps) {
+      assert.match(step.request.prompt, /^Make the picture a tall 9:16 portrait\.\n\n/);
+      assert.equal(step.dispatch.params["prompt"], step.request.prompt);
+      assert.deepEqual(step.dispatch.output, { width: 941, height: 1672, aspect: "9:16" });
+      assert.equal(step.dispatch.estimatedMicroUsd, 0, "the plan pays");
+    }
+
+    const boarded = await fixture();
+    const board = (await start(boarded, "board", "all", vertical(boarded, "9:16"), boarded.world, CODEX_IMAGE)).steps[0]!;
+    assert.match(board.request.prompt, /^Make the picture a tall 9:16 portrait\.\n\nRender one /);
+    assert.deepEqual(board.dispatch.routeOutput, { width: 941, height: 1672, aspect: "9:16" });
+    assert.equal(board.request.layout?.canvasWidth, 941, "the sheet is checked against the size the route returns");
+    assert.equal(board.request.layout?.canvasHeight, 1672);
+
+    // A shape the route was never seen to make stays refused, naming the two it does.
+    const square = await fixture();
+    const production = vertical(square, "4:5");
+    const quote = await quoteFrameRun(square.store, {
+      requestId: "01J8E0000000000000000000QF",
+      quoteId: "01J8E0000000000000000000QG",
+      worldId: WORLD_ID,
+      productionId: production.meta.id,
+      sceneId: square.scene.id,
+      mode: "per-shot",
+      modelId: CODEX_IMAGE.id,
+      scope: "all",
+      clock: CLOCK,
+      compile: () => ({
+        worldId: WORLD_ID,
+        productionId: production.meta.id,
+        scene: square.scene,
+        production,
+        world: square.world,
+        model: CODEX_IMAGE,
+        mode: "per-shot",
+        scope: "all",
+        boardCapSec: 30,
+        boardPanelCap: 6,
+        eligible: true,
+        clock: CLOCK,
+      }),
+    });
+    assert.equal(quote.blockedReason, "Codex Image cannot deliver 4:5 - it offers 9:16, 16:9");
   });
 
   it("preserves the board parent and extracts only update panels as deterministic child takes", async () => {

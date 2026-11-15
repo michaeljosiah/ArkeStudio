@@ -608,6 +608,37 @@ describe("frame-run quote authorization", () => {
     assert.match(one(item, '[aria-label="Image model"] [aria-checked="true"]')?.textContent ?? "", /Wide image/);
   });
 
+  it("offers Codex Image for the production's shape at the size its prompt returns (issue 3106)", async () => {
+    const square = { ...IMAGE_MODEL, id: "square-image", displayName: "Square image", limits: { aspects: ["1:1"] } };
+    const codex: ManifestModel = {
+      id: "codex-image",
+      provider: "codex",
+      capability: "image",
+      displayName: "Codex Image",
+      accepts: { referenceImages: 4, referenceRoles: false, startFrame: false, endFrame: false },
+      limits: { providerSelectedSize: true, promptedSizes: { "9:16": { width: 941, height: 1672 }, "16:9": { width: 1672, height: 941 } } },
+      pricing: { kind: "included-plan" },
+    };
+    const state = stateWith({ imageModels: [square, codex] });
+    state.app.providers.push({
+      id: "codex",
+      configured: true,
+      validation: "valid",
+      probes: [{ capability: "image", available: true }],
+      lastValidated: "2026-08-30T12:00:00Z",
+      fault: null,
+    });
+    state.app.routing.defaults.image = square.id;
+    const sent: ClientMessage[] = [];
+    const item = await mount(state, sent);
+    await click(named(item, "Generate frames"));
+
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
+    assert.equal(request.modelId, codex.id, "the 16:9 production opens on the route that can make it");
+    assert.match(one(item, '[aria-label="Image model"] [aria-checked="true"]')?.textContent ?? "", /Codex Image.*1672×941 · 4 refs/);
+    assert.equal(one(item, ".fy-swgen__guard"), null);
+  });
+
   it("preserves an explicit incompatible model and names a compatible alternative", async () => {
     const square = { ...IMAGE_MODEL, id: "square-image", displayName: "Square image", limits: { aspects: ["1:1"] } };
     const wide = { ...IMAGE_MODEL, id: "wide-image", displayName: "Wide image" };

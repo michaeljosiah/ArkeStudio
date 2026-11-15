@@ -131,6 +131,19 @@ export const ModelLimitsSchema = z
     /** The provider chooses dimensions; absence of aspect limits must not imply control. */
     providerSelectedSize: z.literal(true).optional(),
     /**
+     * The shapes a provider-sized route makes when its prompt asks for them, each with the size it
+     * came back at (issue 3106). Codex's image tool takes no size at all, yet each prompt asking for
+     * a tall 9:16 portrait has come back 941×1672; refusing it for a 9:16 production pushed people
+     * off the plan-included route onto a paid one. Measured, not derived: a shape joins only once a
+     * real call has returned it, and a caller asking for one has to say it in the prompt.
+     */
+    promptedSizes: z
+      .record(
+        z.string().regex(/^[0-9]+:[0-9]+$/),
+        z.object({ width: z.number().int().min(1), height: z.number().int().min(1) }).strict(),
+      )
+      .optional(),
+    /**
      * The vendor says the model letters legible words inside the picture (SPEC-064 R-24): a comic
      * page with its balloons baked in is offered only on a model that says so. A claim, not a
      * guarantee — every page is still read back and checked.
@@ -810,18 +823,50 @@ function aspectOpinionless(model: ManifestModel): boolean {
 }
 
 /**
+ * The size a provider-sized route returns when its prompt asks for this shape, or undefined where
+ * the row declares no such shape (issue 3106). Only `promptedSizes` answers: a route that chooses
+ * its own size promises nothing it was not measured to make.
+ */
+export function promptedSize(model: ManifestModel, aspect: string): { width: number; height: number } | undefined {
+  if (model.limits.providerSelectedSize !== true) return undefined;
+  const canonical = normalizeAspect(aspect);
+  return canonical === null ? undefined : model.limits.promptedSizes?.[canonical];
+}
+
+/**
+ * The words that ask a provider-sized route for a declared shape, or null where there is nothing to
+ * ask. The route has no size field, so these words are the whole request for the shape: every
+ * dispatch that freezes a prompted size puts this sentence first in its prompt.
+ */
+export function promptedShapeLine(model: ManifestModel, aspect: string | undefined): string | null {
+  const size = aspect === undefined ? undefined : promptedSize(model, aspect);
+  if (size === undefined) return null;
+  const canonical = normalizeAspect(aspect!)!;
+  if (size.width < size.height) return `Make the picture a tall ${canonical} portrait.`;
+  if (size.width > size.height) return `Make the picture a wide ${canonical} landscape.`;
+  return `Make the picture square, ${canonical}.`;
+}
+
+/**
  * Whether this model's selected route can deliver that shape, and what it offers instead
  * (issue 389). Three vocabularies, kept apart: a curated `limits.aspects` list is the offer, a
  * continuous `aspectRange` is a capability, and a row declaring neither has no opinion — which
  * is a pass, not a refusal, because refusing on silence would block routes that take anything.
  * The verdict is computed before enqueue so an impossible shape is a named refusal, never a
  * provider failure after the estimate was accepted.
+ *
+ * A provider-sized route delivers only the shapes it declares in `promptedSizes`, and only when the
+ * caller asks for the shape in words (`promptedShapeLine`).
  */
 export function aspectSupport(
   model: ManifestModel,
   aspect: string,
 ): { ok: true } | { ok: false; supported: readonly string[] } {
-  if (model.limits.providerSelectedSize) return { ok: false, supported: [] };
+  if (model.limits.providerSelectedSize) {
+    return promptedSize(model, aspect) !== undefined
+      ? { ok: true }
+      : { ok: false, supported: Object.keys(model.limits.promptedSizes ?? {}) };
+  }
   const canonical = normalizeAspect(aspect);
   const enumerated = model.limits.aspects;
   const offers = enumerated !== undefined && enumerated.length > 0 ? enumerated : STANDARD_ASPECTS;
@@ -876,6 +921,10 @@ export function imageOutputFor(
   model: ManifestModel,
   options: { landscape?: boolean; tier?: SizeTier; aspect?: string } = {},
 ): ImageOutputSpec {
+  // A provider-sized route asked for a shape it declares comes back at the size it was measured
+  // at (issue 3106). No tier applies: the route has no size field to scale.
+  const prompted = options.aspect === undefined ? undefined : promptedSize(model, options.aspect);
+  if (prompted !== undefined) return { width: prompted.width, height: prompted.height, aspect: normalizeAspect(options.aspect!)! };
   const landscape = options.landscape ?? false;
   const tier = options.tier;
   // Offered, or asked of a row with no opinion to refuse with (issue 389) — either way the
