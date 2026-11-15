@@ -42,7 +42,7 @@ afterEach(async () => {
   }
 });
 
-async function mount(bundle: WorldBundle, mode: CastPickerMode, picks: string[], closes: { count: number }, scene = sceneOf(bundle)) {
+async function mount(bundle: WorldBundle, mode: CastPickerMode, picks: Array<string | null>, closes: { count: number }, scene = sceneOf(bundle)) {
   const production = bundle.productions.find((candidate) => candidate.meta.id === "saltlight")!;
   const container = dom.document.createElement("div") as unknown as HTMLElement;
   dom.document.body.append(container);
@@ -114,6 +114,21 @@ describe("the cast picker (SPEC-044 R-4)", () => {
     ]);
     await click(container.querySelector('[aria-label="The Weigh House"]'));
     assert.deepEqual(picks, ["the-weigh-house"]);
+  });
+
+  it("offers No location under Change location only, and a press picks no place (issue 3153)", async () => {
+    const bundle = world();
+    const picks: Array<string | null> = [], closes = { count: 0 };
+    const change = await mount(bundle, "change-location", picks, closes);
+    const none = change.querySelector('[aria-label="No location"]') as HTMLButtonElement;
+    assert.ok(none, "Change location can take the place away");
+    assert.equal(none.disabled, false);
+    await click(none);
+    assert.deepEqual(picks, [null]);
+    const add = await mount(bundle, "location", [], closes, { ...sceneOf(bundle), inherits: { timeOfDay: "night" } });
+    assert.equal(add.querySelector('[aria-label="No location"]'), null, "Add a location has nothing to take away");
+    const cast = await mount(bundle, "character", [], closes);
+    assert.equal(cast.querySelector('[aria-label="No location"]'), null);
   });
 
   it("orders the row by first appearance, then by hand, and keeps a member whose shot is gone (R-1, R-5)", () => {

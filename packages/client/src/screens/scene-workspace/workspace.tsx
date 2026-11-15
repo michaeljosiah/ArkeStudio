@@ -892,11 +892,12 @@ export function SceneWorkspace({
             mode={picker}
             onPick={(sheetId) => {
               // A press adds and closes (R-4): a member with the time it was added, or the place.
-              // A write the page refuses — a proposal staged, a command in flight — leaves the
-              // picker open rather than closing on nothing.
-              const sent = write(picker === "character"
-                ? { kind: "edit-scene", cast: { [sheetId]: { added: new Date().toISOString() } } }
-                : { kind: "edit-scene", inherits: { location: sheetId } });
+              // No location is a null place, which the command clears (issue 3153). A write the
+              // page refuses — a proposal staged, a command in flight — leaves the picker open
+              // rather than closing on nothing.
+              const sent = picker === "character"
+                ? sheetId !== null && write({ kind: "edit-scene", cast: { [sheetId]: { added: new Date().toISOString() } } })
+                : write({ kind: "edit-scene", inherits: { location: sheetId } });
               if (sent) closeDoor();
             }}
             onClose={closeDoor}

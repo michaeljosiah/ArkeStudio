@@ -83,7 +83,8 @@ export function CastPicker({
   production: ProductionBundle;
   scene: SceneRecord;
   mode: CastPickerMode;
-  onPick: (sheetId: string) => void;
+  /** Null is Change location's No location: the scene keeps no place (issue 3153). */
+  onPick: (sheetId: string | null) => void;
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -148,6 +149,24 @@ export function CastPicker({
           <span className="fy-castpicker__title">{title}</span>
           <button type="button" className="fy-castpicker__close" aria-label="Close" onClick={onClose}><X size={13} /></button>
         </div>
+        {/*
+          A place can be changed but, without this, never taken away: the picker listed places
+          only, so a scene set somewhere by mistake kept a place every shot then rode (issue 3153).
+        */}
+        {mode === "change-location" ? (
+          <div className="fy-castpicker__cards">
+            <button
+              type="button"
+              className="fy-castpicker__card"
+              disabled={scene.inherits?.location === undefined}
+              aria-label="No location"
+              onClick={() => onPick(null)}
+            >
+              <span className="fy-castpicker__portrait" aria-hidden="true">–</span>
+              <span className="fy-castpicker__name">No location</span>
+            </button>
+          </div>
+        ) : null}
         {section(`In ${production.meta.title}`, own)}
         {section("From the world", rest)}
         {offered.length === 0 ? <div className="fy-castpicker__empty">{type === "character" ? "no characters in this world yet" : "no locations in this world yet"}</div> : null}
