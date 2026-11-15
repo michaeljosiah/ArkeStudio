@@ -37,10 +37,13 @@ export function coveredProductionShots(production: ProductionBundle, artifacts: 
  * The first picture of a production's Cut: what its film opens on. A cut made from the Library's
  * clips has no takes of its own, so a trailer and each of its cuts drew the world's key art and
  * could be told apart only by title (issue 3098). Words drawn by the program have no picture.
+ *
+ * Only what the film shows: the render leaves a hidden Picture track out, an upper one entirely
+ * and the base one as black (render-plan.ts), so a clip on either never stands for the film.
  */
 export function cutPicturePath(production: ProductionBundle, artifacts: WorldBundle["artifacts"]): string | null {
   if (production.timeline?.status !== "ready") return null;
-  const clips = production.timeline.timeline.tracks.filter((track) => track.kind === "picture").flatMap((track) => track.clips)
+  const clips = production.timeline.timeline.tracks.filter((track) => track.kind === "picture" && !track.muted).flatMap((track) => track.clips)
     .sort((a, b) => a.startFrame - b.startFrame);
   for (const { source } of clips) {
     const takeId = source.kind === "take" ? source.takeId : source.kind === "shot" ? acceptedTakeId(production, source.shotId) : null;

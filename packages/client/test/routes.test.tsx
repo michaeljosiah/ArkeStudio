@@ -382,8 +382,10 @@ describe("screen inventory", () => {
     const clip = (startFrame: number, source: unknown) => ({ id: `cl_${startFrame}`, startFrame, durationFrames: 24, sourceInFrames: 0, source });
     production.timeline = { status: "ready", timeline: { tracks: [
       { id: "tr_audio", kind: "audio", clips: [clip(0, { kind: "artifact", artifactId: cover.id, label: "Song" })] },
-      { id: "tr_picture", kind: "picture", clips: [clip(48, { kind: "artifact", artifactId: "art_later", label: "Later" }),
+      { id: "tr_picture", kind: "picture", muted: false, clips: [clip(48, { kind: "artifact", artifactId: "art_later", label: "Later" }),
         clip(24, { kind: "artifact", artifactId: still.id, label: "Opening" }), clip(0, { kind: "text", text: "Title" })] },
+      // Hidden, so the render leaves it out: its earlier still never appears in the film.
+      { id: "tr_hidden", kind: "picture", muted: true, clips: [clip(0, { kind: "artifact", artifactId: cover.id, label: "Hidden" })] },
     ] } } as never;
     const image = () => {
       __setStateForTest(state);
