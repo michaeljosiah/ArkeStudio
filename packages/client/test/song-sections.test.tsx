@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes } from "react-router";
 import type { ClientMessage, ClientState, ProductionSpine, SongSectionsResult, SpineMarker } from "@arke-studio/contracts";
 import { __applyEventForTest, __handleFrameForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
-import { parseSongTime, sectionsCommand, wantsSections } from "../src/lib/song.js";
+import { parseSongTime, sectionsCommand, songTimeText, wantsSections } from "../src/lib/song.js";
 import { CutScreen } from "../src/screens/cut.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
@@ -70,6 +70,28 @@ describe("the sections' logic (issue 3099)", () => {
     assert.equal(parseSongTime(" 1:01.5 "), 61.5);
     assert.equal(parseSongTime("12:00"), 720);
     for (const text of ["", "42", "0:60", "1:5", "a:10", "0:42.", "-0:10"]) assert.equal(parseSongTime(text), null, text);
+  });
+
+  it("shows a time on the song's clock, as a spine card reads it", () => {
+    // The coordinator's songTime, case for case: one notation for a time in a song.
+    assert.equal(songTimeText(0), "0:00");
+    assert.equal(songTimeText(16.5), "0:16.5");
+    assert.equal(songTimeText(62.25), "1:02.25");
+    assert.equal(songTimeText(22.424), "0:22.424");
+    assert.equal(songTimeText(227.639979), "3:47.64");
+    assert.equal(songTimeText(3_600), "60:00");
+  });
+
+  // The field read 0:22 for a start at 22.9, so what was typed was not what was marked (codex on PR 3134).
+  it("reads back the time it shows, to the millisecond, for every start a song can have", () => {
+    for (const sec of [0, 22.9, 42.7, 61.9, 99.7, 124.3, 184.3, 201.7, 1.118, 22.424, 59.999, 61.905, 599.001]) {
+      assert.equal(parseSongTime(songTimeText(sec)), sec, songTimeText(sec));
+    }
+    // Every millisecond of four minutes, as the finder gives a start: rounded to the millisecond.
+    for (let ms = 0; ms < 240_000; ms++) {
+      const sec = ms / 1000;
+      if (parseSongTime(songTimeText(sec)) !== sec) assert.fail(`${songTimeText(sec)} read back as ${parseSongTime(songTimeText(sec))}`);
+    }
   });
 });
 
@@ -169,6 +191,29 @@ describe("the Cut proposes the song's sections (issue 3099)", () => {
       assert.ok(command.command.kind === "import-markers");
       assert.deepEqual(command.command.markers.filter((marker) => marker.kind === "section").map((marker) => marker.atSec), [0, 16, 44.5]);
       assert.deepEqual(command.command.markers.filter((marker) => marker.kind === "lyric"), [{ ...LYRIC, source: "json" }], "the lyrics stay");
+    } finally { await screen.close(); }
+  });
+
+  // A start off the tenth is shown whole and kept whole: nothing a person did not type moves.
+  it("shows a start to the millisecond and marks what the field reads", async () => {
+    const screen = await mountCut(musicVideo(spineOn(SONG)));
+    try {
+      await screen.answer(measured([0, 22.424, 61.905, 99.7]));
+      assert.match(screen.notice()!.textContent ?? "", /0:00 · 0:22 · 1:01 · 1:39/, "the line of times stays in whole seconds");
+      await act(async () => screen.button("Change")!.click());
+      const field = (name: string) => screen.labelled<HTMLInputElement>(name)!;
+      assert.equal(field("Section 2 starts").getAttribute("value"), "0:22.424");
+      assert.equal(field("Section 3 starts").getAttribute("value"), "1:01.905");
+      assert.equal(field("Section 4 starts").getAttribute("value"), "1:39.7");
+      // A second typed is a second moved: 0:23 is 23, not a tenth past where it stood.
+      await screen.type(field("Section 2 starts"), "0:23");
+      // Typed back as it was shown, a start is where it was.
+      await screen.type(field("Section 3 starts"), "1:02");
+      await screen.type(field("Section 3 starts"), "1:01.905");
+      await act(async () => screen.button("Mark 4 sections")!.click());
+      const command = screen.commands()[0]!;
+      assert.ok(command.command.kind === "import-markers");
+      assert.deepEqual(command.command.markers.map((marker) => marker.atSec), [0, 23, 61.905, 99.7]);
     } finally { await screen.close(); }
   });
 

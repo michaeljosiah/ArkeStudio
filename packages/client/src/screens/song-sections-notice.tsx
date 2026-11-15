@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { proposedSectionLabel, ulid, type ProductionSpine, type SongSections } from "@arke-studio/contracts";
 import { MusicMark } from "../components/icons.js";
 import { clock } from "../components/player.js";
-import { parseSongTime, sectionsCommand, wantsSections } from "../lib/song.js";
+import { parseSongTime, sectionsCommand, songTimeText, wantsSections } from "../lib/song.js";
 import { requestSongSections, sendSpineCommand, useConnection, useSpineAskPending } from "../lib/store.js";
 
 /**
@@ -35,13 +35,14 @@ function useSongSections(worldId: string, productionId: string, spine: Productio
 interface Row { atSec: number; text: string }
 
 /**
- * A proposed start as its field shows it, to the tenth of a second. The field read `0:22` for a
- * start at 22.9, so typing `0:23` moved it a tenth of a second and looked like a whole one (codex
- * on PR 3134). What is read is now what is marked; the line of times above stays in whole seconds.
+ * A proposed start as its field shows it: the song's clock to the millisecond, as a spine card
+ * reads a time. The field read `0:22` for a start at 22.9, so typing `0:23` moved it a tenth of a
+ * second and looked like a whole one (codex on PR 3134). The start is what its text reads back
+ * as, so what is seen is what is marked; the line of times above stays in whole seconds.
  */
 function proposedStart(sec: number): Row {
-  const tenths = Math.round(sec * 10);
-  return { atSec: tenths / 10, text: `${clock(Math.floor(tenths / 10))}${tenths % 10 === 0 ? "" : `.${tenths % 10}`}` };
+  const text = songTimeText(sec);
+  return { atSec: parseSongTime(text) ?? sec, text };
 }
 
 export function SongSectionsNotice({ worldId, productionId, spine, onSeek }: {

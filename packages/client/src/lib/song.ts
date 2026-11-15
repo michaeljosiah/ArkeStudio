@@ -73,9 +73,27 @@ export function sectionsCommand(
   return { baseRevision: spine.revision, command: { kind: "import-markers", format: "json", markers: [...sections, ...lyrics] } };
 }
 
-/** `0:42` or `1:01.5` as seconds; null for anything that is not a time in a song. */
+/**
+ * A place in the song as a field shows it: `0:42`, `1:01.9`, `0:22.424`, exact to the millisecond.
+ *
+ * The notation a spine card reads a time in, the coordinator's `songTime`, so the Cut and the card
+ * say one time one way. Written again here because that one is not shared with the client yet;
+ * when it is, this is that.
+ */
+export function songTimeText(sec: number): string {
+  const ms = Math.round(sec * 1000);
+  const fraction = ms % 1000;
+  return `${Math.floor(ms / 60_000)}:${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")}${
+    fraction === 0 ? "" : `.${String(fraction).padStart(3, "0").replace(/0+$/, "")}`}`;
+}
+
+/**
+ * What `songTimeText` prints, read back as seconds; null for anything that is not a time in a song.
+ * Counted in whole milliseconds, so a time printed and read again is the same number: added up in
+ * seconds, 1 and 0.118 come to a hair off 1.118, and a start nobody moved would read as moved.
+ */
 export function parseSongTime(text: string): number | null {
   const match = /^(\d{1,3}):([0-5]\d)(?:\.(\d{1,3}))?$/.exec(text.trim());
   if (match === null) return null;
-  return Number(match[1]) * 60 + Number(match[2]) + (match[3] ? Number(`0.${match[3]}`) : 0);
+  return ((Number(match[1]) * 60 + Number(match[2])) * 1000 + (match[3] ? Number(match[3].padEnd(3, "0")) : 0)) / 1000;
 }
