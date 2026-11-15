@@ -50,7 +50,7 @@ import { ConversationActionLifecycle, conversationActionDigest } from "../../src
 import { ARKE_CLIENT_COMMAND_REGISTRY, worldChatActionDescriptor } from "../../src/arke-actions/registry.js";
 import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
 import { readEditorRequest } from "../../src/productions/editor-requests.js";
-import { createChapter, createEpisode, createProduction, openChapter } from "../../src/productions/ops.js";
+import { createChapter, createEpisode, createProduction, openChapter, setProductionStyle } from "../../src/productions/ops.js";
 import { addMusicTrack, editMusicTrack, ensureMusicSession, musicRecordFence, readMusicRecord } from "../../src/productions/music.js";
 import { bookAuthoringRefusal } from "../../src/world-chat/production-authoring.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
@@ -2038,6 +2038,50 @@ describe("World Chat authority adapters", () => {
         checkReceiptIds: [],
       }],
     })), /another production's style/i);
+  });
+
+  // Issue 3187: a frame a run landed while the card waited moved the art-direction read with the
+  // look still at its version, and the card went stale on Approve with nothing it read changed.
+  it("keeps a production style card when only work around the look changes (issue 3187)", async () => {
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    const prepare = async (style: string) => {
+      const production = currentReceipt(w.store, "production-metadata", PRODUCTION);
+      const art = currentReceipt(w.store, "art-direction");
+      const oneTurn = turn(w.conversationId, context, {
+        receipts: [production, art],
+        actions: [{ kind: "production-style", productionId: PRODUCTION, style, checkReceiptIds: [production.id, art.id] }],
+      });
+      const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+      await appendTurn(w.log, oneTurn, prepared);
+      await bindAll(w.lifecycle, prepared);
+      return (await loaded(w.log)).actions.find((card) => card.actionId === prepared[0]!.intent.actionId)!;
+    };
+    const card = await prepare("Bleached salt print");
+    const look = structuredClone(w.store.getBundle().artDirection);
+    // A picture lands, as a frame run's does, and another production takes a style of its own.
+    const frame = join(w.store.dir, "frame.png");
+    await writeFile(frame, encodePng(solidImage(4, 4, [12, 34, 56, 255])));
+    await fileArtifact(w.store, { sourcePath: frame });
+    await setProductionStyle(w.store, "the-ledger-of-nights", "Ink wash");
+    const after = w.store.getBundle().artDirection;
+    assert.equal(after.version, look.version);
+    assert.notDeepEqual(after.reach, look.reach, "the picture and the other style move what the look reaches");
+    assert.notDeepEqual(after.overrides, look.overrides);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    assert.equal(w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.meta.styleOverride, "Bleached salt print");
+
+    // The look itself still fences the card.
+    const next = await prepare("Ink and salt");
+    const path = join(w.store.dir, "art-direction", "art-direction.json");
+    const raw = await readFile(path, "utf8");
+    await w.store.commit({ kind: "art-direction", source: "concurrent-editor", files: [{
+      path: "art-direction/art-direction.json", action: "replace", baseHash: `sha256:${createHash("sha256").update(raw).digest("hex")}`,
+      content: JSON.stringify({ ...JSON.parse(raw), description: "Concurrent description" }),
+    }] });
+    assert.equal(w.store.getBundle().artDirection.description, "Concurrent description");
+    assert.equal((await decide(w.lifecycle, w.log, next)).status, "stale");
+    assert.match((await loaded(w.log)).actions.find((card) => card.actionId === next.actionId)!.statusDetail ?? "", /art-direction changed/);
   });
 
   it("keeps another production's guest out of Production Chat resource actions", async () => {
