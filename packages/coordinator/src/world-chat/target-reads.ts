@@ -275,6 +275,17 @@ export function scenesFence(production: ProductionBundle | undefined): string {
   return fence(sortScenes(production?.scenes ?? []));
 }
 
+/** The observation target a one-scene card's scene-order fence is kept under (issue 3149); never a read's target. */
+export const SCENE_ORDER_TARGET_SUFFIX = "::order";
+
+/**
+ * Which scenes the production holds and where each sits, without what is in them (issue 3149):
+ * what a card for one scene still takes from the scene list it cited beside its own scene's read.
+ */
+export function sceneOrderFence(production: ProductionBundle | undefined): string {
+  return fence(sortScenes(production?.scenes ?? []).map((scene) => ({ id: scene.id, number: scene.number, order: scene.order ?? null })), "order");
+}
+
 export function routingFence(production: ProductionBundle | undefined): string {
   return fence(production?.routing ?? null, production?.routing?.version ?? "absent");
 }

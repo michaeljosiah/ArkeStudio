@@ -242,7 +242,7 @@ import {
 } from "../productions/ops.js";
 import { AudioSpineCommandRefused, applyProductionSpineCommand, previewAudioSpineCommand, type AudioSpineCommandPreview } from "../productions/spine.js";
 import { applyAudioSpineCommand, type WorldBundle } from "@arke-studio/contracts";
-import { applySceneCommand, applySceneCommands, sceneCommandFrom } from "../productions/scene-commands.js";
+import { applySceneCommand, applySceneCommands, plannedShotIds, sceneCommandFrom } from "../productions/scene-commands.js";
 import { sceneActionCommands, sequenceTurnActions, dependencyPreviewWorld, type TurnActionGroup } from "./action-sequencing.js";
 import { modelActionInputRefusal } from "./model-action-input.js";
 import { filePlayblast, conversationStagePlayblastArtifact } from "../productions/stage-playblast.js";
@@ -303,8 +303,10 @@ import {
   referencesFence,
   routingFence,
   sceneFence,
+  sceneOrderFence,
   sceneScriptFence,
   scenesFence,
+  SCENE_ORDER_TARGET_SUFFIX,
   seasonFence,
   seriesFence,
   sheetsFence,
@@ -675,6 +677,8 @@ function currentWorldObservation(
       const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
       if (sceneId && suffix === "script") return { target: targetId, fence: sceneScriptFence(production, sceneId) };
       if (sceneId && suffix === undefined) return { target: targetId, fence: sceneFence(production, sceneId) };
+      // A one-scene card's scene-order fence (issue 3149); never a read's target.
+      if (targetId === `${productionId}${SCENE_ORDER_TARGET_SUFFIX}`) return { target: targetId, fence: sceneOrderFence(production) };
       return { target: targetId, fence: scenesFence(production) };
     }
     case "timeline": {
@@ -994,7 +998,26 @@ function worldActionObservations(
   if (problems.length) {
     throw new Error([...new Set(problems)].join(" "));
   }
-  return [...new Map(observations.map((observation) => [observation.receiptId, observation])).values()];
+  return withSceneOrderFence(store, action, [...new Map(observations.map((observation) => [observation.receiptId, observation])).values()]);
+}
+
+/**
+ * A card for one scene keeps the production's scene list it cited only for which scenes there are
+ * and where each sits (issue 3149). The list's own fence covers every scene's contents, so the
+ * hook and outro cards of one turn each went stale the moment the other was approved, with nothing
+ * either depends on changed. What the card does depend on is fenced elsewhere: its own scene by its
+ * required read, and the production facts its commands consult (shot numbers, sheets, pictures) by
+ * the dry run its approval repeats. The list was current a moment ago, checked above, so the order
+ * taken here is the order it showed.
+ */
+function withSceneOrderFence(store: WorldStore, action: ModelWorldChatAction, observations: ArkeReadObservation[]): ArkeReadObservation[] {
+  const scenes = productionActionTargets(store, action).filter(required => required.requirement === "scenes").map(required => required.target.split(":"));
+  const productionId = scenes[0]?.[0];
+  if (productionId === undefined || scenes.some(([owner, sceneId]) => owner !== productionId || !sceneId)) return observations;
+  const production = store.getBundle().productions.find(candidate => candidate.meta.id === productionId);
+  return observations.map(observation => observation.requirement === "scenes" && observation.target === productionId
+    ? { ...observation, target: `${productionId}${SCENE_ORDER_TARGET_SUFFIX}`, revisionOrDigest: sceneOrderFence(production) }
+    : observation);
 }
 
 function preparedWorldPayload(
@@ -5402,7 +5425,8 @@ export function worldChatActionAdapters(
           if (input.kind === "world-chat-production-scene-command" && input.scenePlan) {
             const scene = store.getBundle().productions.find(p => p.meta.id === input.action.productionId)?.scenes.find(s => s.id === input.action.sceneId);
             if (!scene || !isDeepStrictEqual(scene, input.scenePlan.before) || !isDeepStrictEqual(
-              sceneCommandBatchCandidate(store.getBundle(), input.action.productionId, scene, sceneActionCommands(input.action).map(sceneCommandFrom)), input.scenePlan.after)) {
+              sceneCommandBatchCandidate(store.getBundle(), input.action.productionId, scene, sceneActionCommands(input.action).map(sceneCommandFrom),
+                plannedShotIds(input.scenePlan.before, input.scenePlan.after)), input.scenePlan.after)) {
               throw new Error("The dependency result or fixed shot identities differ from this preview.");
             }
           }

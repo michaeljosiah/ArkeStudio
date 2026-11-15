@@ -1,5 +1,5 @@
-import { ModelWorldChatActionSchema, orderedShots, sceneCommandCandidate, sceneCommandBatchCandidate,
-  turnActionGroups, type ModelWorldChatAction, type SceneRecord, type WorldBundle, type WorldChatDependencyPreview } from "@arke-studio/contracts";
+import { ModelWorldChatActionSchema, nextShotIdIn, orderedShots, sceneCommandCandidate, sceneCommandBatchCandidate,
+  turnActionGroups, type ModelWorldChatAction, type NewShotId, type SceneRecord, type WorldBundle, type WorldChatDependencyPreview } from "@arke-studio/contracts";
 import { sceneCommandFrom } from "../productions/scene-commands.js";
 
 export function sceneActionCommands<T>(action: { command?: T; commands?: readonly T[] }): T[] {
@@ -23,6 +23,13 @@ export function sequenceTurnActions(bundle: WorldBundle, actions: readonly Model
   const groups: TurnActionGroup[] = turnActionGroups(actions).map(group => ({ action: actions[group.members[0]!]!,
     members: group.members.map(index => actions[index]!), dependencies: group.dependencies }));
   const created = new Map<string, CreatedShots>();
+  /*
+   * The shots each production's earlier scene cards in this turn add (issue 3149). A card for
+   * another scene does not see them in its dry run, so it numbered its own new shots from the same
+   * highest shot, and whichever card was approved second no longer had the numbers it showed.
+   * Later cards number above them; each card keeps its numbers whichever lands first.
+   */
+  const reserved = new Map<string, string[]>();
   for (const group of groups) {
     const ancestors = new Set<number>();
     const visit = (index: number) => {
@@ -55,6 +62,8 @@ export function sequenceTurnActions(bundle: WorldBundle, actions: readonly Model
     const before = production?.scenes.find(scene => scene.id === action.sceneId);
     if (!before) throw new Error("That scene is unavailable for the dependency dry run.");
     const beforeBundle = working;
+    const held = reserved.get(action.productionId) ?? [];
+    const newShotId: NewShotId = taken => nextShotIdIn([...taken, ...held]);
     let record = before;
     const commands: NonNullable<SceneAction["commands"]> = [];
     for (const member of group.members as SceneAction[]) {
@@ -62,15 +71,17 @@ export function sequenceTurnActions(bundle: WorldBundle, actions: readonly Model
       for (const raw of sceneActionCommands(member)) {
         const command = resolveShotRefs(raw, allowedRefs, created, action);
         const previous = new Set(orderedShots(record).map(shot => shot.id));
-        record = sceneCommandCandidate(working, action.productionId, record, sceneCommandFrom(command));
+        record = sceneCommandCandidate(working, action.productionId, record, sceneCommandFrom(command), newShotId);
         inserted.push(...orderedShots(record).filter(shot => !previous.has(shot.id)).map(shot => shot.id));
         working = replaceScene(working, action.productionId, record);
         commands.push(command);
       }
       if (member.ref) { created.set(member.ref, { productionId: action.productionId, sceneId: action.sceneId, shotIds: inserted }); allowedRefs.add(member.ref); }
     }
-    const after = sceneCommandBatchCandidate(beforeBundle, action.productionId, before, commands.map(sceneCommandFrom));
+    const after = sceneCommandBatchCandidate(beforeBundle, action.productionId, before, commands.map(sceneCommandFrom), newShotId);
     group.scene = { before, after, beforeBundle };
+    const existing = new Set(orderedShots(before).map(shot => shot.id));
+    reserved.set(action.productionId, [...held, ...orderedShots(after).map(shot => shot.id).filter(id => !existing.has(id))]);
     group.action = ModelWorldChatActionSchema.parse({ kind: action.kind, productionId: action.productionId, sceneId: action.sceneId,
       commands, checkReceiptIds: [...new Set(group.members.flatMap(member => member.checkReceiptIds))] });
   }
