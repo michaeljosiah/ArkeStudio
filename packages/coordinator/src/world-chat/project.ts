@@ -70,29 +70,34 @@ function subjectKindOf(candidate: WorldChangeCandidate, sheetVersion?: (slug: st
   return "world";
 }
 
-function subjectLabelOf(candidate: WorldChangeCandidate, sheetName?: (slug: string) => string | null): string {
+function subjectLabelOf(candidate: WorldChangeCandidate, options: ProjectOptions = {}): string {
+  // A production or scene by its title, as a sheet is by its name: "sc_intro-lagoon" headed the
+  // notes for a scene the person knows as "Intro: the lagoon" (issue 3093). The id stands in only
+  // where the record is gone.
+  const production = (id: string) => options.productionTitle?.(id) ?? id;
+  const scene = (productionId: string, sceneId: string) => options.sceneTitle?.(productionId, sceneId) ?? sceneId;
   if (candidate.classification === "art-direction.change") return "Art direction";
   if (
     candidate.classification === "development.overview" ||
     candidate.classification === "development.season" ||
     candidate.classification === "development.episode"
   ) {
-    return candidate.target.productionId;
+    return production(candidate.target.productionId);
   }
-  if (candidate.classification === "development.scene-script") return candidate.target.sceneId;
+  if (candidate.classification === "development.scene-script") return scene(candidate.target.productionId, candidate.target.sceneId);
   // A shot is named by the scene it lives in — "sh_12" alone says nothing about where it is.
-  if (candidate.classification === "development.shot") return candidate.target.sceneId;
+  if (candidate.classification === "development.shot") return scene(candidate.target.productionId, candidate.target.sceneId);
   if (candidate.classification === "development.series") return candidate.target.seriesId;
   if (candidate.classification === "media.image-opportunity") {
     const target = candidate.draft.target;
-    if (target.kind === "production" || target.kind === "episode") return target.productionId;
-    if (target.kind === "scene" || target.kind === "shot") return target.sceneId;
+    if (target.kind === "production" || target.kind === "episode") return production(target.productionId);
+    if (target.kind === "scene" || target.kind === "shot") return scene(target.productionId, target.sceneId);
     if (target.kind === "series") return target.seriesId;
   }
   const subject = candidate.subject;
   if (subject.kind === "new") return subject.label;
   if (subject.kind === "canon") return subject.entryId;
-  if (subject.kind === "sheet") return sheetName?.(subject.sheetId) ?? subject.sheetId;
+  if (subject.kind === "sheet") return options.sheetName?.(subject.sheetId) ?? subject.sheetId;
   return "This world";
 }
 
@@ -226,6 +231,8 @@ export interface ProjectOptions {
   humanDecisionProblems?: string[];
   sheetName?: (slug: string) => string | null;
   sheetVersion?: (slug: string) => number | null;
+  productionTitle?: (productionId: string) => string | null;
+  sceneTitle?: (productionId: string, sceneId: string) => string | null;
   /**
    * A turn is in flight for this conversation right now (§15.3).
    *
@@ -275,7 +282,7 @@ export function projectPoints(
         kind: candidate.classification === "canon.thread" || candidate.classification === "undecided"
           ? ("question" as const)
           : ("point" as const),
-        subject: subjectLabelOf(candidate, options.sheetName).slice(0, 160),
+        subject: subjectLabelOf(candidate, options).slice(0, 160),
         subjectKind: subjectKindOf(candidate, options.sheetVersion).slice(0, 80),
         text: candidate.title.slice(0, 400),
         settled: wouldCarry(candidate, options),

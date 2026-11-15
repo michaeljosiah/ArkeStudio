@@ -323,7 +323,9 @@ export function ProposalPanel({
       <div className="dom-proposal__content">
       <div className="dom-proposal__head">
         <Badge tone="warning">proposal</Badge>
-        <span className="dom-proposal__source">{proposal.source.startsWith("world-chat-action:") ? "Arke" : proposal.source}</span>
+        {/* A saved point's source is "world-chat:<conversation id>", which headed the card with the
+            id itself (issue 3093); both conversation sources are Arke's. */}
+        <span className="dom-proposal__source">{/^world-chat(-action)?:/.test(proposal.source) ? "Arke" : proposal.source}</span>
         {proposal.pendingReview && <Badge tone="danger">rebased — review</Badge>}
       </div>
       <div className="dom-proposal__summary">{proposal.summary}</div>
