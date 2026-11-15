@@ -122,6 +122,7 @@ import {
   useSpineAskPending,
 } from "../lib/store.js";
 import { songCommand, wantsSong } from "../lib/song.js";
+import { SongSectionsNotice } from "./song-sections-notice.js";
 import { storyShotCount } from "./production-story.js";
 import { type PendingImport, type LibraryFilter, ArtifactPanel, AddToLibraryDialog, LIBRARY_DRAWER_QUERY } from "./editor-library.js";
 import { seekDrag, CutScrubber, LANE_PRESS_OWNERS, CutPlayhead, useCutTransport } from "./editor-transport.js";
@@ -1607,6 +1608,8 @@ function CutEditorScreen() {
             <button type="button" disabled={commandsDisabled} onClick={addSong}>Add the song</button>
           </div>
         )}
+        {/* The song's sections as the Studio measured them (issue 3099), until some are marked. */}
+        {worldId && prodId && <SongSectionsNotice worldId={worldId} productionId={prodId} spine={production?.spine ?? null} onSeek={transport.seek} />}
         {notice}
         {pictureReview.active && worldId && production && <PictureReviewBar worldId={worldId} production={production} onBack={() => showArke(arkePanel)} />}
         {transitionReview.active && worldId && production && <TransitionReviewBar worldId={worldId} production={production} onBack={() => showArke(arkePanel)} />}

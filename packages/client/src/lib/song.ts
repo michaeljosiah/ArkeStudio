@@ -1,4 +1,4 @@
-import { productionShape, type ArtifactSidecar, type AudioSpineCommand, type ProductionSpine } from "@arke-studio/contracts";
+import { productionShape, proposedSectionLabel, type ArtifactSidecar, type AudioSpineCommand, type ProductionSpine, type SpineMarker } from "@arke-studio/contracts";
 
 /**
  * A music video's song (issue 3088): the master track its audio spine is cut to.
@@ -41,4 +41,40 @@ export function songCommand(
   if (spine === null) return { baseRevision: null, command: { kind: "create", trackArtifactId: artifactId } };
   if (spine.trackArtifactId === artifactId) return null;
   return { baseRevision: spine.revision, command: { kind: "assign-track", trackArtifactId: artifactId } };
+}
+
+/**
+ * A song with no sections marked (issue 3099): the Cut asks what the Studio measured of it and
+ * offers that. One marked section, by anyone, ends the offer: nothing is proposed over a person's
+ * own marks.
+ */
+export function wantsSections(spine: ProductionSpine | null): spine is ProductionSpine {
+  return spine !== null && !spine.markers.some((marker) => marker.kind === "section");
+}
+
+/**
+ * The one command that marks proposed sections: the spine's marker import, at the revision shown,
+ * named by their order in the song because where a section starts is all that was measured.
+ *
+ * An import owns sections and lyrics alike and replaces both, so the lyrics already on the spine
+ * are sent back with it as they are. Leaving them out would trade somebody's lyric sheet for the
+ * sections they pressed for.
+ */
+export function sectionsCommand(
+  spine: ProductionSpine,
+  startsSec: readonly number[],
+  mintId: () => string,
+): { baseRevision: number; command: AudioSpineCommand } {
+  const sections = [...startsSec].sort((a, b) => a - b).map((atSec, index): SpineMarker => ({
+    kind: "section", id: mintId(), label: proposedSectionLabel(index), atSec, source: "json",
+  }));
+  const lyrics = spine.markers.filter((marker) => marker.kind === "lyric").map((marker): SpineMarker => ({ ...marker, source: "json" }));
+  return { baseRevision: spine.revision, command: { kind: "import-markers", format: "json", markers: [...sections, ...lyrics] } };
+}
+
+/** `0:42` or `1:01.5` as seconds; null for anything that is not a time in a song. */
+export function parseSongTime(text: string): number | null {
+  const match = /^(\d{1,3}):([0-5]\d)(?:\.(\d{1,3}))?$/.exec(text.trim());
+  if (match === null) return null;
+  return Number(match[1]) * 60 + Number(match[2]) + (match[3] ? Number(`0.${match[3]}`) : 0);
 }

@@ -1,6 +1,7 @@
 import { PromptToolsResultSchema } from "./prompt-tools.js";
 import { WorldChatInputQueueViewSchema } from "./world-chat-input.js";
 import { MediaMeasurementResultSchema } from "./media-measurement.js";
+import { SongSectionsResultSchema } from "./song-sections.js";
 import { GuideVoiceLineSchema } from "./world-guide.js";
 import { OnboardingStatusSchema } from "./onboarding.js";
 import { ArkePlayerReleaseSchema } from "./arke-player-release.js";
@@ -421,6 +422,8 @@ export const DomainEventSchema = valueSchema(z.discriminatedUnion("type", [
 
   z.object({ ...base, type: z.literal("prompt-tools.changed"), enabled: z.boolean() }).strict(),
   z.object({ ...base, type: z.literal("media.measured"), worldId: UlidSchema, requestId: UlidSchema, result: MediaMeasurementResultSchema }).strict(),
+  /** The song's length, tempo and proposed section starts, for the window that asked (#3099). */
+  z.object({ ...base, type: z.literal("song.sections"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema, result: SongSectionsResultSchema }).strict(),
   z.object({ ...base, type: z.literal("prompt-tools.result"), requestId: UlidSchema, worldId: UlidSchema, result: PromptToolsResultSchema }).strict(),
 
   /** One kept version's prose, for Compare (SPEC-056 R-13). */
