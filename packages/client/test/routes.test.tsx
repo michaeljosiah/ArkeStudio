@@ -370,6 +370,35 @@ describe("screen inventory", () => {
     }
   });
 
+  it("draws a cut's first picture and an album's cover rather than the world art (issue 3098)", () => {
+    const state = structuredClone(FIXTURE_STATE);
+    const world = state.world!;
+    const production = world.productions[0]!;
+    production.selections = {}; production.reviews = []; production.takes = [];
+    for (const scene of production.scenes) delete scene.board;
+    const still = { ...world.artifacts[0]!, id: "art_cut-opening", kind: "image", file: "cut-opening.png" } as (typeof world.artifacts)[number];
+    const cover = { ...world.artifacts[0]!, id: "art_album-cover", kind: "image", file: "album-cover.png" } as (typeof world.artifacts)[number];
+    world.artifacts.push(still, cover);
+    const clip = (startFrame: number, source: unknown) => ({ id: `cl_${startFrame}`, startFrame, durationFrames: 24, sourceInFrames: 0, source });
+    production.timeline = { status: "ready", timeline: { tracks: [
+      { id: "tr_audio", kind: "audio", clips: [clip(0, { kind: "artifact", artifactId: cover.id, label: "Song" })] },
+      { id: "tr_picture", kind: "picture", clips: [clip(48, { kind: "artifact", artifactId: "art_later", label: "Later" }),
+        clip(24, { kind: "artifact", artifactId: still.id, label: "Opening" }), clip(0, { kind: "text", text: "Title" })] },
+    ] } } as never;
+    const image = () => {
+      __setStateForTest(state);
+      return parseHTML(renderAt(`/w/${world.meta.worldId}/productions`)).document
+        .querySelector(".fy-prodcard__frame img")?.getAttribute("src");
+    };
+    try {
+      assert.ok(image()?.endsWith("artifacts/cut-opening.png"), "the earliest picture on a Picture track, past drawn words");
+      production.music = { version: 1, cover: cover.id, loudness: -14, tracks: [] } as never;
+      assert.ok(image()?.endsWith("artifacts/album-cover.png"), "a cover chosen for the production comes first");
+    } finally {
+      __setStateForTest(FIXTURE_STATE);
+    }
+  });
+
   it("keeps Props under Cast with the shared entity navigation and a bounded creation form", () => {
     __setStateForTest(FIXTURE_STATE);
     const world = FIXTURE_STATE.world!;
