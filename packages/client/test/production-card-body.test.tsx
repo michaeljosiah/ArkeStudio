@@ -3,7 +3,7 @@ import { it, afterEach } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
-import { migrateLegacyScene, stageShot, newId, ulid, type ConversationActionCard } from "@arke-studio/contracts";
+import { migrateLegacyScene, orderedShots, stageShot, newId, ulid, type ConversationActionCard } from "@arke-studio/contracts";
 import { StagePlayblastReceipt } from "../src/components/production-stage-card.js";
 import { ProductionCardBody } from "../src/components/production-card-body.js";
 import { __setStateForTest } from "../src/lib/store.js";
@@ -38,6 +38,35 @@ it("renders all forty shots through the native rows, with frozen script changes 
   assert.match(document.toString(), /Picture 40/);
   assert.equal(document.querySelector('[aria-label="Resulting screenplay"] [data-changed] del')?.textContent, "Before.");
   assert.equal(document.querySelector('[aria-label="Resulting screenplay"] [data-removed] del')?.textContent, "Removed action.");
+});
+
+const few = (ids: number[]) => migrateLegacyScene({ id: "sc_review", slug: "review", number: 1, order: 1, title: "Review", status: "draft", version: 1,
+  shots: ids.map((id, i) => ({ id: `sh_${id}`, number: i + 1, title: `Picture ${id}`, description: "Maren waits by the gate.", durationSec: 4 })) });
+const rows = (document: Document, label: string) => [...document.querySelectorAll(`[aria-label="${label}"] > li`)].map(li => [li.getAttribute("value"), li.textContent]);
+
+it("numbers a removed shot once, by the number it had (issue 3138)", () => {
+  __setStateForTest(state);
+  const { document } = parseHTML(renderToString(<MemoryRouter><ProductionCardBody action={card()} preview={{ kind: "scene", before: few([1, 2, 3, 4, 5]), after: few([1, 3, 4]) }} /></MemoryRouter>));
+  assert.deepEqual(rows(document, "Removed shots"), [["2", "Picture 2 · Removed"], ["5", "Picture 5 · Removed"]]);
+});
+
+it("numbers the plain shot list once when the card's world is not the open one (issue 3138)", () => {
+  __setStateForTest(state);
+  const { document } = parseHTML(renderToString(<MemoryRouter><ProductionCardBody action={card({ worldId: ulid() })} preview={{ kind: "scene", before: few([1, 2]), after: few([2, 1]) }} /></MemoryRouter>));
+  assert.deepEqual(rows(document, "Resulting shot list"), [["1", "Picture 2 · 4s · Moved ↑ 2 → 1"], ["2", "Picture 1 · 4s · Moved ↑ 1 → 2"]]);
+});
+
+it("says No shots for an emptied scene and offers nothing to build it with (issue 3139)", () => {
+  __setStateForTest(state);
+  for (const before of [few([1, 2]), few([])]) {
+    const { document } = parseHTML(renderToString(<MemoryRouter><ProductionCardBody action={card()} preview={{ kind: "scene", before, after: few([]) }} /></MemoryRouter>));
+    const shown = document.querySelector('[aria-label="Resulting scene"]')!;
+    assert.deepEqual([...shown.querySelectorAll(":scope > p")].map(p => p.textContent), ["No shots"]);
+    assert.equal(shown.querySelector('[data-testid="workspace-empty"]'), null);
+    assert.equal(shown.querySelectorAll("button").length, 0);
+    assert.doesNotMatch(shown.textContent ?? "", /Build this scene|Talk to Arke|Add first shot|0 shots/);
+    assert.equal(rows(document, "Removed shots").length, orderedShots(before).length);
+  }
 });
 
 it("deduplicates a group gesture, waits for completion and leaves generation for an individual decision", async () => {

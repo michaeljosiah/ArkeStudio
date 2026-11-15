@@ -73,17 +73,25 @@ export function ProductionCardBody({ preview, action, onSelectShot }: { preview:
         <figcaption>{world.sheets.find(s => s.id === id)?.name ?? id}{!world.referenceKits.some(kit => kit.sheetId === id) && <small>Missing kit</small>}</figcaption></figure>)}
       {scene.inherits?.location && <figure><Portrait worldSlug={world.meta.slug} path={locationPortraitPath(world, scene.inherits.location)} label={scene.inherits.location} /><figcaption>{scene.inherits.location}</figcaption></figure>}
     </section>}
-    <p>{shots.length} shots · {shots.reduce((sum, shot) => sum + (shot.durationSec ?? 4), 0)}s</p>
-    {world && production && pack ? <div className="fy-production-preview__rows" data-screen="scene-detail" tabIndex={0} aria-label={boardChanged ? "Resulting board grid" : "Resulting shot list"}>
-      <StoryboardRows layout={boardChanged ? "grid" : "list"} scene={scene} acceptedScene={preview.before ?? scene}
-        world={world} production={production} artifacts={world.artifacts} sheets={world.sheets} slug={world.meta.slug}
-        digests={new Map()} aspect={production.meta.aspect ?? "16:9"} capSec={60} boardPack={pack} showBoards={boardChanged}
-        stagedShotIds={EMPTY} newShotIds={newShots} stagedBoards={false} locked generatorPending={false} onCommand={() => false}
-        refusalVersion={0} frameRun={null} jobs={[]} worldId={world.meta.worldId} reviewMarks={marks} reviewShots={reviewShots}
-        onViewBoardSheet={nothing} onGenerateFrame={nothing} onEditShot={onSelectShot ?? nothing} onOpenShotInGenerator={nothing}
-        onPreviewShot={onSelectShot ?? nothing} onTalkToArke={nothing} onPlanVideo={nothing} onRenderBoard={nothing} />
-    </div> : <ol aria-label="Resulting shot list">{changes?.shots.map(row => <li key={row.shot.id}><strong>{row.shot.number}. {row.shot.title}</strong> · {row.shot.durationSec ?? 4}s · {marks.get(row.shot.id)}</li>)}</ol>}
-    {changes?.removed.length ? <ol aria-label="Removed shots">{changes.removed.map(shot => <li key={shot.id} data-removed><del>{shot.number}. {shot.title}</del> · Removed</li>)}</ol> : null}
+    {/* A scene left with no shots is a result to read. The rows' own empty state is the workspace's
+        invitation to build one, and in a frozen preview its buttons did nothing: a card removing
+        every shot showed "Build this scene" over the list of what it removed (issue 3139). */}
+    {shots.length === 0 ? <p>No shots</p> : <>
+      <p>{shots.length} shots · {shots.reduce((sum, shot) => sum + (shot.durationSec ?? 4), 0)}s</p>
+      {world && production && pack ? <div className="fy-production-preview__rows" data-screen="scene-detail" tabIndex={0} aria-label={boardChanged ? "Resulting board grid" : "Resulting shot list"}>
+        <StoryboardRows layout={boardChanged ? "grid" : "list"} scene={scene} acceptedScene={preview.before ?? scene}
+          world={world} production={production} artifacts={world.artifacts} sheets={world.sheets} slug={world.meta.slug}
+          digests={new Map()} aspect={production.meta.aspect ?? "16:9"} capSec={60} boardPack={pack} showBoards={boardChanged}
+          stagedShotIds={EMPTY} newShotIds={newShots} stagedBoards={false} locked generatorPending={false} onCommand={() => false}
+          refusalVersion={0} frameRun={null} jobs={[]} worldId={world.meta.worldId} reviewMarks={marks} reviewShots={reviewShots}
+          onViewBoardSheet={nothing} onGenerateFrame={nothing} onEditShot={onSelectShot ?? nothing} onOpenShotInGenerator={nothing}
+          onPreviewShot={onSelectShot ?? nothing} onTalkToArke={nothing} onPlanVideo={nothing} onRenderBoard={nothing} />
+      </div> : <ol aria-label="Resulting shot list">{changes?.shots.map(row => <li key={row.shot.id} value={row.shot.number}><strong>{row.shot.title}</strong> · {row.shot.durationSec ?? 4}s · {marks.get(row.shot.id)}</li>)}</ol>}
+    </>}
+    {/* The list numbers its rows, so a row that printed the shot's number as well read "1. 1. The
+        phone lights" (issue 3138). The marker is the shot's own number: a removed shot keeps the
+        one it had, wherever it falls in this list. */}
+    {changes?.removed.length ? <ol aria-label="Removed shots">{changes.removed.map(shot => <li key={shot.id} value={shot.number} data-removed><del>{shot.title}</del> · Removed</li>)}</ol> : null}
     {world && production && stageChanged.map(shot => <section key={shot.id} className="fy-production-preview__stage" aria-label={`Stage preview for shot ${shot.number}`}>
       <SelectionProvider value={{ subject: { kind: "shot", shotId: shot.id }, select: nothing }}>
         <SceneStage world={world} production={production} scene={scene} aspect={production.meta.aspect ?? "16:9"}
