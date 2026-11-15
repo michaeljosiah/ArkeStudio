@@ -1,4 +1,5 @@
-import { orderedShots, masterAudioBinding, MasterAudioReviewSchema, type MasterAudioRequest, type FrozenMasterAudio } from "@arke-studio/contracts";
+import { orderedShots, masterAudioBinding, MasterAudioReviewSchema, ProductionSpineSchema, SPINE_SONG_SOURCE, spineSongHash,
+  type MasterAudioRequest, type FrozenMasterAudio } from "@arke-studio/contracts";
 import { sha256 } from "../world/text-files.js";
 import { readFile } from "node:fs/promises";
 import { PreparedPerformanceAudioReviewSchema, PreparedReferenceAudioSchema, type ClientMessage, type PerformanceRecord } from "@arke-studio/contracts";
@@ -13,8 +14,16 @@ import { readAudioBytes } from "./media-tools.js";
 import { appendAudioRights, readAudioRights } from "./rights.js";
 import { clearAudioDispatch, checkAudioDispatchEvidence } from "./dispatch-gate.js";
 
-/** Read frozen samples, never the character's possibly replaced current designation. */
-export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job, "model" | "provider" | "params">, requireCurrent = false) {
+/**
+ * Read frozen samples, never the character's possibly replaced current designation.
+ *
+ * `evidenceOnly` is a card being priced, not a dispatch (issue 3186): every byte, hash and QC
+ * check still runs, but the cloud-upload right is not looked for, because an Arke card's rights
+ * are written only when the person approves it. Before that, a read or a song slice failed the
+ * preview over the very acknowledgement the approval exists to give. A plan made durable, and every
+ * enqueue, still clears in full.
+ */
+export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job, "model" | "provider" | "params">, requireCurrent = false, evidenceOnly = false) {
   const plan = CharacterAudioPlanSchema.parse(job.params.audioReferences);
   if (plan.disabled) {
     if (plan.references.length) throw new Error("Disabled audio plan still carries samples.");
@@ -53,7 +62,7 @@ export async function readCharacterAudioInputs(store: WorldStore, job: Pick<Job,
     seconds += sample.provenance.outputTechnical.durationSec ?? Infinity;
     if ((sample.provenance.outputTechnical.durationSec ?? Infinity) > route.maxFileDurationSec) throw new Error("Audio reference exceeds the per-file duration limit.");
     if (seconds > route.maxTotalDurationSec) throw new Error("Audio references exceed the combined duration limit.");
-    (route.local ? checkAudioDispatchEvidence : clearAudioDispatch)({ bytes, hash: sample.provenance.outputHash, report: sample.provenance.qualityReport,
+    (route.local || evidenceOnly ? checkAudioDispatchEvidence : clearAudioDispatch)({ bytes, hash: sample.provenance.outputHash, report: sample.provenance.qualityReport,
       rights, scope: "cloud-reference-upload", warningCodes: sample.warningCodes, attestations: sample.attestations,
       requiredAttestations: "master" in ref ? [] : ["single-speaker", "no-music"], statementVersion: 1, acknowledgementId: sample.acknowledgementId });
     const mp3 = sample.file.endsWith(".mp3");
@@ -201,7 +210,16 @@ async function acceptPerformanceAudioRange(store: WorldStore, performance: Perfo
 
 async function requireCurrentMasterBinding(store: WorldStore, binding: MasterAudioRequest["binding"]) {
   const production = store.getBundle().productions.find(p => p.meta.id === binding.productionId);
-  if (!production || JSON.stringify(masterAudioBinding(production, binding.shotId)) !== JSON.stringify(binding)) throw new Error("The master playback binding changed. Prepare the current slice again.");
+  let current;
+  try { current = production ? masterAudioBinding(production, binding.shotId) : undefined; } catch { current = undefined; }
+  if (!current || JSON.stringify(current) !== JSON.stringify(binding)) throw new Error("The master playback binding changed. Prepare the current slice again.");
+  // A slice of the spine's own track (issue 3186) is fenced on the spine as it is on disk, as a
+  // slice of the timeline is on the timeline's bytes: the bundle may lag a write it has not read.
+  if (binding.sourceClipId === SPINE_SONG_SOURCE) {
+    const raw = await readFile(await audioWorldPath(store.dir, `productions/${binding.productionId}/spine.json`), "utf8");
+    if (spineSongHash(ProductionSpineSchema.parse(JSON.parse(raw))) !== binding.timelineHash) throw new Error("The song changed. Refresh before preparing playback.");
+    return;
+  }
   const raw = await readFile(await audioWorldPath(store.dir, `productions/${binding.productionId}/timeline.json`), "utf8");
   if (sha256(raw) !== binding.timelineHash) throw new Error("The timeline changed. Refresh before preparing playback.");
 }
@@ -212,7 +230,7 @@ export async function prepareMasterAudioReference(store: WorldStore, tools: Audi
   return MasterAudioReviewSchema.parse({ operationId: candidate.operationId, binding, preparedFile: candidate.stagedFile, provenance: candidate.provenance });
 }
 export async function resolveMasterAudioReferences(store: WorldStore, productionId: string, sceneId: string,
-  requests: readonly MasterAudioRequest[], requestId: string): Promise<FrozenMasterAudio[]> {
+  requests: readonly MasterAudioRequest[], requestId: string, resolution: { acknowledge?: boolean; at?: string } = {}): Promise<FrozenMasterAudio[]> {
   const references: FrozenMasterAudio[] = [];
   for (const [index, request] of requests.entries()) {
     const binding = request.binding;
@@ -244,10 +262,15 @@ export async function resolveMasterAudioReferences(store: WorldStore, production
     if (!prepared) throw new Error("Master slice preparation did not finish.");
     const acknowledgementId = `master-reference/${requestId}/${index}`;
     const prior = (await readAudioRights(store)).find(r => r.action === "acknowledge" && r.id === acknowledgementId);
-    await appendAudioRights(store, { schemaVersion: 1, action: "acknowledge", id: acknowledgementId, audioHash: request.hash,
-      basis: request.cloudBasis, scopes: ["cloud-reference-upload"], statementVersion: 1, at: prior?.at ?? store.now() });
+    const acknowledgement = { schemaVersion: 1 as const, action: "acknowledge" as const, id: acknowledgementId, audioHash: request.hash,
+      basis: request.cloudBasis, scopes: ["cloud-reference-upload" as const], statementVersion: 1, at: prior?.at ?? resolution.at ?? store.now() };
+    // Pricing a card checks the same evidence without authorizing an upload (issue 3186), as a
+    // cast read's quote does: the right is written when the person approves.
+    if (resolution.acknowledge !== false) await appendAudioRights(store, acknowledgement);
+    const rights = await readAudioRights(store);
+    if (resolution.acknowledge === false) rights.push(acknowledgement);
     const bytes = await readAudioBytes(await audioWorldPath(store.dir, `${prefix}/${prepared.file}`), store.closingSignal, 15_000_000);
-    clearAudioDispatch({ bytes, hash: request.hash, report: prepared.provenance.qualityReport, rights: await readAudioRights(store),
+    clearAudioDispatch({ bytes, hash: request.hash, report: prepared.provenance.qualityReport, rights,
       scope: "cloud-reference-upload", acknowledgementId, warningCodes: request.warningCodes, attestations: [], requiredAttestations: [], statementVersion: 1 });
     references.push({ intent: "performance-sync", characterName: `Shot ${binding.shotId} master playback`, label: "@Audio1", master: binding,
       prepared, warningCodes: request.warningCodes, acknowledgementId });

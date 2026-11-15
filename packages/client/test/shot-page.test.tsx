@@ -108,6 +108,10 @@ const props = <T,>(element: Element): T => {
 const chooseOption = async (element: HTMLElement, value: string): Promise<void> => {
   await act(async () => props<{ onChange: (event: { target: { value: string } }) => void }>(element).onChange({ target: { value } }));
 };
+/** A checkbox's change as React hands it on: linkedom's click does not flip checked first. */
+const tick = async (input: HTMLInputElement, checked: boolean): Promise<void> => {
+  await act(async () => props<{ onChange: (event: { target: { checked: boolean } }) => void }>(input).onChange({ target: { checked } }));
+};
 const blurInput = async (input: HTMLInputElement, value: string): Promise<void> => {
   await act(async () => {
     input.value = value;
@@ -348,6 +352,9 @@ describe("the shot page (design turn 145)", () => {
         { kind: "edit-shot", shotId: "sh_12", change: { notes: "Hold on her hands." } }],
       ["keep out of frame", async (m) => { await blurInput(q(m, 'input[aria-label="Keep out of frame"]') as HTMLInputElement, "Modern boats"); },
         { kind: "edit-shot", shotId: "sh_12", change: { continuity: { keepOut: "Modern boats" } } }],
+      // Issue 3185: the shot's clip from references, where the production makes them from frames.
+      ["the clip select", async (m) => { await chooseOption(q(m, 'select[aria-label="Clip from"]')!, "references"); },
+        { kind: "edit-shot", shotId: "sh_12", change: { continuity: { clipsFrom: "references" } } }],
       ["a sound field, keeping the kind", async (m) => { await blurInput(q(m, 'input[aria-label="Sound · ambience"]') as HTMLInputElement, "Water under the boards"); },
         { kind: "edit-shot", shotId: "sh_12", change: { audio: { kind: "vo", speaker: "maren-kest", line: "the verse, under the water", ambience: "Water under the boards" } } }],
       ["the title behind its pencil", async (m) => {
@@ -365,6 +372,29 @@ describe("the shot page (design turn 145)", () => {
       mounted.container.remove();
       open.splice(open.indexOf(mounted), 1);
     }
+  });
+
+  it("in a production cut to a song, Sings to the song makes the shot's sound the song, and unticking keeps it and opts out (issue 3186)", async () => {
+    assert.equal(all(await mountState(), "label").some((label) => label.textContent?.includes("Sings to the song")), false, "no song, no box");
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    state.world!.productions.find((p) => p.meta.id === "saltlight")!.spine = { schemaVersion: 1, revision: 1,
+      trackArtifactId: "ar_01J8E0000000000000000000S1", markers: [], anchors: {}, updatedAt: "2026-11-15T10:00:00.000Z" };
+    const box = (m: Mounted) => all(m, "label").find((label) => label.textContent?.includes("Sings to the song"))!.querySelector("input") as HTMLInputElement;
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    assert.equal(box(mounted).checked, false, "a voice-over is not sung");
+    await tick(box(mounted), true);
+    assert.deepEqual(commands(sent), [{ kind: "edit-shot", shotId: "sh_12",
+      change: { audio: { kind: "music", speaker: "maren-kest", line: "the verse, under the water" } } }]);
+    const sung = structuredClone(state);
+    const shot = sung.world!.productions.find((p) => p.meta.id === "saltlight")!.scenes.flatMap((scene) => orderedShots(scene)).find((s) => s.id === "sh_12")!;
+    shot.audio = { kind: "music", speaker: "maren-kest" };
+    const singing = await mountState(sung);
+    assert.equal(box(singing).checked, true);
+    sent.length = 0;
+    await tick(box(singing), false);
+    assert.deepEqual(commands(sent), [{ kind: "edit-shot", shotId: "sh_12", change: { audio: { kind: "music", speaker: "maren-kest", lipSync: false } } }]);
   });
 
   it("the Stage is its own workspace in the page, and leaving it brings the head, filmstrip, footer and dock back (231a)", async () => {

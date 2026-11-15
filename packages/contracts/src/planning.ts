@@ -2,7 +2,7 @@ import { referencePrompt } from "./reference-prompt.js";
 import { dialogueSlots, type DialogueSlot } from "./dialogue-timing.js";
 import type { ProductionBundle } from "./client-state.js";
 import { resolvedAuthoredDuration, DEFAULT_SHOT_SEC } from "./scene.js";
-import { planCharacterAudio, characterAudioInstructions, type CharacterAudioPlan, type FrozenPerformanceAudio, type FrozenMasterAudio } from "./audio-reference.js";
+import { planCharacterAudio, characterAudioInstructions, characterAudioRoute, type CharacterAudioPlan, type FrozenPerformanceAudio, type FrozenMasterAudio } from "./audio-reference.js";
 import {
   compilationIsStale,
   designatedCompilation,
@@ -1456,6 +1456,12 @@ export interface DispatchWarnings {
   aspectUnsupported: { aspect: string; model: string; supported: readonly string[] } | null;
   /** Subjects past the model's stated reliable range — carried anyway, and said so (R-42). */
   subjectsOverRange: BudgetResult["subjectsOverRange"];
+  /**
+   * A singer's slice of the song the route that shot takes cannot carry (issue 3186), with the
+   * label the plan card says. The slice is left out and the clip is made without it, rather than
+   * refusing a scene over one shot's lip sync.
+   */
+  songNotSent?: Array<{ shotId: string; number: number; reason: string }>;
 }
 
 /**
@@ -2287,10 +2293,15 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     );
   })();
 
+  // A singer's shot is a clip of its own (issue 3186): its slice of the song is its length, so
+  // a pass that ran on into the next shot would ask the singer to mouth a song that has stopped.
+  const singing = new Set((input.masterReferences ?? []).map((ref) => ref.master.shotId));
+  const songBreaks = ordered.flatMap((shot, index) =>
+    singing.has(shot.id) ? [shot.id, ...(ordered[index + 1] ? [ordered[index + 1]!.id] : [])] : []);
   const pack = packScene(ordered, capSec, {
     referenceCapSec,
     shotCarriesReferences: (shotId) => boundByShot.get(shotId) ?? false,
-    forceBreakBefore: new Set([...boardBoundaries,...timingBreaks]),
+    forceBreakBefore: new Set([...boardBoundaries,...timingBreaks, ...songBreaks]),
   });
 
   const passReferences: ScenePlan["passReferences"] = pack.ok
@@ -2546,10 +2557,33 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     })(),
   };
 
+  /*
+   * A singer's slice rides only where the route can sync to it (issue 3186): performance sync on
+   * a reference route that also carries a picture. Anywhere else — a frame or an extend route, a
+   * model that hears no audio, a pass with no picture to sing — the slice stays home and the shot
+   * is named with the reason, once, from the dispatch shape this plan is for.
+   */
+  const songNotSent: NonNullable<DispatchWarnings["songNotSent"]> = [];
+  const songFor = (shotIds: ReadonlySet<string>, imageCount: number, videoCount: number, taskMode: string, record: boolean) =>
+    (input.masterReferences ?? []).filter((ref) => {
+      if (!shotIds.has(ref.master.shotId)) return false;
+      const route = characterAudioRoute(model, taskMode);
+      const reason = route === null && (taskMode === "first-frame" || taskMode === "continue") ? "opens on a frame"
+        : !route?.supportsPerformanceSync ? "model takes no song"
+        : route.requiresImages && imageCount + videoCount === 0 ? "no picture rides" : null;
+      if (reason !== null && record) {
+        const shot = ordered.find((candidate) => candidate.id === ref.master.shotId);
+        if (shot !== undefined) songNotSent.push({ shotId: shot.id, number: shot.number, reason });
+      }
+      return reason === null;
+    });
   for (const entry of shots) {
+    const taskMode = entry.continuation?.kind === "extend" ? "continue" : entry.frame ? "first-frame" : "generate";
+    const videoCount = entry.continuation?.kind === "carry" ? 1 : 0;
     entry.audioReferences = planCharacterAudio({ scene, shots: [entry.shot], sheets, kits, model,
-      imageCount: entry.bound.length, videoCount: entry.continuation?.kind === "carry" ? 1 : 0, taskMode: entry.continuation?.kind === "extend" ? "continue" : entry.frame ? "first-frame" : "generate",
-      disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences, masterReferences: input.masterReferences });
+      imageCount: entry.bound.length, videoCount, taskMode,
+      disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences,
+      masterReferences: songFor(new Set([entry.shot.id]), entry.bound.length, videoCount, taskMode, mode === "per-shot") });
     const audioText = characterAudioInstructions(entry.audioReferences);
     if (audioText) entry.parts.preamble = [entry.parts.preamble, audioText].filter(Boolean).join("\n");
     const videos = entry.continuation?.kind === "carry" ? 1 : 0;
@@ -2560,8 +2594,10 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     const packed = pack.ok ? pack.passes.find(p => p.index === reference.passIndex) : undefined;
     const ids = new Set(packed?.plan.map(p => p.shotId) ?? []);
     reference.audioReferences = planCharacterAudio({ scene, shots: shots.filter(s => ids.has(s.shot.id)).map(s => s.shot),
-      sheets, kits, model, imageCount: reference.bound.length, disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences, masterReferences: input.masterReferences });
+      sheets, kits, model, imageCount: reference.bound.length, disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences,
+      masterReferences: songFor(ids, reference.bound.length, 0, "generate", mode === "whole-scene") });
   }
+  if (songNotSent.length > 0) warnings.songNotSent = songNotSent;
 
   return {
     mode,

@@ -15,6 +15,7 @@ import {
   resolveCast,
   resolvePropStates,
   shotCoverage,
+  shotSingsToSong,
   shotSpeakers,
   withoutMention,
   type ClientMessage,
@@ -600,6 +601,23 @@ export function ShotFields({
       </Section>
 
       <Section icon={<Speaker size={15} />} name="Sound">
+        {/* Issue 3186: in a production cut to a song, a singer's shot sends its slice of the song
+            for lip sync. On marks the shot's sound as the song; off keeps the sound and opts out. */}
+        {production.spine === null ? null : (
+          <Checkbox
+            className="fy-shot__check"
+            label="Sings to the song"
+            disabled={disabled}
+            checked={shotSingsToSong(shot)}
+            onChange={(event) => {
+              const audio: NonNullable<Shot["audio"]> = { ...(shot.audio ?? { kind: "music" }) };
+              delete audio.lipSync;
+              edit({ audio: event.target.checked
+                ? { ...audio, kind: shotSingsToSong({ audio }) ? audio.kind : "music" }
+                : { ...audio, lipSync: false } });
+            }}
+          />
+        )}
         {([["line", "dialogue", "None · the shot is silent"], ["ambience", "ambience", "The bed under the line"], ["effects", "effects", "The hits beside it"]] as const).map(([key, label, placeholder]) => (
           <div key={key} className="fy-shot__row">
             <span className="fy-shot__rowlabel">{label}</span>

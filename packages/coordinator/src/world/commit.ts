@@ -706,6 +706,9 @@ export const EDITOR_PICTURE_LOOK_SCHEMA_VERSION = 134;
  */
 export const CLIPS_FROM_SCHEMA_VERSION = 136;
 const CLIPS_FROM_KEY = /"clipsFrom"\s*:/;
+/** Issue 3186: a shot's `audio.lipSync` opt-out is a strict sound field an older scene reader refuses. */
+export const LIP_SYNC_SCHEMA_VERSION = 137;
+const LIP_SYNC_KEY = /"lipSync"\s*:/;
 /** SPEC-047 R-191: older readers cannot discard the chapter's authoritative arrangement. */
 export const AUDIO_STUDIO_SCHEMA_VERSION = 83;
 
@@ -1207,6 +1210,7 @@ export class Committer {
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesSoundFade(f.newContent)) ? EDITOR_SOUND_FADE_SCHEMA_VERSION : 0,
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesPictureLook(f.newContent)) ? EDITOR_PICTURE_LOOK_SCHEMA_VERSION : 0,
       files.some(f => (classify(f.path).track === "production-meta" || classify(f.path).track === "scene") && f.newContent != null && CLIPS_FROM_KEY.test(f.newContent)) ? CLIPS_FROM_SCHEMA_VERSION : 0,
+      files.some(f => classify(f.path).track === "scene" && f.newContent != null && LIP_SYNC_KEY.test(f.newContent)) ? LIP_SYNC_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageConstruction(f.newContent)) ? 11 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageReferenceFrames(f.newContent)) ? 20 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageSpeed(f.newContent)) ? 21 : 0,
