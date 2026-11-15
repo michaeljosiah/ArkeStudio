@@ -151,8 +151,17 @@ export function sceneScriptFence(production: ProductionBundle | undefined, scene
   return fence(scene?.script?.blocks ?? [], scene ? scene.version : "absent");
 }
 
+/**
+ * The look as its own record holds it, not the facts the scan counts around it (issue 3187).
+ * `reach` counts every picture, kit, production and accepted take in the world, and `overrides`
+ * repeats the style each kit and production carries, so a frame landing from a run moved this
+ * fence while the look stood at its version, and every card that had read the look went stale on
+ * Approve with nothing it read changed. A card that depends on one of those reads it from its own
+ * authority and is fenced there. The read still shows them.
+ */
 export function artDirectionFence(bundle: WorldBundle): string {
-  return fence(bundle.artDirection, bundle.artDirection.version);
+  const { reach: _reach, overrides: _overrides, ...look } = bundle.artDirection;
+  return fence(look, look.version);
 }
 
 export function worldMetadataFence(bundle: WorldBundle): string {
