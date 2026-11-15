@@ -172,7 +172,7 @@ export function localWriting(store: WorldStore, assertScratch: (path: string) =>
         resolveLanguageModel: async () => ({ modelId: input.modelId, sessionModel: runtime.sessionModel, inputTokenLimit: runtime.inputTokenLimit }),
         prepare: async ({ runId, conversationId }) => {
           await guard();
-          return { cwd: runtime.cwd, leaseToken: leases.mint({ worldId: store.worldId, runId, conversationId }).token };
+          return { cwd: runtime.cwd, leaseToken: leases.mint({ worldId: store.worldId, runId, conversationId, productionId }).token };
         },
         release: async ({ runId }) => { leases.revokeRun(runId); retrieval.forgetRun(runId); },
         createSession: async ({ cwd }) => {
