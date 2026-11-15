@@ -145,6 +145,9 @@ describe("the Cut proposes the song's sections (issue 3099)", () => {
       await screen.answer(measured([0, 22.9, 42.7, 61.9]));
       await act(async () => screen.button("Change")!.click());
       assert.equal(screen.labelled("Section 1 starts"), null, "a song starts with its first section");
+      // To the tenth: the field reads what will be marked, so a second typed is a second moved.
+      assert.equal(screen.labelled<HTMLInputElement>("Section 2 starts")!.getAttribute("value"), "0:22.9");
+      assert.equal(screen.labelled<HTMLInputElement>("Section 4 starts")!.getAttribute("value"), "1:01.9");
       await screen.type(screen.labelled<HTMLInputElement>("Section 2 starts")!, "0:16");
       await act(async () => screen.labelled<HTMLButtonElement>("Remove Section 4")!.click());
       assert.match(screen.notice()!.textContent ?? "", /3 sections found\./);

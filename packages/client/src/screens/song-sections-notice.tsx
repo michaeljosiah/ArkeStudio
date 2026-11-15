@@ -34,6 +34,16 @@ function useSongSections(worldId: string, productionId: string, spine: Productio
 
 interface Row { atSec: number; text: string }
 
+/**
+ * A proposed start as its field shows it, to the tenth of a second. The field read `0:22` for a
+ * start at 22.9, so typing `0:23` moved it a tenth of a second and looked like a whole one (codex
+ * on PR 3134). What is read is now what is marked; the line of times above stays in whole seconds.
+ */
+function proposedStart(sec: number): Row {
+  const tenths = Math.round(sec * 10);
+  return { atSec: tenths / 10, text: `${clock(Math.floor(tenths / 10))}${tenths % 10 === 0 ? "" : `.${tenths % 10}`}` };
+}
+
 export function SongSectionsNotice({ worldId, productionId, spine, onSeek }: {
   worldId: string;
   productionId: string;
@@ -50,7 +60,7 @@ export function SongSectionsNotice({ worldId, productionId, spine, onSeek }: {
   if (song === null || spine === null || song.startsSec.length < 2 || hidden === song.trackArtifactId) return null;
 
   const rows: Row[] = edits?.trackArtifactId === song.trackArtifactId ? edits.rows
-    : song.startsSec.map((atSec) => ({ atSec, text: clock(atSec) }));
+    : song.startsSec.map(proposedStart);
   const change = (next: Row[]) => setEdits({ trackArtifactId: song.trackArtifactId, rows: next });
   // A time as the song shows it, inside the song, and not another section's.
   const valid = (row: Row, index: number) => parseSongTime(row.text) !== null && row.atSec < song.durationSec &&
@@ -66,7 +76,7 @@ export function SongSectionsNotice({ worldId, productionId, spine, onSeek }: {
     <div className="fy-cutnotice" data-testid="sections-notice">
       <span className="fy-cutnotice__mark" aria-hidden="true"><MusicMark size={12} /></span>
       <strong>{`${count} found.`}</strong>
-      {!open && <span className="fy-cutnotice__hint fy-songsections__times">{rows.map((row) => row.text).join(" · ")}</span>}
+      {!open && <span className="fy-cutnotice__hint fy-songsections__times">{rows.map((row) => clock(row.atSec)).join(" · ")}</span>}
       <span className="fy-h1row__push" />
       <button type="button" aria-expanded={open} aria-controls="song-sections" onClick={() => setOpen((was) => !was)}>Change</button>
       <button type="button" disabled={pending || !ready} onClick={mark}>{`Mark ${count}`}</button>
