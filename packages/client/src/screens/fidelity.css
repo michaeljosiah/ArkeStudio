@@ -7652,6 +7652,8 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-songsections input[aria-invalid="true"] { border-color: var(--destructive); }
 /* A long song's times give way to the presses beside them. */
 .fy-songsections__times { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Mark is held while a time is wrong or the spine has not answered, and has to look it. */
+.fy-cutnotice button:disabled { opacity: .5; cursor: default; }
 
 /* The Inspector's cut view (SPEC-039 R-22): what still needs a decision, and the kind chips on a sound clip. */
 .fy-cutinspect__decisions { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px dashed color-mix(in oklab, var(--destructive) 45%, transparent); border-radius: 6px; }

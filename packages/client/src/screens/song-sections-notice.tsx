@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ulid, type ProductionSpine, type SongSections } from "@arke-studio/contracts";
+import { proposedSectionLabel, ulid, type ProductionSpine, type SongSections } from "@arke-studio/contracts";
 import { MusicMark } from "../components/icons.js";
 import { clock } from "../components/player.js";
 import { parseSongTime, sectionsCommand, wantsSections } from "../lib/song.js";
@@ -52,7 +52,9 @@ export function SongSectionsNotice({ worldId, productionId, spine, onSeek }: {
   const rows: Row[] = edits?.trackArtifactId === song.trackArtifactId ? edits.rows
     : song.startsSec.map((atSec) => ({ atSec, text: clock(atSec) }));
   const change = (next: Row[]) => setEdits({ trackArtifactId: song.trackArtifactId, rows: next });
-  const valid = (row: Row) => parseSongTime(row.text) !== null && row.atSec < song.durationSec;
+  // A time as the song shows it, inside the song, and not another section's.
+  const valid = (row: Row, index: number) => parseSongTime(row.text) !== null && row.atSec < song.durationSec &&
+    rows.findIndex((other) => other.atSec === row.atSec) === index;
   const ready = rows.length >= 2 && rows.every(valid);
   const count = `${rows.length} section${rows.length === 1 ? "" : "s"}`;
   const mark = () => {
@@ -72,7 +74,7 @@ export function SongSectionsNotice({ worldId, productionId, spine, onSeek }: {
       {open && (
         <ul className="fy-cutnotice__did fy-songsections" id="song-sections">
           {rows.map((row, index) => {
-            const name = `Section ${index + 1}`;
+            const name = proposedSectionLabel(index);
             return (
               // By place: a row has no identity but its order, and a removed one takes its place with it.
               <li key={index}>
@@ -80,7 +82,7 @@ export function SongSectionsNotice({ worldId, productionId, spine, onSeek }: {
                 {index === 0 ? <span>{row.text}</span> : (
                   <>
                     <input
-                      type="text" aria-label={`${name} starts`} aria-invalid={!valid(row)} value={row.text}
+                      type="text" aria-label={`${name} starts`} aria-invalid={!valid(row, index)} value={row.text}
                       onChange={(event) => {
                         const text = event.target.value;
                         const atSec = parseSongTime(text);

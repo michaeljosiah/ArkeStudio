@@ -155,6 +155,8 @@ describe("the Cut proposes the song's sections (issue 3099)", () => {
       assert.equal(screen.button("Mark 3 sections")!.disabled, true);
       await screen.type(screen.labelled<HTMLInputElement>("Section 3 starts")!, "4:10");
       assert.equal(screen.button("Mark 3 sections")!.disabled, true, "4:10 is past a 3:47 song");
+      await screen.type(screen.labelled<HTMLInputElement>("Section 3 starts")!, "0:16");
+      assert.equal(screen.button("Mark 3 sections")!.disabled, true, "two sections cannot start at one time");
       await screen.type(screen.labelled<HTMLInputElement>("Section 3 starts")!, "0:44.5");
       assert.equal(screen.button("Mark 3 sections")!.disabled, false);
 

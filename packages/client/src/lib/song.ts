@@ -57,7 +57,8 @@ export function wantsSections(spine: ProductionSpine | null): spine is Productio
  * named by their order in the song because where a section starts is all that was measured.
  *
  * An import owns sections and lyrics alike and replaces both, so the lyrics already on the spine
- * are sent back with it as they are. Leaving them out would trade somebody's lyric sheet for the
+ * are sent back with it: the same ids, words and times, under the import's provenance, which an
+ * import requires of every marker. Leaving them out would trade somebody's lyric sheet for the
  * sections they pressed for.
  */
 export function sectionsCommand(
