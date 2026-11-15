@@ -78,6 +78,7 @@ import {
 } from "../components/icons.js";
 import { EDITOR_KEYS, EditorDialog } from "../components/editor-dialog.js";
 import { ProductionConversation, type DockAsk } from "../components/conversation.js";
+import { useGlobalChat } from "../components/global-chat-context.js";
 import { mediaUrl } from "../lib/media.js";
 import { runtimeSeconds, seconds } from "../lib/format.js";
 import { artifactDisplayName, artifactsForProduction, linkNameResolver } from "../lib/artifact-view.js";
@@ -426,6 +427,20 @@ function CutEditorScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [detailTab, setDetailTab] = useState<"inspector" | "arke">("inspector");
+  /*
+   * Arke, wherever the Cut asks for it (issue 3096). With the app's Builder Chat the conversation
+   * lives in that panel, and the Arke tab's column held one button that opened the chat and then
+   * sat empty beside it, squeezing the Cut. So every way in opens the chat and the column stays
+   * the Inspector. The Arke panel stays mounted, hidden: it is what hands this Cut's conversation —
+   * its subject and its request cards — to the chat. Without the shared chat, Arke is the panel.
+   */
+  const globalChat = useGlobalChat();
+  const showArke = (inPanel: () => void) => {
+    if (!globalChat) { inPanel(); return; }
+    setDetailTab("inspector");
+    globalChat.open();
+  };
+  const arkePanel = () => { setDetailTab("arke"); if (compact) setArkeOpen(true); else setRightOpen(true); };
   const [draft, setDraft] = useState<ProductionTimeline | null>(null);
   const [scrubFrame, setScrubFrame] = useState<number | null>(null);
   /** Which of Arke's pending requests is drawn as a ghost (SPEC-039 R-33); local view state. */
@@ -721,6 +736,9 @@ function CutEditorScreen() {
     const inspection = effectReview.state.inspect;
     if (!inspection || inspection.ref.versionId !== effectReview.active?.ref.versionId) return;
     setArkeOpen(false);
+    // Below 1100px the chat lies over the Cut, so the Inspector this opens would sit under it
+    // (SPEC-053 R-31); Back to proposal opens the chat again.
+    if (compact) globalChat?.close();
     selectEffect(inspection.effectId);
   }, [effectReview.state.inspect?.serial]);
   useEffect(() => {
@@ -729,7 +747,7 @@ function CutEditorScreen() {
     // covered by the newer Inspector in the overlay stack (SPEC-053 R-31, R-39).
     if (phone) setRightOpen(false);
     setLibraryOpen(false);
-    setDetailTab("arke"); if (compact) setArkeOpen(true); else setRightOpen(true);
+    showArke(arkePanel);
   }, [effectReview.state.cardFocus?.serial]);
   const selectedCueId = activeSelection?.kind === "cue" ? activeSelection.id : null;
   // What the cut uses is what the record holds (round four): a legacy placement is a typed clip
@@ -1558,8 +1576,8 @@ function CutEditorScreen() {
           </div>
         )}
         {notice}
-        {pictureReview.active && worldId && production && <PictureReviewBar worldId={worldId} production={production} onBack={() => { setDetailTab("arke"); if (compact) setArkeOpen(true); else setRightOpen(true); }} />}
-        {transitionReview.active && worldId && production && <TransitionReviewBar worldId={worldId} production={production} onBack={() => { setDetailTab("arke"); if (compact) setArkeOpen(true); else setRightOpen(true); }} />}
+        {pictureReview.active && worldId && production && <PictureReviewBar worldId={worldId} production={production} onBack={() => showArke(arkePanel)} />}
+        {transitionReview.active && worldId && production && <TransitionReviewBar worldId={worldId} production={production} onBack={() => showArke(arkePanel)} />}
         {effectReview.active && <EffectReviewBar version={effectReview.active.version.number} changes={effectReview.active.version.delta.length}
           comparison={effectReview.active.comparison} busy={effectReview.busy} reason={effectReview.statusReason ?? effectProjection.problem}
           canApply={effectReview.active.version.delta.length > 0 && connection === "open"}
@@ -2017,9 +2035,9 @@ function CutEditorScreen() {
         </EditorDialog>
       </main>
       <aside ref={rightPanelRef} className="fy-cutside" id="cut-right-pane" data-open={rightOpen} aria-label="Editor details">
-        {portraitPhone && rightOpen && (selectedTransition || transitionBatchOpen) && <TransitionPhoneNavigation onJoin={() => setRightOpen(false)} onArke={() => setArkeOpen(true)} onDone={() => setRightOpen(false)} />}
+        {portraitPhone && rightOpen && (selectedTransition || transitionBatchOpen) && <TransitionPhoneNavigation onJoin={() => setRightOpen(false)} onArke={() => showArke(() => setArkeOpen(true))} onDone={() => setRightOpen(false)} />}
         <div className="fy-cutside__head">
-          <EditorPanelTabs value={detailTab} onChange={setDetailTab} />
+          <EditorPanelTabs value={detailTab} onChange={tab => tab === "arke" ? showArke(() => setDetailTab("arke")) : setDetailTab(tab)} />
           <button
             type="button"
             className="fy-cutside__close"
@@ -2122,7 +2140,7 @@ function CutEditorScreen() {
         </EditorSheetSlot>
       </aside>
       {compact && <>
-        {!phone && <button type="button" className="fy-cut-arke-rail" onClick={() => setArkeOpen(true)}><Sparkle size={16} /><span>Ask Arke</span></button>}
+        {!phone && <button type="button" className="fy-cut-arke-rail" onClick={() => showArke(() => setArkeOpen(true))}><Sparkle size={16} /><span>Ask Arke</span></button>}
         <div className="fy-cut-tools" data-picked={phone && selectedTimed !== null || undefined}>
           {phone && selectedTimed && <div className="fy-cut-tools__selection">{textSelected ? <TypeMark size={13} /> : <Film size={13} />}{selectedLabel} · {(selectedTimed.durationFrames / frameRate).toFixed(1)}s</div>}
           {(!phone || !selectedTimed) && <button type="button" onClick={() => setLibraryOpen(true)}><Grid2x2 size={20} /><span>Library</span></button>}
@@ -2136,7 +2154,7 @@ function CutEditorScreen() {
             <button type="button" disabled={selectionCommandsDisabled || !selectedTimed} onClick={() => selectedAction(phone || selectedEffect ? "delete" : "ripple")}><Trash2 size={20} /><span>{phone || selectedEffect ? "Delete" : "Ripple delete"}</span></button></>}
           {phone && selectedTimed ? <button type="button" onClick={() => document.querySelector<HTMLElement>(`[data-clip="${selectedTimed.id}"]`)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }))}><More size={20} /><span>More</span></button>
             : <><button type="button" disabled={!canUndo} onClick={() => sendHistory("undo")}><Undo2 size={20} /><span>Undo</span></button><button type="button" disabled={!canRedo} onClick={() => sendHistory("redo")}><Redo2 size={20} /><span>Redo</span></button></>}
-          {phone && !selectedTimed && <button type="button" onClick={() => setArkeOpen(true)}><Sparkle size={20} /><span>Arke</span></button>}
+          {phone && !selectedTimed && <button type="button" onClick={() => showArke(() => setArkeOpen(true))}><Sparkle size={20} /><span>Arke</span></button>}
           {!phone && <><button type="button" aria-label="Zoom out" disabled={zoom <= 1} onClick={() => zoomBy(-.5)}><Minus size={16} /></button><button type="button" aria-label="Zoom in" disabled={zoom >= 4} onClick={() => zoomBy(.5)}><Plus size={16} /></button></>}
         </div>
       </>}
