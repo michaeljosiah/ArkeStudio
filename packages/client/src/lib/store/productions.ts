@@ -43,6 +43,21 @@ export function createProduction(
   return requestId;
 }
 
+/**
+ * One change to the production's song clock (issue 3088): the spine authority Arke's card applies,
+ * fenced by the revision shown (null creates it). A refusal is a `command.failed` under the id
+ * returned; success is the next snapshot's spine.
+ */
+export function sendSpineCommand(
+  worldId: string,
+  productionId: string,
+  baseRevision: number | null,
+  command: Extract<ClientMessage, { kind: "spine-command" }>["command"],
+): string | null {
+  const requestId = ulid();
+  return send({ kind: "spine-command", worldId, productionId, requestId, baseRevision, command }) ? requestId : null;
+}
+
 /** Stage the structured overview through the gate — nothing is written live (issue 385). */
 export function proposeStoryOverview(
   worldId: string,

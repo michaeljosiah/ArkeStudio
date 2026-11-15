@@ -61,6 +61,7 @@ import {
 import { Wave } from "../components/wave.js";
 import { takeMediaPath } from "../lib/take-presentation.js";
 import { COARSE_QUERY, useMediaQuery } from "../lib/media-query.js";
+import { isSong, offersSong } from "../lib/song.js";
 import { textHash } from "./scene-workspace/line-doors.js";
 
 /**
@@ -161,7 +162,9 @@ export function ArtifactPanel({
   onBorrow = null,
   productions = [],
   onBorrowTake = null,
+  onUseAsSong = null,
   initialFilter = "all",
+  filterRequest = null,
   open,
   onClose,
   panelRef,
@@ -211,7 +214,11 @@ export function ArtifactPanel({
   productions?: readonly ProductionBundle[];
   /** Copy another production's accepted take into this Library, under the name its row reads. */
   onBorrowTake?: ((productionId: string, takeId: string, name: string) => void) | null;
+  /** Make a sound file the production's song (issue 3088); null while a press is out. */
+  onUseAsSong?: ((artifact: ArtifactSidecar) => void) | null;
   initialFilter?: LibraryFilter;
+  /** A filter asked for from outside the panel, such as the Cut's Choose the song; each serial once. */
+  filterRequest?: { filter: LibraryFilter; serial: number } | null;
   open: boolean;
   onClose: () => void;
   panelRef: RefObject<HTMLElement | null>;
@@ -263,6 +270,16 @@ export function ArtifactPanel({
     setBrowseSlug(null);
     setBrowseProduction(null);
   }, [worldId, production?.meta.id]);
+  // A filter asked for from outside lands on this production's own rows: the Cut's Choose the
+  // song shows Audio, and the song is never another shelf's.
+  useEffect(() => {
+    if (filterRequest === null) return;
+    setFilter(filterRequest.filter);
+    setKindFilter("all");
+    setBrowseSlug(null);
+    setBrowseProduction(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterRequest?.serial]);
   /*
    * Which use Locate reached last, per item (R-11): the next press goes on from there, and the
    * last use wraps to the first. View state, never written — Locate selects and seeks only.
@@ -380,6 +397,8 @@ export function ArtifactPanel({
     line?: { shotId: string; status: string; sceneId?: string };
     /** The file, when the name shown is a known name rather than the file's. */
     file?: string;
+    /** Use as the song (issue 3088), offered on a sound file of a production cut to one. */
+    song?: (() => void) | null;
   }
   const frameRate = production ? productionFrameRate(production.meta) : 24;
   // Names by sheet id, built once: the search reads a shot's cast and place by name, and this panel renders four times a second in playback.
@@ -437,10 +456,11 @@ export function ArtifactPanel({
     const source = artifact.origin.by === "user" ? artifact.origin.importedFrom : undefined;
     const from = source?.startsWith("world:") ? `from ${worldName(source.slice(6))}`
       : source?.startsWith("production:") ? `from ${productions.find((candidate) => candidate.meta.id === source.slice(11))?.meta.title ?? source.slice(11)}` : null;
+    const theSong = production ? isSong(production, artifact.id) : false;
     return {
       key: `artifact:${artifact.id}`,
       name,
-      sub: why ?? (lane === null ? `${artifact.kind} · no picture or sound to place` : [artifact.kind, duration !== undefined ? runtimeSeconds(duration) : null, from].filter((part) => part !== null).join(" · ")),
+      sub: why ?? (lane === null ? `${artifact.kind} · no picture or sound to place` : [artifact.kind, duration !== undefined ? runtimeSeconds(duration) : null, from, theSong ? "the song" : null].filter((part) => part !== null).join(" · ")),
       subTone: why === null ? "muted" : "destructive",
       thumb: <MediaThumb slug={slug} path={why !== null ? null : artifactPicturePath(artifact)} fallback={glyph} />,
       lane,
@@ -450,6 +470,7 @@ export function ArtifactPanel({
       add: why === null && onAddArtifact !== null && lane !== null ? () => onAddArtifact(artifact) : null,
       placeAt: why === null && onPlaceAtPlayhead !== null && lane === "Picture" ? () => onPlaceAtPlayhead(artifact) : null,
       overlay: why === null && onOverlayArtifact && ["video", "image", "board"].includes(artifact.kind) ? () => onOverlayArtifact(artifact) : null,
+      song: why === null && !theSong && onUseAsSong !== null && production && offersSong(production, artifact) ? () => onUseAsSong(artifact) : null,
       // Membership comes off from the row once the record has no more use for it: an unavailable
       // file's, or an available one's after its last clip is gone — deleting a clip leaves the
       // membership behind, and the picker offers shots only, so nowhere else could take it off.
@@ -857,6 +878,7 @@ export function ArtifactPanel({
                       </button>
                     )}
                     {item.overlay && <button type="button" className="fy-tlbtn fy-tlbtn--text" onClick={item.overlay}>Overlay at playhead</button>}
+                    {item.song && <button type="button" className="fy-tlbtn fy-tlbtn--text" onClick={item.song}>Use as the song</button>}
                     {item.uses.length > 0 && (
                       <button type="button" className="fy-tlbtn fy-tlbtn--text" onClick={() => locate(item)}>
                         <Locate size={11} />

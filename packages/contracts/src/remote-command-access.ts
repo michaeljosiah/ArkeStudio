@@ -144,7 +144,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "compile-scene-board": "studio", "export-scene-board": "studio", "dispatch-scene": "studio",
   "record-review": "studio", "accept-take": "studio", "clear-shot-frame": "studio",
   "reject-take": "studio", "set-trim": "studio", "timeline-move-picture": "studio",
-  "timeline-command": "studio", "editor-request-decide": "studio", "timeline-history": "studio",
+  "timeline-command": "studio", "editor-request-decide": "studio", "timeline-history": "studio", "spine-command": "studio",
   // A phone types titles too; a draft is painted for the device that asked and written nowhere.
   "text-draft": "studio", "text-typefaces": "studio",
   "editor-effect-analysis": "studio", "editor-effect-proposal": "studio", "editor-transition-proposal": "studio", "editor-picture-proposal": "studio",

@@ -154,7 +154,7 @@ export {
 } from "./store/voice.js";
 export type { ReadingVoice, StagedClip } from "./store/voice.js";
 export {
-  createProduction, proposeStoryOverview, draftStoryOverview, proposeSeason, createEpisode,
+  createProduction, sendSpineCommand, proposeStoryOverview, draftStoryOverview, proposeSeason, createEpisode,
   proposeEpisode, reorderEpisodes, createScene, isOwnSceneCreate, sceneCommand, frameRunCommand,
   restoreScene, deleteScene, saveBible, setGuideEntry, setGuideTeasers, setGuideStory,
   draftGuideDescription, stopGuideDrafting, listGuideVoiceLines, restoreBible, createChapter,

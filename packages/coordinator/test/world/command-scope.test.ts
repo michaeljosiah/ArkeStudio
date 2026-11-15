@@ -43,6 +43,7 @@ const staleCommands: ClientMessage[] = [
   { kind: "restore-bible", worldId: WORLD_ID, version: 0 },
   { kind: "delete-scene", worldId: WORLD_ID, productionId: "saltlight", sceneFile: "opening" },
   { kind: "set-trim", worldId: WORLD_ID, productionId: "saltlight", shotId: "sh_01", trimInSec: 1 },
+  { kind: "spine-command", worldId: WORLD_ID, productionId: "saltlight", requestId: ulid(), baseRevision: null, command: { kind: "create", trackArtifactId: "ar_01J8G0000000000000000000R1" } },
   // Routed commands (issue 2796): the router checks the world once; these returned in silence before.
   { kind: "set-guide-entry", worldId: WORLD_ID, change: { entryKind: "characters", id: "maren-kest", entry: { public: true } } },
   { kind: "set-guide-teasers", worldId: WORLD_ID, change: { teasers: [] } },
