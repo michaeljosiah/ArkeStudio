@@ -2763,15 +2763,13 @@ const exampleWorldActions = {
     shotId: "sh_001",
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  // The first card a spine ever gets, because it is the one nothing else teaches (issue 3081):
+  // with a set-anchor at revision 2 as the only example, Arke sent a number to create one.
   "audio-spine-command": {
     kind: "audio-spine-command",
     productionId: "saltlight",
-    baseRevision: 2,
-    command: {
-      kind: "set-anchor",
-      shotId: "sh_001",
-      anchor: { startSec: 12, endSec: 18, clipAudio: { mode: "mute" } },
-    },
+    baseRevision: null,
+    command: { kind: "create", trackArtifactId: `ar_${EXAMPLE_ULID}` },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
   "production-routing": {
@@ -2960,7 +2958,7 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-take-trim": "Set where a take starts in its shot.",
   "production-stage-playblast": "Record a shot's Stage blocking as a playblast video. Needs the Stage open.",
   "production-stage-construct": "Build a shot's Stage blockout from its script. The person keeps or discards the draft.",
-  "audio-spine-command": "Change the production's audio spine: its track, markers and each shot's anchor.",
+  "audio-spine-command": "Change the production's audio spine: its track, markers and each shot's anchor. Read get_spine first. A production with no spine gets one by create {trackArtifactId} with baseRevision null; every later command names the live revision get_spine shows. Marker ids are mk_ and a 26-character ULID you make up (digits and capitals, no I, L, O or U), each unique. A card cannot build on a create that is not yet approved: send markers and anchors in the turn after the spine card is approved, reading get_spine again for its revision.",
   "production-routing": "Edit an interactive production's branch map: start, choices, endings, and which scenes are in play.",
   "production-routing-traversal": "Record a walk through one choice of the branch map.",
   "production-branch-canon": "Propose Canon that holds only on one route through the branch map.",

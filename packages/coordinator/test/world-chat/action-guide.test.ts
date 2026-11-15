@@ -55,6 +55,17 @@ it("advertises available audio actions, dependent cues, spine verbs and the huma
   assert.match(guide, /sample rights and purge remain human/); assert.match(guide, /attach\/detach/); assert.match(guide, /Refuse sound effects\/SFX/);
 });
 
+it("tells Arke how a spine is created, how markers are named and when they can follow (issue 3081)", () => {
+  const entry = describeAction("audio-spine-command")!;
+  assert.match(entry.description, /create \{trackArtifactId\} with baseRevision null/);
+  assert.match(entry.description, /mk_ and a 26-character ULID/);
+  assert.match(entry.description, /in the turn after the spine card is approved/);
+  for (const budget of [HUGE, 1000]) {
+    const guide = renderActionGuide(["world", "production"], budget, { kind: "cut", productionId: "saltlight" }).text;
+    assert.match(guide, /The first master is create with baseRevision null/);
+  }
+});
+
 // Direct editor commands include human-only effect/protection operations. The model guide
 // must follow the narrower request schema rather than advertise those commands (SPEC-053 R-36).
 it("names only generic editor request commands in full and compact guides and states the effect review boundary", () => {

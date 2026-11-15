@@ -102,6 +102,7 @@ import {
   seasonFence,
   seriesFence,
   sheetsFence,
+  spineFence,
   storyFence,
   takesFence,
   timelineFence,
@@ -3974,5 +3975,45 @@ describe("a graphic novel's cards (turn 270)", () => {
     assert.equal(card!.shown.title, "Export chapter 1");
     assert.match(card!.blockedReason ?? "", /no accepted take/);
     assert.notEqual((await decide(w.lifecycle, w.log, card!)).status, "completed");
+  });
+});
+
+describe("Arke sets a production's song (issue 3081)", () => {
+  const context = { kind: "production" as const, productionId: PRODUCTION };
+  const spineRead = (store: WorldStore): WorldChatCheckReceipt => ({
+    ...currentReceipt(store, "spine", PRODUCTION),
+    observedRevisionOrDigest: spineFence(store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION), store.getBundle().artifacts),
+  });
+  async function songWorld() {
+    const w = await setup(context);
+    const source = join(w.store.dir, "why-you-do-me-like-that.mp3");
+    await writeFile(source, "song fixture");
+    const filed = await fileArtifact(w.store, { sourcePath: source, production: PRODUCTION,
+      mediaProbe: { async durationSec() { return 227.64; }, async info() { return { durationSec: 227.64, hasAudio: true }; } } });
+    assert.ok(filed.outcome === "filed");
+    return { ...w, song: filed.artifact.id };
+  }
+  async function offer(w: Awaited<ReturnType<typeof songWorld>>, baseRevision: number | null) {
+    const read = spineRead(w.store);
+    const oneTurn = turn(w.conversationId, context, { receipts: [read], actions: [{ kind: "audio-spine-command", productionId: PRODUCTION,
+      baseRevision, command: { kind: "create", trackArtifactId: w.song }, checkReceiptIds: [read.id] }] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    return prepared;
+  }
+
+  it("says why a spine created at a revision is refused, in the authority's words", async () => {
+    const w = await songWorld();
+    // Not "The action authority could not prepare this action": that sentence was all Arke and
+    // the person saw, twice, while the reason sat in the conversation record.
+    await assert.rejects(bindAll(w.lifecycle, await offer(w, 1)), /creating an audio spine needs baseRevision null/);
+    const view = await loaded(w.log);
+    assert.ok(Object.values(view.notPrepared ?? {}).flat().includes("Audio spine: creating an audio spine needs baseRevision null"));
+    assert.equal(w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.spine, null);
+
+    await bindAll(w.lifecycle, await offer(w, null));
+    const card = (await loaded(w.log)).actions.at(-1)!;
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    assert.equal(w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.spine?.trackArtifactId, w.song);
   });
 });

@@ -240,7 +240,7 @@ import {
   exportBoard,
   landBoard,
 } from "../productions/ops.js";
-import { applyProductionSpineCommand, previewAudioSpineCommand } from "../productions/spine.js";
+import { AudioSpineCommandRefused, applyProductionSpineCommand, previewAudioSpineCommand, type AudioSpineCommandPreview } from "../productions/spine.js";
 import { applySceneCommand, applySceneCommands, sceneCommandFrom } from "../productions/scene-commands.js";
 import { sceneActionCommands, sequenceTurnActions, dependencyPreviewWorld } from "./action-sequencing.js";
 import { modelActionInputRefusal } from "./model-action-input.js";
@@ -3844,7 +3844,16 @@ async function sharedResourceProjection(
     }
     case "world-chat-audio-spine-command": {
       authority = { kind: "audio-spine", id: intent.actionId };
-      const preview = previewAudioSpineCommand(bundle, payload.action, store.now());
+      let preview: AudioSpineCommandPreview;
+      try {
+        preview = previewAudioSpineCommand(bundle, payload.action, store.now());
+      } catch (error) {
+        // The authority's own reason, not "could not prepare" (issue 3081, as 1883 was for
+        // production authoring): a spine created with a revision of 1 was refused for a reason
+        // nobody saw, and Arke concluded the card would take nothing lower.
+        if (error instanceof AudioSpineCommandRefused) throw new ConversationActionPreparationError(error.reason);
+        throw error;
+      }
       authorityRevision = preview.authorityRevision;
       shown = {
         title: preview.title.slice(0, 200),

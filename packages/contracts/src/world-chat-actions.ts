@@ -1173,8 +1173,16 @@ export const AudioSpineModelActionSchema = z
   .object({
     kind: z.literal("audio-spine-command"),
     productionId: SlugSchema,
-    /** Null creates the first spine; every other command names the exact live revision. */
-    baseRevision: z.number().int().min(1).nullable(),
+    /**
+     * Null creates the first spine; every other command names the exact live revision.
+     *
+     * A refinement rather than min(1) so the turn's corrective line carries this sentence (issue
+     * 3081): a minimum is reported as "needs at least 1", and Arke, told that about a create, sent
+     * 1 — which the authority refuses, because a spine that does not exist has no revision.
+     */
+    baseRevision: z.number().int()
+      .refine((revision) => revision >= 1, "use null to create the first spine; otherwise the live revision from get_spine")
+      .nullable(),
     command: AudioSpineCommandSchema,
     checkReceiptIds: CompleteReadIdsSchema,
   })

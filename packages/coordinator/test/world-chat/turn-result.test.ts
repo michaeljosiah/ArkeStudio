@@ -256,6 +256,16 @@ describe("parsing a turn result", () => {
     if (!result.ok) assert.ok(result.problems.some(problem => /at most 24 commands/.test(problem.safeMessage)));
   });
 
+  it("tells a spine sent at revision 0 that the first spine is created with null (issue 3081)", () => {
+    const action = WORLD_CHAT_SHAPE_EXAMPLES.worldActions["audio-spine-command"];
+    assert.equal(action.baseRevision, null, "the example is the create nothing else teaches");
+    assert.equal(parseTurnResult(turn({ actions: [action] }), true).ok, true);
+    const parsed = parseTurnResult(turn({ actions: [{ ...action, baseRevision: 0 }] }), true);
+    assert.equal(parsed.ok, false);
+    // "needs at least 1" was the line before, and Arke sent 1, which the authority refuses.
+    if (!parsed.ok) assert.match(correctiveMessage(parsed.problems), /actions\.0\.baseRevision: use null to create the first spine/);
+  });
+
   it("rejects execution-blocked generation before it can become a dead card", () => {
     for (const kind of ["voice-audition"] as const) {
       const action = WORLD_CHAT_SHAPE_EXAMPLES.worldActions[kind];

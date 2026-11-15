@@ -34,9 +34,9 @@ function validatedNext(
   if (production === undefined) throw new AudioSpineCommandRefused(`production ${action.productionId} is not in this world`);
   const current = production.spine;
   if (action.command.kind === "create") {
-    if (action.baseRevision !== null) throw new AudioSpineCommandRefused("creating an audio spine requires a null base revision");
+    if (action.baseRevision !== null) throw new AudioSpineCommandRefused("creating an audio spine needs baseRevision null");
   } else if (current === null) {
-    throw new AudioSpineCommandRefused("the production has no audio spine");
+    throw new AudioSpineCommandRefused("the production has no audio spine yet: create it first, with baseRevision null");
   } else if (action.baseRevision !== current.revision) {
     throw new AudioSpineCommandRefused(`the audio spine moved from revision ${action.baseRevision ?? "none"} to ${current.revision}`);
   }
