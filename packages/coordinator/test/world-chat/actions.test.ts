@@ -54,6 +54,8 @@ import { createChapter, createEpisode, createProduction, openChapter } from "../
 import { addMusicTrack, editMusicTrack, ensureMusicSession, musicRecordFence, readMusicRecord } from "../../src/productions/music.js";
 import { bookAuthoringRefusal } from "../../src/world-chat/production-authoring.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
+import { acceptCharacterLook } from "../../src/references/kit.js";
+import { productionRecord } from "../../src/world-chat/production-record.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { recordUploadedShotFrameTake } from "../../src/takes/drawn-frame.js";
 import { applySceneEdits, sceneVersionFor } from "../../src/productions/scene-edits.js";
@@ -1881,6 +1883,32 @@ describe("World Chat authority adapters", () => {
     assert.equal(card.status, "pending", "preview validation grants no execution permission");
   });
 
+  it("clears a scene's location alone, keeping its time of day and tone (issue 3153)", async () => {
+    const w = await setup();
+    const production = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+    const scene = production.scenes[0]!;
+    assert.deepEqual(scene.inherits, { location: "the-vigil", timeOfDay: "dusk", tone: "quiet dread" });
+    const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: scene.id };
+    const scenes = currentReceipt(w.store, "scenes", `${PRODUCTION}:${scene.id}`);
+    const action = (inherits: Record<string, string | null>) => ({
+      kind: "production-scene" as const,
+      productionId: PRODUCTION,
+      change: { operation: "edit" as const, sceneId: scene.id, changes: { inherits } },
+      checkReceiptIds: [scenes.id],
+    });
+    // The empty slug Arke sent twice is still refused, by the schema, with the clearing word beside it.
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, { receipts: [scenes], actions: [action({ location: "" })] })), /location/);
+    const oneTurn = turn(w.conversationId, context, { receipts: [scenes], actions: [action({ location: null })] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    const after = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!
+      .scenes.find((candidate) => candidate.id === scene.id)!;
+    assert.deepEqual(after.inherits, { timeOfDay: "dusk", tone: "quiet dread" });
+  });
+
   it("refuses a production frame-rate card after a timeline exists", async () => {
     const context = { kind: "production" as const, productionId: PRODUCTION };
     const w = await setup(context);
@@ -2119,6 +2147,35 @@ describe("World Chat authority adapters", () => {
       .scenes.find((scene) => scene.id === context.sceneId)!;
     assert.equal(orderedShots(after)[0]!.description, description);
     assert.equal(after.version, before.version + 1);
+  });
+
+  it("dresses a shot from its card with a look it read off get_production, and refuses one she cannot wear (issue 3178)", async () => {
+    const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
+    const w = await setup(context);
+    await acceptCharacterLook(w.store, "maren-kest", { id: "storm-oilskin", file: "looks/storm-oilskin.png", kind: "costume",
+      prompt: "Storm oilskin, salt-stiff, collar up", takeId: "tk_01J8E0000000000000000000T3", artDirectionVersion: 3 });
+    const read = productionRecord(w.store.getBundle(), PRODUCTION) as { cast?: Array<{ sheetId: string; name: string; looks: Array<{ id: string; name: string; kind: string }> }> };
+    assert.deepEqual(read.cast?.find((member) => member.sheetId === "maren-kest")?.looks, [{ id: "storm-oilskin", name: "Storm oilskin, salt-stiff, collar up", kind: "costume" }]);
+    const dress = (lookId: string) => {
+      const receipt = currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`);
+      return turn(w.conversationId, context, { receipts: [receipt], actions: [{
+        kind: "production-scene-command", productionId: PRODUCTION, sceneId: context.sceneId,
+        command: { kind: "edit-shot", shotId: "sh_12", change: { looks: [{ sheetId: "maren-kest", lookId }] } }, checkReceiptIds: [receipt.id],
+      }] });
+    };
+    // A look id she has no costume for is refused while the turn is read, in words Arke can act on.
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, dress("council-coat")), /not one of Maren Kest's costumes/);
+
+    const oneTurn = dress("storm-oilskin");
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions.find((action) => action.actionId === prepared[0]!.intent.actionId)!;
+    if (card.shown.productionPreview?.kind !== "scene") assert.fail("expected the resulting shot list");
+    assert.deepEqual(orderedShots(card.shown.productionPreview.after).find((shot) => shot.id === "sh_12")!.looks, [{ sheetId: "maren-kest", lookId: "storm-oilskin" }]);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    const after = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!.scenes.find((scene) => scene.id === context.sceneId)!;
+    assert.deepEqual(orderedShots(after).find((shot) => shot.id === "sh_12")!.looks, [{ sheetId: "maren-kest", lookId: "storm-oilskin" }]);
   });
 
   it("refuses an old pending visual-facts card at approval without changing the scene", async () => {

@@ -41,6 +41,8 @@ import {
   pickStagedReference,
   promoteCharacterLook,
   rejectReferenceTake,
+  renameSavedLook,
+  subscribeLookRename,
   subscribeQueueResults,
   useCharacterSheetAcceptance,
   useMainPhotoAcceptance,
@@ -908,6 +910,51 @@ export function lookTileLabel(prompt: string | undefined, kind: string | undefin
 }
 
 /**
+ * A look's name, set where the look is chosen (issue 3178). A look explored here had no name and
+ * read as its prompt cut short — in the Wardrobe, in a shot's look picker, and to Arke choosing a
+ * shot's clothes by name. The same command the audiobook's saved looks rename with, fenced on the
+ * name as read; Enter or leaving the field saves, Escape puts the name back, empty clears it.
+ */
+function LookNameField({ worldId, sheetId, look }: { worldId: string; sheetId: string; look: CharacterLook }) {
+  const [draft, setDraft] = useState(look.name ?? "");
+  const [saving, setSaving] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => subscribeLookRename((answer) => {
+    if (answer.requestId !== saving) return;
+    setSaving(null);
+    if (answer.error === undefined) return;
+    setFailed(true);
+    setDraft(look.name ?? "");
+  }), [saving, look.name]);
+  const save = () => {
+    const next = draft.trim();
+    if (saving !== null || next === (look.name ?? "")) return;
+    setFailed(false);
+    setSaving(renameSavedLook(worldId, sheetId, look.id, next, look.name ?? null));
+  };
+  return (
+    <label className="fy-looks-attach fy-looks-name">
+      <span>Name</span>
+      <input
+        className="ui-input fy-looks-name__input"
+        value={draft}
+        maxLength={60}
+        placeholder={lookTileLabel(look.prompt, look.kind)}
+        disabled={saving !== null}
+        aria-invalid={failed || undefined}
+        onChange={(event) => { setDraft(event.target.value); setFailed(false); }}
+        onBlur={save}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") { event.preventDefault(); save(); }
+          if (event.key === "Escape") setDraft(look.name ?? "");
+        }}
+      />
+      {failed ? <small role="alert">Not saved</small> : null}
+    </label>
+  );
+}
+
+/**
  * Where an accepted look is in use, in the fewest words that identify it.
  *
  * An attachment is the whole point of a look — it is what makes the look ride as the subject
@@ -1215,6 +1262,7 @@ export function CharacterLooksScreen() {
                   that a look is a candidate portrait. So the scope is the labelled control here,
                   and the anchor rewrite is the quiet one.
                 */}
+                <LookNameField key={`${selectedLook.id}:${selectedLook.name ?? ""}`} worldId={world.meta.worldId} sheetId={sheetId} look={selectedLook} />
                 <label className="fy-looks-attach">
                   <span>Use in</span>
                   <select

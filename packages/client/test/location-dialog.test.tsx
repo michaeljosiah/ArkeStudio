@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
-import type { ClientMessage, ClientState, SceneRecord, WorldBundle } from "@arke-studio/contracts";
+import { orderedShots, type ClientMessage, type ClientState, type SceneRecord, type WorldBundle } from "@arke-studio/contracts";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { LocationDialog } from "../src/screens/scene-workspace/location-dialog.js";
 import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
@@ -87,6 +87,19 @@ describe("the location dialog (SPEC-044 R-18, R-19, R-21)", () => {
     await click([...container.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Done") ?? null);
     assert.equal(closes.count, 1);
     assert.doesNotMatch(container.textContent ?? "", /sha256|sh_\d+/, "no hash or shot id on the dialog");
+  });
+
+  it("names the shots set here once a shot cites a place of its own (issue 3152)", async () => {
+    const state = stateFor();
+    const world = state.world!;
+    world.sheets.push({ id: "the-weigh-house", type: "location", name: "The Weigh-House", version: 1, status: "draft", canonRules: [], links: [], created: "2026-05-02", updated: "2026-05-02", sections: [] } as never);
+    const scene = world.productions.find((candidate) => candidate.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const shots = orderedShots(scene);
+    assert.ok(shots.length >= 2);
+    (shots[1] as { description: string }).description += " @the-weigh-house";
+    const { container } = await mount(state);
+    const here = shots.filter((_, index) => index !== 1).map((shot) => shot.number);
+    assert.equal(container.querySelector(".fy-chardialog__facts")?.textContent, `location · sheet v2 · ${here.length === 1 ? `shot ${here[0]}` : `shots ${here.join(", ")}`} · night`);
   });
 
   it("rings nothing when the place has no kit: only the door stands in the row", async () => {

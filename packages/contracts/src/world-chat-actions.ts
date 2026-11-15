@@ -543,6 +543,20 @@ const SceneInheritsSchema = z
   })
   .strict();
 
+/*
+ * A scene edit's inherited context, per field (issue 3153). Asked to clear four scenes' places,
+ * Arke sent `location: ""` twice and both turns failed on the slug: the edit had no way to say
+ * none. Null clears one field and an absent field keeps its value, as `edit-scene` does.
+ */
+const SceneInheritsEditSchema = z
+  .object({
+    location: SlugSchema.nullable().optional().describe("A location sheet id, or null to leave the scene with no location."),
+    timeOfDay: z.string().nullable().optional(),
+    tone: z.string().nullable().optional(),
+  })
+  .strict()
+  .describe("Per field: a field left out keeps its value; null clears it.");
+
 const ScriptBlocksSchema = z.array(ScriptBlockSchema).max(200).superRefine((blocks, context) => {
   const seen = new Set<string>();
   for (const [index, block] of blocks.entries()) {
@@ -843,7 +857,7 @@ const ProductionSceneModelActionSchema = z
               title: z.string().trim().min(1).max(200).optional(),
               synopsis: z.string().max(2_000).nullable().optional(),
               status: z.string().trim().min(1).max(120).optional(),
-              inherits: SceneInheritsSchema.nullable().optional(),
+              inherits: SceneInheritsEditSchema.nullable().optional(),
               defaults: ShotFramingSchema.nullable().optional(),
             })
             .strict()

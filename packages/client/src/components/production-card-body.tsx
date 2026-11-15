@@ -1,5 +1,6 @@
 import { useMemo } from "react";
-import { effectiveFraming, resolveCast, orderedShots, shotChanges, type ProductionCardPreview, type ConversationActionCard } from "@arke-studio/contracts";
+import { effectiveFraming, resolveCast, orderedShots, shotChanges, shotLookId, shotLookIn, type ProductionCardPreview, type ConversationActionCard } from "@arke-studio/contracts";
+import { lookTileLabel } from "../screens/character-reference.js";
 import { useWorld } from "../lib/store.js";
 import { StoryboardRows } from "../screens/scene-workspace/rows.js";
 import { boardsForScene } from "../screens/scene-workspace/boards.js";
@@ -20,9 +21,15 @@ export function ProductionCardBody({ preview, action, onSelectShot }: { preview:
   const changes = useMemo(() => preview.kind === "scene" ? shotChanges(preview.before, preview.after) : null, [preview]);
   const marks = useMemo(() => new Map(changes?.shots.map(row => [row.shot.id, [row.inserted ? "Inserted" : "", row.moved ? `Moved ↑ ${row.from} → ${row.shot.number}` : "", row.changed ? "Changed" : ""].filter(Boolean).join(" · ")]) ?? []), [changes]);
   const newShots = useMemo(() => new Set(changes?.shots.filter(row => row.inserted).map(row => row.shot.id) ?? []), [changes]);
+  // Each person with the look the shot puts them in (issue 3178), so the card shows the choice it asks to approve.
   const reviewShots = useMemo(() => preview.kind === "scene" ? new Map(orderedShots(preview.after).map(shot => [shot.id, {
     framing: Object.values(effectiveFraming(preview.after, shot)).filter(Boolean).join(" · "),
-    cast: world ? resolveCast(shot.description, world.sheets).cast.filter(entry => entry.sheet.type === "character").map(entry => entry.sheet.name) : [],
+    cast: world ? resolveCast(shot.description, world.sheets).cast.filter(entry => entry.sheet.type === "character").map(entry => {
+      const lookId = shotLookId(shot, entry.sheet.id);
+      if (lookId === undefined) return entry.sheet.name;
+      const look = shotLookIn(world.referenceKits.find(kit => kit.sheetId === entry.sheet.id) ?? null, lookId);
+      return `${entry.sheet.name} · ${look === undefined ? "look missing" : look.name ?? lookTileLabel(look.prompt, look.kind)}`;
+    }) : [],
   }])) : undefined, [preview, world]);
   if (preview.kind === "production") return <div className="fy-production-preview" aria-label="Resulting production">
     <h4>{preview.title}</h4><dl>{[

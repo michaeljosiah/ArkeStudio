@@ -133,7 +133,7 @@ const TOOLS = [
   {
     name: "get_production",
     description:
-      "Fetch one production's records whole: story, season (question, ending, direction, defaults, arcs), episodes with their promises and scene memberships, and the scene index. Read this before deciding anything a season or episode thread should honour — the briefing carries the shape, this carries the decisions.",
+      "Fetch one production's records whole: story, season (question, ending, direction, defaults, arcs), episodes with their promises and scene memberships, the scene index, and the cast its shots cite with each one's costume looks (the ids a shot's looks name). Read this before deciding anything a season or episode thread should honour — the briefing carries the shape, this carries the decisions.",
     inputSchema: {
       type: "object",
       properties: { id: { type: "string", description: "Production id, e.g. saltlight" } },

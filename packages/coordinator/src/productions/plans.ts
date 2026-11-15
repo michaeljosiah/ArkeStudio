@@ -23,6 +23,7 @@ import {
   orderedShots,
   resolveCast,
   SlugSchema,
+  shotPlaceId,
   shotSpeakers,
   ulid,
   type CompiledPass,
@@ -212,7 +213,8 @@ function passCarries(
       ...(voiceReason !== undefined ? { voiceReason } : {}),
     } as const;
   });
-  const location = input.scene.inherits?.location;
+  // The pass's place is its shots' (issue 3152): the first shot's own, else the scene's.
+  const location = shots.length === 0 ? input.scene.inherits?.location : shotPlaceId(input.scene, shots[0]!, sheets);
   const locationSheet = location === undefined ? undefined : sheets.find((sheet) => sheet.id === location && sheet.type === "location");
   const bound = locationSheet === undefined ? undefined : pass.references.find((ref) => ref.sheetId === locationSheet.id);
   const dropped = locationSheet === undefined ? undefined : pass.dropped.find((entry) => entry.sheetId === locationSheet.id);

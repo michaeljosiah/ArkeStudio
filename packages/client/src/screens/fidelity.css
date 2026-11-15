@@ -3868,6 +3868,8 @@ select.fy-set__pill { padding-right: 26px; }
    the footer is one 58px row, and a stacked caption would be the tallest thing in it. */
 .fy-looks-attach { display: inline-flex; align-items: center; gap: 8px; }
 .fy-looks-attach > span { font: 500 10px var(--font-mono); color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.04em; }
+.fy-looks-name > .fy-looks-name__input { width: 180px; }
+.fy-looks-name > small { color: var(--destructive); font: var(--type-meta); }
 .fy-looks-results > footer select.fy-looks-attach__select { border-color: var(--foreground); box-shadow: var(--shadow-xs); color: var(--foreground); font-weight: 600; }
 /* Read on the tile, not only inside the control that sets it. Top-left, opposite the download
    button, on the same plate the caption pill uses so it stays legible over any photograph. */
@@ -6797,6 +6799,7 @@ p.fy-ab__menu-eb { margin: 0; }
 .fy-castpicker__card { box-sizing: border-box; width: 104px; display: flex; flex-direction: column; gap: 6px; padding: 0; border: 0; background: transparent; color: var(--foreground); text-align: left; font: inherit; cursor: pointer; }
 .fy-castpicker__card:disabled { color: var(--neutral-400); cursor: default; }
 .fy-castpicker__portrait { position: relative; width: 100%; aspect-ratio: 1; border-radius: 10px; overflow: hidden; background: var(--muted); color: var(--neutral-400); display: inline-flex; align-items: center; justify-content: center; font: 500 20px var(--font-sans); }
+.fy-castpicker__portrait--none { box-sizing: border-box; background: transparent; border: 1px dashed var(--neutral-300); }
 .fy-castpicker__name { font: 600 11.5px var(--font-sans); letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fy-castpicker__meta { margin-top: -4px; font: 400 9px var(--font-mono); color: var(--neutral-400); white-space: nowrap; }
 .fy-castpicker__empty { font: 400 11px var(--font-mono); color: var(--neutral-400); }

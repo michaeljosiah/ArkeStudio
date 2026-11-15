@@ -4,6 +4,8 @@ import {
   lookHoldingScope,
   mainPhotoFor,
   orderedLocationViews,
+  orderedShots,
+  shotPlaceId,
   type ProductionBundle,
   type SceneRecord,
   type WorldBundle,
@@ -45,9 +47,12 @@ export function LocationDialog({ world, production, scene, onClose, onChangeLoca
   const sceneLook = lookHoldingScope(kit, { kind: "scene", productionId, sceneId: scene.id });
   const picture = sceneLook === undefined ? locationPortraitPath(world, sheetId) : `references/${sheetId}/${sceneLook.file}`;
   const hasPlate = establishing !== undefined || photo !== null;
-  // A shot cannot override the scene's place today (a shot's overrides are its framing), so the
-  // plate is every shot's; R-21's "shots set here" waits for a shot-level place to exist.
-  const facts = ["location", sheet === undefined ? null : `sheet v${sheet.version}`, "every shot in the scene", scene.inherits?.timeOfDay ?? null]
+  // A shot that cites a place of its own is set there (issue 3152), so the plate is every shot's
+  // only until one does; then the line names the shots set here (R-18, R-21).
+  const shots = orderedShots(scene);
+  const here = shots.filter((shot) => shotPlaceId(scene, shot, world.sheets) === sheetId).map((shot) => shot.number);
+  const where = here.length === shots.length ? "every shot in the scene" : here.length === 0 ? "no shot" : here.length === 1 ? `shot ${here[0]}` : `shots ${here.join(", ")}`;
+  const facts = ["location", sheet === undefined ? null : `sheet v${sheet.version}`, where, scene.inherits?.timeOfDay ?? null]
     .filter((part): part is string => part !== null);
   const thumb = (file: string) => (
     <span className="fy-chardialog__thumb"><img src={mediaUrl(world.meta.slug, `references/${sheetId}/${file}`)} alt="" onError={(event) => { event.currentTarget.style.display = "none"; }} /></span>

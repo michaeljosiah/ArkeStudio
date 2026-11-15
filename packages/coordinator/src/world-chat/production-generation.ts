@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  attachmentFor, characterAudioRoute, characterImageEstimateIsUsable, foldBenchSession, keyframePlan, orderedShots, resolveCast,
+  attachmentFor, characterAudioRoute, characterImageEstimateIsUsable, foldBenchSession, keyframePlan, orderedShots, resolveCast, scenePlaceApplies,
   type AppSettings, type ArkeGenerationBody, type ModelManifest,
 } from "@arke-studio/contracts";
 import { resolveSubjectCastVoices } from "../audio/reference-inputs.js";
@@ -119,7 +119,9 @@ export function productionGenerationSource(store: WorldStore, ports: {
       }
       const usedSheets = new Map<string, typeof world.sheets[number]>();
       for (const id of shotIds) for (const { sheet } of resolveCast(shots.find(s => s.id === id)!.description, world.sheets).cast) usedSheets.set(sheet.id, sheet);
-      const location = world.sheets.find(s => s.id === scene.inherits?.location);
+      // The scene's place is used only by a shot that names no place of its own (issue 3152).
+      const location = scenePlaceApplies(scene, shotIds.map(id => shots.find(s => s.id === id)!), world.sheets)
+        ? world.sheets.find(s => s.id === scene.inherits?.location) : undefined;
       if (location) usedSheets.set(location.id, location);
       const withoutKit = [...usedSheets.values()].filter(sheet => attachmentFor(world.referenceKits.find(k => k.sheetId === sheet.id) ?? null,
         sheet, "primary", { productionId: action.productionId, sceneId: scene.id }).file === null);

@@ -55,6 +55,40 @@ const READY: ClientState = {
   },
 };
 
+it("names a selected look where it is used, with the rename command, and Escape keeps the name (issue 3178)", async () => {
+  const sent: ClientMessage[] = [];
+  __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json) as ClientMessage); } } as unknown as ArkeBridge);
+  const state = structuredClone(READY) as ClientState;
+  state.world!.referenceKits.find((kit) => kit.sheetId === "maren-kest")!.looks = [
+    { id: "look-agbada", file: "looks/agbada.png", kind: "costume", prompt: "Full-length, head to toe: a dark blue agbada with gold thread", acceptedAt: "2026-08-01T10:00:00Z" },
+  ];
+  __setStateForTest(state);
+  const container = dom.document.createElement("div") as unknown as HTMLElement;
+  dom.document.body.append(container);
+  const root = createRoot(container);
+  open.push(root);
+  await act(async () => root.render(
+    <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/cast/maren-kest/looks`]}>
+      <App />
+    </MemoryRouter>,
+  ));
+  const tile = [...container.querySelectorAll<HTMLButtonElement>(".fy-looks-results__grid button")].find((b) => b.textContent?.includes("dark blue agbada"))!;
+  await act(async () => tile.click());
+  const field = container.querySelector<HTMLInputElement>(".fy-looks-name input")!;
+  assert.ok(field, "a selected look can be named beside Use in");
+  assert.equal(field.value, "", "an unnamed look has no name yet");
+  assert.match(field.getAttribute("placeholder") ?? "", /^Full-length, head to toe/);
+  const props = () => (field as unknown as Record<string, { onChange: (e: { target: { value: string } }) => void; onKeyDown: (e: { key: string; preventDefault: () => void }) => void; onBlur: () => void }>)[Object.keys(field).find((k) => k.startsWith("__reactProps$"))!]!;
+  await act(async () => props().onChange({ target: { value: "Blue agbada" } }));
+  await act(async () => props().onKeyDown({ key: "Escape", preventDefault() {} }));
+  await act(async () => props().onBlur());
+  assert.equal(sent.some((message) => message.kind === "rename-character-look"), false, "Escape put the name back; nothing to save");
+  await act(async () => props().onChange({ target: { value: "  Blue agbada " } }));
+  await act(async () => props().onKeyDown({ key: "Enter", preventDefault() {} }));
+  const rename = sent.find((message): message is Extract<ClientMessage, { kind: "rename-character-look" }> => message.kind === "rename-character-look");
+  assert.deepEqual({ ...rename, requestId: "r" }, { kind: "rename-character-look", worldId: FIXTURE_WORLD_ID, sheetId: "maren-kest", lookId: "look-agbada", name: "Blue agbada", expectedName: null, requestId: "r" });
+});
+
 it("Explore sends the size that was chosen, with the model and the words", async () => {
   const sent: ClientMessage[] = [];
   __setBridgeForTest({ appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json) as ClientMessage); } } as unknown as ArkeBridge);

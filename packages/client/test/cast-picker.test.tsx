@@ -116,6 +116,30 @@ describe("the cast picker (SPEC-044 R-4)", () => {
     assert.deepEqual(picks, ["the-weigh-house"]);
   });
 
+  it("offers No location first under Change location, and only there (issue 3153)", async () => {
+    const bundle = world([sheet("the-weigh-house", "The Weigh House", { type: "location" })]);
+    const production = bundle.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const clears = { count: 0 };
+    const mountWith = async (mode: CastPickerMode) => {
+      const container = dom.document.createElement("div") as unknown as HTMLElement;
+      dom.document.body.append(container);
+      const root = createRoot(container);
+      await act(async () => {
+        root.render(<CastPicker world={bundle} production={production} scene={sceneOf(bundle)} mode={mode} onPick={() => {}} onClear={() => { clears.count += 1; }} onClose={() => {}} />);
+      });
+      open.push({ container, root });
+      return container;
+    };
+    const changing = await mountWith("change-location");
+    const names = [...changing.querySelectorAll(".fy-castpicker__card")].map((card) => card.getAttribute("aria-label"));
+    assert.deepEqual(names, ["No location", "The Vigil · in the scene", "The Weigh House"]);
+    await click(changing.querySelector('[aria-label="No location"]'));
+    assert.equal(clears.count, 1);
+    for (const mode of ["location", "character"] as const) {
+      assert.equal((await mountWith(mode)).querySelector('[aria-label="No location"]'), null, `${mode} has nothing to clear`);
+    }
+  });
+
   it("orders the row by first appearance, then by hand, and keeps a member whose shot is gone (R-1, R-5)", () => {
     const bundle = world([sheet("odile", "Odile"), sheet("bray-half-hitch", "Bray Half-Hitch")]);
     const scene = sceneOf(bundle);
