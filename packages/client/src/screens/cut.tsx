@@ -118,7 +118,7 @@ import {
   borrowTakes,
   subscribeTimelineRefusals,
   sendSpineCommand,
-  subscribeCommandFailures,
+  useSpineAskPending,
 } from "../lib/store.js";
 import { songCommand, wantsSong } from "../lib/song.js";
 import { storyShotCount } from "./production-story.js";
@@ -405,17 +405,8 @@ function CutEditorScreen() {
   }, []);
   /** Choose the song's Library on Audio, asked once per press (issue 3088). */
   const [libraryAsk, setLibraryAsk] = useState<{ filter: LibraryFilter; serial: number } | null>(null);
-  /*
-   * A Use as the song press, until its answer (issue 3088): the spine the next snapshot carries,
-   * or a refusal under its request. Held so a second press cannot be composed against the
-   * revision the first is about to move, which the authority would refuse as stale.
-   */
-  const [songAsk, setSongAsk] = useState<{ requestId: string; spine: string } | null>(null);
-  const spineKey = production?.spine ? `${production.spine.revision}:${production.spine.trackArtifactId}` : "none";
-  useEffect(() => { setSongAsk((ask) => (ask !== null && ask.spine !== spineKey ? null : ask)); }, [spineKey]);
-  useEffect(() => subscribeCommandFailures((failure) => {
-    setSongAsk((ask) => (ask !== null && failure.requestId === ask.requestId ? null : ask));
-  }), []);
+  /** A Use as the song press still out (issue 3088); the store holds it until it is answered. */
+  const songPending = useSpineAskPending(worldId, prodId);
   const [detailTab, setDetailTab] = useState<"inspector" | "arke">("inspector");
   const [draft, setDraft] = useState<ProductionTimeline | null>(null);
   const [scrubFrame, setScrubFrame] = useState<number | null>(null);
@@ -1260,9 +1251,7 @@ function CutEditorScreen() {
   const makeSong = (artifact: ArtifactSidecar) => {
     if (!worldId || !prodId || !production) return;
     const next = songCommand(production.spine, artifact.id);
-    if (next === null) return;
-    const requestId = sendSpineCommand(worldId, prodId, next.baseRevision, next.command);
-    if (requestId !== null) setSongAsk({ requestId, spine: spineKey });
+    if (next !== null) sendSpineCommand(worldId, prodId, next.baseRevision, next.command);
   };
   let notice: React.ReactNode = null;
   // A music video is cut to its song, so its absence is said before anything else (issue 3088).
@@ -1469,7 +1458,7 @@ function CutEditorScreen() {
         productions={world?.productions ?? []}
         onBorrowTake={commandsDisabled ? null : borrowTake}
         onOverlayArtifact={commandsDisabled ? null : artifact => placeArtifact(artifact, null, playheadFrame, { kind: "picture" })}
-        onUseAsSong={songAsk === null ? makeSong : null}
+        onUseAsSong={songPending ? null : makeSong}
         filterRequest={libraryAsk}
         onRemoveFromLibrary={commandsDisabled ? null : removeFromLibrary}
         onImport={commandsDisabled || remote ? null : files => importMedia("library", files)}

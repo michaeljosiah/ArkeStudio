@@ -6,7 +6,7 @@ import { renderToString } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import type { ClientMessage, ClientState, ProductionSpine } from "@arke-studio/contracts";
-import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __connectionStatusForTest, __handleFrameForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import { offersSong, songCommand, wantsSong } from "../src/lib/song.js";
 import { CutScreen } from "../src/screens/cut.js";
 import { ProductionDashboardScreen } from "../src/screens/production-dashboard.js";
@@ -69,6 +69,12 @@ describe("the song's logic (issue 3088)", () => {
   });
 });
 
+/** A coordinator snapshot through the store's own frame path, as a refresh after a write sends it. */
+let seq = 1_000;
+function snapshot(state: ClientState): void {
+  __handleFrameForTest({ kind: "snapshot", seq: ++seq, state });
+}
+
 async function mountCut(state: ClientState) {
   const sent: ClientMessage[] = [];
   const bridge = { appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json)); } };
@@ -108,17 +114,53 @@ describe("the Cut asks for the song (issue 3088)", () => {
       assert.equal(screen.buttons("Use as the song").length, 1);
 
       // The snapshot that carries the spine ends the ask: the row reads as the song, the notice goes.
-      await act(async () => __setStateForTest(musicVideo(spineOn(SONG))));
+      await act(async () => screen.buttons("Use as the song")[0]!.click());
+      await act(async () => snapshot(musicVideo(spineOn(SONG))));
       assert.equal(screen.container.querySelector("[data-testid='song-notice']"), null);
       assert.match(screen.row(SONG).textContent ?? "", /the song/);
       assert.equal(screen.buttons("Use as the song").length, 0, "the song is not offered as itself");
 
-      // Another sound file moves the song at the revision shown.
+      // Another sound file moves the song at the revision shown, held until the spine moves past it.
       await screen.pick(OTHER);
       await act(async () => screen.buttons("Use as the song")[0]!.click());
       const moved = screen.sent.filter((message) => message.kind === "spine-command").at(-1)!;
       assert.ok(moved.kind === "spine-command");
       assert.deepEqual({ baseRevision: moved.baseRevision, command: moved.command }, { baseRevision: 1, command: { kind: "assign-track", trackArtifactId: OTHER } });
+      await act(async () => snapshot(musicVideo(spineOn(SONG, 1))));
+      assert.equal(screen.buttons("Use as the song").length, 0, "a snapshot that has not moved the spine answers nothing");
+      await act(async () => snapshot(musicVideo(spineOn(OTHER, 2))));
+      assert.match(screen.row(OTHER).textContent ?? "", /the song/);
+      await screen.pick(SONG);
+      assert.equal(screen.buttons("Use as the song").length, 1, "released once the spine moved");
+    } finally { await screen.close(); }
+  });
+
+  it("releases a press whose answer went with the connection, without sending it again", async () => {
+    const screen = await mountCut(musicVideo());
+    try {
+      await screen.pick(SONG);
+      await act(async () => screen.buttons("Use as the song")[0]!.click());
+      assert.equal(screen.buttons("Use as the song").length, 0);
+      // The socket drops before the coordinator answers; the window rejoins and the snapshot shows
+      // no spine. Nothing replays the refusal, so the rejoin itself is the answer.
+      await act(async () => __connectionStatusForTest("closed"));
+      await act(async () => __connectionStatusForTest("open"));
+      assert.equal(screen.buttons("Use as the song").length, 0, "held until the rejoin's snapshot says where it stands");
+      await act(async () => snapshot(musicVideo()));
+      assert.equal(screen.buttons("Use as the song").length, 1, "the press is offered again");
+      assert.equal(screen.sent.filter((message) => message.kind === "spine-command").length, 1, "and was not sent again");
+    } finally { await screen.close(); }
+  });
+
+  it("brings the Library back to Media when Choose the song is pressed from Effects", async () => {
+    const screen = await mountCut(musicVideo());
+    try {
+      const section = (name: string) => [...screen.container.querySelectorAll<HTMLButtonElement>("[aria-label='Library section'] button")].find((b) => b.textContent === name)!;
+      await act(async () => section("Effects").click());
+      assert.equal(screen.row(SONG), null, "Effects shows no media rows");
+      await act(async () => screen.buttons("Choose the song")[0]!.click());
+      assert.equal(section("Media").getAttribute("aria-pressed"), "true");
+      assert.ok(screen.row(SONG), "the song's row is listed");
     } finally { await screen.close(); }
   });
 

@@ -270,10 +270,12 @@ export function ArtifactPanel({
     setBrowseSlug(null);
     setBrowseProduction(null);
   }, [worldId, production?.meta.id]);
-  // A filter asked for from outside lands on this production's own rows: the Cut's Choose the
-  // song shows Audio, and the song is never another shelf's.
+  // A filter asked for from outside lands on this production's own media rows: the Cut's Choose
+  // the song shows Audio, which shows nothing from Effects or Transitions (codex on PR 3118), and
+  // the song is never another shelf's.
   useEffect(() => {
     if (filterRequest === null) return;
+    setSection("media");
     setFilter(filterRequest.filter);
     setKindFilter("all");
     setBrowseSlug(null);

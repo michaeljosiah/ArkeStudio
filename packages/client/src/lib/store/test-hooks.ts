@@ -57,6 +57,7 @@ export function __setStateForTest(state: ClientState, extra: Partial<StoreState>
   narratorQuotes: {},
   heardLines: {},
   audiobookAsks: {},
+    spineAsks: {},
     audiobookDoor: {},
     audiobookCredits: {},
     audiobookBook: {},

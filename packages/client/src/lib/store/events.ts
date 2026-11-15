@@ -326,6 +326,10 @@ export function subscribeCommandFailures(listener: (event: CommandFailure) => vo
 export type HostOnlyRefusal = Extract<RemoteCommandRefusal, { refused: "host-only" }>;
 export function refuseInvalidCommand(refusal: Extract<RemoteCommandRefusal, { refused: "invalid" }>): void {
   if (refusal.requestId !== undefined) pendingQueueRequests.delete(refusal.requestId);
+  if (refusal.requestId !== undefined && current.spineAsks[refusal.requestId] !== undefined) {
+    const { [refusal.requestId]: _refused, ...spineAsks } = current.spineAsks;
+    emitChange({ ...current, spineAsks });
+  }
   const failure: CommandFailure = { type: "command.failed", at: new Date().toISOString(), command: refusal.command ?? "unknown",
     requestId: refusal.requestId ?? null, reason: "Studio could not read that request. Try again." };
   for (const listener of commandFailureListeners) listener(failure);

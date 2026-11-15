@@ -88,6 +88,17 @@ function settleHolds(next: StoreState): StoreState {
   return holds === null ? next : { ...next, worldChatHolds: holds };
 }
 
+/** The spine commands a snapshot leaves unanswered: their spine still at the revision they were sent against. */
+function unansweredSpineAsks(asks: StoreState["spineAsks"], state: ClientState): StoreState["spineAsks"] {
+  const entries = Object.entries(asks);
+  if (entries.length === 0) return asks;
+  const kept = entries.filter(([, ask]) => {
+    const production = state.world?.meta.worldId === ask.worldId ? state.world.productions.find((candidate) => candidate.meta.id === ask.productionId) : undefined;
+    return production !== undefined && (production.spine?.revision ?? null) === ask.revision;
+  });
+  return kept.length === entries.length ? asks : Object.fromEntries(kept);
+}
+
 export function emitChange(next: StoreState): void {
   const was = current.state?.world?.meta.worldId ?? null;
   const now = next.state?.world?.meta.worldId ?? null;
@@ -166,7 +177,7 @@ function pageBase(): ClientState | null {
 const EARLY_SLICES = [
   "gateNotices", "authoring", "transcripts", "genesis", "buildPlans", "keyArtPlans", "reading",
   "deriving", "casting", "audiobook", "direction", "illustration", "audiobookRecords", "beats",
-  "stagedTakes", "speakerLines", "narratorQuotes", "heardLines", "audiobookAsks", "audiobookDoor",
+  "stagedTakes", "speakerLines", "narratorQuotes", "heardLines", "audiobookAsks", "spineAsks", "audiobookDoor",
   "audiobookCredits", "audiobookBook", "audiobookNotes", "manuscripts", "archiveNote",
   "setupStatus", "permissions", "frameRunQuotes", "frameRunStartResults",
 ] as const;
@@ -379,6 +390,10 @@ export function handleFrame(json: string): void {
       heardLines: changedWorld ? {} : current.heardLines,
       // A reconnect replays no answer to a question in flight (codex on PR 1479): the asker asks again.
       audiobookAsks: changedWorld || rejoined ? {} : current.audiobookAsks,
+      // A spine command is answered by the spine moving. A rejoin's snapshot is the answer too:
+      // the frame or its refusal may have gone with the socket, and the snapshot shows whether it
+      // landed, so the press is released rather than sent again (codex on PR 3118).
+      spineAsks: changedWorld || rejoined ? {} : unansweredSpineAsks(current.spineAsks, frame.state),
       audiobookDoor: changedWorld ? {} : current.audiobookDoor,
       audiobookCredits: changedWorld ? {} : current.audiobookCredits,
       // Book state uses production id alone, unlike the world-keyed chapter runs above.
