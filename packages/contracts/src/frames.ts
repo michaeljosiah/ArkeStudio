@@ -175,6 +175,13 @@ export type AudioStudioImport = z.infer<typeof AudioStudioImportSchema>;
 export const MusicImportSchema = z.object({ productionId: SlugSchema, makeAlbum: z.boolean().optional() }).strict();
 export type MusicImport = z.infer<typeof MusicImportSchema>;
 
+/**
+ * A picture already in the studio, named the way the reference picker lists it (issue 972): a
+ * world's slug and the image's path inside that world. Only the name crosses; the coordinator
+ * checks the picture is still offered there and reads the bytes itself.
+ */
+const StudioImageSchema = z.object({ slug: SlugSchema, path: z.string().min(1) }).strict();
+
 export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("import-world"), requestId: z.string().min(1) }).strict(),
   z.object({ kind: z.literal("check-onboarding") }).strict(),
@@ -497,7 +504,7 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("pick-staged-reference"),
-      image: z.object({ slug: SlugSchema, path: z.string().min(1) }).strict().optional(),
+      image: StudioImageSchema.optional(),
       worldFile: z.string().min(1).max(1024).optional(),
       worldId: UlidSchema,
       requestId: UlidSchema,
@@ -1748,9 +1755,23 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       replace: z.boolean().optional(),
     })
     .strict(),
-  /** Ask the trusted host picker for an image; it lands as a candidate, never straight as identity. */
+  /**
+   * Ask the trusted host picker for an image; it lands as a candidate, never straight as identity.
+   *
+   * Two other sources take the picker's place (issue 3146), and the picker is asked only when
+   * neither is named. `sourcePath` is a file dropped in the dialog: the desktop preload resolves
+   * the dropped File and adds the path as the frame leaves, the way it does for an attachment, so
+   * the renderer never holds one (SPEC-001 R-9). `image` is a picture already in the studio, used
+   * as the photo itself rather than as a reference for a generated one.
+   */
   z
-    .object({ kind: z.literal("import-main-photo-candidate"), worldId: UlidSchema, sheetId: SlugSchema })
+    .object({
+      kind: z.literal("import-main-photo-candidate"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      sourcePath: z.string().min(1).optional(),
+      image: StudioImageSchema.optional(),
+    })
     .strict(),
   /**
    * The whole main photo, brought in by hand (PR #241).
@@ -1758,11 +1779,30 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
    * Distinct from `import-main-photo-candidate`, which adds one option to a set the user then
    * chooses from. Here the choosing already happened — in the host's own file dialog, on a file
    * the user pointed at — so the picked image becomes the identity anchor in the same motion.
-   * The dialog IS the confirmation; a second "are you sure" would be asking twice.
+   * The dialog IS the confirmation; a second "are you sure" would be asking twice. A file dropped
+   * on the slot is the same choice made another way, and arrives as `sourcePath` (issue 3146).
    */
-  z.object({ kind: z.literal("import-main-photo"), worldId: UlidSchema, sheetId: SlugSchema }).strict(),
-  /** The same hand-carried route for the composite: no provider, no cost, no review step. */
-  z.object({ kind: z.literal("import-character-sheet"), worldId: UlidSchema, sheetId: SlugSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("import-main-photo"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      sourcePath: z.string().min(1).optional(),
+    })
+    .strict(),
+  /**
+   * The same hand-carried route for the composite: no provider, no cost, no review step. It takes
+   * a dropped file and a picture already in the studio the way the candidate above does.
+   */
+  z
+    .object({
+      kind: z.literal("import-character-sheet"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      sourcePath: z.string().min(1).optional(),
+      image: StudioImageSchema.optional(),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("generate-main-photo"),

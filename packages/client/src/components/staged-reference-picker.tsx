@@ -1,12 +1,26 @@
 import { useEffect, useState } from "react";
 import { ulid, type WorldImageReference, type ManifestModel } from "@arke-studio/contracts";
-import { browseReferenceImages, pickStagedReference, subscribeReferenceImages, useStore } from "../lib/store.js";
+import { browseReferenceImages, pickStagedReference, subscribeReferenceImages, useStore, type StudioPicture } from "../lib/store.js";
+import { PageSheet } from "./page-sheet.js";
 import { ReferencePickerBody, type PickerSource } from "./reference-picker.js";
 
-/** The existing single-image slot, with read-only browsing before the ordinary copy. */
-export function StagedReferencePicker({ worldId, referenceKey, onClose, onUpload, model = null }: {
-  model?: ManifestModel | null;
-  worldId: string; referenceKey: string; onClose: () => void; onUpload: () => void;
+/**
+ * This world's pictures, or another world's, for one pick. Read-only until the pick: browsing
+ * another world never opens it, and the coordinator checks the chosen picture again before
+ * copying it (issue 972).
+ */
+function WorldPictureBrowser({ worldId, model, title, confirm, note, meta, onPick, onUpload, onClose }: {
+  worldId: string;
+  /** The model the picture would ride to, when it rides to one; null budgets nothing. */
+  model: ManifestModel | null;
+  title?: string;
+  confirm?: { label: string };
+  /** What the foot says once the pictures are in. */
+  note?: string;
+  meta: (image: WorldImageReference, from: string | null) => string;
+  onPick: (picture: StudioPicture, borrowed: boolean) => void;
+  onUpload?: () => void;
+  onClose: () => void;
 }) {
   const { state } = useStore();
   const worlds = state?.worlds ?? [];
@@ -31,11 +45,13 @@ export function StagedReferencePicker({ worldId, referenceKey, onClose, onUpload
   const borrowed = source?.worldId !== worldId;
   const rows: PickerSource[] = images.map(image => ({
     key: image.file, kind: "image", name: image.name, imagePath: image.file,
-    meta: borrowed ? `${image.role} · from ${source?.name ?? slug}` : image.role,
+    meta: meta(image, borrowed ? source?.name ?? slug : null),
     group: image.group, durationSec: 0, pick: { source: "world-file", path: image.file },
   }));
-  return <ReferencePickerBody key={slug} mode="slot" worldSlug={slug} model={model} budget="model" only="image"
-    carried={[]} world={rows} session={[]} note={status ?? "One picture, copied into this world."}
+  const said = status ?? note;
+  return <ReferencePickerBody key={slug} mode="slot" worldSlug={slug} model={model} budget={model === null ? "none" : "model"} only="image"
+    {...(title !== undefined ? { title } : {})} {...(confirm !== undefined ? { confirm } : {})} {...(said !== undefined ? { note: said } : {})}
+    carried={[]} world={rows} session={[]}
     worldChoices={<label>Browse images <select aria-label="Browse images" value={slug} onChange={event => {
       setImages([]); setSlug(event.target.value);
     }}>
@@ -44,7 +60,50 @@ export function StagedReferencePicker({ worldId, referenceKey, onClose, onUpload
         <option key={world.worldId} value={world.slug}>{world.name}</option>)}</optgroup>
     </select></label>}
     onChoose={pick => {
-      if (pick.source === "world-file") pickStagedReference(worldId, referenceKey, borrowed ? { slug, path: pick.path } : pick.path);
+      if (pick.source === "world-file") onPick({ slug, path: pick.path }, borrowed);
       onClose();
-    }} onUpload={onUpload} onClose={onClose} />;
+    }} {...(onUpload !== undefined ? { onUpload } : {})} onClose={onClose} />;
+}
+
+/** The existing single-image slot, with read-only browsing before the ordinary copy. */
+export function StagedReferencePicker({ worldId, referenceKey, onClose, onUpload, model = null }: {
+  model?: ManifestModel | null;
+  worldId: string; referenceKey: string; onClose: () => void; onUpload: () => void;
+}) {
+  return <WorldPictureBrowser worldId={worldId} model={model} note="One picture, copied into this world."
+    meta={(image, from) => from === null ? image.role : `${image.role} · from ${from}`}
+    onPick={(picture, borrowed) => pickStagedReference(worldId, referenceKey, borrowed ? picture : picture.path)}
+    onUpload={onUpload} onClose={onClose} />;
+}
+
+/**
+ * The same pictures, used as the picture itself rather than as a reference for a generated one
+ * (issue 3146): a finished main photo or character sheet that already exists somewhere in the
+ * studio. Kept apart from the reference slot on purpose. A reference only steers a generation,
+ * and a face that must not change cannot be left to one, so this picker has its own title, is
+ * never budgeted against a model, and asks before it acts.
+ */
+export function StudioPicturePicker({ worldId, title, confirmLabel, onChoose, onUpload, onClose }: {
+  worldId: string;
+  title: string;
+  confirmLabel: string;
+  onChoose: (picture: StudioPicture) => void;
+  onUpload?: () => void;
+  onClose: () => void;
+}) {
+  return <WorldPictureBrowser worldId={worldId} model={null} title={title} confirm={{ label: confirmLabel }}
+    meta={(image, from) => from === null ? image.group : `from ${from}`}
+    onPick={(picture) => onChoose(picture)} {...(onUpload !== undefined ? { onUpload } : {})} onClose={onClose} />;
+}
+
+/**
+ * The picker in a sheet of its own, for a slot that has no dialog to lend it one. Headless: the
+ * picker draws its own title and close, and a second head over it would name it twice.
+ */
+export function StudioPictureSheet(picker: Parameters<typeof StudioPicturePicker>[0]) {
+  return (
+    <PageSheet open headless title={picker.title} onClose={picker.onClose} className="fy-picture-sheet">
+      <StudioPicturePicker {...picker} />
+    </PageSheet>
+  );
 }

@@ -89,6 +89,7 @@ import { recoverProductionSetups } from "./productions/setup.js";
 import { guardProductionSetupAuthority } from "./productions/setup-authority.js";
 import { StageConstructor } from "./productions/stage-construction.js";
 import { worldImageReferences, stagedWorldImage } from "@arke-studio/contracts";
+import { ONE_IMAGE_ONLY, type BorrowedImageOrigin } from "@arke-studio/contracts";
 import { GenerationQuotes } from "./world-chat/generation-quotes.js";
 import { productionAudioGenerationSource } from "./world-chat/production-audio-generation.js";
 import { productionGenerationSource } from "./world-chat/production-generation.js";
@@ -879,14 +880,6 @@ const IMPORTABLE_IMAGES = ["png", "jpg", "jpeg", "webp"] as const;
 const NAMING_TIMEOUT_MS = 60_000;
 
 const UNSUPPORTED_IMAGE = "That file is not an image the studio can hold. Choose a PNG, JPEG or WebP.";
-
-/**
- * The host's dialog allows multiple selections — it is the same seam that attaches whole folders
- * of files — but a main photo and a character sheet are each exactly one image. Taking the first
- * of several and reporting success would quietly discard the rest, so the extras are refused out
- * loud instead (PR review).
- */
-const ONE_IMAGE_ONLY = "Choose a single image: this replaces one picture, not a set.";
 
 /**
  * The same ceiling `readContainedImageReferences` enforces when a reference is about to be sent.
@@ -16372,20 +16365,16 @@ export class Coordinator {
           this.rejectEnqueue(msg.requestId, msg.kind, "Reference images are unavailable.");
           return;
         }
-        let origin: import("@arke-studio/contracts").BorrowedImageOrigin | undefined;
+        let origin: BorrowedImageOrigin | undefined;
         let chosen: readonly string[];
         if (msg.image) {
-          const sourceWorld = (await this.opts.provider.listWorlds()).find(world => world.slug === msg.image!.slug);
-          const offered = sourceWorld && await this.opts.provider.listReferenceImages?.(sourceWorld.slug);
-          const media = offered?.some(image => image.file === msg.image!.path) ? await this.opts.provider.serveMedia?.(msg.image.slug, msg.image.path) : null;
-          if (!sourceWorld || !media || !media.contentType.startsWith("image/")) {
+          const offered = await this.offeredStudioImage(msg.worldId, msg.image);
+          if (offered === null) {
             this.rejectEnqueue(msg.requestId, msg.kind, "That image is no longer available.");
             return;
           }
-          chosen = [media.path];
-          if (sourceWorld.worldId !== msg.worldId) origin = {
-            worldName: sourceWorld.name, imageName: msg.image.path.split("/").pop()!, copiedAt: this.nowIso(),
-          };
+          chosen = [offered.path];
+          origin = offered.origin;
         } else chosen = await pick!({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
         const [source] = chosen;
         // A closed dialog is not a failure, here as everywhere else the host picker is opened.
@@ -16719,29 +16708,51 @@ export class Coordinator {
       }
       case "import-main-photo-candidate": {
         const store = this.opts.provider.openStore?.();
-        const pick = this.opts.pickFiles;
+        // Only the picker needs the host: a dropped file and a studio picture name themselves.
+        const named = msg.sourcePath !== undefined || msg.image !== undefined;
         // The open world must be the world the frame was written for. Sheet slugs recur across
         // worlds, so a frame from a screen the user has since navigated away from would file the
         // image under the same-named character somewhere else entirely — and the only sign would
         // be a candidate nobody put there. Every other reference handler already checks this.
-        if (!store || store.worldId !== msg.worldId || !pick) return;
-        const [source] = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
-        if (!source) return;
-        if (!this.stillOpen(store)) return;
-        const picked = await readPickedImage(source);
-        if ("error" in picked) {
-          // Reported through the acceptance slot the replace dialog already reads. This route
-          // adds a candidate rather than accepting one, so it has no report of its own — and
-          // saying nothing would leave a refused file indistinguishable from a dead button.
+        if (!store || store.worldId !== msg.worldId || (!named && !this.opts.pickFiles)) return;
+        // Reported through the acceptance slot the replace dialog already reads. This route
+        // adds a candidate rather than accepting one, so it has no report of its own — and
+        // saying nothing would leave a refused file indistinguishable from a dead button.
+        const refuse = (reason: string) =>
           this.emit({
             at: new Date().toISOString(),
             type: "main-photo.acceptance",
             worldId: msg.worldId,
             sheetId: msg.sheetId,
             status: "failed",
-            reason: picked.error,
+            reason,
             candidateRetained: false,
           });
+        const chosen = await this.handCarriedImage(msg);
+        if ("unavailable" in chosen) {
+          refuse(chosen.unavailable);
+          return;
+        }
+        const [source] = chosen.files;
+        if (!source) return;
+        if (!this.stillOpen(store)) return;
+        const picked = await readPickedImage(source);
+        if ("error" in picked) {
+          refuse(picked.error);
+          return;
+        }
+        if (chosen.from !== undefined) {
+          // A picture from the studio lands as an undecided take rather than a loose file. Where
+          // it came from has to be written down while it is still known, and a file in
+          // `candidates/` has nowhere to keep that: the take is the record the kit will point
+          // at. The dialog lists it beside the candidates, and choosing it is the same accept.
+          const media = `picture-${Date.now().toString(36)}${picked.extension}`;
+          const landed = await recordUploadedMainPhotoTake(store, msg.sheetId, media, picked.data, chosen.from).then(
+            () => true,
+            () => false,
+          );
+          this.refreshIfStillOpen(store);
+          if (!landed && this.stillOpen(store)) refuse("That image could not be copied into the world.");
           return;
         }
         await store
@@ -16770,12 +16781,15 @@ export class Coordinator {
             ...(reason ? { reason } : {}),
             candidateRetained,
           });
-        if (!store || store.worldId !== msg.worldId || !pick) return;
+        if (!store || store.worldId !== msg.worldId || (msg.sourcePath === undefined && !pick)) return;
         if (!store.getBundle().sheets.some((candidate) => candidate.id === msg.sheetId)) {
           report("failed", false, "The main photo was not changed because the character is unavailable.");
           return;
         }
-        const chosen = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
+        // A file dropped on the slot is the choice already made (issue 3146): its path stands
+        // where the picker's answer would, and everything below treats the two alike.
+        const chosen =
+          msg.sourcePath !== undefined ? [msg.sourcePath] : await pick!({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
         // A closed dialog is not a failure — no error belongs under a card the user just decided
         // to leave alone — but it is still an ending, and the button that opened it is waiting.
         const [source] = chosen;
@@ -16862,12 +16876,18 @@ export class Coordinator {
             status,
             ...(reason ? { reason } : {}),
           });
-        if (!store || store.worldId !== msg.worldId || !pick) return;
+        const named = msg.sourcePath !== undefined || msg.image !== undefined;
+        if (!store || store.worldId !== msg.worldId || (!named && !pick)) return;
         if (!store.getBundle().sheets.some((candidate) => candidate.id === msg.sheetId)) {
           report("failed", "The character sheet was not changed because the character is unavailable.");
           return;
         }
-        const chosen = await pick({ accept: [...IMPORTABLE_IMAGES] }).catch(() => []);
+        const carried = await this.handCarriedImage(msg);
+        if ("unavailable" in carried) {
+          report("failed", carried.unavailable);
+          return;
+        }
+        const chosen = carried.files;
         const [source] = chosen;
         if (!source) {
           report("cancelled");
@@ -16896,7 +16916,8 @@ export class Coordinator {
           return;
         }
         const media = `character-sheet-upload-${Date.now().toString(36)}${picked.extension}`;
-        const take = await recordUploadedCharacterSheetTake(store, msg.sheetId, media, picked.data).catch(
+        // A picture from the studio keeps where it came from on the take; a file has nothing to add.
+        const take = await recordUploadedCharacterSheetTake(store, msg.sheetId, media, picked.data, carried.from).catch(
           () => null,
         );
         if (!take) {
@@ -19457,6 +19478,65 @@ export class Coordinator {
     if (!this.opts.provider.worldDir) return null;
     const dir = await this.opts.provider.worldDir(world.worldId);
     return { world, bundle: (await scanWorld(dir)).bundle, dir };
+  }
+
+  /**
+   * A picture the reference picker offered, checked again where the bytes are (issue 972): the
+   * world is still registered, the picture is still in its catalogue, and the media guard still
+   * serves it as an image. Null when any of those has stopped being true since it was browsed.
+   *
+   * A picture from another world comes back with where it came from: its world's name, its own
+   * name and now. That is description, not a link. Nothing about the source world is kept that a
+   * later change there could contradict (issue 960).
+   */
+  private async offeredStudioImage(
+    worldId: string,
+    image: { slug: string; path: string },
+  ): Promise<{ path: string; origin?: BorrowedImageOrigin } | null> {
+    const sourceWorld = (await this.opts.provider.listWorlds()).find((world) => world.slug === image.slug);
+    const offered = sourceWorld && (await this.opts.provider.listReferenceImages?.(sourceWorld.slug));
+    const media = offered?.some((candidate) => candidate.file === image.path)
+      ? await this.opts.provider.serveMedia?.(image.slug, image.path)
+      : null;
+    if (!sourceWorld || !media || !media.contentType.startsWith("image/")) return null;
+    return {
+      path: media.path,
+      ...(sourceWorld.worldId !== worldId
+        ? { origin: { worldName: sourceWorld.name, imageName: image.path.split("/").pop()!, copiedAt: this.nowIso() } }
+        : {}),
+    };
+  }
+
+  /**
+   * Where a hand-carried main photo or character sheet is read from (issue 3146).
+   *
+   * The Upload button asks the host's picker. A file dropped on the slot has already been chosen,
+   * and arrives as the path the desktop preload resolved for it. A picture already in the studio
+   * arrives as the row the reference picker offered. All three end as files to read, so everything
+   * after this point is the one import it always was: the same checks on the bytes, the same
+   * take, the same acceptance. An empty list is a dialog closed without a choice.
+   *
+   * What a studio picture adds is where it came from, for the take to keep: the borrow's own
+   * record for another world's picture, the path it was copied from for one of this world's.
+   */
+  private async handCarriedImage(msg: {
+    worldId: string;
+    sourcePath?: string | undefined;
+    image?: { slug: string; path: string } | undefined;
+  }): Promise<
+    | { files: readonly string[]; from?: { borrowed?: BorrowedImageOrigin; source?: { params: Record<string, unknown> } } }
+    | { unavailable: string }
+  > {
+    if (msg.image !== undefined) {
+      const offered = await this.offeredStudioImage(msg.worldId, msg.image);
+      if (offered === null) return { unavailable: "That image is no longer available." };
+      return {
+        files: [offered.path],
+        from: offered.origin ? { borrowed: offered.origin } : { source: { params: { copiedFrom: msg.image.path } } },
+      };
+    }
+    if (msg.sourcePath !== undefined) return { files: [msg.sourcePath] };
+    return { files: (await this.opts.pickFiles?.({ accept: [...IMPORTABLE_IMAGES] }).catch(() => [])) ?? [] };
   }
 
   /** The artifact shelf's pictures, on the same terms as the bench's (issue 1037). */

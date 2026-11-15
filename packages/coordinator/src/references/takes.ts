@@ -1,6 +1,6 @@
 import { copyFile, mkdir, readFile, rm, rmdir, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { ulid, type Job, type LedgerEntry, type ReviewDecision, type Take } from "@arke-studio/contracts";
+import { ulid, type BorrowedImageOrigin, type Job, type LedgerEntry, type ReviewDecision, type Take } from "@arke-studio/contracts";
 import { atomicWriteFile, renameWithRetry, withTransientRetry } from "../world/atomic.js";
 import { toExtendedLength } from "../world/paths.js";
 import { sha256 } from "../world/text-files.js";
@@ -323,7 +323,7 @@ export async function recordUploadedCharacterSheetTake(
   sheetId: string,
   media: string,
   data: Uint8Array,
-  options: { requestId?: string; precondition?: WorldStatePrecondition; source?: Partial<Pick<Take, "provider" | "model" | "jobId" | "prompt" | "params" | "cost" | "dispatchedAt">> } = {},
+  options: UploadedImageTakeOptions = {},
 ): Promise<Take> {
   return recordUploadedImageTake(store, sheetId, "sheet", media, data, options);
 }
@@ -333,9 +333,21 @@ export async function recordUploadedMainPhotoTake(
   sheetId: string,
   media: string,
   data: Uint8Array,
-  options: { requestId?: string; precondition?: WorldStatePrecondition; source?: Partial<Pick<Take, "provider" | "model" | "jobId" | "prompt" | "params" | "cost" | "dispatchedAt">> } = {},
+  options: UploadedImageTakeOptions = {},
 ): Promise<Take> {
   return recordUploadedImageTake(store, sheetId, "main-photo", media, data, options);
+}
+
+interface UploadedImageTakeOptions {
+  requestId?: string;
+  precondition?: WorldStatePrecondition;
+  source?: Partial<Pick<Take, "provider" | "model" | "jobId" | "prompt" | "params" | "cost" | "dispatchedAt">>;
+  /**
+   * The picture was copied from another world (issue 3146). Frozen into the take's provenance
+   * the way a borrowed reference is when it rides a generation (issue 960): the world's name, the
+   * image's name and when, and nothing a later change over there could contradict.
+   */
+  borrowed?: BorrowedImageOrigin;
 }
 
 export async function recordUploadedLookTake(
@@ -372,7 +384,7 @@ async function recordUploadedImageTake(
   kind: Take["kind"],
   media: string,
   data: Uint8Array,
-  options: { requestId?: string; precondition?: WorldStatePrecondition; source?: Partial<Pick<Take, "provider" | "model" | "jobId" | "prompt" | "params" | "cost" | "dispatchedAt">> },
+  options: UploadedImageTakeOptions,
   params: Record<string, unknown> = {},
 ): Promise<Take> {
   // A plain filename and nothing else. `basename` alone lets "." and ".." through — basename("..")
@@ -399,7 +411,13 @@ async function recordUploadedImageTake(
       uploadedFile: media,
       ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
     };
-    const take = { ...uploadedTake(store, sheetId, kind, media, metadata), ...options.source, params: metadata };
+    const uploaded = uploadedTake(store, sheetId, kind, media, metadata);
+    const take = {
+      ...uploaded,
+      ...options.source,
+      params: metadata,
+      ...(options.borrowed ? { provenance: { ...uploaded.provenance, borrowedImages: [options.borrowed] } } : {}),
+    };
     await writeTakeDirectory(store, sheetId, take, async (dir) => {
       // Staged and renamed like every other write here, so a half-written 40 MB sheet cannot be
       // mistaken for a finished one (SPEC-002 R-13).

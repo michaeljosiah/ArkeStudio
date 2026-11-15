@@ -188,6 +188,16 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
     assert.equal(offeredScene.shape["command"]!.safeParse({ kind: "edit-shot", shotId: "sh_12", change: { visualFacts: { onScreenCharacters: [], composition: "wide", confirmedAt: "2026-09-04T12:00:00.000Z" } } }).success, false);
     const staged = modelActionCatalogue().find((entry) => entry.kind === "pick-staged-reference")!.fields;
     assert.equal(staged.some((field) => field.name === "image" || field.name === "worldFile"), false);
+    // A dropped file's path is the host's to name, and a studio picture is chosen on screen (issue 3146).
+    for (const kind of ["import-main-photo-candidate", "import-main-photo", "import-character-sheet"] as const) {
+      const reference = ARKE_CLIENT_COMMAND_REGISTRY[kind];
+      assert.ok(reference.classification === "supported-by-arke");
+      const asked = { kind, worldId, sheetId: "maren-kest" };
+      assert.equal(reference.schema.safeParse({ ...asked, sourcePath: "dropped.png" }).success, true);
+      assert.equal(reference.conversationSchema.safeParse({ ...asked, sourcePath: "dropped.png" }).success, false, `${kind} names no host path from chat`);
+      assert.equal(reference.conversationSchema.safeParse({ ...asked, image: { slug: "the-undersong", path: "references/a.png" } }).success, false);
+      assert.equal(reference.conversationSchema.safeParse(asked).success, true);
+    }
     const clone = ARKE_CLIENT_COMMAND_REGISTRY["clone-voice"];
     assert.ok(clone.classification === "supported-by-arke");
     const frenchClone = { kind: "clone-voice", worldId, clipId: "chosen-clip", name: "Voice", description: "The speaker", consent: true, language: "fr" };

@@ -250,3 +250,12 @@
   .fy-look-import-sheet::backdrop { background: color-mix(in srgb, var(--background) 72%, transparent); }
   .fy-look-import-sheet .fy-page-sheet__grab { display: none; }
 }
+
+/* A picture used as the character sheet itself (issue 3146): the phone's sheet, and on a larger
+   window the same wide frame the reference picker opens in. */
+.fy-picture-sheet .fy-page-sheet__body { gap: 12px; }
+@media (min-width: 600px) {
+  .fy-page-sheet.fy-picture-sheet { inset: 0; margin: auto; width: 980px; max-width: calc(100vw - 48px); height: fit-content; max-height: calc(100dvh - 48px); border: 1px solid var(--border); border-radius: var(--radius-card); background: var(--card); box-shadow: var(--shadow-xl); }
+  .fy-picture-sheet::backdrop { background: color-mix(in srgb, var(--background) 72%, transparent); }
+  .fy-picture-sheet .fy-page-sheet__grab { display: none; }
+}

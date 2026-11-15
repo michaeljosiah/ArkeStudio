@@ -137,6 +137,7 @@ export {
 export {
   chooseAnchor, useMainPhotoAcceptance, clearMainPhotoAcceptance, importMainPhotoCandidate,
   importMainPhoto, importCharacterSheet, useCharacterSheetAcceptance, clearCharacterSheetAcceptance,
+  dropMainPhoto, dropMainPhotoCandidate, dropCharacterSheet,
   generateMainPhoto, generateCharacterSheet, acceptCharacterSheet, generateLocationView,
   acceptLocationView, importLocationViewCandidate, useLocationViewUpload, clearLocationViewUpload,
   generateCharacterLooks, acceptCharacterLook, makeChapterLook, acceptChapterLook,
@@ -144,6 +145,7 @@ export {
   attachCharacterLook, setStyleOverride, createProp, addPropState, importPropStateCandidate,
   acceptPropState,
 } from "./store/references.js";
+export type { StudioPicture } from "./store/references.js";
 export {
   setNarrator, setProviderPlan, requestVoiceCatalogue, requestCataloguePreview,
   stopCataloguePreview, designVoice, saveVoiceDesign, listProjectVoices, hearDesignedVoice,
