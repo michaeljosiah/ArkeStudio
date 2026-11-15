@@ -50,7 +50,7 @@ import { ConversationActionLifecycle, conversationActionDigest } from "../../src
 import { ARKE_CLIENT_COMMAND_REGISTRY, worldChatActionDescriptor } from "../../src/arke-actions/registry.js";
 import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
 import { readEditorRequest } from "../../src/productions/editor-requests.js";
-import { createChapter, createEpisode, createProduction, openChapter, setProductionStyle } from "../../src/productions/ops.js";
+import { createChapter, createEpisode, createProduction, openChapter, reorderScenes, setProductionStyle } from "../../src/productions/ops.js";
 import { addMusicTrack, editMusicTrack, ensureMusicSession, musicRecordFence, readMusicRecord } from "../../src/productions/music.js";
 import { bookAuthoringRefusal } from "../../src/world-chat/production-authoring.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
@@ -3817,6 +3817,74 @@ describe("turn-local scene action sequencing (#1417)", () => {
       assert.deepEqual(calls[0]!.target, { kind: "shot", id: inserted.id, coversShots: [inserted.id] });
       assert.deepEqual(scene(w).version, before.version + 2);
     }
+  });
+});
+
+// Issue 3149: a music video's hook and outro, one card each from one turn. Both cards cited the
+// production's scene list beside their own scene, and that list was fenced on every scene's
+// contents, so approving the hook staled the outro. Both also add shots, and both had numbered
+// them from the same highest shot, so the second card's shots no longer had the numbers it showed.
+describe("cards one turn prepares for different scenes (issue 3149)", () => {
+  const context = { kind: "production" as const, productionId: PRODUCTION };
+  const sceneOf = (w: Awaited<ReturnType<typeof setup>>, id: string) => w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.scenes.find(s => s.id === id)!;
+  async function hookAndOutro(w: Awaited<ReturnType<typeof setup>>) {
+    const list = currentReceipt(w.store, "scenes", PRODUCTION);
+    const hook = currentReceipt(w.store, "scenes", `${PRODUCTION}:sc_02`), outro = currentReceipt(w.store, "scenes", `${PRODUCTION}:sc_06`);
+    const { id: _id, number: _number, visualFacts: _facts, ...shot } = orderedShots(sceneOf(w, "sc_02"))[0]!;
+    const last = (sceneId: string) => orderedShots(sceneOf(w, sceneId)).at(-1)!.id;
+    const add = (sceneId: string, receipt: WorldChatCheckReceipt, ref: string, after: string, title: string) => ModelWorldChatActionSchema.parse({
+      kind: "production-scene-command", productionId: PRODUCTION, sceneId, ref, command: { kind: "insert-shot", at: { after }, shot: { ...shot, title } },
+      checkReceiptIds: [list.id, receipt.id] });
+    const input = turn(w.conversationId, context, { receipts: [list, hook, outro], actions: [
+      ModelWorldChatActionSchema.parse({ kind: "production-scene-command", productionId: PRODUCTION, sceneId: "sc_02",
+        command: { kind: "edit-scene", synopsis: "Her hand comes in." }, checkReceiptIds: [list.id, hook.id] }),
+      add("sc_02", hook, "palm", last("sc_02"), "Flat palm"), add("sc_02", hook, "shoulders", "ref:palm", "Shoulders"),
+      add("sc_06", outro, "rail", last("sc_06"), "The rail"), add("sc_06", outro, "black", "ref:rail", "Black"),
+    ] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, input);
+    assert.equal(prepared.length, 2, "one card for each scene");
+    await appendTurn(w.log, input, prepared); await bindAll(w.lifecycle, prepared);
+    const cards = (await loaded(w.log)).actions;
+    const plans = prepared.map(item => {
+      if (item.payload.kind !== "world-chat-production-scene-command" || !item.payload.scenePlan) throw new Error("wrong action kind");
+      return item.payload.scenePlan;
+    });
+    return { cards, plans };
+  }
+  for (const outroFirst of [false, true]) it(`approves either card after the other${outroFirst ? ", out of turn order" : ""}`, async () => {
+    const w = await setup(context);
+    const { cards, plans } = await hookAndOutro(w);
+    const added = plans.map(plan => orderedShots(plan.after).filter(shot => !orderedShots(plan.before).some(old => old.id === shot.id)).map(shot => shot.id));
+    assert.equal(new Set(added.flat()).size, 4, "the two cards number their new shots apart");
+    for (const index of outroFirst ? [1, 0] : [0, 1]) assert.equal((await decide(w.lifecycle, w.log, cards[index]!)).status, "completed");
+    assert.deepEqual(sceneOf(w, "sc_02"), plans[0]!.after, "the hook lands as its card showed it");
+    assert.deepEqual(sceneOf(w, "sc_06"), plans[1]!.after, "the outro lands as its card showed it");
+    const ids = w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.scenes.flatMap(s => orderedShots(s).map(shot => shot.id));
+    assert.equal(new Set(ids).size, ids.length, "no shot number is used twice");
+  });
+  it("still stales a card when its own scene changes", async () => {
+    const w = await setup(context);
+    const { cards } = await hookAndOutro(w);
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed");
+    const production = w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!;
+    await applySceneCommand(w.store, { productionId: PRODUCTION, sceneId: "sc_06", sceneFile: production.sceneFiles["sc_06"]!,
+      baseVersion: sceneOf(w, "sc_06").version, command: { kind: "edit-scene", synopsis: "A later human edit." } });
+    const edited = structuredClone(sceneOf(w, "sc_06"));
+    assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).status, "stale");
+    assert.deepEqual(sceneOf(w, "sc_06"), edited);
+  });
+  it("still stales a card that read the scene list when the scenes are put in another order", async () => {
+    const w = await setup(context);
+    // Every scene takes an explicit place first, so the reorder below leaves the outro's own record alone.
+    await reorderScenes(w.store, PRODUCTION, ["sc_02", "sc_04", "sc_06"]);
+    const { cards } = await hookAndOutro(w);
+    const outro = structuredClone(sceneOf(w, "sc_06"));
+    await reorderScenes(w.store, PRODUCTION, ["sc_04", "sc_02", "sc_06"]);
+    assert.deepEqual(sceneOf(w, "sc_06"), outro);
+    const result = await decide(w.lifecycle, w.log, cards[1]!);
+    assert.equal(result.status, "stale");
+    assert.match((await loaded(w.log)).actions.find(card => card.actionId === cards[1]!.actionId)!.statusDetail ?? "", /scenes changed/);
+    assert.deepEqual(sceneOf(w, "sc_06"), outro);
   });
 });
 
