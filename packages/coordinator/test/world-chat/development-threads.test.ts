@@ -28,7 +28,7 @@ import {
   storyFence,
 } from "../../src/world-chat/target-reads.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
-import { wrapUp } from "../../src/world-chat/wrapup.js";
+import { savePoint, wrapUp, WrapUpError } from "../../src/world-chat/wrapup.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { WorldStore } from "../../src/world/store.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -132,6 +132,16 @@ async function withCandidates(log: WorldChatStore, candidates: WorldChangeCandid
   );
   const { events } = await log.read();
   return events[events.length - 1]!.seq;
+}
+
+/** A settled new shot at the end of one scene of the fixture's production, in no group. */
+function shotPoint(sceneId: string, title: string): WorldChangeCandidate {
+  return candidate({
+    classification: "development.shot",
+    title,
+    target: { kind: "shot", productionId: "saltlight", sceneId },
+    draft: { title, description: `${title}, held.` },
+  } as Partial<WorldChangeCandidate>);
 }
 
 /** A valid graph whose stable identities cannot be mistaken for deterministic projections. */
@@ -972,6 +982,64 @@ describe("two settled items touching one file (issue 909)", () => {
     assert.deepEqual(shots.slice(before.length).map((shot) => shot.title), titles, "every shot, in the order they were said");
     assert.equal(new Set(shots.map((shot) => shot.id)).size, shots.length, "each with an id of its own");
     assert.equal(accepted(await w.gate.accept(proposal.id)), "accepted", "and the gate takes it whole");
+  });
+
+  /*
+   * The same five shots, settled one by one rather than as a group (issue 3087). Staged a proposal
+   * each, all against one version of the scene: accepting the first left four stale.
+   */
+  it("writes ungrouped shots for one scene as one change too, in the order they were said", async () => {
+    const w = await world();
+    const scene = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!;
+    const before = orderedShots(scene).map((shot) => shot.id);
+    const titles = ["Black water", "Gold on gold", "The far bank", "The hold"];
+    const seq = await withCandidates(w.log, titles.map((title) => shotPoint(scene.id, title)));
+    const result = await wrapUp({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId: "req-3087",
+      expectedConversationSeq: seq,
+      now: NOW,
+    });
+    assert.equal(result.proposalIds.length, 1, "one change, not four against one version");
+    const proposal = (await w.gate.listOpen()).find((p) => p.id === result.proposalIds[0])!;
+    assert.equal(proposal.worldChatOrigins?.length, 4, "each point says it became this one");
+    const shots = orderedShots(await readStagedGraphScene(w.dir, proposal));
+    assert.deepEqual(shots.slice(0, before.length).map((shot) => shot.id), before, "the scene keeps what it had");
+    assert.deepEqual(shots.slice(before.length).map((shot) => shot.title), titles);
+    assert.equal(accepted(await w.gate.accept(proposal.id)), "accepted");
+  });
+
+  it("saves the shots one card carries as one proposal, and refuses when one has changed since", async () => {
+    const w = await world();
+    const scene = w.store.getBundle().productions.find((p) => p.meta.id === "saltlight")!.scenes[0]!;
+    const points = ["Black water", "Gold on gold", "The hold"].map((title) => shotPoint(scene.id, title));
+    await withCandidates(w.log, points);
+    const shown = points.map((point) => ({ candidateId: point.id, revision: point.revision }));
+    const save = (requestId: string, together: typeof shown) => savePoint({
+      store: w.store,
+      gate: w.gate,
+      conversationId: w.conversationId,
+      requestId,
+      candidateId: points[0]!.id,
+      expectedCandidateRevision: points[0]!.revision,
+      together,
+      now: NOW,
+    });
+
+    await assert.rejects(
+      () => save("save-3087-stale", shown.map((one, index) => index === 2 ? { ...one, revision: one.revision + 1 } : one)),
+      (err: unknown) => err instanceof WrapUpError && err.reason === "stale",
+    );
+    assert.equal((await w.gate.listOpen()).filter((p) => p.kind === "scene-edit").length, 0, "nothing was staged");
+
+    const result = await save("save-3087", shown);
+    assert.equal(result.proposalIds.length, 1);
+    assert.deepEqual(result.candidateIds, points.map((point) => point.id));
+    const proposal = (await w.gate.listOpen()).find((p) => p.id === result.proposalIds[0])!;
+    const shots = orderedShots(await readStagedGraphScene(w.dir, proposal));
+    assert.deepEqual(shots.slice(-3).map((shot) => shot.title), ["Black water", "Gold on gold", "The hold"]);
   });
 
   it("names both items when two of them still cannot be written together, and shows no path", async () => {
