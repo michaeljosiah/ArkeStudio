@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { z } from "zod";
 import {
   newId,
+  TURN_RESULT_BOUNDS,
   WORLD_CHAT_SHAPE_EXAMPLES,
   WorldChatPreparedActionSchema,
   type CandidateChecks,
@@ -307,6 +308,46 @@ describe("parsing a turn result", () => {
       const parsed = parseTurnResult(prose);
       assert.equal(parsed.ok === false && parsed.problems[0]!.code, "not-json", prose);
     }
+  });
+
+  it("shows the plan written before a fenced result whose reply is empty (issue 3082)", async () => {
+    // The answer as it came back from a scene's Builder Chat: the storyboard and a question for
+    // the author as prose, then the notes in a fenced object with an empty reply. The bubble was
+    // blank and the question was lost.
+    const input = await baseInput();
+    const prose = [
+      "Four shots, cut on the bars of the song.",
+      "1. Wide on the lagoon as the intro opens (0:00–0:04). The Lady stays wide here so the place reads before she does.\n2. Closer as the first line lands (0:04–0:08).",
+      "3. and 4. Her turn to the water, then the reflection (0:08–0:16).",
+      "Shall shots 3 and 4 be one take, or two?",
+    ].join("\n\n");
+    const result = {
+      reply: "",
+      candidateOperations: [{ op: "create", temporaryId: "t1", candidate: { ...canonCreateDraft(input.message), settledness: "tentative" } }],
+      groupOperations: [],
+    };
+    const outcome = validateTurnResult({ ...input, raw: `${prose}\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\`` });
+    assert.equal(outcome.ok, true);
+    if (!outcome.ok) return;
+    assert.equal(outcome.turn.reply, prose, "the prose, trimmed, without the fence");
+    assert.equal(outcome.turn.candidates.length, 1, "the notes land beside it as before");
+  });
+
+  it("takes prose from either side of the object only when its own reply is empty", () => {
+    const after = parseTurnResult(`Here is the plan.\n${turn({ reply: "  " })}\n\nShall I go on?`);
+    assert.equal(after.ok && after.value.reply, "Here is the plan.\n\nShall I go on?");
+    const own = parseTurnResult(`Here is the plan.\n${turn({ reply: "Four shots." })}\n\nShall I go on?`);
+    assert.equal(own.ok && own.value.reply, "Four shots.", "a reply of its own is never replaced");
+    for (const bare of [turn({ reply: "" }), "```json\n" + turn({ reply: "" }) + "\n```"]) {
+      const parsed = parseTurnResult(bare);
+      assert.equal(parsed.ok && parsed.value.reply, "", "no prose, nothing to show");
+    }
+  });
+
+  it("cuts prose longer than a reply at the bound rather than refusing the result", () => {
+    const parsed = parseTurnResult(`${"word ".repeat(TURN_RESULT_BOUNDS.reply)}\n${turn({ reply: "" })}`);
+    assert.equal(parsed.ok, true);
+    assert.equal(parsed.ok && parsed.value.reply.length, TURN_RESULT_BOUNDS.reply);
   });
 
   it("refuses unrecognised fields rather than ignoring them", () => {
