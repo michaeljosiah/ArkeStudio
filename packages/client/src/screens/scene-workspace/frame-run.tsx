@@ -7,7 +7,6 @@ import {
   isReplayableFinalization,
   lookHoldingScope,
   orderedShots,
-  PROVIDERS,
   resolveCast,
   sceneImageOutput,
   ulid,
@@ -25,6 +24,7 @@ import {
 } from "@arke-studio/contracts";
 import { productionModel, resolveModel, strandReason, usableModels } from "../../components/dispatch-bar.js";
 import { X } from "../../components/icons.js";
+import { modelLabel } from "../../components/models-card.js";
 import { characterPortraitPath, locationPortraitPath, Portrait } from "../../components/portrait.js";
 import { lookTileLabel } from "../character-reference.js";
 import { Button } from "../../components/ui.js";
@@ -173,8 +173,17 @@ function GenerateFramesDialogOpen({
   const resolved = resolveModel(state, "image", undefined, remembered);
   const allModels = state?.app.manifest?.models ?? [];
   const usable = usableModels(state, "image");
+  // The production's model opens the dialog wherever it can make this shape. Where the model it
+  // inherits from Settings cannot, the same model through another provider comes before any
+  // other model: OpenAI's GPT Image 2 makes no 9:16, and opening on whichever model happened to
+  // be listed first put a 9:16 production on Nano Banana Pro while fal's GPT Image 2 could make
+  // the frames (issue 3107).
+  const deliverableInstead = (model: ManifestModel): ManifestModel | null => {
+    const can = usable.filter((candidate) => candidate.id !== model.id && aspectSupport(candidate, aspect).ok);
+    return can.find((candidate) => candidate.displayName === model.displayName) ?? can[0] ?? null;
+  };
   const aspectDefault = remembered === undefined && resolved.stranded === null && resolved.model !== null && !aspectSupport(resolved.model, aspect).ok
-    ? usable.find((candidate) => aspectSupport(candidate, aspect).ok) ?? null
+    ? deliverableInstead(resolved.model)
     : null;
   const [modelId, setModelId] = useState(remembered ?? aspectDefault?.id ?? resolved.model?.id ?? "");
   const knownModel = allModels.find((candidate) => candidate.id === modelId && candidate.capability === "image") ?? null;
@@ -311,14 +320,8 @@ function GenerateFramesDialogOpen({
     (propIssues.length === 0 || propsAcknowledged);
   const blockedReason = matchingOptions ? quote.blockedReason : deliveryReason;
   const aspectVerdict = knownModel === null ? null : aspectSupport(knownModel, aspect);
-  const compatibleAlternative = aspectVerdict?.ok === false
-    ? usable.find((candidate) => candidate.id !== modelId && aspectSupport(candidate, aspect).ok) ?? null
-    : null;
-  const alternativeName = compatibleAlternative === null
-    ? null
-    : usable.some((candidate) => candidate.id !== compatibleAlternative.id && candidate.displayName === compatibleAlternative.displayName)
-      ? `${compatibleAlternative.displayName} via ${PROVIDERS[compatibleAlternative.provider].displayName}`
-      : compatibleAlternative.displayName;
+  const compatibleAlternative = aspectVerdict?.ok === false && knownModel !== null ? deliverableInstead(knownModel) : null;
+  const alternativeName = compatibleAlternative === null ? null : modelLabel(compatibleAlternative);
   const displayedBlockedReason = blockedReason !== null && aspectVerdict?.ok === false && blockedReason.includes("cannot deliver")
     ? `${blockedReason}. ${alternativeName === null
       ? `No available image model supports ${aspect}; turn one on in AI models.`
@@ -457,16 +460,18 @@ function GenerateFramesDialogOpen({
                   onKeyDown={(event) => moveRadio(event, (at) => setModelId(modelChoices[at]!.id))}
                   onClick={() => setModelId(choice.id)}
                 >
-                  {candidate?.displayName ?? choice.id}{candidateUnavailable ? " · unavailable" : ""}
+                  {candidate === null ? choice.id : modelLabel(candidate)}{candidateUnavailable ? " · unavailable" : ""}
+                  {/* A route that cannot make this shape says so rather than showing the size it
+                      would make in another shape (issue 3107). */}
                   <span>{candidate === null
                     ? "not in the catalogue"
-                    : `${output!.width}×${output!.height} · ${candidate.accepts.referenceImages} ref${candidate.accepts.referenceImages === 1 ? "" : "s"}`}</span>
+                    : `${aspectSupport(candidate, aspect).ok ? `${output!.width}×${output!.height}` : `no ${aspect}`} · ${candidate.accepts.referenceImages} ref${candidate.accepts.referenceImages === 1 ? "" : "s"}`}</span>
                   {candidate !== null && candidateUnavailable && <small className="fy-swgen__unavailable">{strandReason(state, candidate)}</small>}
                 </button>
               );
             })}
           </div>
-          {unavailable ? <p className="fy-swgen__hint">This production still names {knownModel!.displayName}; it has not been replaced by another model.</p> : null}
+          {unavailable ? <p className="fy-swgen__hint">This production still names {modelLabel(knownModel!)}; it has not been replaced by another model.</p> : null}
         </section>
 
         {references.length === 0 ? null : (
