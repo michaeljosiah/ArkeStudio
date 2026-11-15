@@ -1962,7 +1962,7 @@ export function ConversationPoints({
   return (
     <div className="fy-panel">
       {groups.map((group) => (
-        <div key={group.subject} className="fy-panel__group">
+        <div key={group.key} className="fy-panel__group">
           <div className="fy-panel__grouphead">
             <span className="fy-panel__subject">{group.subject}</span>
             <span className="fy-mono">{group.kind}</span>
@@ -2021,16 +2021,20 @@ export function ConversationPoints({
   );
 }
 
-/** Points under the thing each is about; questions are pulled out and listed on their own. */
-export function groupPointsBySubject<P extends { kind: string; subject: string; subjectKind: string }>(
+/**
+ * Points under the thing each is about; questions are pulled out and listed on their own. Grouped
+ * by what the thing is, not what it is called: two scenes can share a title (issue 3093).
+ */
+export function groupPointsBySubject<P extends { kind: string; subject: string; subjectKey?: string; subjectKind: string }>(
   points: readonly P[],
-): Array<{ subject: string; kind: string; items: P[] }> {
-  const groups: Array<{ subject: string; kind: string; items: P[] }> = [];
+): Array<{ key: string; subject: string; kind: string; items: P[] }> {
+  const groups: Array<{ key: string; subject: string; kind: string; items: P[] }> = [];
   for (const point of points) {
     if (point.kind === "question") continue;
-    const existing = groups.find((g) => g.subject === point.subject);
+    const key = point.subjectKey ?? point.subject;
+    const existing = groups.find((g) => g.key === key);
     if (existing) existing.items.push(point);
-    else groups.push({ subject: point.subject, kind: point.subjectKind, items: [point] });
+    else groups.push({ key, subject: point.subject, kind: point.subjectKind, items: [point] });
   }
   return groups;
 }

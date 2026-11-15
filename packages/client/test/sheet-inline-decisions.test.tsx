@@ -577,6 +577,19 @@ describe("proposal reading order (#1982)", () => {
   });
 });
 
+it("names a conversation's proposal as Arke's, never by the conversation id (issue 3093)", async () => {
+  const proposal = staged(SHEET_PATH, "sheet-edit");
+  proposal.proposal.source = "world-chat:cv_01M7E7GACB3WT7WQX2X969J7AB";
+  __setStateForTest(stateWith([proposal]));
+  __setBridgeForTest(bridge([]));
+  const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  try {
+    await act(async () => root.render(<ConnectedProposalPanel staged={proposal} />));
+    assert.equal(container.querySelector(".dom-proposal__source")?.textContent, "Arke");
+    assert.doesNotMatch(container.textContent ?? "", /cv_01M7/);
+  } finally { await unmount(root, container); }
+});
+
 for (const ready of [false, true]) for (const route of ["cast/new", "locations/new", "factions/new"]) {
   it(`sends the displayed sketch choice from ${route} with harness ready=${ready} (#2811)`, async () => {
     const state = stateWith([]);

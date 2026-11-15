@@ -112,11 +112,37 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
   if (/^productions\/[a-z0-9-]+\/scenes\/[^/]+\.json$/.test(path)) {
     try {
       const scene = SceneRecordSchema.parse(JSON.parse(content));
-      const fields = new Map<string, string>([["Scene JSON", JSON.stringify(scene, null, 2)]]);
-      for (const shot of orderedShots(scene)) {
-        if (shot.visualFacts) fields.set(`Shot ${shot.id} · Authored visual facts`, JSON.stringify(shot.visualFacts, null, 2));
-        if (shot.promptOverride !== undefined) fields.set(`Shot ${shot.id} · Prompt override`, shot.promptOverride.text);
+      const shots = orderedShots(scene);
+      /*
+       * Read as the storyboard reads it (issue 3093): the shots in order by number, title and
+       * length, then each shot's own words. The whole scene as JSON was the only field, so adding
+       * one shot asked the person to compare two walls of the file to find it.
+       */
+      const fields = new Map<string, string>([
+        ["Title", scene.title],
+        ...(scene.synopsis ? [["Synopsis", scene.synopsis] as [string, string]] : []),
+        ["Shots", shots.length === 0 ? "None" : shots.map((shot) => `${shot.number}. ${shot.title}${shot.durationSec === undefined ? "" : ` · ${shot.durationSec}s`}`).join("\n")],
+      ]);
+      for (const shot of shots) {
+        const { id: _id, number: _number, title: _title, description, durationSec: _length, visualFacts, promptOverride, camera, intent, notes, ...more } = shot;
+        fields.set(`Shot ${shot.number} · ${shot.title}`, [description.trim() || "No description",
+          ...(camera ? [`Camera: ${camera}`] : []), ...(intent ? [`Intent: ${intent}`] : []), ...(notes ? [`Notes: ${notes}`] : []),
+          ...Object.entries(more).map(([key, value]) => `${key}: ${JSON.stringify(value)}`)].join("\n"));
+        if (visualFacts) fields.set(`Shot ${shot.id} · Authored visual facts`, JSON.stringify(visualFacts, null, 2));
+        if (promptOverride !== undefined) {
+          fields.set(`Shot ${shot.id} · Prompt override`, promptOverride.text);
+          // What the words are for and which sheets they were written against change behaviour
+          // too (`promptFor`, `overrideStaleAgainst`): an edit to these alone must still be seen.
+          const { text: _text, ...settings } = promptOverride;
+          fields.set(`Shot ${shot.id} · Prompt override settings`, JSON.stringify(settings, null, 2));
+        }
       }
+      // The rest of the file, so a change the fields above do not show is still seen. The title,
+      // synopsis, shots and their order are shown above, and the version is in the kind; a field
+      // that did not change is dropped from the review, so this appears only when something else moved.
+      const { title: _sceneTitle, synopsis: _synopsis, version: _version, ...rest } = scene;
+      const other = "flow" in rest ? { ...rest, flow: { storyboardGroups: rest.flow.storyboardGroups } } : { ...rest, shots: undefined };
+      fields.set("Other scene details", JSON.stringify(other, null, 2));
       return { label: scene.title, kind: `scene · v${scene.version}`, fields };
     } catch { return null; }
   }

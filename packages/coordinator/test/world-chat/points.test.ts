@@ -179,3 +179,33 @@ describe("media points", () => {
     assert.equal(point?.subjectKind, "shot · sh_12");
   });
 });
+
+describe("what a point is about, by name (issue 3093)", () => {
+  const titles = {
+    productionTitle: (id: string) => id === "saltlight" ? "Saltlight" : null,
+    sceneTitle: (productionId: string, sceneId: string) => productionId === "saltlight" && sceneId === "sc_04" ? "The verse rises" : null,
+  };
+  it("heads a new shot with its scene's title, and an overview with its production's", () => {
+    const shot = lookChange({ classification: "development.shot", target: { kind: "shot", productionId: "saltlight", sceneId: "sc_04" },
+      draft: { title: "The hold", description: "Nothing moves but the water." } } as Partial<WorldChangeCandidate>);
+    const overview = lookChange({ classification: "development.overview", target: { kind: "production", productionId: "saltlight" },
+      draft: { logline: "A bell rings under the sea." } } as Partial<WorldChangeCandidate>);
+    const [shotPoint, overviewPoint] = projectPoints([shot, overview], titles);
+    assert.equal(shotPoint?.subject, "The verse rises");
+    assert.equal(overviewPoint?.subject, "Saltlight");
+  });
+  it("keeps two scenes with one title apart by what they are", () => {
+    const shot = (sceneId: string) => lookChange({ classification: "development.shot", target: { kind: "shot", productionId: "saltlight", sceneId },
+      draft: { title: "The hold", description: "Nothing moves." } } as Partial<WorldChangeCandidate>);
+    const [one, two] = projectPoints([shot("sc_04"), shot("sc_05")], { ...titles, sceneTitle: () => "Intro" });
+    assert.equal(one?.subject, "Intro");
+    assert.equal(two?.subject, "Intro");
+    assert.equal(one?.subjectKey, "scene:saltlight/sc_04");
+    assert.equal(two?.subjectKey, "scene:saltlight/sc_05");
+  });
+  it("keeps the id when the scene is gone", () => {
+    const shot = lookChange({ classification: "development.shot", target: { kind: "shot", productionId: "saltlight", sceneId: "sc_99" },
+      draft: { title: "The hold", description: "Nothing moves." } } as Partial<WorldChangeCandidate>);
+    assert.equal(projectPoints([shot], titles)[0]?.subject, "sc_99");
+  });
+});

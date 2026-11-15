@@ -1856,6 +1856,11 @@ export const WorldChatPointSchema = z
     kind: z.enum(["point", "question"]),
     /** The heading it displays under — the thing it is about. */
     subject: z.string().min(1).max(160),
+    /**
+     * Which thing that is, when a name could be shared: two scenes may have one title, and their
+     * points must not group under one heading (issue 3093). Absent, the subject is its own key.
+     */
+    subjectKey: z.string().min(1).max(200).optional(),
     /** "sheet · v4", "new rule" — what the subject is, in the panel's own words. */
     subjectKind: z.string().max(80),
     /** One sentence, as the panel renders it. */
