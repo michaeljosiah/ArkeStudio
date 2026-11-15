@@ -667,7 +667,9 @@ export function failureLine(failure: { status: string; detail?: string }): strin
   if (rejected) {
     // The detail may end on its own full stop (issue 1403 found "fences.." on screen).
     const why = failure.detail!.slice("rejected: ".length).trim().replace(/[.!?]+$/, "");
-    return `The studio answered and the answer was refused — ${why}. Your message is still here; asking a different way usually gets past it.`;
+    // Said as Arke's answer, not the studio's refusal (issue 3112): the person asked Arke, and
+    // "the studio answered and the answer was refused" named machinery they never see.
+    return `Arke's answer couldn't be used: ${why}. Your message is still here; try again, or ask a different way.`;
   }
   const opening =
     failure.status === "timeout"

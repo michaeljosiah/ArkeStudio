@@ -33,15 +33,15 @@ describe("a turn that produced nothing says which kind of nothing", () => {
     assert.doesNotMatch(line, /did not go through/);
   });
 
-  it("a refused answer says what was refused, and does not promise a retry will help", () => {
+  it("a refused answer says what was refused, as Arke's answer (issue 3112)", () => {
     const line = failureLine({
       status: "failed",
-      detail: "rejected: A quotation was not found in the entity it cites.",
+      detail: "rejected: it cited something it could not point to.",
     });
-    assert.match(line, /answered and the answer was refused/);
-    assert.match(line, /A quotation was not found in the entity it cites\./, "the gate's own words");
+    assert.match(line, /^Arke's answer couldn't be used: it cited something it could not point to\./);
+    assert.doesNotMatch(line, /studio answered/, "machinery the person never sees");
     assert.doesNotMatch(line, /Nothing was lost/, "that is the other event");
-    assert.match(line, /asking a different way/, "the remedy that actually works");
+    assert.match(line, /try again, or ask a different way/, "a retry with the same words got past both refusals seen");
   });
 
   it("ends a refusal on one full stop, whatever the detail ended on (issue 1403)", () => {
