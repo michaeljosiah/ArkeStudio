@@ -78,6 +78,8 @@ export function PlansPanel({
       pass.askedSec === undefined ? null : `${pass.askedSec.toFixed(1)}s`,
       usd(pass.estimatedMicroUsd),
       carries?.frame === undefined ? null : `frame: shot ${carries.frame.number}`,
+      // Issue 3185: a clip made from references by choice says so, where a frame would be named.
+      carries?.fromReferences === true ? "from references" : null,
       carries?.place === undefined ? null
         : carries.place.rides ? `${carries.place.name}: plate`
         : `${carries.place.name}: plate not sent${carries.place.reason === undefined ? "" : ` · ${carries.place.reason}`}`,

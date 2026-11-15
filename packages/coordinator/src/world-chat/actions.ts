@@ -2197,6 +2197,11 @@ function shownValue(value: unknown): string | null {
   return JSON.stringify(value);
 }
 
+/** A production's clip source as its card reads it (issue 3185): absent has always meant frames. */
+function clipsWords(clipsFrom: "frames" | "references" | undefined): string {
+  return clipsFrom === "references" ? "From references" : "From frames";
+}
+
 function diffFields(
   before: Record<string, unknown>,
   after: Record<string, unknown>,
@@ -3134,8 +3139,10 @@ async function sharedResourceProjection(
         status: production.meta.status,
         aspect: production.meta.aspect ?? null,
         frameRate: productionFrameRate(production.meta),
+        clipsFrom: clipsWords(production.meta.clipsFrom),
       };
-      const after = { ...before, ...payload.action.changes };
+      const after = { ...before, ...payload.action.changes,
+        ...(payload.action.changes.clipsFrom !== undefined ? { clipsFrom: clipsWords(payload.action.changes.clipsFrom) } : {}) };
       if (
         payload.action.changes.seriesId !== undefined &&
         payload.action.changes.seriesId !== null &&
@@ -3149,6 +3156,7 @@ async function sharedResourceProjection(
         status: "Status",
         aspect: "Aspect",
         frameRate: "Frame rate",
+        clipsFrom: "Clips",
       });
       if (fields.length === 0) throw new Error("The production metadata already has those values.");
       shown = {

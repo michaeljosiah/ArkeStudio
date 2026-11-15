@@ -565,6 +565,22 @@ export function ShotFields({
           checked={shot.continuity?.continuesPrevious ?? false}
           onChange={(event) => continuitySet({ continuesPrevious: event.target.checked || undefined })}
         />
+        {/* Issue 3185: this shot's clip from a frame or from the cast and place pictures, where it
+            differs from the production. The first option follows the production and says how. */}
+        <div className="fy-shot__row">
+          <span className="fy-shot__rowlabel">clip</span>
+          <Select
+            label="Clip from"
+            className="fy-shot__select"
+            value={shot.continuity?.clipsFrom ?? ""}
+            disabled={disabled}
+            onChange={(event) => continuitySet({ clipsFrom: event.target.value === "frames" || event.target.value === "references" ? event.target.value : undefined })}
+          >
+            <option value="">{production.meta.clipsFrom === "references" ? "Production · from references" : "Production · from frames"}</option>
+            <option value="frames">From frames</option>
+            <option value="references">From references</option>
+          </Select>
+        </div>
         <div className="fy-shot__row">
           <span className="fy-shot__rowlabel">keep out</span>
           <input

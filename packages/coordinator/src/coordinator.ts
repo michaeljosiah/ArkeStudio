@@ -10214,6 +10214,7 @@ export class Coordinator {
               ...(production.meta.musicPolicy !== undefined
                 ? { musicPolicy: production.meta.musicPolicy }
                 : {}),
+              ...(production.meta.clipsFrom !== undefined ? { clipsFrom: production.meta.clipsFrom } : {}),
               failureModes: production.meta.failureModes,
             },
             sheets: bundle.sheets,
@@ -18344,7 +18345,8 @@ export class Coordinator {
           : await resolveCastVoices(store, production, scene, id, acknowledgeShotIds, route?.local === true, { acknowledge: acknowledgeShotIds !== undefined, at });
         const audioDesign = await audioDesignFor(store, production.meta.id);
         const plan = planScene({ timingProduction: production, world: bundle.meta, artDirection: bundle.artDirection, productionId: action.productionId,
-          production: { styleOverride: production.meta.styleOverride, musicPolicy: production.meta.musicPolicy, failureModes: production.meta.failureModes },
+          production: { styleOverride: production.meta.styleOverride, musicPolicy: production.meta.musicPolicy, failureModes: production.meta.failureModes,
+            clipsFrom: production.meta.clipsFrom },
           sheets: bundle.sheets, kits: bundle.referenceKits, props: bundle.props, scene, selections: production.selections, model, audioDesign,
           artifacts: bundle.artifacts, takes: production.takes, aspect: production.meta.aspect, resolution: action.resolution,
           audioReferencesDisabled: disabled, performanceReferences: cast.references, masterReferences: [] }, action.mode);

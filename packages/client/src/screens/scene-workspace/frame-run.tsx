@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject 
 import { useCompact, usePhone } from "../../lib/media-query.js";
 import {
   aspectSupport,
+  clipFromReferences,
   formatMicroUsd,
   CODEX_IMAGE_PLAN_LABEL,
   isReplayableFinalization,
@@ -167,6 +168,12 @@ function GenerateFramesDialogOpen({
     ? sceneShots.filter((shot) => !playsAsBeats || beatPictureShotId(sceneShots, shot.id) === shot.id)
     : sceneShots.filter((shot) => shot.id === shotId);
   const missing = shots.filter((shot) => !shotHasFrame(production, world.artifacts, shot.id));
+  // What the clips these frames are for will be made from (issue 3185): a frame drawn for a clip
+  // made from references is a storyboard picture, never the clip's opening.
+  const fromReferences = shots.filter((shot) => clipFromReferences(production.meta, shot)).length;
+  const clipsLabel = fromReferences === 0 ? "clips from frames"
+    : fromReferences === shots.length ? "clips from references"
+    : `${fromReferences} of ${shots.length} clips from references`;
   const [mode, setMode] = useState<"per-shot" | "board">(shotId === undefined ? "board" : "per-shot");
   const [scope, setScope] = useState<"missing" | "all">(shotId === undefined && missing.length > 0 ? "missing" : "all");
   const remembered = productionModel(state, production.meta.id, "image");
@@ -390,6 +397,7 @@ function GenerateFramesDialogOpen({
         <header className="fy-swgen__head">
           <h2 id={titleId}>Generate {displayedCount} frame{displayedCount === 1 ? "" : "s"}</h2>
           <span className="fy-swgen__scene">scene {scene.number}</span>
+          <span className="fy-swgen__scene" data-testid="clips-from">{clipsLabel}</span>
           {compact && <button type="button" aria-label="Close" onClick={onClose}><X size={20} /></button>}
         </header>
 

@@ -1542,6 +1542,8 @@ export interface ScenePlanInput {
     styleOverride?: string;
     musicPolicy?: "environmental-only";
     failureModes?: readonly string[];
+    /** What its clips are made from (issue 3185); absent is frames. A shot may differ. */
+    clipsFrom?: "frames" | "references";
   };
   /**
    * The production's audio design, which is where the score negative comes from (R-11). Absent
@@ -1605,6 +1607,8 @@ export interface ShotDispatchPlan {
    * and the warnings name them.
    */
   continuation?: ContinuationPlan;
+  /** The clip is made from references by choice (issue 3185): no frame was even looked for. */
+  fromReferences?: true;
 }
 
 export interface ScenePlan {
@@ -1629,6 +1633,11 @@ export interface ScenePlan {
     negatives: string | null;
     /** The prop states the pass's shots cite, distinct by prop and state (issue 536). */
     propStates: ShotPropResolution[];
+    /**
+     * The pass's first shot makes its clip from references (issue 3185), so the pass opens on
+     * nothing: the compiler does not chain it behind the previous pass's last frame.
+     */
+    fromReferences?: true;
   }>;
   pack: PackResult;
   /**
@@ -1724,6 +1733,27 @@ function budgetFor(
  */
 export const START_FRAME_PREAMBLE =
   "The attached image is this clip's exact first frame. Continue the motion from it.";
+
+/**
+ * The line a clip made from references adds beneath the numbered pictures (issue 3185). A
+ * reference route reads a portrait or a place as loosely as it likes, and a model handed a
+ * picture of a room with nobody in it has opened the clip on that room. The words say what the
+ * pictures are for, so the model composes the shot rather than animating one of them.
+ */
+export const REFERENCES_NOT_FRAMES_LINE =
+  "These pictures show who is in the clip, what they wear and where it happens. None is a frame of the clip: compose each shot from the words.";
+
+/**
+ * Whether a shot's clip is made from its references rather than a frame (issue 3185): the
+ * shot's own choice, else its production's, else frames, which is what every production made
+ * before the choice existed did.
+ */
+export function clipFromReferences(
+  production: { clipsFrom?: "frames" | "references" } | undefined,
+  shot: Pick<Shot, "continuity">,
+): boolean {
+  return (shot.continuity?.clipsFrom ?? production?.clipsFrom ?? "frames") === "references";
+}
 
 /**
  * The line a continuation replaces the binding preamble with (SPEC-019 R-50).
@@ -1938,6 +1968,7 @@ function resolveBoundaryFrames(
   model: ManifestModel,
   artifacts: readonly ArtifactSidecar[] | undefined,
   mode: "per-shot" | "whole-scene",
+  fromReferences: (shot: Shot) => boolean = () => false,
 ): Map<string, { frame?: BoundaryFramePlan; stale?: string }> {
   const states = new Map<string, { frame?: BoundaryFramePlan; stale?: string }>();
   const shots = orderedShots(scene);
@@ -1946,6 +1977,9 @@ function resolveBoundaryFrames(
   if (artifacts === undefined) return states;
   const route = frameDispatchFor(model, 1);
   for (const [shotIndex, shot] of shots.entries()) {
+    // A clip made from references never looks at the frame (issue 3185), so a frame that has
+    // gone stale cannot refuse the plan either: it stays filed, unread, until the shot asks for it.
+    if (fromReferences(shot)) continue;
     const artifactId = selections[shot.id]?.startFrameArtifactId ?? null;
     if (artifactId === null) continue;
     const artifact = artifacts.find((candidate) => candidate.id === artifactId);
@@ -2078,7 +2112,8 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
 
   // Boundary frames resolved before anything is bound or priced (issue 154): a shot that opens
   // on a durable frame takes the first-frame route, which changes what else may travel with it.
-  const boundaryFrames = resolveBoundaryFrames(scene, selections, model, input.artifacts, mode);
+  const fromReferences = (shot: Shot) => clipFromReferences(input.production, shot);
+  const boundaryFrames = resolveBoundaryFrames(scene, selections, model, input.artifacts, mode, fromReferences);
   // Resolved beside them, and consulted first where both landed on one shot (R-50): a frame is
   // issue 154's workaround for models that could not take video, and this model can. Continuing
   // keeps the motion and the audio the extracted still throws away, so the frame steps aside
@@ -2167,7 +2202,9 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
             ? [bindingPreamble(bound), CARRY_PREAMBLE].filter(Boolean).join("\n")
             : frame !== undefined
               ? START_FRAME_PREAMBLE
-              : bindingPreamble(bound),
+              : fromReferences(shot) && bound.length > 0
+                ? [bindingPreamble(bound), REFERENCES_NOT_FRAMES_LINE].join("\n")
+                : bindingPreamble(bound),
       body: prompt.text,
       negatives: derivedNegatives({
         capability: model.capability,
@@ -2188,6 +2225,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       estimatedMicroUsd: estimate,
       ...(frame !== undefined ? { frame } : {}),
       ...(continuation !== undefined ? { continuation } : {}),
+      ...(fromReferences(shot) ? { fromReferences: true as const } : {}),
     };
   });
 
@@ -2276,12 +2314,16 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
           );
         const budget = budgetFor([...seen.values()], kits, scene, sheets, model, input.productionId, propStates);
         const references = attachmentsFor(budget.carried, propStates);
+        // The pass opens where its first shot opens, so that shot decides whether it may open on
+        // the previous pass's last frame (issue 3185).
+        const opening = ordered.find((s) => s.id === pass.plan[0]?.shotId);
         return {
           passIndex: pass.index,
           references,
           budget,
           bound: bindReferences(references, sheets),
           propStates,
+          ...(opening !== undefined && fromReferences(opening) ? { fromReferences: true as const } : {}),
           // A pass is one clip, so its negatives are the clip's. Silence is still stated, but
           // only when the whole clip is silent — one spoken beat among four is not a silent pass.
           negatives: derivedNegatives({
@@ -2384,6 +2426,8 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
             .filter(
               (s) =>
                 continuations.get(s.id)?.continuation === undefined &&
+                // A clip made from references opens on no frame by choice (issue 3185).
+                !fromReferences(s) &&
                 !(selections[s.id]?.startFrameArtifactId ?? selections[s.id]?.startFrameTakeId ?? null),
             )
             .map((s) => ({ shotId: s.id, number: s.number }))

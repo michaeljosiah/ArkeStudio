@@ -435,6 +435,11 @@ export function setProductionAspect(worldId: string, productionId: string, aspec
   send({ kind: "set-production-aspect", worldId, productionId, aspect });
 }
 
+/** What the production's clips are made from (issue 3185): frames, or the cast and place pictures. */
+export function setProductionClips(worldId: string, productionId: string, clipsFrom: "frames" | "references"): void {
+  send({ kind: "set-production-clips", worldId, productionId, clipsFrom });
+}
+
 /**
  * Dispatch a scene under a durable plan (SPEC-024): the aggregate is written and authorized
  * before any pass reaches a provider. Returns the requestId the plan-result answers to.

@@ -554,6 +554,16 @@ export const ShotSchema = z
          * take, or its take was itself continued, the plan names the refusal (R-51, R-52).
          */
         continuesPrevious: z.boolean().optional(),
+        /**
+         * What this shot's clip is made from, where it differs from the production's
+         * `clipsFrom` (issue 3185). Absent follows the production. `references` sends no start
+         * frame and opens no pass on the previous one; `frames` keeps today's behaviour for a
+         * shot in a production that makes its clips from references.
+         */
+        clipsFrom: z
+          .enum(["frames", "references"])
+          .optional()
+          .describe("What this shot's clip is made from when it differs from the production's: references (no start frame, the cast and place pictures ride) or frames. Leave it out to follow the production."),
       })
       .strict()
       .optional(),

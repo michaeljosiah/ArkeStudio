@@ -583,6 +583,8 @@ const ProductionMetadataChangesSchema = z
     status: z.string().trim().min(1).max(120).optional(),
     aspect: z.string().trim().min(1).max(20).optional(),
     frameRate: FrameRateSchema.optional(),
+    /** Issue 3185: whether clips open on frames or are made from the cast and place pictures. */
+    clipsFrom: z.enum(["frames", "references"]).optional(),
   })
   .strict()
   .refine((changes) => Object.keys(changes).length > 0, "a production metadata action must change at least one field");

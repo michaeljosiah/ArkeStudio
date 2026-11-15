@@ -1328,6 +1328,14 @@ describe("scene detail owns the workspace", () => {
               timing: [{ shotId: "sh_14", number: 14, kind: "unanchored", durationSec: 5 }],
               promptOverCap: { chars: 5120, limit: 4000 },
             },
+          }, {
+            // Issue 3185: a pass made from references names no frame and says so.
+            passIndex: 1, state: "compiled", estimatedMicroUsd: 40_000, askedSec: 5,
+            carries: {
+              shots: [{ shotId: "sh_15", number: 15 }],
+              fromReferences: true,
+              cast: [{ sheetId: "maren-kest", name: "Maren Kest", voice: "none", look: "rides" }],
+            },
           }],
           spentEstimateMicroUsd: 80_000,
           next: { kind: "await-continue", passIndex: 0 },
@@ -1353,6 +1361,7 @@ describe("scene detail owns the workspace", () => {
     const card = q(mounted, ".fy-boardcard__mono")?.textContent ?? "";
     assert.match(card, /pass 1 · shots 12–13 · 7\.0s · \$0\.08 · frame: shot 12 · The Vigil: plate · Maren Kest: voice, look · Bray Half-Hitch: voice not sent · takes no audio · The Chorister: voice, sheet · The Chorister: read not sent · read missing · the sample rides · prompt too long · 5120 of 4000 characters · materialised/);
     assert.match(card, /shot 14 · not on the Cut · left out/);
+    assert.match(card, /pass 2 · shot 15 · 5\.0s · \$0\.04 · from references · Maren Kest: look · compiled/);
     assert.doesNotMatch(q(mounted, "header")?.textContent ?? "", /sh_\d+|unanchored|Generation timing/);
     // A refusal is the same plain clause in the callout, and nowhere else (R-25).
     await apply({ at: "2026-08-31T12:01:00Z", type: "production.plan-result", requestId: create.requestId, worldId: FIXTURE_WORLD_ID, productionId: "saltlight",

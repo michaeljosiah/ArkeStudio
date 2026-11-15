@@ -243,11 +243,15 @@ function passCarries(
   const wirePrompt = typeof pass.params["prompt"] === "string" ? pass.params["prompt"] : "";
   const promptOverCap =
     cap !== undefined && wirePrompt.length > cap ? { chars: wirePrompt.length, limit: cap } : undefined;
+  // The pass opens where its first shot opens (issue 3185): a clip that shot makes from its
+  // references carries no frame, and the card says so rather than leaving the frame unsaid.
+  const fromReferences = input.plan.shots.find((entry) => entry.shot.id === first.id)?.fromReferences === true;
   return {
     shots: shots.map((shot) => ({ shotId: shot.id, number: shot.number })),
     // A chained pass opens on the previous pass's boundary frame, bound at materialisation; it
     // is a frame on this pass's first shot as surely as a selected one is.
     ...(pass.frame !== undefined || pass.route.kind === "frame" ? { frame: { shotId: first.id, number: first.number } } : {}),
+    ...(fromReferences ? { fromReferences: true as const } : {}),
     ...(place !== undefined ? { place } : {}),
     cast,
     ...(timing !== undefined && timing.length > 0 ? { timing } : {}),
@@ -277,7 +281,12 @@ export async function compileDispatchPlan(store: WorldStore, input: CreatePlanIn
       model: pass.model.id, provider: pass.model.provider, params: pass.params });
   }
   if (compiled.length === 0) throw new Error("nothing to dispatch — the plan compiled no passes");
-  const dependencies = chainFrames ? chainedDependencies(input.plan.mode, input.model, compiled.length) : compiled.map(() => []);
+  // A pass waits for the previous pass's last frame only when it opens on it: one whose first
+  // shot makes its clip from references compiled to the reference route (issue 3185), and
+  // holding it behind an extraction it never reads would only serialise the scene for nothing.
+  const dependencies = chainFrames
+    ? chainedDependencies(input.plan.mode, input.model, compiled.length).map((needs, index) => compiled[index]!.route.kind === "frame" ? needs : [])
+    : compiled.map(() => []);
   // A timing clause sits on the pass it changes (R-25). A shot whole-scene packing left out is
   // in no pass; its clause files with the pass carrying the nearest earlier shot, so it sits
   // where the gap is rather than vanishing with the shot.
