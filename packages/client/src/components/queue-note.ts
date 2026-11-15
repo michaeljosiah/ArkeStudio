@@ -110,16 +110,41 @@ const ULID = /^[0-9A-HJKMNP-TV-Z]{26}$/;
  */
 const OPAQUE_ID = /^[a-z]+_[0-9A-HJKMNP-TV-Z]{20,}$/i;
 
+/** The open world, as far as naming its work needs it. */
+export type NamingWorld = { meta: { worldId: string }; sheets: readonly { id: string; name: string }[] };
+
+/** Reference work whose target id leads with the sheet's slug: `timi-j-s-dark-set/g1/1`. */
+const SHEET_LED = new Set([
+  "main-photo-candidate",
+  "establish-candidate",
+  "reference-tile",
+  "character-sheet",
+  "character-look",
+  "character-voice-sample",
+  "location-view-candidate",
+  "prop-state-candidate",
+]);
+
 /**
- * What the work belongs to, said the way the rest of the app says it. `params.characterName` when
- * the enqueue recorded one, otherwise the first segment of the target id — `sh_12` is Shot 12 and
+ * What the work belongs to, said the way the rest of the app says it. The sheet's own name when
+ * the work is a sheet's and the sheet is still there, then `params.characterName` when the enqueue
+ * recorded one, otherwise the first segment of the target id — `sh_12` is Shot 12 and
  * `maren-kest/g1` is Maren Kest. A ULID names a world, which the title never needs.
+ *
+ * The slug is the last resort because it is not a name: title-cased, `timi-j-s-dark-set` read
+ * "Timi J S Dark Set, location view queued" for a place called Timi J's Dark Set (issue 3164).
+ * The sheet is read only from the job's own world, so work from a world that is not open never
+ * borrows a name from the one that is (SPEC-014 R-19).
  */
-export function subjectOf(job: Job): string | null {
+export function subjectOf(job: Job, world?: NamingWorld | null): string | null {
   if (job.target.kind === "voice-preview" && job.params.purpose === "audiobook") return typeof job.params.audiobookChapterTitle === "string" ? job.params.audiobookChapterTitle : "Chapter narration";
+  const head = job.target.id?.split("/")[0];
+  if (head && SHEET_LED.has(job.target.kind) && world?.meta.worldId === job.worldId) {
+    const sheet = world.sheets.find((candidate) => candidate.id === head)?.name.trim();
+    if (sheet) return sheet;
+  }
   const named = job.params["characterName"];
   if (typeof named === "string" && named.trim()) return named.trim();
-  const head = job.target.id?.split("/")[0];
   if (!head || ULID.test(head) || OPAQUE_ID.test(head)) return null;
   if (/^sh_\d+$/.test(head)) return humanNumber(head, "Shot");
   if (/^sc_\d+$/.test(head)) return humanNumber(head, "Scene");
@@ -195,10 +220,10 @@ function failureCost(job: Job): string {
  * Kest's, while four separately dispatched shots have four different subjects and the notification
  * says so by naming none of them.
  */
-function sharedSubject(jobs: readonly Job[]): string | null {
+function sharedSubject(jobs: readonly Job[], world: NamingWorld | null | undefined): string | null {
   if (jobs.length === 0) return null;
-  const first = subjectOf(jobs[0]!);
-  return jobs.every((job) => subjectOf(job) === first) ? first : null;
+  const first = subjectOf(jobs[0]!, world);
+  return jobs.every((job) => subjectOf(job, world) === first) ? first : null;
 }
 
 const AHEAD_OF = new Set(["queued", "submitting"]);
@@ -274,6 +299,7 @@ export function enqueueNote(
   result: QueueEnqueueResult,
   jobs: readonly Job[],
   manifest: ModelManifest | null,
+  world?: NamingWorld | null,
 ): QueueNote | null {
   if ((result.command === "upload-artifacts" || result.command === "borrow-artifacts" || result.command === "borrow-takes") && result.requestedCount > 0) {
     const failed = result.failures.length;
@@ -321,7 +347,7 @@ export function enqueueNote(
       id: queueNoteId(result.requestId),
       tone: partial ? "warning" : "queued",
       ...(first && (first.status === "running" || first.status === "submitting") ? { live: true } : {}),
-      title: title(sharedSubject(accepted), what, verbOf(first)),
+      title: title(sharedSubject(accepted, world), what, verbOf(first)),
       meta,
       ...(partial && reasonOf(result) ? { reason: reasonOf(result)! } : {}),
       action: { label: "Activity", to: "/activity" },
@@ -358,8 +384,9 @@ export function readyNote(
   job: Job,
   manifest: ModelManifest | null,
   noteId: string | undefined,
+  world?: NamingWorld | null,
 ): QueueNote {
-  const subject = subjectOf(job);
+  const subject = subjectOf(job, world);
   const to =
     job.target.kind === "character-sheet" && job.target.id
       ? `/w/${job.worldId}/cast/${job.target.id.split("/")[0]}/kit`
@@ -409,11 +436,12 @@ export function failedNote(
   job: Job,
   manifest: ModelManifest | null,
   noteId: string | undefined,
+  world?: NamingWorld | null,
 ): QueueNote {
   return {
     id: noteId ?? `job:${job.id}`,
     tone: "refused",
-    title: title(subjectOf(job), jobNoun(job, 1), "failed"),
+    title: title(subjectOf(job, world), jobNoun(job, 1), "failed"),
     meta: [modelName(job, manifest), job.status === "failed" ? failureCost(job) : "held"].join(" · "),
     ...(job.error ? { reason: job.error } : {}),
     action: { label: "Activity", to: "/activity" },
@@ -425,8 +453,8 @@ export function failedNote(
  * so the panel and the notification never spell one job two ways (79's first binding). Cancelled
  * work had no receipt — nothing came back — so it gets its verb here, unmetered.
  */
-export function historyNote(job: Job, manifest: ModelManifest | null): QueueNote {
-  if (job.status === "succeeded") return readyNote(job, manifest, undefined);
+export function historyNote(job: Job, manifest: ModelManifest | null, world?: NamingWorld | null): QueueNote {
+  if (job.status === "succeeded") return readyNote(job, manifest, undefined, world);
   if (job.status === "cancelled") {
     // The queue's own distinction (SPEC-009 §cancel): cancelled before anything reached the
     // provider is not charged; once a request was submitted the provider may still complete or
@@ -436,10 +464,10 @@ export function historyNote(job: Job, manifest: ModelManifest | null): QueueNote
     return {
       id: `job:${job.id}`,
       tone: remote ? "warning" : "queued",
-      title: title(subjectOf(job), jobNoun(job, 1), "cancelled"),
+      title: title(subjectOf(job, world), jobNoun(job, 1), "cancelled"),
       meta: `${modelName(job, manifest)} · ${usesCodexImagePlan(job) || measuredCost(job) !== null || job.speechQuote?.unit === "token" ? failureCost(job) : remote ? "charge unknown" : "not charged"}`,
       ...(job.error ? { reason: job.error } : {}),
     };
   }
-  return failedNote(job, manifest, undefined);
+  return failedNote(job, manifest, undefined, world);
 }

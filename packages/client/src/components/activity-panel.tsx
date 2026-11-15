@@ -666,7 +666,7 @@ function HistoryRow({
 }) {
   const connection = useStore().connection;
   const compact = useCompact();
-  const note = historyNote(job, state.app.manifest);
+  const note = historyNote(job, state.app.manifest, state.world);
   const labels = activityJobLabels(state, job);
   const thumb =
     note.thumb && worldSlug && state.world?.meta.worldId === note.thumb.worldId ? mediaUrl(worldSlug, note.thumb.path) : null;
