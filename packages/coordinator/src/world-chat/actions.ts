@@ -285,6 +285,7 @@ import {
 import { MarkdownFile } from "../world/text-files.js";
 import { toExtendedLength } from "../world/paths.js";
 import { foldConversation } from "./fold.js";
+import { shotSceneKey } from "./materialise.js";
 import { evaluateReadiness } from "./readiness.js";
 import { sendBack } from "./resolution.js";
 import { conversationDir, WorldChatStore } from "./store.js";
@@ -1584,14 +1585,25 @@ export function prepareWorldChatActions(
   );
   const changed = new Set(turn.candidates.map((candidate) => candidate.id));
   const claimed = new Set<string>();
+  const settles = (candidate: WorldChangeCandidate): boolean =>
+    changed.has(candidate.id) && ready.has(candidate.id) && candidate.status === "live";
   for (const candidate of turn.candidates) {
-    if (!changed.has(candidate.id) || !ready.has(candidate.id) || candidate.status !== "live") continue;
+    if (!settles(candidate)) continue;
     const group = candidate.groupId ? groupById.get(candidate.groupId) : undefined;
+    /*
+     * Shots this turn settles for one scene are one card (issue 3087). Four cards for four shots
+     * were each staged against the same scene version, so approving the first made the other
+     * three stale. In the conversation's order, which is the order they were laid out in and the
+     * order they are inserted.
+     */
+    const scene = shotSceneKey(candidate);
     const members = group?.status === "live"
       ? group.members.map((member) => candidateById.get(member.candidateId)).filter((one): one is WorldChangeCandidate => one !== undefined)
-      : [candidate];
+      : scene !== undefined
+        ? [...candidateById.values()].filter((one) => settles(one) && shotSceneKey(one) === scene)
+        : [candidate];
     if (members.length === 0 || members.some((member) => !ready.has(member.id))) continue;
-    const key = group ? `group:${group.id}` : `candidate:${candidate.id}`;
+    const key = group ? `group:${group.id}` : scene ?? `candidate:${candidate.id}`;
     if (claimed.has(key)) continue;
     claimed.add(key);
     const payload = {
@@ -5831,6 +5843,8 @@ async function saveProposalPoint(
     candidateId: candidate.candidateId,
     expectedCandidateRevision: candidate.revision,
     expectedGroupRevisions: [...members],
+    // A card's members are its group's or, for shots settled together, the shots (issue 3087).
+    together: [...members],
     now,
   });
   if (staged.proposalIds.length !== 1) throw new Error("A conversation action must bind one proposal authority.");

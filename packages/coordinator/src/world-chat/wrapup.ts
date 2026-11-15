@@ -13,7 +13,7 @@ import { LookAlreadyProposedError, type ProposalManager } from "../gate/proposal
 import type { WorldStore } from "../world/store.js";
 import { foldConversation } from "./fold.js";
 import { lookHasMoved } from "./look.js";
-import { canonIdsNeeded, materialiseCandidate, MaterialiseError, planIdentities } from "./materialise.js";
+import { canonIdsNeeded, materialiseCandidate, MaterialiseError, planIdentities, shotSceneKey } from "./materialise.js";
 import { evaluateReadiness, type NotCarried } from "./readiness.js";
 import { ConversationSequenceError, conversationDir, WorldChatStore } from "./store.js";
 import { accountedProposalIdsOf, type Leftover, leftoversOf, openIntentOf } from "./wrapup-recovery.js";
@@ -209,9 +209,10 @@ async function buildAndStage(input: {
   const identities = planIdentities(carried, reserved, bundle);
 
   // Group before materialisation because members may intentionally rewrite one sheet together.
+  // Ungrouped shots for one scene share a bucket too: they rewrite one file (issue 3087).
   const candidateBuckets: Array<{ key: string; candidates: WorldChangeCandidate[] }> = [];
   for (const candidate of carried) {
-    const key = candidate.groupId ?? `solo:${candidate.id}`;
+    const key = candidate.groupId ?? shotSceneKey(candidate) ?? `solo:${candidate.id}`;
     const existing = candidateBuckets.find((bucket) => bucket.key === key);
     if (existing) existing.candidates.push(candidate);
     else candidateBuckets.push({ key, candidates: [candidate] });
@@ -849,6 +850,15 @@ export interface SavePointInput {
    * belongs to no group.
    */
   expectedGroupRevisions?: ReadonlyArray<{ candidateId: string; revision: number }>;
+  /**
+   * Ungrouped points one card carries together, in order, at the revisions the card showed.
+   *
+   * A turn that settles several shots for one scene offers them as one card (issue 3087), and the
+   * card has to stage them as the one proposal it showed. Not on the rail's frame: a point saved
+   * from the rail is saved alone, as before. Ignored for a point in a live group, which carries
+   * its group.
+   */
+  together?: ReadonlyArray<{ candidateId: string; revision: number }>;
   now: () => string;
 }
 
@@ -938,10 +948,37 @@ export async function savePoint(input: SavePointInput): Promise<SavePointResult>
     const group = point.groupId
       ? view.groups.find((g) => g.id === point.groupId && g.status === "live")
       : undefined;
+    const together = !group && (input.together?.length ?? 0) > 1 ? input.together! : undefined;
     const wanted = new Set<string>(
-      group ? group.members.map((m) => m.candidateId as string) : [input.candidateId],
+      group
+        ? group.members.map((m) => m.candidateId as string)
+        : together
+          ? together.map((m) => m.candidateId)
+          : [input.candidateId],
     );
-    const selected = view.candidates.filter((c) => wanted.has(c.id));
+    // In the card's order when it carries several, which is the order the shots go in.
+    const selected = together
+      ? together.flatMap((m) => view.candidates.filter((c) => c.id === m.candidateId))
+      : view.candidates.filter((c) => wanted.has(c.id));
+
+    /*
+     * Every point the card carries, live and at the revision it showed. The same check a group
+     * gets, for the same reason: one press writes all of them, so none may be a correction nobody
+     * has seen, and a point that has gone since means the card no longer says what it would do.
+     */
+    if (together) {
+      const shown = new Map(together.map((m) => [m.candidateId, m.revision]));
+      if (
+        !wanted.has(input.candidateId) ||
+        selected.length !== shown.size ||
+        selected.some((member) => member.status !== "live" || shown.get(member.id) !== member.revision)
+      ) {
+        throw new WrapUpError(
+          "stale",
+          "These land together, and one of them changed since you saw it. Look again and save from there.",
+        );
+      }
+    }
 
     /*
      * Every member at the revision the rail showed, not only the one that was clicked.
@@ -998,7 +1035,7 @@ export async function savePoint(input: SavePointInput): Promise<SavePointResult>
      * rest would be the app deciding that the missing piece did not matter, which is exactly the
      * judgement atomicity exists to keep away from it.
      */
-    if (group && carried.length !== selected.length) {
+    if ((group || together) && carried.length !== selected.length) {
       const blocked = notCarried[0];
       throw new WrapUpError(
         "nothing-to-carry",

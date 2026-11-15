@@ -116,6 +116,20 @@ function withProduction(
   };
 }
 
+/**
+ * The scene an ungrouped shot writes into, as a key shots settled beside it share (issue 3087).
+ *
+ * A shot has no file of its own, so every shot settled for one scene is a rewrite of that scene's
+ * file. Staged one proposal each, they were all based on the same version: accepting the first
+ * moved the scene and left the rest stale, so a storyboard of four shots took four round trips.
+ * Shots that share this key are built one on the last into a single proposal, as the members of
+ * an atomic group already are (issue #909). A grouped shot keeps its group's proposal.
+ */
+export function shotSceneKey(candidate: WorldChangeCandidate): string | undefined {
+  if (candidate.classification !== "development.shot" || candidate.groupId !== undefined) return undefined;
+  return `scene:${candidate.target.productionId}:${candidate.target.sceneId}`;
+}
+
 export interface ChoiceMaterialised extends Materialised {
   action: "create" | "amend";
 }

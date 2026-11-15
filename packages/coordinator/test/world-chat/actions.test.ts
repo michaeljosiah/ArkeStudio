@@ -791,6 +791,48 @@ describe("World Chat authority adapters", () => {
     assert.ok(accepted.every((one) => one.status === "accepted"));
   });
 
+  it("settles the shots one turn makes for one scene as one card that adds them in order (issue 3087)", async () => {
+    // As it happened: four tentative shots laid out in one turn, settled in the next in another
+    // order. Four cards against scene version 1 made the last three stale once the first landed.
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    const scene = () => w.store.getBundle().productions.find((one) => one.meta.id === PRODUCTION)!.scenes[0]!;
+    const before = orderedShots(scene()).map((shot) => shot.id);
+    const titles = ["Black water", "Gold on gold", "The far bank", "The hold"];
+    const tentative = titles.map((title) => candidate(w.conversationId, title, {
+      classification: "development.shot",
+      settledness: "tentative",
+      target: { kind: "shot", productionId: PRODUCTION, sceneId: scene().id },
+      draft: { title, description: `${title}, held.` },
+    } as Partial<WorldChangeCandidate>));
+    const laidOut = turn(w.conversationId, context, { candidates: tentative });
+    assert.deepEqual(prepareWorldChatActions(w.store, w.lifecycle, laidOut), [], "tentative shots make no card");
+    await appendTurn(w.log, laidOut, []);
+
+    const settled = tentative.map((one) => ({ ...one, settledness: "settled" as const, revision: 2 }));
+    const rule = candidate(w.conversationId, "The lagoon never reflects her");
+    const settling = turn(w.conversationId, context, {
+      existingCandidates: tentative,
+      candidates: [settled[3]!, settled[1]!, rule, settled[0]!, settled[2]!],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, settling);
+    const shotCards = prepared.flatMap((one) => one.payload.kind === "world-chat-proposal" && one.payload.members.length > 1 ? [one.payload] : []);
+    assert.equal(prepared.length, 2, "one card for the scene's shots, one for the rule");
+    assert.equal(shotCards.length, 1);
+    assert.deepEqual(shotCards[0]!.members, settled.map((one) => ({ candidateId: one.id, revision: 2 })), "in the order they were laid out");
+    await appendTurn(w.log, settling, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    const card = (await loaded(w.log)).actions.find((one) => one.targets.length === 4)!;
+    assert.equal((await w.gate.readManifest(card.authority.id)).worldChatOrigins?.length, 4);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    const shots = orderedShots(scene());
+    assert.deepEqual(shots.slice(0, before.length).map((shot) => shot.id), before, "the scene keeps what it had");
+    assert.deepEqual(shots.slice(before.length).map((shot) => shot.title), titles, "and gains every shot, in order");
+    const points = (await loaded(w.log)).candidates.filter((one) => settled.some((shot) => shot.id === one.id));
+    assert.ok(points.length === 4 && points.every((one) => one.status === "accepted"));
+  });
+
   it("does not write a Bible edit until approval and refuses it after the base moves", async () => {
     const w = await setup();
     if (!(await readBible(w.store.dir)).present) {
