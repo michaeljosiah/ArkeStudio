@@ -23,6 +23,7 @@ import {
   resolvePropStates,
   beatPictureShotId,
   productionShape,
+  productionStyleFor,
 } from "@arke-studio/contracts";
 import { productionModel, resolveModel, strandReason, usableModels } from "../../components/dispatch-bar.js";
 import { X } from "../../components/icons.js";
@@ -335,6 +336,13 @@ function GenerateFramesDialogOpen({
   // the backend's refusal, because switching scope would not change anything there.
   const emptyScope = shotId === undefined && scope === "missing" && missing.length === 0 && shots.length > 0;
   const displayedCount = matchingOptions && quote.blockedReason === null ? quote.includedCount : included.length;
+  // A frame's prompt never has the look pasted in (SPEC-012 R-14): Arke reads it when it writes a
+  // shot's prompt, and a shot nobody wrote one for is drawn from its own fields alone. A music
+  // video's production style was set to make its frames look filmed, and reached none of them
+  // (issue 3188), so the press names the look it does not add.
+  const styleHint = productionStyleFor(production.meta, world.artDirection.description) === undefined
+    ? undefined
+    : `${production.meta.styleOverride?.trim() ? "Production style" : "World look"} not added · Arke writes it into shot prompts`;
 
   const start = () => {
     if (startPending !== null || !canStart || quote.signature === null || quote.estimatedMicroUsd === null) return;
@@ -543,7 +551,7 @@ function GenerateFramesDialogOpen({
               </span>
               <Button variant={compact ? "outline" : "ghost"} size="sm" onClick={onClose}>Cancel</Button>
               {startReason === null ? null : <p className="fy-swgen__guard" role="status">{startReason}</p>}
-              {displayedBlockedReason !== null && startPending === null ? <p className="fy-swgen__guard" role="status">{displayedBlockedReason}</p> : <Button variant="primary" size="sm" disabled={!canStart || startPending !== null} onClick={start}>{startPending === null ? compact ? "Generate" : "Generate frames" : "Starting..."}</Button>}
+              {displayedBlockedReason !== null && startPending === null ? <p className="fy-swgen__guard" role="status">{displayedBlockedReason}</p> : <Button variant="primary" size="sm" {...(styleHint === undefined ? {} : { hint: styleHint, className: "fy-tip--end" })} disabled={!canStart || startPending !== null} onClick={start}>{startPending === null ? compact ? "Generate" : "Generate frames" : "Starting..."}</Button>}
             </div>
           )}
         </footer>

@@ -907,6 +907,37 @@ describe("frame-run coordinator service", () => {
     assert.equal(quote.blockedReason, "Codex Image cannot deliver 4:5 - it offers 9:16, 16:9");
   });
 
+  // The look informs Arke when it writes a shot's prompt and is never pasted into one (SPEC-012
+  // R-14, issue 942), frames and clips alike. A music video's frames came back without its
+  // production style (issue 3188); the surfaces now say so, and this holds the frames to the spec.
+  it("leaves the production style and the world look out of frame prompts, recording which applied", async () => {
+    const look = "Lagos at night, shot close and handheld.";
+    const style = "Photographed on 35 mm colour negative film; natural skin, no beauty filter.";
+    for (const override of [undefined, style]) {
+      for (const mode of ["per-shot", "board"] as const) {
+        const value = await fixture();
+        const world = { ...value.world, artDirection: { ...value.world.artDirection, description: look } };
+        const production = override === undefined
+          ? value.production
+          : { ...value.production, meta: { ...value.production.meta, styleOverride: override } };
+        const run = await start(value, mode, "all", production, world);
+        assert.ok(run.steps.length > 0);
+        for (const step of run.steps) {
+          assert.ok(!step.request.prompt.includes(look), `a ${mode} frame pastes no world look`);
+          assert.ok(!step.request.prompt.includes(style), `a ${mode} frame pastes no production style`);
+        }
+        if (mode === "per-shot") {
+          assert.deepEqual(
+            run.steps[0]!.dispatch.params["artDirection"],
+            override === undefined
+              ? { version: world.artDirection.version, source: "world", transport: "text" }
+              : { version: world.artDirection.version, source: "production", transport: "text", description: style },
+          );
+        }
+      }
+    }
+  });
+
   it("preserves the board parent and extracts only update panels as deterministic child takes", async () => {
     const f = await fixture();
     const shots = orderedShots(f.scene);

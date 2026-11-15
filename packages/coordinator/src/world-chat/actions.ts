@@ -3375,7 +3375,15 @@ async function sharedResourceProjection(
         title: payload.action.style === null ? "Clear the production style" : "Set the production style",
         consequence: "Updates the production's scoped style through its world-owned production metadata authority.",
         affectedTargets: [...intent.targets],
-        ripples: ["Future production generations inherit this style; accepted assets remain pinned."],
+        // A shot's prompt never has the style pasted in (SPEC-012 R-14, issue 942): Arke reads it
+        // when it writes the prompt. "Future generations inherit this style" promised a music
+        // video's frames a look they were then drawn without (issue 3188).
+        ripples: productionShape(production.meta).hasScenes
+          ? [
+              `Shot prompts Arke writes from now on use ${payload.action.style === null ? "the world look" : "this style"}; it is not added to frame or clip prompts.`,
+              "Accepted assets remain pinned.",
+            ]
+          : ["Future production generations inherit this style; accepted assets remain pinned."],
         permissionReason: "authored-change",
         body: {
           family: "setting",
