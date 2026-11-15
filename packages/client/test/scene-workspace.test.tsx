@@ -2811,6 +2811,42 @@ describe("staged scene changes stay in place but inert until applied (T-12)", ()
     await click(all(mounted, "button").find((button) => button.textContent === "Accept")!);
     assert.equal(sent.at(-1)?.kind, "proposal-accept");
   });
+
+  it("never draws a proposal built on an older version over the scene (issue 3104)", async () => {
+    // Staged on the scene as it was; another change has landed since, moving it a version on.
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const accepted = production.scenes.find((candidate) => candidate.id === "sc_04")!;
+    production.scenes = production.scenes.map((candidate) =>
+      candidate.id === accepted.id ? { ...accepted, version: accepted.version + 1 } : candidate);
+    const firstShot = orderedShots(accepted)[0]!;
+    const snapshot = insertShot(accepted, {
+      at: { after: orderedShots(accepted).at(-1)!.id },
+      shot: { id: "sh_999", title: "The hold", description: "Nothing moves." },
+    });
+    const path = "productions/saltlight/scenes/04-the-verse-rises.json";
+    state.world!.proposals = [{
+      proposal: {
+        id: "pr_01J8H0000000000000000000Q3",
+        kind: "scene-edit",
+        summary: "Add the hold",
+        targets: [{ path, baseVersion: accepted.version, baseHash: `sha256:${"e".repeat(64)}` }],
+        baseCanonRevision: 42,
+        reservedCanonIds: [],
+        source: "world-chat:cv_01J8H0000000000000000000C1",
+        created: "2026-11-14T12:00:00Z",
+        draftRevision: 1,
+      },
+      ripple: null,
+      scenes: { [path]: snapshot },
+    }];
+    const mounted = await mountState(state);
+
+    assert.equal(q(mounted, '[data-testid="workspace-row-sh_999"]'), null, "the stale snapshot is not drawn");
+    assert.ok(q(mounted, `[data-testid="workspace-row-${firstShot.id}"]`), "the scene's own shots are");
+    assert.equal(all(mounted, '.fy-swrow__band[data-staged="true"]').length, 0);
+    assert.doesNotMatch(q(mounted, ".fy-sw__save")?.textContent ?? "", /Changes awaiting review/);
+  });
 });
 
 describe("every read-side operation is reachable by keyboard (T-19)", () => {
@@ -2969,7 +3005,24 @@ describe("an empty scene keeps its canonical path (SPEC-029 R-29)", () => {
     const talk = all(mounted, ".fy-swflow__empty button").find((button) => button.textContent === "Talk to Arke");
     assert.ok(talk);
     await click(talk);
-    assert.equal(q(mounted, '[data-testid="scene-workspace"]')?.getAttribute("data-dock"), "true");
+    // The scene's conversation is Builder Chat's, so Talk to Arke opens that, as the rail does,
+    // rather than a dock with nothing in it (issue 3085).
+    assert.equal(dom.document.body.dataset.globalChatOpen, "true");
+  });
+
+  it("opens Builder Chat from the storyboard's Talk to Arke (issue 3085)", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const at = production.scenes.findIndex((scene) => scene.id === "sc_04");
+    const empty = { ...production.scenes[at], shots: [] } as unknown as SceneRecord;
+    delete (empty as { flow?: unknown }).flow;
+    production.scenes[at] = empty;
+    const mounted = await mountState(state);
+    assert.notEqual(dom.document.body.dataset.globalChatOpen, "true", "the chat starts closed");
+    const talk = all(mounted, '[data-testid="workspace-empty"] button').find((button) => button.textContent === "Talk to Arke");
+    assert.ok(talk);
+    await click(talk);
+    assert.equal(dom.document.body.dataset.globalChatOpen, "true");
   });
 });
 

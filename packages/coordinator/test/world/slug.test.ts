@@ -33,6 +33,21 @@ describe("slugification (R-7, R-8)", () => {
     assert.ok(slug.length <= 48);
   });
 
+  it("cuts a long name at the last whole word that fits (issue 3097)", () => {
+    const title = "Why You Do Me Like That — Na Love or Juju music video";
+    assert.equal(slugify(title), "why-you-do-me-like-that-na-love-or-juju-music");
+    // A word that ends exactly at the cap is kept whole.
+    assert.equal(slugify(`${"a".repeat(43)} bcde fgh`), `${"a".repeat(43)}-bcde`);
+    // Taken, the suffix makes room by whole words too.
+    assert.equal(uniqueSlug(title, "production", ["why-you-do-me-like-that-na-love-or-juju-music"]), "why-you-do-me-like-that-na-love-or-juju-music-2");
+    const longer = "Why You Do Me Like That Now — Na Love or Juju music video";
+    const first = uniqueSlug(longer, "production", []);
+    assert.equal(first, "why-you-do-me-like-that-now-na-love-or-juju");
+    assert.equal(uniqueSlug(longer, "production", [first]), "why-you-do-me-like-that-now-na-love-or-juju-2");
+    // One short word before a long one keeps the long one's start rather than shrinking to "a".
+    assert.equal(slugify(`a ${"x".repeat(60)}`), `a-${"x".repeat(46)}`);
+  });
+
   it("falls back for unslugifiable names, keeping the display name elsewhere (R-9)", () => {
     assert.equal(slugify("🌊🌊🌊"), "");
     const fb = fallbackSlug("character");

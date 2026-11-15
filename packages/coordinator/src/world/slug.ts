@@ -23,13 +23,25 @@ const HAND_MAP: Record<string, string> = {
   œ: "oe",
 };
 
+/**
+ * The longest whole-word prefix that fits the cap. A production titled "… Juju music video" was
+ * filed as `…-juju-music-vi` (issue 3097), which reads as a typo of the title it came from. A cut
+ * that would keep less than half the cap, as when one long word follows a short one, cuts inside
+ * that word instead, as before: a slug of "a" would say less than "a-supercalifragilisti".
+ */
+function capAtWord(slug: string, cap: number): string {
+  if (slug.length <= cap) return slug;
+  const end = slug.lastIndexOf("-", cap);
+  return (end >= cap / 2 ? slug.slice(0, end) : slug.slice(0, cap)).replace(/-+$/g, "");
+}
+
 export function slugify(name: string): string {
   let s = name.normalize("NFKD").toLowerCase();
   s = s.replace(/[\u0300-\u036f]/g, ""); // strip combining marks left by NFKD
   s = s.replace(/[æøđðþßłœ]/g, (ch) => HAND_MAP[ch] ?? "");
   s = s.replace(/[^a-z0-9]+/g, "-");
   s = s.replace(/^-+|-+$/g, "");
-  if (s.length > SLUG_CAP) s = s.slice(0, SLUG_CAP).replace(/-+$/g, "");
+  s = capAtWord(s, SLUG_CAP);
   if (RESERVED.test(s)) s = `${s}-x`; // escaped, not refused — the display name lives in frontmatter
   return s;
 }
@@ -56,7 +68,7 @@ export function uniqueSlug(name: string, kind: string, taken: Iterable<string>):
   if (!lower.has(base.toLowerCase())) return base;
   for (let n = 2; ; n++) {
     const suffix = `-${n}`;
-    const head = base.slice(0, Math.max(1, SLUG_CAP - suffix.length)).replace(/-+$/g, "");
+    const head = capAtWord(base, Math.max(1, SLUG_CAP - suffix.length));
     const candidate = `${head}${suffix}`;
     if (!lower.has(candidate.toLowerCase())) return candidate;
   }

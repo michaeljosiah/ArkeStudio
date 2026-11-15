@@ -102,6 +102,7 @@ import {
   seasonFence,
   seriesFence,
   sheetsFence,
+  spineFence,
   storyFence,
   takesFence,
   timelineFence,
@@ -752,6 +753,78 @@ describe("World Chat authority adapters", () => {
     assert.equal((await loaded(w.log)).candidates.find((one) => one.id === point.id)!.status, "accepted");
   });
 
+  it("sends a stale card's proposal back to the conversation instead of leaving it open (issue 3104)", async () => {
+    // Two shots for one scene settled in two turns: two cards, both prepared against one version.
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    const scene = () => w.store.getBundle().productions.find((one) => one.meta.id === PRODUCTION)!.scenes[0]!;
+    const before = orderedShots(scene()).length;
+    const cards: ConversationActionCard[] = [];
+    const points: WorldChangeCandidate[] = [];
+    for (const title of ["Black water", "The hold"]) {
+      const point = candidate(w.conversationId, title, {
+        classification: "development.shot",
+        target: { kind: "shot", productionId: PRODUCTION, sceneId: scene().id },
+        draft: { title, description: `${title}, held.` },
+      } as Partial<WorldChangeCandidate>);
+      const oneTurn = turn(w.conversationId, context, { existingCandidates: points, candidates: [point] });
+      const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+      await appendTurn(w.log, oneTurn, prepared);
+      await bindAll(w.lifecycle, prepared);
+      points.push(point);
+      cards.push((await loaded(w.log)).actions.at(-1)!);
+    }
+    assert.equal(cards.length, 2);
+
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed");
+    assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).status, "stale");
+    assert.equal(await w.gate.isStaged(cards[1]!.authority.id), false, "nothing is left open to accept over the newer scene");
+    assert.equal((await w.gate.listOpen()).filter((one) => one.kind === "scene-edit").length, 0);
+    const view = await loaded(w.log);
+    assert.equal(view.candidates.find((one) => one.id === points[1]!.id)!.status, "live", "the point is back on the rail");
+    assert.equal(view.candidates.find((one) => one.id === points[0]!.id)!.status, "accepted");
+    assert.equal(orderedShots(scene()).length, before + 1, "and the scene holds only what was accepted");
+  });
+
+  it("never discards a draft revised while its stale card is being cleaned up (codex on PR 3124)", async () => {
+    // The edit is queued at the gate ahead of the cleanup's discard. Read outside the gate, the
+    // cleanup saw the card's revision, and the discard then deleted the edit that landed first.
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    const sceneId = w.store.getBundle().productions.find((one) => one.meta.id === PRODUCTION)!.scenes[0]!.id;
+    const point = candidate(w.conversationId, "Black water", {
+      classification: "development.shot",
+      target: { kind: "shot", productionId: PRODUCTION, sceneId },
+      draft: { title: "Black water", description: "Black water, held." },
+    } as Partial<WorldChangeCandidate>);
+    const oneTurn = turn(w.conversationId, context, { candidates: [point] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    const proposal = await w.gate.readManifest(card.authority.id);
+    const proposalAdapter = w.adapters.find((adapter) => adapter.actionKind === "world-chat-proposal")!;
+
+    const edit = w.gate.mergeFormEdit({
+      proposalId: proposal.id,
+      requestId: "edit-while-stale",
+      path: proposal.targets[0]!.path,
+      expectedDraftRevision: card.authorityRevision,
+      edit: (content) => ({ content: content.replace("Black water, held.", "Black water, held longer.") }),
+    });
+    const cleanup = proposalAdapter.settleStale!({ ...card, status: "stale" });
+    assert.equal((await edit).status, "updated");
+    await cleanup;
+
+    assert.equal(await w.gate.isStaged(proposal.id), true, "the revised draft is still there to decide");
+    assert.equal((await w.gate.readManifest(proposal.id)).draftRevision, card.authorityRevision + 1);
+    assert.equal((await loaded(w.log)).candidates.find((one) => one.id === point.id)!.status, "proposed", "and its point was not sent back");
+
+    await proposalAdapter.settleStale!({ ...card, status: "stale", authorityRevision: card.authorityRevision + 1 });
+    assert.equal(await w.gate.isStaged(proposal.id), false, "the draft the card names is the one that goes");
+    assert.equal((await loaded(w.log)).candidates.find((one) => one.id === point.id)!.status, "live");
+  });
+
   it("binds an atomic candidate group to one existing ProposalManager authority", async () => {
     const w = await setup();
     const groupId = newId("grp");
@@ -789,6 +862,48 @@ describe("World Chat authority adapters", () => {
     assert.equal(result.status, "completed");
     const accepted = (await loaded(w.log)).candidates.filter((one) => [first.id, second.id].includes(one.id));
     assert.ok(accepted.every((one) => one.status === "accepted"));
+  });
+
+  it("settles the shots one turn makes for one scene as one card that adds them in order (issue 3087)", async () => {
+    // As it happened: four tentative shots laid out in one turn, settled in the next in another
+    // order. Four cards against scene version 1 made the last three stale once the first landed.
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    const scene = () => w.store.getBundle().productions.find((one) => one.meta.id === PRODUCTION)!.scenes[0]!;
+    const before = orderedShots(scene()).map((shot) => shot.id);
+    const titles = ["Black water", "Gold on gold", "The far bank", "The hold"];
+    const tentative = titles.map((title) => candidate(w.conversationId, title, {
+      classification: "development.shot",
+      settledness: "tentative",
+      target: { kind: "shot", productionId: PRODUCTION, sceneId: scene().id },
+      draft: { title, description: `${title}, held.` },
+    } as Partial<WorldChangeCandidate>));
+    const laidOut = turn(w.conversationId, context, { candidates: tentative });
+    assert.deepEqual(prepareWorldChatActions(w.store, w.lifecycle, laidOut), [], "tentative shots make no card");
+    await appendTurn(w.log, laidOut, []);
+
+    const settled = tentative.map((one) => ({ ...one, settledness: "settled" as const, revision: 2 }));
+    const rule = candidate(w.conversationId, "The lagoon never reflects her");
+    const settling = turn(w.conversationId, context, {
+      existingCandidates: tentative,
+      candidates: [settled[3]!, settled[1]!, rule, settled[0]!, settled[2]!],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, settling);
+    const shotCards = prepared.flatMap((one) => one.payload.kind === "world-chat-proposal" && one.payload.members.length > 1 ? [one.payload] : []);
+    assert.equal(prepared.length, 2, "one card for the scene's shots, one for the rule");
+    assert.equal(shotCards.length, 1);
+    assert.deepEqual(shotCards[0]!.members, settled.map((one) => ({ candidateId: one.id, revision: 2 })), "in the order they were laid out");
+    await appendTurn(w.log, settling, prepared);
+    await bindAll(w.lifecycle, prepared);
+
+    const card = (await loaded(w.log)).actions.find((one) => one.targets.length === 4)!;
+    assert.equal((await w.gate.readManifest(card.authority.id)).worldChatOrigins?.length, 4);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    const shots = orderedShots(scene());
+    assert.deepEqual(shots.slice(0, before.length).map((shot) => shot.id), before, "the scene keeps what it had");
+    assert.deepEqual(shots.slice(before.length).map((shot) => shot.title), titles, "and gains every shot, in order");
+    const points = (await loaded(w.log)).candidates.filter((one) => settled.some((shot) => shot.id === one.id));
+    assert.ok(points.length === 4 && points.every((one) => one.status === "accepted"));
   });
 
   it("does not write a Bible edit until approval and refuses it after the base moves", async () => {
@@ -3381,6 +3496,26 @@ describe("turn-local scene action sequencing (#1417)", () => {
     assert.equal(orderedShots(scene(w)).find(shot => shot.id === newShot.id)!.promptOverride?.text, "Low angle, looking up at the bell.");
     assert.equal(scene(w).version, before.version + 2);
   });
+  it("adds several new shots in order on one card, each placed after the one before it (issue 3084)", async () => {
+    const w = await setup(context), before = structuredClone(scene(w));
+    const { id: _id, number: _number, visualFacts: _facts, ...shot } = orderedShots(before)[0]!;
+    const last = orderedShots(before).at(-1)!.id;
+    const receipt = currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`);
+    // The pattern the action guide teaches: one action per new shot, each with a ref and no after,
+    // so they share a card, and each next one at after the previous one's ref.
+    const insert = (ref: string, at: { after: string }, title: string) => ModelWorldChatActionSchema.parse({ kind: "production-scene-command",
+      productionId: PRODUCTION, sceneId: context.sceneId, ref, command: { kind: "insert-shot", at, shot: { ...shot, title } }, checkReceiptIds: [receipt.id] });
+    const input = turn(w.conversationId, context, { receipts: [receipt], actions: [
+      insert("lagoon", { after: last }, "The lagoon"), insert("phone", { after: "ref:lagoon" }, "The phone"), insert("door", { after: "ref:phone" }, "The door"),
+    ] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, input);
+    assert.equal(prepared.length, 1, "one card for the three shots");
+    await appendTurn(w.log, input, prepared); await bindAll(w.lifecycle, prepared);
+    const [card] = (await loaded(w.log)).actions;
+    assert.equal((await decide(w.lifecycle, w.log, card!)).status, "completed");
+    assert.deepEqual(orderedShots(scene(w)).map(one => one.title), [...orderedShots(before).map(one => one.title), "The lagoon", "The phone", "The door"]);
+    assert.equal(scene(w).version, before.version + 1);
+  });
   function shotPrompt(before: ReturnType<typeof scene>) { return orderedShots(before)[0]!.promptOverride?.text; }
   for (const parentCompleted of [false, true]) it(`recovers an interrupted dependent binding with its parent ${parentCompleted ? "completed" : "pending"}`, async () => {
     const { w, before, prepared } = await insertThenPrompt(false);
@@ -3974,5 +4109,100 @@ describe("a graphic novel's cards (turn 270)", () => {
     assert.equal(card!.shown.title, "Export chapter 1");
     assert.match(card!.blockedReason ?? "", /no accepted take/);
     assert.notEqual((await decide(w.lifecycle, w.log, card!)).status, "completed");
+  });
+});
+
+describe("Arke sets a production's song (issue 3081)", () => {
+  const context = { kind: "production" as const, productionId: PRODUCTION };
+  const spineRead = (store: WorldStore): WorldChatCheckReceipt => ({
+    ...currentReceipt(store, "spine", PRODUCTION),
+    observedRevisionOrDigest: spineFence(store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION), store.getBundle().artifacts),
+  });
+  async function songWorld() {
+    const w = await setup(context);
+    const source = join(w.store.dir, "why-you-do-me-like-that.mp3");
+    await writeFile(source, "song fixture");
+    const filed = await fileArtifact(w.store, { sourcePath: source, production: PRODUCTION,
+      mediaProbe: { async durationSec() { return 227.64; }, async info() { return { durationSec: 227.64, hasAudio: true }; } } });
+    assert.ok(filed.outcome === "filed");
+    return { ...w, song: filed.artifact.id };
+  }
+  async function offer(w: Awaited<ReturnType<typeof songWorld>>, baseRevision: number | null) {
+    const read = spineRead(w.store);
+    const oneTurn = turn(w.conversationId, context, { receipts: [read], actions: [{ kind: "audio-spine-command", productionId: PRODUCTION,
+      baseRevision, command: { kind: "create", trackArtifactId: w.song }, checkReceiptIds: [read.id] }] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    return prepared;
+  }
+
+  it("says why a spine created at a revision is refused, in the authority's words", async () => {
+    const w = await songWorld();
+    // Not "The action authority could not prepare this action": that sentence was all Arke and
+    // the person saw, twice, while the reason sat in the conversation record.
+    await assert.rejects(bindAll(w.lifecycle, await offer(w, 1)), /creating an audio spine needs baseRevision null/);
+    const view = await loaded(w.log);
+    assert.ok(Object.values(view.notPrepared ?? {}).flat().includes("Audio spine: creating an audio spine needs baseRevision null"));
+    assert.equal(w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.spine, null);
+
+    await bindAll(w.lifecycle, await offer(w, null));
+    const card = (await loaded(w.log)).actions.at(-1)!;
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    assert.equal(w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.spine?.trackArtifactId, w.song);
+  });
+
+  // Four set-anchor cards chained with after: the first prepared and the rest were refused, each
+  // previewed against the live spine rather than the one the cards before it leave (issue 3103).
+  it("prepares the song, its marks and pinned shots chained in one turn, and approves them in order (issue 3103)", async () => {
+    const w = await songWorld();
+    const spine = () => w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.spine;
+    const shots = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.scenes
+      .map((scene) => orderedShots(scene)).find((ordered) => ordered.length >= 2)!.slice(0, 2);
+    const read = spineRead(w.store);
+    const card = (ref: string, after: string[], baseRevision: number | null, command: unknown) => ModelWorldChatActionSchema.parse({
+      kind: "audio-spine-command", productionId: PRODUCTION, ref, ...(after.length > 0 ? { after } : {}), baseRevision, command, checkReceiptIds: [read.id] });
+    const marker = (index: number, label: string, atSec: number) => ({ kind: "section", id: `mk_01J8G${"0".repeat(20)}${index}`, label, atSec, source: "json" });
+    const oneTurn = turn(w.conversationId, context, { receipts: [read], actions: [
+      card("song", [], null, { kind: "create", trackArtifactId: w.song }),
+      card("marks", ["song"], 1, { kind: "import-markers", format: "json", markers: [marker(1, "Intro", 0), marker(2, "Verse 1", 16)] }),
+      card("first", ["marks"], 2, { kind: "set-anchor", shotId: shots[0]!.id, anchor: { startSec: 0, endSec: 4 } }),
+      card("second", ["first"], 3, { kind: "set-anchor", shotId: shots[1]!.id, anchor: { startSec: 4, endSec: 9 } }),
+    ] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const cards = (await loaded(w.log)).actions;
+    assert.equal(cards.length, 4, "every card prepares against the spine the ones before it leave");
+    assert.equal(spine(), null, "preparing writes nothing");
+    assert.equal((await decide(w.lifecycle, w.log, cards[3]!)).reason, "dependency-blocked");
+    for (const one of cards) assert.equal((await decide(w.lifecycle, w.log, one)).status, "completed", one.shown.title);
+    assert.equal(spine()?.revision, 4);
+    assert.deepEqual(spine()?.markers.map((one) => one.kind === "section" ? one.label : one.text), ["Intro", "Verse 1"]);
+    assert.deepEqual(Object.keys(spine()?.anchors ?? {}).sort(), shots.map((shot) => shot.id).sort());
+  });
+
+  // Its spine read moves under the cards it waits on, but the shots and tracks that read showed do
+  // not: a shot rewritten after the card was prepared must not be pinned unseen (codex on PR 3129).
+  it("goes stale when a shot it pins changes after it was prepared, though the spine it waits on may move", async () => {
+    const w = await songWorld();
+    const production = () => w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+    const scene = production().scenes.find((candidate) => orderedShots(candidate).length > 0)!;
+    const shot = orderedShots(scene)[0]!;
+    const read = spineRead(w.store);
+    const card = (ref: string, after: string[], baseRevision: number | null, command: unknown) => ModelWorldChatActionSchema.parse({
+      kind: "audio-spine-command", productionId: PRODUCTION, ref, ...(after.length > 0 ? { after } : {}), baseRevision, command, checkReceiptIds: [read.id] });
+    const oneTurn = turn(w.conversationId, context, { receipts: [read], actions: [
+      card("song", [], null, { kind: "create", trackArtifactId: w.song }),
+      card("pin", ["song"], 1, { kind: "set-anchor", shotId: shot.id, anchor: { startSec: 0, endSec: 4 } }),
+    ] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const [song, pin] = (await loaded(w.log)).actions;
+    assert.equal((await decide(w.lifecycle, w.log, song!)).status, "completed");
+    await applySceneCommand(w.store, { productionId: PRODUCTION, sceneId: scene.id, sceneFile: production().sceneFiles[scene.id]!,
+      baseVersion: scene.version, command: { kind: "edit-shot", shotId: shot.id, change: { title: "A different shot now" } } });
+    assert.equal((await decide(w.lifecycle, w.log, pin!)).reason, "stale");
+    assert.deepEqual(production().spine?.anchors, {}, "nothing is pinned");
   });
 });

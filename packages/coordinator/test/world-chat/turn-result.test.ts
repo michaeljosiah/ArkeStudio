@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { z } from "zod";
 import {
   newId,
+  TURN_RESULT_BOUNDS,
   WORLD_CHAT_SHAPE_EXAMPLES,
   WorldChatPreparedActionSchema,
   type CandidateChecks,
@@ -247,6 +248,20 @@ describe("parsing a turn result", () => {
     assert.equal(parseTurnResult(raw).ok, false);
   });
 
+  it("names the shot positions when an insert's at is a guess (issue 3084)", () => {
+    const example = WORLD_CHAT_SHAPE_EXAMPLES.worldActions["production-scene-command"];
+    assert.equal(parseTurnResult(turn({ actions: [example] }), true).ok, true, "the example is an insert that parses");
+    const { command: _command, ...action } = example;
+    for (const at of [{ kind: "end" }, { index: 1 }]) {
+      const guessed = [{ ...action, commands: [{ kind: "insert-shot", at, shot: { title: "The bell", description: "The bell swings." } }] }];
+      const parsed = parseTurnResult(turn({ actions: guessed as unknown as WorldChatTurnResult["actions"] }), true);
+      assert.equal(parsed.ok, false);
+      // "matches none of the allowed shapes" was the whole line, and Arke's next guess failed too.
+      if (!parsed.ok) assert.match(correctiveMessage(parsed.problems),
+        /actions\.0\.commands\.0\.at must be \{"atStart":true\}, \{"after":shotId\} or \{"before":shotId\}.*There is no end or index/);
+    }
+  });
+
   it("rejects an oversized merged scene batch before turn completion", () => {
     const { command: _command, ...action } = WORLD_CHAT_SHAPE_EXAMPLES.worldActions["production-scene-command"];
     const raw = turn({ actions: [{ ...action, commands: Array.from({ length: 24 }, () => ({ kind: "edit-scene" as const, title: "The bell" })) },
@@ -254,6 +269,16 @@ describe("parsing a turn result", () => {
     const result = parseTurnResult(raw, true);
     assert.equal(result.ok, false);
     if (!result.ok) assert.ok(result.problems.some(problem => /at most 24 commands/.test(problem.safeMessage)));
+  });
+
+  it("tells a spine sent at revision 0 that the first spine is created with null (issue 3081)", () => {
+    const action = WORLD_CHAT_SHAPE_EXAMPLES.worldActions["audio-spine-command"];
+    assert.equal(action.baseRevision, null, "the example is the create nothing else teaches");
+    assert.equal(parseTurnResult(turn({ actions: [action] }), true).ok, true);
+    const parsed = parseTurnResult(turn({ actions: [{ ...action, baseRevision: 0 }] }), true);
+    assert.equal(parsed.ok, false);
+    // "needs at least 1" was the line before, and Arke sent 1, which the authority refuses.
+    if (!parsed.ok) assert.match(correctiveMessage(parsed.problems), /actions\.0\.baseRevision: use null to create the first spine/);
   });
 
   it("rejects execution-blocked generation before it can become a dead card", () => {
@@ -297,6 +322,46 @@ describe("parsing a turn result", () => {
       const parsed = parseTurnResult(prose);
       assert.equal(parsed.ok === false && parsed.problems[0]!.code, "not-json", prose);
     }
+  });
+
+  it("shows the plan written before a fenced result whose reply is empty (issue 3082)", async () => {
+    // The answer as it came back from a scene's Builder Chat: the storyboard and a question for
+    // the author as prose, then the notes in a fenced object with an empty reply. The bubble was
+    // blank and the question was lost.
+    const input = await baseInput();
+    const prose = [
+      "Four shots, cut on the bars of the song.",
+      "1. Wide on the lagoon as the intro opens (0:00–0:04). The Lady stays wide here so the place reads before she does.\n2. Closer as the first line lands (0:04–0:08).",
+      "3. and 4. Her turn to the water, then the reflection (0:08–0:16).",
+      "Shall shots 3 and 4 be one take, or two?",
+    ].join("\n\n");
+    const result = {
+      reply: "",
+      candidateOperations: [{ op: "create", temporaryId: "t1", candidate: { ...canonCreateDraft(input.message), settledness: "tentative" } }],
+      groupOperations: [],
+    };
+    const outcome = validateTurnResult({ ...input, raw: `${prose}\n\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\`` });
+    assert.equal(outcome.ok, true);
+    if (!outcome.ok) return;
+    assert.equal(outcome.turn.reply, prose, "the prose, trimmed, without the fence");
+    assert.equal(outcome.turn.candidates.length, 1, "the notes land beside it as before");
+  });
+
+  it("takes prose from either side of the object only when its own reply is empty", () => {
+    const after = parseTurnResult(`Here is the plan.\n${turn({ reply: "  " })}\n\nShall I go on?`);
+    assert.equal(after.ok && after.value.reply, "Here is the plan.\n\nShall I go on?");
+    const own = parseTurnResult(`Here is the plan.\n${turn({ reply: "Four shots." })}\n\nShall I go on?`);
+    assert.equal(own.ok && own.value.reply, "Four shots.", "a reply of its own is never replaced");
+    for (const bare of [turn({ reply: "" }), "```json\n" + turn({ reply: "" }) + "\n```"]) {
+      const parsed = parseTurnResult(bare);
+      assert.equal(parsed.ok && parsed.value.reply, "", "no prose, nothing to show");
+    }
+  });
+
+  it("cuts prose longer than a reply at the bound rather than refusing the result", () => {
+    const parsed = parseTurnResult(`${"word ".repeat(TURN_RESULT_BOUNDS.reply)}\n${turn({ reply: "" })}`);
+    assert.equal(parsed.ok, true);
+    assert.equal(parsed.ok && parsed.value.reply.length, TURN_RESULT_BOUNDS.reply);
   });
 
   it("refuses unrecognised fields rather than ignoring them", () => {
@@ -401,6 +466,17 @@ describe("parsing a turn result", () => {
     assert.match(refused.safeMessage, /title allows at most 3 characters/);
     assert.ok(!refused.safeMessage.includes("seventh bell"), "a refused value is not echoed");
     assert.match(preparationProblem("thrown string").safeMessage, /^The requested change could not be prepared\. If a read/);
+  });
+
+  it("tells the person a bookkeeping or citation refusal in plain words, the model the detail (issue 3112)", () => {
+    // The two refusals a scene thread showed its author on 2026-11-15, word for word.
+    const read = { code: "candidate-read-required", safeMessage: "Read the proposition with get_candidate at its current registry revision through complete=true before replacing it. Preserve unchanged authored fields, evidence and groups." };
+    const quote = { code: "world-quote-not-found", safeMessage: "A quotation was not found in the entity it cites." };
+    assert.equal(personLine([read]), "it did not line up with the conversation as it stands");
+    assert.equal(personLine([quote]), "it cited something it could not point to");
+    assert.equal(personLine([read, quote, read]), "it did not line up with the conversation as it stands · it cited something it could not point to");
+    assert.match(correctiveMessage([read]), /get_candidate/, "the model still gets what to do");
+    assert.doesNotMatch(personLine([read, quote]), /get_candidate|complete=true|proposition|entity/);
   });
 
   it("keeps the complete missing-read list in the bounded corrective prompt (#1911)", () => {

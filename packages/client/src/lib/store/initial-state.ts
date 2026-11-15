@@ -29,6 +29,7 @@ export function initialStoreState(): StoreState {
     narratorQuotes: {},
     heardLines: {},
     audiobookAsks: {},
+    spineAsks: {},
     audiobookDoor: {},
     audiobookCredits: {},
     audiobookBook: {},

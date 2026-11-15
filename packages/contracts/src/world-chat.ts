@@ -2698,11 +2698,13 @@ const exampleWorldActions = {
     style: "Bleached documentary realism.",
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  // An insert, because its position is the shape nothing else shows (issue 3084): with a prompt
+  // override as the only example, Arke guessed {"kind":"end"}, then {"index":1}, and the turn failed.
   "production-scene-command": {
     kind: "production-scene-command",
     productionId: "saltlight",
     sceneId: "sc_04",
-    command: { kind: "set-prompt-override", shotId: "sh_001", capability: "video", text: "Close on the missing page under a salt-stained amber lamp. Over six seconds the camera pushes slowly toward the torn edge; the loose paper trembles in a draught. A distant bell sounds once, then only the soft rustle of paper." },
+    command: { kind: "insert-shot", at: { after: "sh_003" }, shot: { title: "The torn page", description: "Close on the missing page under a salt-stained amber lamp; the loose paper trembles in a draught.", durationSec: 6 } },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
   "production-board-compile": {
@@ -2768,15 +2770,13 @@ const exampleWorldActions = {
     shotId: "sh_001",
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
+  // The first card a spine ever gets, because it is the one nothing else teaches (issue 3081):
+  // with a set-anchor at revision 2 as the only example, Arke sent a number to create one.
   "audio-spine-command": {
     kind: "audio-spine-command",
     productionId: "saltlight",
-    baseRevision: 2,
-    command: {
-      kind: "set-anchor",
-      shotId: "sh_001",
-      anchor: { startSec: 12, endSec: 18, clipAudio: { mode: "mute" } },
-    },
+    baseRevision: null,
+    command: { kind: "create", trackArtifactId: `ar_${EXAMPLE_ULID}` },
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
   "production-routing": {
@@ -2946,7 +2946,7 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-prose-style": "Set the story's point of view, tense, voice and samples.",
   "production-comic-script": `Plan, then write, a graphic novel chapter's pages. A chapter is planned before it is drafted: first send its plan alone, with no pages — every passage of the prose with keep, cut, merge, show or invent and why, each page's change and the turn it ends on, what the reader is shown or told and on which page, and every line that would lean on a cut or on something not yet shown and that the plan does not settle: a line the plan answers is not listed. Once the author keeps the plan, write the pages whole from it: turn the prose, or the chapter it adapts, into pages of panels and exact lettering. Read get_production first and name the chapter's comic baseHash — null for a chapter with nothing yet, as unpagedChapters lists them — keep every unchanged page, panel and line with its id, and cite each panel's source paragraphs. ${COMIC_ADAPTATION_CRAFT} The plan's shape, exactly: {"passages":[{"where":"¶ 1–6","what":"what happens","verdict":"keep","why":"a reason in a few words"}],"pages":[{"change":"what changes on the page","turn":"the turn it ends on"}],"knows":[{"name":"Bray","page":1,"how":"named"}],"leans":[{"page":3,"line":"the line","why":"what it leans on"}],"mysteries":["What is under the water?"]} — verdict is keep, cut, merge, show or invent; knows and leans may be empty; mysteries are the questions the book means the reader to carry unanswered, and the reader of the draft is told them. A page's layout sets how many panels it has: splash 1, feature or strip-3 3, grid-2x2 4, manga 5, grid-3x3 9; give each page exactly the panels its layout has. A reader who has only the pages reads every draft, and the author sees its questions beside the draft. They are advice: a question can be what the book holds back, so never answer one with words the book does not give or by telling the reader early. When the author asks about them, say which you would answer and how and which you would leave open, change nothing until they choose, then send the pages whole; they replace the draft waiting. The author keeps or discards each draft in Pages.`,
   "production-episode-script": "Write or change an audio drama episode's script, whole. Read get_production first and name the script's baseHash — null for an episode with no script yet, as unwrittenEpisodes lists them — and keep every unchanged block with its id; the author keeps or discards the draft in the score.",
-  "production-scene-command": "One command or an ordered commands list on a scene: cast and place, shots, staging, prompt overrides or boards. Independent commands on the same scene share an atomic card showing the resulting shot list. Explicit after dependencies stay separate cards. Use ref:name in a shot target to name the one shot a preceding action with ref=name creates; include that ref in after when it is a separate card. Visual facts require the person's review on the shot panel and cannot be set here.",
+  "production-scene-command": "One command or an ordered commands list on a scene: cast and place, shots, staging, prompt overrides or boards. Independent commands on the same scene share an atomic card showing the resulting shot list. Explicit after dependencies stay separate cards. insert-shot's at, like move-shot's to, is {\"atStart\":true}, {\"after\":shotId} or {\"before\":shotId}, nothing else: there is no end or index, so a shot goes last after the scene's last shot. The studio numbers a new shot, so no command can name it by id. To add several shots in order on one card, send one production-scene-command per new shot on the same scene, each with its own ref and no after: place the first after an existing shot (or atStart) and each next at {\"after\":\"ref:<previous ref>\"}. Use ref:name in any shot target to name the one shot a preceding action with ref=name creates; another kind of action naming that shot is its own card and lists the ref in after. Visual facts require the person's review on the shot panel and cannot be set here.",
   "production-board-compile": "Compile a scene's storyboard from its shots and frames.",
   "production-board-export": "Export a scene's storyboard to a file the person chooses.",
   "production-take-import": "Import a take for a shot from a file the person picks.",
@@ -2965,7 +2965,7 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-take-trim": "Set where a take starts in its shot.",
   "production-stage-playblast": "Record a shot's Stage blocking as a playblast video. Needs the Stage open.",
   "production-stage-construct": "Build a shot's Stage blockout from its script. The person keeps or discards the draft.",
-  "audio-spine-command": "Change the production's audio spine: its track, markers and each shot's anchor.",
+  "audio-spine-command": "Change the production's audio spine: its track, markers and each shot's anchor. Read get_spine first. A production with no spine gets one by create {trackArtifactId} with baseRevision null; every later command names the live revision get_spine shows. Marker ids are mk_ and a 26-character ULID you make up (digits and capitals, no I, L, O or U), each unique. Spine cards in one turn chain with after, each naming the revision the card before it leaves: a create leaves 1 and every later card adds 1. The person approves them in order.",
   "production-routing": "Edit an interactive production's branch map: start, choices, endings, and which scenes are in play.",
   "production-routing-traversal": "Record a walk through one choice of the branch map.",
   "production-branch-canon": "Propose Canon that holds only on one route through the branch map.",

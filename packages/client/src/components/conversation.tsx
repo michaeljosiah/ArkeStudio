@@ -424,8 +424,9 @@ export function ConversationPermissionCard({
         </div>
         <span className="fy-actioncard__status">{recorded && action.status === "pending" ? "Starting…" : comicDraft && action.status === "pending" ? "Waiting in Pages" : ACTION_STATUS[action.status]}</span>
       </div>
-      {/* A comic draft is read in Pages: its card names it and goes there (issue 2459). */}
-      {!comicDraft && !comicCard && <StudioShow action={action} />}
+      {/* A comic draft is read in Pages: its card names it and goes there (issue 2459). A song card
+          has no picture: Show opened the production overview beside it (issue 3092). */}
+      {!comicDraft && !comicCard && action.actionKind !== "world-chat-audio-spine-command" && <StudioShow action={action} />}
       {/* A proposal's rows are what it does; "Writes one reviewed world record" added nothing. */}
       {!comicDraft && !comicMake && !generation && !(action.shown.body.family === "authored-diff" && action.authority.kind === "proposal-manager") && <p className="fy-actioncard__consequence">{action.shown.consequence}</p>}
       {comicMake ? <ComicMakeCardBody action={action} /> : terminal ? (
@@ -666,7 +667,9 @@ export function failureLine(failure: { status: string; detail?: string }): strin
   if (rejected) {
     // The detail may end on its own full stop (issue 1403 found "fences.." on screen).
     const why = failure.detail!.slice("rejected: ".length).trim().replace(/[.!?]+$/, "");
-    return `The studio answered and the answer was refused — ${why}. Your message is still here; asking a different way usually gets past it.`;
+    // Said as Arke's answer, not the studio's refusal (issue 3112): the person asked Arke, and
+    // "the studio answered and the answer was refused" named machinery they never see.
+    return `Arke's answer couldn't be used: ${why}. Your message is still here; try again, or ask a different way.`;
   }
   const opening =
     failure.status === "timeout"

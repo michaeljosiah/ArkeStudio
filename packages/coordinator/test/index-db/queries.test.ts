@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import type { Sheet } from "@arke-studio/contracts";
 import { WorldIndex } from "../../src/index-db/world-index.js";
 import {
   contradictionCandidates,
+  DEFAULT_RELEVANCE_FLOOR,
   ftsQuery,
   needsYou,
   refsForCanon,
@@ -303,6 +305,133 @@ describe("sheet search (#70 §9.2)", () => {
   it("honours the result limit", async () => {
     const { index } = await openFixtureIndex();
     assert.ok(searchSheets(index.db, "the harbour water", { limit: 1 }).candidates.length <= 1);
+    index.close();
+  });
+});
+
+/**
+ * A cast shaped like the world that found issue 3109: the two leads are named in every sheet,
+ * their own included, so bm25 gives "Ife" and "Ade" no weight at all. Every sheet says "the" as
+ * well, so a filler word in a question scores nothing either and can only arrive by a name.
+ */
+async function openLeadsWorld() {
+  const dir = await makeTempWorld();
+  const bundle = await fixtureBundle();
+  const template = bundle.sheets.find((s) => s.id === "maren-kest")!;
+  const sheet = (id: string, name: string, prose: string, more: Partial<Sheet> = {}): Sheet => ({
+    ...template,
+    id,
+    type: "character",
+    name,
+    role: undefined,
+    region: undefined,
+    production: undefined,
+    retired: false,
+    sections: [{ heading: "Essence", body: prose }],
+    ...more,
+  });
+  return WorldIndex.open(dir, {
+    ...bundle,
+    sheets: [
+      sheet("ife", "Ife", "Ife keeps the flat that Ade pays for."),
+      sheet("adeyemi-ade-akinola", 'Adeyemi "Ade" Akinola', "Ade owns the house; Ife is the secret he keeps."),
+      sheet("musa", "Musa", "Musa opens the gate for Ade, and never for Ife."),
+      sheet("tunde", "Tunde", "Tunde drinks with Ade at the club and does not trust Ife."),
+      sheet("kemi", "Kemi", "Kemi sold Ife the insurance, and tells her Ade will never leave the marriage."),
+      sheet("zee", "Zee", "Zee met Ife at the club and Ade at the door."),
+      // Renamed since it was written: the slug keeps the old name, the name does not.
+      sheet("the-ferryman", "Old Joss", "Old Joss rowed Ade across the lagoon, and Ife back."),
+      sheet("ife-s-flat", "Ife's Flat", "The flat Ade rents for Ife.", { type: "location", region: "Lekki" }),
+      sheet("the-lighthouse", "The Lighthouse", "Neither Ade nor Ife has climbed the stairs.", { type: "location" }),
+      sheet("ife-adeleke", "Ife Adeleke", "A guest who shares a name with Ife and owes Ade the rent.", {
+        production: "saltlight",
+      }),
+    ],
+  });
+}
+
+describe("sheet search finds the people a story is about (issue 3109)", () => {
+  it("finds every lead a question names, though bm25 scores their names at zero", async () => {
+    const index = await openLeadsWorld();
+    const result = searchSheets(index.db, "Ade Ife Musa");
+    assert.equal(result.floorCleared, true);
+    assert.deepEqual(
+      result.candidates.map((c) => c.sheetId).sort(),
+      ["adeyemi-ade-akinola", "ife", "ife-s-flat", "musa"],
+      "the three named, and the flat named for one of them; never a sheet that only mentions them",
+    );
+    const ife = result.candidates.find((c) => c.sheetId === "ife")!;
+    assert.ok(
+      ife.score < DEFAULT_RELEVANCE_FLOOR,
+      `this world must reproduce the zero score, or the test proves nothing — Ife scored ${ife.score}`,
+    );
+    index.close();
+  });
+
+  it("puts a lead's own sheet first, and leaves the sheets that merely mention them below the floor", async () => {
+    const index = await openLeadsWorld();
+    assert.deepEqual(
+      searchSheets(index.db, "Ife").candidates.map((c) => c.sheetId),
+      ["ife", "ife-s-flat"],
+      "the name that is all of the sheet's name comes before the one it is part of",
+    );
+    assert.deepEqual(searchSheets(index.db, "Ife", { limit: 1 }).candidates.map((c) => c.sheetId), ["ife"]);
+    index.close();
+  });
+
+  it("matches a whole word of the name, through quotes, and never part of one", async () => {
+    const index = await openLeadsWorld();
+    // Adeyemi and Adeleke both begin with "ade"; only the quoted nickname is the word.
+    assert.deepEqual(
+      searchSheets(index.db, "ade", { production: "saltlight" }).candidates.map((c) => c.sheetId),
+      ["adeyemi-ade-akinola"],
+    );
+    index.close();
+  });
+
+  it("ranks a name match ahead of a prose match that outscores it", async () => {
+    const index = await openLeadsWorld();
+    const result = searchSheets(index.db, "Ife insurance");
+    assert.deepEqual(
+      result.candidates.map((c) => c.sheetId),
+      ["ife", "ife-s-flat", "kemi"],
+    );
+    const score = new Map(result.candidates.map((c) => [c.sheetId, c.score]));
+    assert.ok(score.get("kemi")! > score.get("ife")!, "the order is the name's, not bm25's");
+    index.close();
+  });
+
+  it("finds a renamed sheet by the slug it kept", async () => {
+    const index = await openLeadsWorld();
+    const result = searchSheets(index.db, "ferryman");
+    assert.equal(result.floorCleared, true);
+    assert.deepEqual(result.candidates.map((c) => c.sheetId), ["the-ferryman"]);
+    index.close();
+  });
+
+  it("does not take a filler word for a name", async () => {
+    const index = await openLeadsWorld();
+    assert.deepEqual(
+      searchSheets(index.db, "the Ade").candidates.map((c) => c.sheetId),
+      ["adeyemi-ade-akinola"],
+      "every \"The …\" sheet would come first if \"the\" named them",
+    );
+    index.close();
+  });
+
+  it("matches names only inside the corpus it searched, and counts that corpus", async () => {
+    const index = await openLeadsWorld();
+    const world = searchSheets(index.db, "Ife");
+    assert.ok(!world.candidates.some((c) => c.sheetId === "ife-adeleke"), "another production's guest stays out");
+    assert.equal(world.searched, 9);
+
+    const scoped = searchSheets(index.db, "Ife", { production: "saltlight" });
+    assert.ok(scoped.candidates.some((c) => c.sheetId === "ife-adeleke"), "this production's guest is in");
+    assert.equal(scoped.searched, 10);
+
+    const places = searchSheets(index.db, "Ife", { kind: "location" });
+    assert.deepEqual(places.candidates.map((c) => c.sheetId), ["ife-s-flat"]);
+    assert.equal(places.searched, 2);
     index.close();
   });
 });

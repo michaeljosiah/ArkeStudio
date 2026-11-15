@@ -473,6 +473,91 @@ describe("the Library (SPEC-039 T-3)", () => {
   });
 });
 
+/**
+ * "This production" is what this production uses or owns (issue 3095). A world upload names no
+ * production, and a brand-new production's Library listed another film's clips and songs as its
+ * own. The world's files stay one choice away under Browse world, placeable as before.
+ */
+describe("This production and the world's files (issue 3095)", () => {
+  const TRAILER = "ar_01J8G0000000000000000000W1";
+  const ELSEWHERE = "ar_01J8G0000000000000000000W2";
+  const OWN = "ar_01J8G0000000000000000000W3";
+  const FOR_SCENE = "ar_01J8G0000000000000000000W4";
+  const SONG = "ar_01J8G0000000000000000000W5";
+  const PLACED = "ar_01J8G0000000000000000000W6";
+
+  function worldState(): ClientState {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions[0]!;
+    const file = (id: string, kind: "video" | "audio", extra: { production?: string; links?: string[] } = {}) => ({
+      id, kind, file: `${id.slice(-2).toLowerCase()}.${kind === "audio" ? "wav" : "mp4"}`, hash: `sha256:${id.slice(-2).toLowerCase()}d24c90a13e58f6`,
+      origin: { by: "user" }, links: extra.links ?? [], created: "2026-11-01T10:00:00Z",
+      mediaInfo: { durationSec: 5, hasAudio: true }, ...(extra.production !== undefined ? { production: extra.production } : {}),
+    });
+    state.world!.artifacts.push(
+      // Another film's clip, filed by its Cut as a world upload; and one scoped to another production.
+      file(TRAILER, "video") as never, file(ELSEWHERE, "video", { production: "undertow" }) as never,
+      // This production's own file, one made for one of its scenes, its song, and one it placed.
+      file(OWN, "video", { production: production.meta.id }) as never, file(FOR_SCENE, "video", { links: ["sc_04"] }) as never,
+      file(SONG, "audio") as never, file(PLACED, "audio") as never,
+    );
+    production.spine = { schemaVersion: 1, revision: 1, trackArtifactId: SONG, markers: [], anchors: {}, updatedAt: "2026-11-01T10:00:00Z" } as typeof production.spine;
+    production.timeline = {
+      status: "ready",
+      timeline: applyTimelineCommands(seedStoryPictureTimeline(production), [
+        { kind: "add-to-library", items: [{ kind: "shot", shotId: "sh_12" }] },
+        { kind: "add-track", trackId: "tr_music", trackKind: "music", name: "Music" },
+        { kind: "place", trackId: "tr_music", clip: { id: "cl_placed", startFrame: 0, durationFrames: 48, sourceInFrames: 0, source: { kind: "artifact", artifactId: PLACED, label: "placed.wav" } } },
+      ]),
+    };
+    return state;
+  }
+
+  async function choose(screen: Mounted, value: string): Promise<void> {
+    const select = screen.container.querySelector<HTMLSelectElement>('select[aria-label="Browse world"]');
+    assert.ok(select, "Browse world is offered");
+    await act(async () => {
+      for (const option of select.querySelectorAll("option[selected]")) option.removeAttribute("selected");
+      [...select.querySelectorAll("option")].find((option) => option.value === value)!.setAttribute("selected", "");
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  }
+
+  const files = (screen: Mounted) => rows(screen).filter((key) => key.startsWith("artifact:")).sort();
+  const keys = (...ids: string[]) => ids.map((id) => `artifact:${id}`).sort();
+
+  it("lists what this production owns, holds, places, plays and was made for, and nothing else", async () => {
+    const screen = await mount(worldState());
+    try {
+      // One world and one production: the world's own files are still something to browse.
+      const select = screen.container.querySelector<HTMLSelectElement>('select[aria-label="Browse world"]')!;
+      assert.deepEqual([...select.querySelectorAll("option")].map((option) => option.textContent), ["This production", "This world’s files"]);
+      assert.deepEqual(files(screen), keys(OWN, FOR_SCENE, SONG, PLACED), "not another film's clip, nor the world's bells");
+      assert.ok(rows(screen).includes("shot:sh_12"), "its shots as before");
+    } finally {
+      await close(screen);
+    }
+  });
+
+  it("keeps the world's uploads under Browse world, placeable from there", async () => {
+    const screen = await mount(worldState());
+    try {
+      await choose(screen, "world:files");
+      assert.deepEqual(files(screen), keys(BELLS, TRAILER, OWN, FOR_SCENE, SONG, PLACED), "every file this production can see; never another production's own");
+      assert.equal(rows(screen).some((key) => !key.startsWith("artifact:")), false, "files only: the shots and lines are this production's");
+      assert.equal(screen.container.querySelector('select[aria-label="Scene"]'), null, "no scene of this production frames the world's files");
+      await act(async () => rowButton(screen, `artifact:${TRAILER}`).click());
+      await act(async () => action(screen, "Append to timeline")!.click());
+      const [sent] = commandsSent(screen);
+      assert.ok(sent, "placing it is the same one batch");
+      assert.deepEqual(sent.commands.find((command) => command.kind === "add-to-library"), { kind: "add-to-library", items: [{ kind: "artifact", artifactId: TRAILER }] }, "which takes it into this production");
+      await choose(screen, "here");
+      assert.deepEqual(files(screen), keys(OWN, FOR_SCENE, SONG, PLACED));
+    } finally {
+      await close(screen);
+    }
+  });
+});
 
 const PERFORMANCE = "pf_01J8E0000000000000000000P1", PERFORMANCE_HASH = `sha256:${"1".repeat(64)}`;
 function stateWithPerformance() {

@@ -114,6 +114,8 @@ export interface NeedsYouEntry {
   /** Exact in-app review destination when the derived item owns one. */
   reviewPath?: string;
   productionTitle?: string;
+  /** A reference take's sheet, by name: what a group of them is called, as a production names its own. */
+  sheetName?: string;
 }
 
 /**
@@ -131,7 +133,10 @@ export function groupTakesToReview(entries: readonly NeedsYouEntry[]): NeedsYouE
     if (count < 2) { rows.push(entry); continue; }
     if (shown.has(entry.reviewPath!)) continue;
     shown.add(entry.reviewPath!);
-    rows.push({ ...entry, title: `${count} ${entry.reviewPath!.includes("view=stills") ? "pictures" : "takes"} to review · ${entry.productionTitle}`, detail: "" });
+    // Reference takes belong to a sheet, not a production, and were titled "· undefined" (issue 3090).
+    const reference = entry.productionTitle === undefined;
+    const noun = entry.reviewPath!.includes("view=stills") ? "pictures" : reference ? "reference takes" : "takes";
+    rows.push({ ...entry, title: [`${count} ${noun} to review`, entry.productionTitle ?? entry.sheetName].filter(Boolean).join(" · "), detail: "" });
   }
   return rows;
 }
@@ -272,11 +277,12 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
     const decidedReferences = new Set((world.referenceReviews ?? []).map((review) => review.takeId));
     for (const take of world.referenceTakes ?? []) {
       if (decidedReferences.has(take.id)) continue;
+      const sheetName = (world.sheets ?? []).find((sheet) => sheet.id === take.reference?.sheetId)?.name;
       entries.push({
         urgency: 4,
         kind: "unreviewed-take",
         title: "reference take awaiting review",
-        detail: `${take.kind.replace(/-/g, " ")} for ${(world.sheets ?? []).find((sheet) => sheet.id === take.reference?.sheetId)?.name ?? take.reference?.sheetId ?? "reference set"}`,
+        detail: `${take.kind.replace(/-/g, " ")} for ${sheetName ?? take.reference?.sheetId ?? "reference set"}`,
         at: take.completedAt ?? take.dispatchedAt,
         worldId: world.meta.worldId,
         actions: ["review"],
@@ -284,6 +290,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
         ...(take.reference?.sheetId
           ? { reviewPath: referenceReviewPath(world.meta.worldId, take.reference.sheetId, take.kind) }
           : {}),
+        ...(sheetName ? { sheetName } : {}),
       });
     }
     for (const production of world.productions) {

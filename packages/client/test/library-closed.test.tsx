@@ -68,17 +68,20 @@ function bridge(sent: ClientMessage[]) {
   } as unknown as NonNullable<Window["arke"]>;
 }
 
-/** Every row the fixture lists once its two shots are in the Library: the shots, one shot's spoken line, the bells. */
+/** Every row the fixture lists once its two shots and the bells are in the Library: the shots, one shot's spoken line, the bells. */
 const ALL_ROWS = ["shot:sh_12", "shot:sh_13", "line:sh_12", "artifact:ar_01J8G0000000000000000000R1"];
 
-/** The story's two shots on a saved timeline and in the Library: rows to draw, or not. */
+/**
+ * The story's two shots on a saved timeline, and they and the bells in the Library: rows to draw,
+ * or not. The bells are a world upload, so this production lists them once it has taken them up.
+ */
 function libraryState(): ClientState {
   const state = structuredClone(FIXTURE_STATE) as ClientState;
   const production = state.world!.productions[0]!;
   production.timeline = {
     status: "ready",
     timeline: applyTimelineCommands(seedStoryPictureTimeline(production), [
-      { kind: "add-to-library", items: [{ kind: "shot", shotId: "sh_12" }, { kind: "shot", shotId: "sh_13" }] },
+      { kind: "add-to-library", items: [{ kind: "shot", shotId: "sh_12" }, { kind: "shot", shotId: "sh_13" }, { kind: "artifact", artifactId: "ar_01J8G0000000000000000000R1" }] },
     ]),
   };
   return state;

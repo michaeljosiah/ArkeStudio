@@ -232,6 +232,19 @@ it("a full-size permission card and human review each move their one mounted ins
   assert.ok(dom.document.querySelector('.fy-production-studio__full-card [aria-label="Unsaved review"]'));
 });
 
+it("a song card offers no Show: it has no picture to open (issue 3092)", async () => {
+  const action = card();
+  action.actionKind = "world-chat-audio-spine-command";
+  action.authority = { kind: "audio-spine", id: action.actionId };
+  action.targets = [{ kind: "audio-spine", id: production.meta.id, label: "Audio spine" }];
+  action.shown = { ...action.shown, productionPreview: undefined, title: "Use why-you-do-me-like-that.mp3 as the song · 3:47",
+    body: { family: "command", commands: [{ label: "Use why-you-do-me-like-that.mp3 as the song", detail: "3:47" }], expectedResult: "Saved as revision 1 of the song.", undoAvailable: false } };
+  await setup(action);
+  const pressable = [...dom.document.querySelectorAll("button")].map(button => button.textContent);
+  assert.ok(pressable.includes("Approve"));
+  assert.ok(!pressable.includes("Show") && !pressable.includes("Open full size"));
+});
+
 it("pinning holds a target as new cards arrive and settled previews return to live authoritative scenes", async () => {
   const made = await setup(); await click("Show"); await click("Pin canvas");
   const next = { ...card(), conversationId: made.action.conversationId, actionKind: "world-chat-production-metadata", targets: [{ kind: "production", id: production.meta.id }] };

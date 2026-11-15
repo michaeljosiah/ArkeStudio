@@ -20,6 +20,11 @@ export function foldResultEvent(slices: FrameSlices, event: DomainEvent): void {
     if (event.command === "make-audiobook-picture" && event.requestId && slices.audiobookAsks[event.requestId]?.state === "working") {
       slices.audiobookAsks = { ...slices.audiobookAsks, [event.requestId]: { state: "failed", reason: event.reason } };
     }
+    // A refused spine command is answered; the toaster says why (issue 3088).
+    if (event.requestId && slices.spineAsks[event.requestId] !== undefined) {
+      const { [event.requestId]: _answered, ...rest } = slices.spineAsks;
+      slices.spineAsks = rest;
+    }
     // A Draft refused before it ran (a world no longer open) sends no last word of its own; the
     // page stops saying Drafting with the refusal on the toaster (issue 2796).
     if (event.command === "draft-guide-description" && event.requestId) forgetGuideDrafting(event.requestId);

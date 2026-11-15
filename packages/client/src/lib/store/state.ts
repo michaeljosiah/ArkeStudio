@@ -407,6 +407,12 @@ export interface StoreState {
   /** What the director would read and speaker notes drafted (design turn 184), by request id. */
   audiobookAsks: Record<string, AudiobookAsk>;
   /**
+   * Spine commands sent and not yet answered (issue 3088), by request id, with the spine revision
+   * each was composed against (null for none). Answered by a snapshot whose spine has moved, by
+   * a refusal under the id, or by a rejoin, whose snapshot says whether it landed.
+   */
+  spineAsks: Record<string, { worldId: string; productionId: string; revision: number | null }>;
+  /**
    * The door (turn 146, SPEC-047 R-29), by production: what every chapter stands at, who
    * reads, and the price of a press, as the coordinator last answered; and `Read the book`,
    * the chapter's run over the whole book, keyed by production like the chapters' by chapter.

@@ -608,6 +608,37 @@ describe("frame-run quote authorization", () => {
     assert.match(one(item, '[aria-label="Image model"] [aria-checked="true"]')?.textContent ?? "", /Wide image/);
   });
 
+  it("offers Codex Image for the production's shape at the size its prompt returns (issue 3106)", async () => {
+    const square = { ...IMAGE_MODEL, id: "square-image", displayName: "Square image", limits: { aspects: ["1:1"] } };
+    const codex: ManifestModel = {
+      id: "codex-image",
+      provider: "codex",
+      capability: "image",
+      displayName: "Codex Image",
+      accepts: { referenceImages: 4, referenceRoles: false, startFrame: false, endFrame: false },
+      limits: { providerSelectedSize: true, promptedSizes: { "9:16": { width: 941, height: 1672 }, "16:9": { width: 1672, height: 941 } } },
+      pricing: { kind: "included-plan" },
+    };
+    const state = stateWith({ imageModels: [square, codex] });
+    state.app.providers.push({
+      id: "codex",
+      configured: true,
+      validation: "valid",
+      probes: [{ capability: "image", available: true }],
+      lastValidated: "2026-08-30T12:00:00Z",
+      fault: null,
+    });
+    state.app.routing.defaults.image = square.id;
+    const sent: ClientMessage[] = [];
+    const item = await mount(state, sent);
+    await click(named(item, "Generate frames"));
+
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
+    assert.equal(request.modelId, codex.id, "the 16:9 production opens on the route that can make it");
+    assert.match(one(item, '[aria-label="Image model"] [aria-checked="true"]')?.textContent ?? "", /Codex Image.*1672×941 · 4 refs/);
+    assert.equal(one(item, ".fy-swgen__guard"), null);
+  });
+
   it("preserves an explicit incompatible model and names a compatible alternative", async () => {
     const square = { ...IMAGE_MODEL, id: "square-image", displayName: "Square image", limits: { aspects: ["1:1"] } };
     const wide = { ...IMAGE_MODEL, id: "wide-image", displayName: "Wide image" };
@@ -620,7 +651,73 @@ describe("frame-run quote authorization", () => {
 
     const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
     assert.equal(request.modelId, square.id, "an explicit production choice is never silently replaced");
-    assert.match(one(item, ".fy-swgen__guard")?.textContent ?? "", /Choose Wide image, which supports 16:9/);
+    assert.match(one(item, ".fy-swgen__guard")?.textContent ?? "", /Choose FAL · Wide image, which supports 16:9/);
+    assert.match(one(item, '[aria-label="Image model"] [aria-checked="true"]')?.textContent ?? "", /^FAL · Square imageno 16:9 · 4 refs$/);
+  });
+
+  describe("the production's image model (issue 3107)", () => {
+    const nano = { ...IMAGE_MODEL, id: "nano-like", displayName: "Nano image" };
+    const openai: ManifestModel = {
+      ...IMAGE_MODEL,
+      id: "gpt-image-2",
+      provider: "openai",
+      displayName: "GPT Image 2",
+      accepts: { ...IMAGE_MODEL.accepts, referenceImages: 16 },
+      limits: { aspects: ["1:1", "3:2", "2:3"] },
+    };
+    const fal: ManifestModel = { ...openai, id: "gpt-image-2-fal", provider: "fal", limits: { aspects: ["16:9", "9:16"] } };
+    const withRoutes = () => {
+      // Nano first, so a list-order fallback would land on it.
+      const state = stateWith({ imageModels: [nano, openai, fal] });
+      state.app.providers.push({
+        id: "openai",
+        configured: true,
+        validation: "valid",
+        probes: [{ capability: "image", available: true }],
+        lastValidated: "2026-08-30T12:00:00Z",
+        fault: null,
+      });
+      return state;
+    };
+    const quoted = (sent: ClientMessage[]) =>
+      sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
+    const selected = (item: Mounted) => one(item, '[aria-label="Image model"] [aria-checked="true"]')?.textContent ?? "";
+
+    it("opens on the production's own model when it can make the frames", async () => {
+      const state = withRoutes();
+      state.app.routing.defaults.image = nano.id;
+      state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!.meta.models = { image: fal.id };
+      const sent: ClientMessage[] = [];
+      const item = await mount(state, sent);
+      await click(named(item, "Generate frames"));
+      assert.equal(quoted(sent).modelId, fal.id);
+      assert.match(selected(item), /^FAL · GPT Image 2/);
+    });
+
+    it("opens on the same model through another provider when the inherited route cannot make the shape", async () => {
+      const state = withRoutes();
+      state.app.routing.defaults.image = openai.id;
+      const sent: ClientMessage[] = [];
+      const item = await mount(state, sent);
+      await click(named(item, "Generate frames"));
+      assert.equal(quoted(sent).modelId, fal.id, "GPT Image 2 still, not the first model listed");
+      assert.match(selected(item), /^FAL · GPT Image 2/);
+      assert.equal(one(item, ".fy-swgen__guard"), null);
+    });
+
+    it("names every route by its provider, as the Models card does", async () => {
+      const state = withRoutes();
+      state.app.routing.defaults.image = openai.id;
+      const item = await mount(state, []);
+      await click(named(item, "Generate frames"));
+      const chips = all(item, '[aria-label="Image model"] [role="radio"]').map((chip) => {
+        const detail = chip.querySelector("span")?.textContent ?? "";
+        return { name: (chip.textContent ?? "").slice(0, -detail.length), detail };
+      });
+      assert.deepEqual(chips.map((chip) => chip.name), ["FAL · Nano image", "OpenAI · GPT Image 2", "FAL · GPT Image 2"]);
+      assert.equal(chips[1]!.detail, "no 16:9 · 16 refs", "the route that cannot make the shape says so");
+      assert.equal(chips[2]!.detail, "1536×864 · 16 refs");
+    });
   });
 
   it("ignores an unrelated start result", async () => {

@@ -96,6 +96,9 @@ describe("what the door writes (turn 113a)", () => {
     // under WRITE until there is something to open.
     assert.doesNotMatch(DOOR_CHOICES.map((d) => d.label).join(" "), /audio/i);
     assert.match(DOOR_CHOICES[0]!.body, /audiobook/, "and WRITE says so in its examples");
+    // A music video is made behind Watch, not Listen, so Watch has to say so (issue 3094).
+    assert.match(DOOR_CHOICES.find((d) => d.id === "watch")!.body, /music video/);
+    assert.doesNotMatch(DOOR_CHOICES.find((d) => d.id === "listen")!.body, /video/);
   });
 
   /**
