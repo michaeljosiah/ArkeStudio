@@ -6,7 +6,9 @@ import {
   DEFAULT_SHOT_SEC,
   assemblePrompt,
   beatPlayback,
+  chapterLooksOf,
   deriveRehearsalLines,
+  lookHoldingScope,
   sceneBeats,
   overrideStaleAgainst,
   promptFor,
@@ -15,6 +17,7 @@ import {
   resolveCast,
   resolvePropStates,
   shotCoverage,
+  shotLookId,
   shotSpeakers,
   withoutMention,
   type ClientMessage,
@@ -28,6 +31,8 @@ import { BenchBrief } from "../../components/bench-brief.js";
 import { Checkbox, Select } from "../../components/ui.js";
 import { Archive, FileText, ImageMark, LinkMark, Minus, More, Plus, Speaker, StickyNote, Timer, VideoMark, X } from "../../components/icons.js";
 import { characterPortraitPath, locationPortraitPath, Portrait } from "../../components/portrait.js";
+import { lookTileLabel } from "../character-reference.js";
+import { lookPickerLabels } from "../production-cast.js";
 import { mentionNames, scriptWords } from "./mentions.js";
 import { BeatLineEditor } from "./beat-line-editor.js";
 import { lineVoices, useTableReadPlan } from "./table-read.js";
@@ -178,6 +183,44 @@ export function ShotFields({
   // What a cited character brings to this shot (SPEC-044 R-22): voice where they speak in it,
   // by the same resolution the planner and the dialog use; look where the shot cites them.
   const speakers = shotSpeakers(scene, [shot]).speakers;
+  /*
+   * What a cited character wears in this shot (issue 3178): one of their costume looks, or what
+   * the shot would wear without a choice — the scene's look, the production's, the main photo —
+   * named by what it is. A character with no costume looks has nothing to choose, so no picker.
+   */
+  const lookPicker = (sheetId: string, name: string): ReactNode => {
+    const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId) ?? null;
+    const costumes = chapterLooksOf(kit);
+    const chosen = shotLookId(shot, sheetId);
+    if (costumes.length === 0 && chosen === undefined) return null;
+    const labels = lookPickerLabels(costumes);
+    const inherited = lookHoldingScope(kit, { kind: "scene", productionId: production.meta.id, sceneId: scene.id })
+      ?? lookHoldingScope(kit, { kind: "production", productionId: production.meta.id });
+    const fallback = inherited === undefined
+      ? "Main photo"
+      : `${inherited.name ?? lookTileLabel(inherited.prompt, inherited.kind)} · ${inherited.attachedTo?.kind === "scene" ? "scene" : "production"}`;
+    const missing = chosen !== undefined && !costumes.some((look) => look.id === chosen);
+    return (
+      <Select
+        label={`${name}'s look`}
+        className="fy-shot__select"
+        wrapClassName="fy-shot__look"
+        value={chosen ?? ""}
+        disabled={locked}
+        onChange={(event) => {
+          const lookId = event.target.value;
+          const others = (shot.looks ?? []).filter((entry) => entry.sheetId !== sheetId);
+          const next = lookId === "" ? others : [...others, { sheetId, lookId }];
+          if (next.length > 0) edit({ looks: next });
+          else edit({}, ["looks"]);
+        }}
+      >
+        <option value="">{fallback}</option>
+        {missing ? <option value={chosen} disabled>Look missing</option> : null}
+        {costumes.map((look) => <option key={look.id} value={look.id}>{labels.get(look.id)}</option>)}
+      </Select>
+    );
+  };
 
   // ---- Notes ---------------------------------------------------------------------------------
   const [notesDraft, setNotesDraft] = useState(shot.notes ?? "");
@@ -363,13 +406,14 @@ export function ShotFields({
                   ) : null}
                 </>
               );
-              return entry.sheet.type === "character" ? (
+              if (entry.sheet.type !== "character") return <span key={entry.sheet.id} className="fy-shot__ref" title={title}>{inner}</span>;
+              const chip = (
                 <button key={entry.sheet.id} type="button" className="fy-shot__ref fy-shot__ref--door" title={title} aria-haspopup="dialog" onClick={(event) => onOpenCharacter(entry.sheet.id, event.currentTarget)}>
                   {inner}
                 </button>
-              ) : (
-                <span key={entry.sheet.id} className="fy-shot__ref" title={title}>{inner}</span>
               );
+              const picker = lookPicker(entry.sheet.id, entry.sheet.name);
+              return picker === null ? chip : <span key={entry.sheet.id} className="fy-shot__refpick">{chip}{picker}</span>;
             })}
           </div>
         )}

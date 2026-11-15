@@ -5,7 +5,7 @@ import {
   formatMicroUsd,
   CODEX_IMAGE_PLAN_LABEL,
   isReplayableFinalization,
-  lookHoldingScope,
+  missingShotLooks,
   orderedShots,
   resolveCast,
   sceneImageOutput,
@@ -329,7 +329,7 @@ function GenerateFramesDialogOpen({
       ? `No available image model supports ${aspect}; turn one on in AI models.`
       : `Choose ${alternativeName}, which supports ${aspect}.`}`
     : blockedReason;
-  const references = matchingOptions ? quoteReferences(quote, scene, world, production.meta.id) : [];
+  const references = matchingOptions ? quoteReferences(quote, scene, world) : [];
   // R-16's second layer: a scope that resolves to nothing swaps the primary for the sentence
   // naming the fix. Only the all-framed case has a fix to name — a scene with no shots keeps
   // the backend's refusal, because switching scope would not change anything there.
@@ -617,25 +617,28 @@ function contextValues(scene: SceneRecord, world: WorldBundle, aspect: string, s
     .filter((value): value is string => value !== null);
 }
 
-function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldBundle, productionId: string) {
+function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldBundle) {
   const shotById = new Map(orderedShots(scene).map((shot) => [shot.id, shot]));
   const sheetById = new Map(world.sheets.map((sheet) => [sheet.id, sheet]));
-  // What rides beside the sheet (SPEC-044 R-30): the look in use on a character's row when it is
-  // not the kit's — this scene's, else the production's, the order the resolver prefers — and
-  // the plate on the location's. Voice never applies to stills and is not said here.
-  const detailFor = (sheetId: string): string | null => {
-    const sheet = sheetById.get(sheetId);
-    if (sheet?.type === "location") return "plate";
-    const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId) ?? null;
-    const look = lookHoldingScope(kit, { kind: "scene", productionId, sceneId: scene.id }) ?? lookHoldingScope(kit, { kind: "production", productionId });
-    return look === undefined ? null : `look · ${(look.name ?? lookTileLabel(look.prompt, look.kind))}`;
+  /*
+   * What rides beside the sheet (SPEC-044 R-30), read off the files the steps carry: the looks
+   * that rode for a character, which differ by shot now that a shot can choose one (issue 3178),
+   * and the plate on the location's. Voice never applies to stills and is not said here.
+   */
+  const lookRiding = (sheetId: string, path: string): string | null => {
+    const look = world.referenceKits.find((candidate) => candidate.sheetId === sheetId)?.looks
+      ?.find((candidate) => candidate.kind !== "view" && `references/${sheetId}/${candidate.file}` === path);
+    return look === undefined ? null : look.name ?? lookTileLabel(look.prompt, look.kind);
   };
+  // A look a shot names that has left the kit rides the next scope's instead, and is said so.
+  const quoted = [...new Set(quote.steps.flatMap((step) => step.requestShotIds))].flatMap((shotId) => shotById.get(shotId) ?? []);
+  const missing = missingShotLooks(quoted, world.sheets, world.referenceKits);
   const summary = new Map<string, {
     sheet: WorldBundle["sheets"][number];
     path: string | null;
     citedSteps: number;
     ridingSteps: number;
-    detail: string | null;
+    looks: string[];
   }>();
   for (const step of quote.steps) {
     const cited = new Set<string>();
@@ -651,21 +654,32 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
       if (sheet === undefined) continue;
       const riding = step.references.find((reference) => reference.sheetId === sheetId);
       const previous = summary.get(sheetId);
+      const looks = step.references.flatMap((reference) => reference.sheetId === sheetId ? lookRiding(sheetId, reference.path) ?? [] : []);
       summary.set(sheetId, {
         sheet,
         path: previous?.path ?? riding?.path ?? null,
         citedSteps: (previous?.citedSteps ?? 0) + 1,
         ridingSteps: (previous?.ridingSteps ?? 0) + (riding === undefined ? 0 : 1),
-        detail: previous?.detail ?? detailFor(sheetId),
+        looks: [...new Set([...(previous?.looks ?? []), ...looks])],
       });
     }
   }
-  return [...summary.values()].map((entry) => ({
-    ...entry,
-    path: entry.path ?? (entry.sheet.type === "location"
-      ? locationPortraitPath(world, entry.sheet.id)
-      : characterPortraitPath(world, entry.sheet.id)),
-  }));
+  return [...summary.values()].map(({ looks, ...entry }) => {
+    const gone = missing.filter((item) => item.sheetId === entry.sheet.id).map((item) => item.number);
+    const detail = entry.sheet.type === "location"
+      ? ["plate"]
+      : [
+          ...(looks.length === 0 ? [] : [`look · ${looks.join(", ")}`]),
+          ...(gone.length === 0 ? [] : [`look missing · ${gone.length === 1 ? `shot ${gone[0]}` : `shots ${gone.join(", ")}`}`]),
+        ];
+    return {
+      ...entry,
+      detail: detail.length === 0 ? null : detail.join(" · "),
+      path: entry.path ?? (entry.sheet.type === "location"
+        ? locationPortraitPath(world, entry.sheet.id)
+        : characterPortraitPath(world, entry.sheet.id)),
+    };
+  });
 }
 
 export function FrameRunBar({ run, worldId, productionId, onReview }: { run: FrameRunState; worldId: string; productionId: string; onReview?: () => void }) {

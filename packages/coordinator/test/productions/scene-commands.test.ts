@@ -496,6 +496,38 @@ describe("an edit is a patch on one shot, and everything else is untouched", () 
     assert.equal(nodeIdOf(after, target.id), nodeIdOf(before, target.id));
   });
 
+  it("sets what a cited person wears in one shot, refuses a look they cannot wear, and clears it (issue 3178)", async () => {
+    const { dir, store } = await open();
+    await acceptCharacterLook(store, "maren-kest", { id: "storm-oilskin", file: "looks/storm-oilskin.png", kind: "costume",
+      prompt: "Storm oilskin", takeId: "tk_01J8E0000000000000000000T3", artDirectionVersion: 3 });
+    await acceptCharacterLook(store, "maren-kest", { id: "after-the-verse", file: "looks/after.png", kind: "condition-age",
+      prompt: "After the verse", takeId: "tk_01J8E0000000000000000000T4", artDirectionVersion: 3 });
+    const before = await sceneOnDisk(store);
+    const shots = orderedShots(before);
+    const hers = shots.find((shot) => shot.description.includes("@maren-kest"))!;
+    const notHers = shots.find((shot) => !shot.description.includes("@maren-kest"))!;
+    const base = { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID };
+    const print = await worldPrint(dir);
+    for (const [shotId, looks, refusal] of [
+      [hers.id, [{ sheetId: "maren-kest", lookId: "gone" }], /not one of Maren Kest's costumes/],
+      [hers.id, [{ sheetId: "maren-kest", lookId: "after-the-verse" }], /not one of Maren Kest's costumes/],
+      [notHers.id, [{ sheetId: "maren-kest", lookId: "storm-oilskin" }], /Maren Kest is not in shot/],
+      [hers.id, [{ sheetId: "the-vigil", lookId: "storm-oilskin" }], /not a character/],
+    ] as const) {
+      await assert.rejects(applySceneCommand(store, { ...base, baseVersion: before.version, command: { kind: "edit-shot", shotId, change: { looks: [...looks] } } }), refusal);
+    }
+    assert.equal(await worldPrint(dir), print, "a refused look writes nothing");
+
+    await applySceneCommand(store, { ...base, baseVersion: before.version,
+      command: { kind: "edit-shot", shotId: hers.id, change: { looks: [{ sheetId: "maren-kest", lookId: "storm-oilskin" }] } } });
+    const dressed = await sceneOnDisk(store);
+    assert.deepEqual(orderedShots(dressed).find((shot) => shot.id === hers.id)!.looks, [{ sheetId: "maren-kest", lookId: "storm-oilskin" }]);
+    assert.equal(orderedShots(dressed).find((shot) => shot.id === notHers.id)!.looks, undefined, "one shot, not the scene");
+    await applySceneCommand(store, { ...base, baseVersion: dressed.version,
+      command: sceneCommandFrom({ kind: "edit-shot", shotId: hers.id, change: {}, clear: ["looks"] }) });
+    assert.equal(orderedShots(await sceneOnDisk(store)).find((shot) => shot.id === hers.id)!.looks, undefined);
+  });
+
   it("retimes a staged shot's staging with its duration, as a new staging version", async () => {
     const { store } = await open();
     const before = await sceneOnDisk(store);

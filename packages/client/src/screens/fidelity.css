@@ -3868,6 +3868,8 @@ select.fy-set__pill { padding-right: 26px; }
    the footer is one 58px row, and a stacked caption would be the tallest thing in it. */
 .fy-looks-attach { display: inline-flex; align-items: center; gap: 8px; }
 .fy-looks-attach > span { font: 500 10px var(--font-mono); color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.04em; }
+.fy-looks-name > .fy-looks-name__input { width: 180px; }
+.fy-looks-name > small { color: var(--destructive); font: var(--type-meta); }
 .fy-looks-results > footer select.fy-looks-attach__select { border-color: var(--foreground); box-shadow: var(--shadow-xs); color: var(--foreground); font-weight: 600; }
 /* Read on the tile, not only inside the control that sets it. Top-left, opposite the download
    button, on the same plate the caption pill uses so it stays legible over any photograph. */

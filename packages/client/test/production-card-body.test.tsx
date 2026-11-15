@@ -40,6 +40,22 @@ it("renders all forty shots through the native rows, with frozen script changes 
   assert.equal(document.querySelector('[aria-label="Resulting screenplay"] [data-removed] del')?.textContent, "Removed action.");
 });
 
+it("shows the look a shot card puts each person in beside their name (issue 3178)", () => {
+  const copy = structuredClone(state);
+  copy.world!.referenceKits.find((kit) => kit.sheetId === "maren-kest")!.looks = [
+    { id: "storm-oilskin", file: "looks/storm-oilskin.png", kind: "costume", name: "Storm oilskin", prompt: "Oilskin", acceptedAt: "2026-07-15T09:00:00Z" },
+  ];
+  __setStateForTest(copy);
+  const after = migrateLegacyScene({ ...scene, shots: [
+    { id: "sh_1", number: 1, title: "Dressed", description: "@maren-kest waits by the gate.", durationSec: 4, looks: [{ sheetId: "maren-kest", lookId: "storm-oilskin" }] },
+    { id: "sh_2", number: 2, title: "Gone", description: "@maren-kest turns.", durationSec: 4, looks: [{ sheetId: "maren-kest", lookId: "gone" }] },
+    { id: "sh_3", number: 3, title: "Plain", description: "@maren-kest leaves.", durationSec: 4 },
+  ] });
+  const { document } = parseHTML(renderToString(<MemoryRouter><ProductionCardBody action={card()} preview={{ kind: "scene", before: null, after }} /></MemoryRouter>));
+  const chips = [...document.querySelectorAll(".fy-production-preview__shotmeta")].map((meta) => [...meta.querySelectorAll(".fy-swchip")].map((chip) => chip.textContent));
+  assert.deepEqual(chips, [["Maren Kest · Storm oilskin"], ["Maren Kest · look missing"], ["Maren Kest"]]);
+});
+
 it("deduplicates a group gesture, waits for completion and leaves generation for an individual decision", async () => {
   const first = card(), second = card({ turnId: first.turnId, conversationId: first.conversationId, dependencies: [first.actionId] });
   const generation = card({ turnId: first.turnId, conversationId: first.conversationId, actionKind: "world-chat-production-take-generation", cardFamily: "generation" });

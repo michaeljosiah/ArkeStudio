@@ -468,10 +468,41 @@ const click = async (element: HTMLElement) => act(async () => element.click());
 
 describe("frame-run quote authorization", () => {
   it("names the look riding for a character beside the sheet, as the kit names it", async () => {
-    const item = await mount(stateWithSceneLook(), []);
+    const sent: ClientMessage[] = [];
+    const item = await mount(stateWithSceneLook(), sent, false);
     await click(named(item, "Generate frames"));
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
+    // Read off what the step carries (issue 3178), so the quote carries the look's own file.
+    const quote = quoteFor(request);
+    await act(async () => emitQuote({ ...quote, steps: quote.steps.map((step) => ({ ...step, references: [{ sheetId: "maren-kest", version: 4, path: "references/maren-kest/looks/council-coat.png" }] })) }));
     const maren = all(item, ".fy-swgen__references article").find((reference) => reference.textContent?.includes("Maren Kest"));
     assert.match(maren?.textContent ?? "", /rides · look · Formal council coat, storm-grey wool with a hig…/, "cut where the kit's tile cuts it");
+  });
+
+  it("names each look that rides for one person across shots, and a shot's look that has left the kit (issue 3178)", async () => {
+    const sent: ClientMessage[] = [];
+    const state = stateWithSceneLook();
+    const kit = state.world!.referenceKits.find((candidate) => candidate.sheetId === "maren-kest")!;
+    kit.looks = [
+      ...(kit.looks ?? []),
+      { id: "storm-oilskin", file: "looks/storm-oilskin.png", kind: "costume", name: "Storm oilskin", prompt: "Oilskin", acceptedAt: "2026-07-15T09:00:00Z" },
+    ];
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const [first, second] = orderedShots(scene);
+    (second as { description: string }).description += " @maren-kest";
+    (second as { looks?: unknown }).looks = [{ sheetId: "maren-kest", lookId: "gone-look" }];
+    const item = await mount(state, sent, false);
+    await click(named(item, "Generate frames"));
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
+    const quote = quoteFor(request);
+    const step = quote.steps[0]!;
+    await act(async () => emitQuote({ ...quote, steps: [
+      { ...step, label: `Shot ${first!.number}`, requestShotIds: [first!.id], updateShotIds: [first!.id], references: [{ sheetId: "maren-kest", version: 4, path: "references/maren-kest/looks/storm-oilskin.png" }] },
+      { ...step, label: `Shot ${second!.number}`, requestShotIds: [second!.id], updateShotIds: [second!.id], references: [{ sheetId: "maren-kest", version: 4, path: "references/maren-kest/looks/council-coat.png" }] },
+    ] }));
+    const maren = all(item, ".fy-swgen__references article").find((reference) => reference.textContent?.includes("Maren Kest"));
+    assert.match(maren?.textContent ?? "", /rides · look · Storm oilskin, Formal council coat/);
+    assert.match(maren?.textContent ?? "", new RegExp(`look missing · shot ${second!.number}`), "the fallback is said, never passed off as the choice");
   });
 
   it("leaves the scene's place out of the context and the references when every shot names its own (issue 3152)", async () => {

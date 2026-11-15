@@ -1,6 +1,6 @@
 import { clearBoardOverride, clearBoardPrompt, deleteShot, duplicateShot, editScene, editShot, insertShot, moveShot, moveBoardBoundary, nextShotIdIn, SceneOperationRefused, setBoardOverride, setBoardPrompt, type ShotAnchor } from "./scene-operations.js";
 import { orderedShots, type GraphScene, type SceneRecord } from "./scene-flow.js";
-import { parseMentions, shotPlaceId } from "./planning.js";
+import { parseMentions, shotLookIn, shotPlaceId } from "./planning.js";
 import { stageProblems, resolvedShotStaging, stagingRetimed } from "./staging.js";
 import { stageReframed } from "./stage-framing.js";
 import { effectiveFraming, ScriptBlockSchema } from "./scene.js";
@@ -30,6 +30,24 @@ export type SemanticSceneCommand =
   | { kind: "set-board-prompt"; members: string[]; text: string }
   | { kind: "clear-board-prompt"; members: string[] };
 
+
+/**
+ * A look a shot names must be one its character can wear (issue 3178): a costume look in the kit
+ * of a character the shot cites. Checked where a command sets looks, preview and authority alike:
+ * the person's picker offers nothing else, and a look id guessed wrong would otherwise fall back
+ * to the scene's look in silence at every dispatch.
+ */
+function refuseUnwearableLooks(bundle: WorldBundle, description: string, looks: Shot["looks"], where: string): void {
+  if (looks === undefined) return;
+  const cited = new Set(parseMentions(description));
+  for (const entry of looks) {
+    const sheet = bundle.sheets.find((candidate) => candidate.id === entry.sheetId && candidate.type === "character");
+    if (sheet === undefined) throw new SceneOperationRefused([`${entry.sheetId} is not a character in this world`]);
+    if (!cited.has(sheet.id)) throw new SceneOperationRefused([`${sheet.name} is not in ${where}`]);
+    const kit = bundle.referenceKits.find((candidate) => candidate.sheetId === sheet.id) ?? null;
+    if (shotLookIn(kit, entry.lookId) === undefined) throw new SceneOperationRefused([`that look is not one of ${sheet.name}'s costumes`]);
+  }
+}
 
 /** The same graph candidate for a preview and the locked scene authority (SPEC-051 R-15/R-16).
  * Caller supplies the complete production snapshot, including preceding dry-run commands. */
@@ -144,6 +162,7 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
       // Ids clear the WHOLE production, never just this scene: takes and selections key by bare
       // shot id, so a per-scene number would collide with another scene's shot 3.
       const taken = production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => shot.id));
+      refuseUnwearableLooks(bundle, command.shot.description, command.shot.looks, "this shot");
       return insertShot(record, {
         shot: { ...command.shot, id: nextShotIdIn(taken) } as Omit<Shot, "number">,
         at: command.at,
@@ -166,6 +185,7 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
       // its beats) describing seconds the shot no longer has. The version moves with it, which
       // is what marks a playblast recorded at the old length stale.
       const current = orderedShots(record).find((candidate) => candidate.id === command.shotId);
+      if (current !== undefined) refuseUnwearableLooks(bundle, command.change.description ?? current.description, command.change.looks, `shot ${current.number}`);
       const retimed = command.change.durationSec !== undefined && current?.staging !== undefined
         ? stagingRetimed(current.staging, command.change.durationSec, current.durationSec ?? 4)
         : undefined;

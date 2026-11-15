@@ -330,6 +330,38 @@ describe("the shot page (design turn 145)", () => {
     assert.equal(q(first, ".fy-chardialog")?.getAttribute("aria-label"), "Maren Kest in scene 4");
   });
 
+  it("a cited person's chip picks what they wear in this shot, from their costume looks (issue 3178)", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const kit = state.world!.referenceKits.find((candidate) => candidate.sheetId === "maren-kest")!;
+    kit.looks = [
+      { id: "council-coat", file: "looks/council-coat.png", kind: "costume", name: "Council coat", prompt: "Formal council coat", acceptedAt: "2026-07-14T09:00:00Z", attachedTo: { kind: "scene", productionId: "saltlight", sceneId: "sc_04" } },
+      { id: "storm-oilskin", file: "looks/storm-oilskin.png", kind: "costume", name: "Storm oilskin", prompt: "Oilskin", acceptedAt: "2026-07-15T09:00:00Z" },
+      { id: "after-the-verse", file: "looks/after.png", kind: "condition-age", prompt: "After the verse", acceptedAt: "2026-07-16T09:00:00Z" },
+    ];
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    const picker = q(mounted, 'select[aria-label="Maren Kest\'s look"]')!;
+    assert.ok(picker, "the chip carries a picker beside it");
+    assert.deepEqual([...picker.querySelectorAll("option")].map((option) => option.textContent), ["Council coat · scene", "Storm oilskin", "Council coat"],
+      "what she wears without a choice comes first, named by where it is from; then her costumes, newest first");
+    assert.equal(q(mounted, 'select[aria-label="The Vigil\'s look"]'), null, "a place has no wardrobe");
+    await chooseOption(picker, "storm-oilskin");
+    assert.deepEqual(commands(sent).at(-1), { kind: "edit-shot", shotId: "sh_12", change: { looks: [{ sheetId: "maren-kest", lookId: "storm-oilskin" }] } });
+
+    await act(async () => mounted.root.unmount());
+    mounted.container.remove();
+    open.splice(open.indexOf(mounted), 1);
+    // A choice already made, and one whose look has since left the kit.
+    const chosen = structuredClone(state);
+    (sceneOf(chosen).shots[0] as { looks?: unknown }).looks = [{ sheetId: "maren-kest", lookId: "gone" }];
+    const again = await mountState(chosen);
+    const held = q(again, 'select[aria-label="Maren Kest\'s look"]') as HTMLSelectElement;
+    assert.equal(held.querySelector('option[value="gone"]')?.textContent, "Look missing");
+    await chooseOption(held, "");
+    assert.deepEqual(commands(sent).at(-1), { kind: "edit-shot", shotId: "sh_12", change: {}, clear: ["looks"] }, "back to the scene's look clears the field");
+  });
+
   it("every editor writes one named scene command where it stands", async () => {
     const cases: Array<[string, (m: Mounted) => Promise<void>, unknown]> = [
       ["the script on blur", async (m) => {

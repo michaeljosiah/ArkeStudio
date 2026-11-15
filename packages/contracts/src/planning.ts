@@ -951,13 +951,16 @@ export function bindReferences(
     const sheet = sheets.find((s) => s.id === decision.sheetId);
     if (sheet === undefined) continue;
     const first = bound.find((b) => b.sheetId === decision.sheetId);
+    // The main photo beside a look is there for the face (issue 3178): a cream shirt in the photo
+    // beside a navy suit in the look was seen to compete, so the line says which clothes win.
+    const faceOnly = decision.role === "secondary" && first?.mode === "scoped-look";
     bound.push({
       index: bound.length + 1,
       sheetId: decision.sheetId,
       subject: sheet.name,
       file: decision.file,
       kind: "image",
-      rolePhrase: rolePhraseFor(sheet, decision),
+      rolePhrase: faceOnly && first !== undefined ? `the face only — the clothing is image ${first.index}'s, not this one's` : rolePhraseFor(sheet, decision),
       mode: decision.mode,
       sameSubjectAs: first ? first.index : null,
     });
@@ -1291,6 +1294,53 @@ export function lookHoldingScope(
     );
 }
 
+/** A costume look of this kit a shot may name (issue 3178); any other kind, or a gone id, is none. */
+export function shotLookIn(kit: ReferenceKit | null, lookId: string): NonNullable<ReferenceKit["looks"]>[number] | undefined {
+  return (kit?.looks ?? []).find((look) => look.id === lookId && look.kind === "costume");
+}
+
+/** The look a shot names for one character, by id, whether or not the kit still holds it. */
+export function shotLookId(shot: Pick<Shot, "looks">, sheetId: string): string | undefined {
+  return shot.looks?.find((entry) => entry.sheetId === sheetId)?.lookId;
+}
+
+/**
+ * The look several shots carry for one character as one request — a whole-scene pass, a board
+ * subject: the first of them that names one. A clip carries one picture of each person, so a
+ * pass whose shots name two looks for the same person wears the first; per-shot frames are
+ * where each shot gets its own.
+ */
+export function groupLookId(shots: readonly Pick<Shot, "looks">[], sheetId: string): string | undefined {
+  for (const shot of shots) {
+    const lookId = shotLookId(shot, sheetId);
+    if (lookId !== undefined) return lookId;
+  }
+  return undefined;
+}
+
+/**
+ * The looks these shots name that their character's kit no longer holds as a costume (issue
+ * 3178), for a cited character only: each falls back to the scene's, the production's or the
+ * main photo, and the dialog names it rather than letting the fallback pass for the choice.
+ */
+export function missingShotLooks(
+  shots: readonly Shot[],
+  sheets: readonly Sheet[],
+  kits: readonly ReferenceKit[],
+): Array<{ shotId: string; number: number; sheetId: string; name: string; lookId: string }> {
+  return shots.flatMap((shot) => {
+    const cited = new Set(parseMentions(shot.description));
+    return (shot.looks ?? []).flatMap((entry) => {
+      const sheet = sheets.find((candidate) => candidate.id === entry.sheetId);
+      if (sheet === undefined || !cited.has(entry.sheetId)) return [];
+      const kit = kits.find((candidate) => candidate.sheetId === entry.sheetId) ?? null;
+      return shotLookIn(kit, entry.lookId) === undefined
+        ? [{ shotId: shot.id, number: shot.number, sheetId: entry.sheetId, name: sheet.name, lookId: entry.lookId }]
+        : [];
+    });
+  });
+}
+
 /**
  * Acceptance as an instant, never as a string. `IsoDateTimeSchema` admits an offset and optional
  * fractional seconds, and lexical order is neither: `2026-08-02T00:00:00+12:00` sorts above
@@ -1305,8 +1355,15 @@ export function attachmentFor(
   kit: ReferenceKit | null,
   sheet: Sheet,
   role: "primary" | "secondary" = "primary",
-  scope?: { productionId?: string; sceneId?: string },
+  /** `lookId` is a shot's own choice for this sheet (issue 3178), the narrowest scope of all. */
+  scope?: { productionId?: string; sceneId?: string; lookId?: string },
 ): AttachmentDecision {
+  // Chosen by pointer, like a chapter's look (SPEC-047 R-112): the look stays unattached, and one
+  // the kit no longer holds falls through to the scene's, the production's, then the main photo.
+  const shotLook = scope?.lookId === undefined ? undefined : shotLookIn(kit, scope.lookId);
+  if (role === "primary" && shotLook) {
+    return { sheetId: sheet.id, file: `references/${sheet.id}/${shotLook.file}`, mode: "scoped-look", role, staleGap: null };
+  }
   const scopedLooks = (kit?.looks ?? []).filter((look) => {
     if (!look.attachedTo || !scope?.productionId) return false;
     if (look.attachedTo.productionId !== scope.productionId) return false;
@@ -1454,6 +1511,11 @@ export interface DispatchWarnings {
     state: string | null;
     issue: "unresolved" | "missing-reference";
   }>;
+  /**
+   * Looks a shot names that have left the character's kit (issue 3178): each rides the next
+   * scope's look or the main photo instead, and is said so before money moves.
+   */
+  missingLooks?: ReturnType<typeof missingShotLooks>;
   /**
    * Cast owned by a *different* production (SPEC-020 R-6).
    *
@@ -1741,21 +1803,25 @@ function budgetFor(
     const location = sheets.find((s) => s.id === locationId);
     if (location) withLocation.push({ sheet: location, retired: location.retired === true });
   }
-  const candidates: BudgetCandidate[] = withLocation.map((entry, i) => ({
-    sheetId: entry.sheet.id,
-    kind: entry.sheet.type,
-    ...(entry.sheet.billing !== undefined ? { billing: entry.sheet.billing } : {}),
-    appearanceOrder: i,
-    hasReference:
-      attachmentFor(kits.find((k) => k.sheetId === entry.sheet.id) ?? null, entry.sheet, "primary", {
-        ...(productionId ? { productionId } : {}),
-        sceneId: scene.id,
-      }).file !== null,
-    hasSecondaryReference:
-      entry.sheet.type === "character" &&
-      attachmentFor(kits.find((k) => k.sheetId === entry.sheet.id) ?? null, entry.sheet, "secondary").file !==
-        null,
-  }));
+  const candidates: BudgetCandidate[] = withLocation.map((entry, i) => {
+    const lookId = groupLookId(shots, entry.sheet.id);
+    return {
+      sheetId: entry.sheet.id,
+      kind: entry.sheet.type,
+      ...(entry.sheet.billing !== undefined ? { billing: entry.sheet.billing } : {}),
+      appearanceOrder: i,
+      hasReference:
+        attachmentFor(kits.find((k) => k.sheetId === entry.sheet.id) ?? null, entry.sheet, "primary", {
+          ...(productionId ? { productionId } : {}),
+          sceneId: scene.id,
+          ...(lookId !== undefined ? { lookId } : {}),
+        }).file !== null,
+      hasSecondaryReference:
+        entry.sheet.type === "character" &&
+        attachmentFor(kits.find((k) => k.sheetId === entry.sheet.id) ?? null, entry.sheet, "secondary").file !==
+          null,
+    };
+  });
   // Prop states ride after the cast and the location (turn 105's rank), and only when a state
   // has an accepted reference: an unresolved or reference-less state never spends a slot.
   const propCandidates: BudgetCandidate[] = propStates
@@ -2058,9 +2124,11 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   const props = input.props ?? [];
   const { resolved, perShot } = sceneCast(scene, sheets, props);
   // A carried prop state attaches its accepted reference; everything else attaches as before.
+  // `shots` are the ones the references serve, whose own look choices come first (issue 3178).
   const attachmentsFor = (
     carried: readonly BudgetCandidate[],
     propStates: readonly ShotPropResolution[],
+    shots: readonly Shot[],
   ): AttachmentDecision[] =>
     carried.map((c) => {
       if (c.kind === "prop") {
@@ -2074,11 +2142,12 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
           prop: { name: entry.propName, state: entry.stateName ?? "unresolved" },
         };
       }
+      const lookId = groupLookId(shots, c.sheetId);
       return attachmentFor(
         kits.find((k) => k.sheetId === c.sheetId) ?? null,
         sheets.find((s) => s.id === c.sheetId)!,
         c.referenceRole,
-        { ...(input.productionId ? { productionId: input.productionId } : {}), sceneId: scene.id },
+        { ...(input.productionId ? { productionId: input.productionId } : {}), sceneId: scene.id, ...(lookId !== undefined ? { lookId } : {}) },
       );
     });
   const capSec = durationLimitsFor(model).maxDurationSec ?? Number.POSITIVE_INFINITY;
@@ -2156,7 +2225,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     const cast = perShot.get(shot.id)!;
     const propStates = resolvePropStates(shot, props, input.propStateOverrides?.[shot.id]);
     const budget = budgetFor(cast.cast, kits, scene, sheets, model, [shot], input.productionId, propStates);
-    const references = attachmentsFor(budget.carried, propStates);
+    const references = attachmentsFor(budget.carried, propStates, [shot]);
     // A strict start frame displaces the sheet references (issue 154): the first-frame route
     // takes exactly one image, so nothing else may ride, and the budget's carried set is named
     // in the warnings as what stepped aside rather than silently thinned.
@@ -2332,7 +2401,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
           .map((entry) => ordered.find((s) => s.id === entry.shotId))
           .filter((s): s is Shot => s !== undefined);
         const budget = budgetFor([...seen.values()], kits, scene, sheets, model, passShots, input.productionId, propStates);
-        const references = attachmentsFor(budget.carried, propStates);
+        const references = attachmentsFor(budget.carried, propStates, passShots);
         return {
           passIndex: pass.index,
           references,
@@ -2509,6 +2578,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
         return [];
       }),
     ),
+    missingLooks: missingShotLooks(ordered, sheets, kits),
     foreignGuests: (() => {
       // The cast is `@` mentions, but a scene also cites its inherited location, which never
       // enters `resolved.cast` and which `budgetFor` deliberately carries into the references and

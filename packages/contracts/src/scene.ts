@@ -528,6 +528,19 @@ export const ShotSchema = z
      */
     propStates: z.array(z.object({ propId: PropIdSchema, stateId: PropStateIdSchema }).strict()).optional(),
     /**
+     * What each cited character wears in this shot (issue 3178): a costume look of their kit, by
+     * id. A music video's section intercuts story moments that each have their own clothes, and a
+     * look attached to the scene or production put Ade in one suit through all of them. The
+     * narrowest choice wins — this, then the scene's look, then the production's, then the main
+     * photo (SPEC-044 R-8, SPEC-017 R-20) — and a look that has left the kit falls back to the
+     * next and is named before money moves, never silently.
+     */
+    looks: z
+      .array(z.object({ sheetId: SlugSchema, lookId: z.string().min(1).max(200) }).strict())
+      .refine((looks) => new Set(looks.map((look) => look.sheetId)).size === looks.length, "one look per character")
+      .optional()
+      .describe("Per cited character, the costume look they wear in this shot: sheetId and a lookId from get_production's cast looks. Leave a character out to use the scene's or the production's look, else the main photo."),
+    /**
      * Turn 97 (14d): continuity said plainly. `openOnPrevious` is issue 154's boundary frame as
      * an authored decision, and since issue 851 it is the decision: accepting a take still cuts
      * the still and files it onto the next shot, but the dispatch opens on it only where the

@@ -122,6 +122,10 @@
 :where([data-screen="shot"]) .fy-shot__ref--door:hover { border-color: var(--muted-foreground); }
 :where([data-screen="shot"]) .fy-shot__refthumb { width: 20px; height: 20px; border-radius: 50%; overflow: hidden; flex: none; }
 :where([data-screen="shot"]) .fy-shot__refwords { color: var(--muted-foreground); }
+/* A person's chip and what they wear in this shot (issue 3178), held together when the row wraps. */
+:where([data-screen="shot"]) .fy-shot__refpick { display: inline-flex; align-items: center; gap: 4px; }
+:where([data-screen="shot"]) .fy-shot__look { max-width: 180px; }
+:where([data-screen="shot"]) .fy-shot__look > .fy-shot__select { height: 26px; font: 400 var(--text-xs)/1.4 var(--font-sans); }
 
 /* Notes: one line until written in — the line is the card. */
 :where([data-screen="shot"]) .fy-shot__section--notes { display: flex; align-items: center; gap: 9px; min-height: 36px; padding: 0 12px; }

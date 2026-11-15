@@ -21,6 +21,7 @@ import {
   productionAspect,
   productionStyleFor,
   promptFor,
+  groupLookId,
   resolveCast,
   scenePlaceApplies,
   stagingMoveWord,
@@ -166,14 +167,16 @@ async function sheetTokens(
   const references: BenchReferenceToken[] = [];
   let image = startAt;
   const ordered = sheetOrder(shots, world);
-  const decisions = ordered.map(({ sheet }) =>
-    attachmentFor(
+  const decisions = ordered.map(({ sheet }) => {
+    // The look the shot names comes first (issue 3178); a board wears its first shot's choice.
+    const lookId = groupLookId(shots, sheet.id);
+    return attachmentFor(
       world.referenceKits.find((candidate) => candidate.sheetId === sheet.id) ?? null,
       sheet,
       "primary",
-      { productionId: production.meta.id, sceneId: scene.id },
-    ),
-  );
+      { productionId: production.meta.id, sceneId: scene.id, ...(lookId !== undefined ? { lookId } : {}) },
+    );
+  });
   for (const bound of bindReferences(decisions, world.sheets)) {
     const sheet = world.sheets.find((candidate) => candidate.id === bound.sheetId)!;
     const entry = await sourceToken(
