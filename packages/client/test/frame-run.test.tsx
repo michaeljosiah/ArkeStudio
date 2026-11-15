@@ -929,6 +929,24 @@ describe("durable run projections", () => {
     assert.deepEqual(sent.at(-1), { kind: "retry-job-finalization", jobId: JOB_1 });
   });
 
+  it("says why a board could not be split and offers a new board, not finalization (issue 3154)", async () => {
+    const sent: ClientMessage[] = [];
+    const reason = "The picture came back 1024×1024 instead of 1536×432";
+    const run = structuredClone(frameState({ mode: "board" }).run);
+    run.steps[0]!.landingRefusal = reason;
+    const refused = FrameRunStateSchema.parse(foldFrameRun(run, [{ id: JOB_1, status: "succeeded", finalization: "complete" }]));
+    const state = stateWith({ runs: [refused] });
+    // The sheet itself finalized: nothing is owed locally, so nothing offers to replay it.
+    state.app.jobs = [{ ...failedFinalizationJob({ kind: "board-sheet", coversShots: ["sh_12", "sh_13"] }), finalization: { status: "complete", error: null, updatedAt: "2026-08-30T12:01:00Z" } }];
+    const item = await mount(state, sent);
+    const line = one(item, ".fy-swrunboards")!;
+    assert.match(line.textContent ?? "", new RegExp(`Board A.*${reason}`));
+    assert.equal(all(item, "button").some((button) => button.textContent === "Retry finalization"), false);
+    assert.match(one(item, '[data-testid="workspace-row-sh_12"]')!.textContent ?? "", new RegExp(reason), "each shot's row names it too");
+    await click([...line.querySelectorAll("button")].find((button) => button.textContent === "Retry board") as HTMLElement);
+    assert.deepEqual(sent.at(-1), { kind: "frame-run-retry-step", worldId: FIXTURE_WORLD_ID, productionId: "saltlight", runId: RUN_ID, stepIndex: 0 });
+  });
+
   it("offers failed board retry only, then a cell retry only from backend per-shot facts", async () => {
     const sent: ClientMessage[] = [];
     const failed = frameState({ mode: "board", first: { status: "failed", failureClass: "transient", error: "provider timed out", etaSec: null } });

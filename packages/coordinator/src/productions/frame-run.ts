@@ -978,7 +978,8 @@ export async function retryFrameStep(
     const production = getProduction();
     if (production === undefined) throw new Error(`production ${productionId} is no longer available`);
     return mutateRun(store, productionId, runId, (run) => {
-      const source = retrySource(run, stepIndex, jobById, "step-retry");
+      // The new attempt has not been refused anything yet.
+      const { landingRefusal: _landingRefusal, ...source } = retrySource(run, stepIndex, jobById, "step-retry");
       const appendedIndex = run.steps.length;
       const request = { ...source.request, slotAtAuthorization: currentSlots(production, source.updateShotIds) };
       const next: FrameRun = {
@@ -1068,6 +1069,8 @@ async function retryFrameCellUnderGate(
     .filter(({ step, index }) => {
       if (!ancestors.has(index) || step.dispatch.target.kind !== "board-sheet") return false;
       if (!step.requestShotIds.includes(shotId as never) || step.jobId === null) return false;
+      // A sheet whose panels could not be found is no context for one of them (issue 3154).
+      if (step.landingRefusal !== undefined) return false;
       const job = jobById(step.jobId);
       return job?.status === "succeeded" && job.finalization?.status !== "pending" && job.finalization?.status !== "failed";
     })
@@ -1172,21 +1175,100 @@ export async function dismissFrameRun(
   });
 }
 
-function cropImage(source: RgbaImage, panelIndex: number, layout: FrameBoardLayout) {
-  const region = layout.regions[panelIndex];
-  if (region === undefined) throw new Error(`board layout has no panel ${panelIndex + 1}`);
-  const x = Math.floor((region.x * source.width) / layout.canvasWidth);
-  const y = Math.floor((region.y * source.height) / layout.canvasHeight);
-  const right = Math.floor(((region.x + region.width) * source.width) / layout.canvasWidth);
-  const bottom = Math.floor(((region.y + region.height) * source.height) / layout.canvasHeight);
-  const width = right - x;
-  const height = bottom - y;
+/**
+ * How far a returned sheet's shape may stray from its frozen canvas and still land (issue 3154).
+ *
+ * Codex Image is asked for its canvas in words and does not always comply: seven of the first ten
+ * 1672x941 boards on the "Why You Do Me Like That" production came back 1602x981, a shape 8%
+ * narrower than asked. Measured edge by edge, four of the seven had every panel within 3px of
+ * the frozen layout scaled to the returned canvas, each axis by its own ratio, which is as close
+ * as the boards that came back at the frozen size. Two more sat up to 21px off on the long axis,
+ * and centring each crop back to its panel's shape absorbed that drift. The seventh, a lone
+ * panel, was drawn in a different place altogether, as one board at the frozen size also was;
+ * scaling is not what went wrong there. A tenth either way covers the observed case with room,
+ * while a 3:2 sheet (18% off) or a square one is refused, because the trim that restores a
+ * panel's shape would take about a tenth of its picture or more. Size alone never mattered: a
+ * sheet at the frozen shape and another size always landed, and still does.
+ */
+const BOARD_SHAPE_TOLERANCE = 1.1;
+
+type BoardLanding =
+  | { ok: true; scaleX: number; scaleY: number; crops: Array<{ x: number; y: number; width: number; height: number }> }
+  | { ok: false; reason: string };
+
+/**
+ * Where each frozen panel sits on the sheet that came back. The frozen regions scale to the
+ * returned canvas, each axis by its own ratio, then each is centred back to its own shape: the
+ * panel's aspect is the production's, which is what its shot's frame slot and every video route
+ * downstream expect, and a sheet stretched on one axis would otherwise file frames in a shape
+ * nothing else in the production has.
+ */
+export function boardLanding(layout: FrameBoardLayout, width: number, height: number): BoardLanding {
+  const scaleX = width / layout.canvasWidth;
+  const scaleY = height / layout.canvasHeight;
+  const shape = scaleX / scaleY;
+  // Plain words for the scene's board line, which shows this sentence as it stands.
+  const refusal = { ok: false as const, reason: `The picture came back ${width}×${height} instead of ${layout.canvasWidth}×${layout.canvasHeight}` };
+  if (Math.max(shape, 1 / shape) > BOARD_SHAPE_TOLERANCE) return refusal;
+  const crops: Array<{ x: number; y: number; width: number; height: number }> = [];
+  for (const region of layout.regions) {
+    let x = region.x * scaleX;
+    let y = region.y * scaleY;
+    let w = region.width * scaleX;
+    let h = region.height * scaleY;
+    const aspect = region.width / region.height;
+    if (w / h > aspect) {
+      const fitted = h * aspect;
+      x += (w - fitted) / 2;
+      w = fitted;
+    } else {
+      const fitted = w / aspect;
+      y += (h - fitted) / 2;
+      h = fitted;
+    }
+    const left = Math.round(x);
+    const top = Math.round(y);
+    const right = Math.min(width, Math.round(x + w));
+    const bottom = Math.min(height, Math.round(y + h));
+    if (right - left < 1 || bottom - top < 1) return refusal;
+    crops.push({ x: left, y: top, width: right - left, height: bottom - top });
+  }
+  return { ok: true, scaleX, scaleY, crops };
+}
+
+function cropImage(source: RgbaImage, geometry: { x: number; y: number; width: number; height: number }) {
+  const { x, y, width, height } = geometry;
   const pixels = new Uint8Array(width * height * 4);
   for (let py = 0; py < height; py++) {
     const from = ((y + py) * source.width + x) * 4;
     pixels.set(source.pixels.subarray(from, from + width * 4), py * width * 4);
   }
-  return { image: { width, height, pixels }, geometry: { x, y, width, height } };
+  return { width, height, pixels };
+}
+
+/**
+ * Record on the run why a board could not be split, so the scene says so (issue 3154). False when
+ * the job belongs to no run step, and the caller then fails the finalization instead: a refusal
+ * nobody can read would be the silent failure this exists to end.
+ */
+async function recordBoardLandingRefusal(
+  store: WorldStore,
+  productionId: string,
+  job: Pick<Job, "id" | "params">,
+  reason: string,
+): Promise<boolean> {
+  const runId = job.params["frameRun"];
+  const stepIndex = job.params["frameRunStep"];
+  if (typeof runId !== "string" || typeof stepIndex !== "number" || !Number.isInteger(stepIndex)) return false;
+  const run = await mutateRun(store, productionId, runId, (current) => {
+    const step = current.steps[stepIndex];
+    if (step === undefined || step.jobId !== job.id || step.dispatch.target.kind !== "board-sheet") return current;
+    return {
+      ...current,
+      steps: current.steps.map((candidate, index) => index === stepIndex ? { ...candidate, landingRefusal: reason } : candidate),
+    };
+  });
+  return run?.steps[stepIndex]?.landingRefusal === reason;
 }
 
 async function pngBytes(
@@ -1252,11 +1334,17 @@ export async function recordBoardSheetFromJob(
   const parentHash = artifactShortHash(parentBytes);
   const sourceBytes = await pngBytes(store, parent, production.meta.id, toPng);
   const source = await decodePng(sourceBytes);
-  if (source.width * request.layout.canvasHeight !== source.height * request.layout.canvasWidth) {
-    throw new Error(
-      `board sheet is ${source.width}x${source.height}, not the frozen ${request.layout.canvasWidth}x${request.layout.canvasHeight} canvas`,
-    );
+  const landing = boardLanding(request.layout, source.width, source.height);
+  if (!landing.ok) {
+    // Replaying this finalization would meet the same pixels, so it completes with the sheet
+    // kept and the run saying why. The remedy is a new board, and `retrySource` rightly refuses
+    // to spend on one while a finalization is still owed.
+    if (await recordBoardLandingRefusal(store, production.meta.id, job, landing.reason)) return [parent];
+    throw new Error(landing.reason);
   }
+  const returnedSize = source.width === request.layout.canvasWidth && source.height === request.layout.canvasHeight
+    ? undefined
+    : { width: source.width, height: source.height, scaleX: landing.scaleX, scaleY: landing.scaleY };
   const cropSourceHash = artifactShortHash(sourceBytes);
   const landed: Take[] = [parent];
   const updatePanels = request.panels.filter((panel) => panel.role === "update");
@@ -1270,8 +1358,9 @@ export async function recordBoardSheetFromJob(
       .find((candidate) => candidate.meta.id === production.meta.id)?.takes
       .find((take) => take.panel?.parentTakeId === parent.id && take.panel.index === panel.panel);
     if (child === undefined) {
-      const cropped = cropImage(source, panel.panel - 1, request.layout);
-      const bytes = await encodePng(cropped.image);
+      const geometry = landing.crops[panel.panel - 1];
+      if (geometry === undefined) throw new Error(`board layout has no panel ${panel.panel}`);
+      const bytes = await encodePng(cropImage(source, geometry));
       const childId = panelTakeId(job.id, panel.panel);
       const estimated = updateIndex === updatePanels.length - 1
         ? job.estimatedMicroUsd - allocatedEstimated
@@ -1302,10 +1391,11 @@ export async function recordBoardSheetFromJob(
           sourceJobId: job.id,
           index: panel.panel,
           shotId: panel.shotId,
-          crop: cropped.geometry,
+          crop: geometry,
           parentHash,
           cropSourceHash,
           hash: artifactShortHash(bytes),
+          ...(returnedSize === undefined ? {} : { returnedSize }),
         },
       };
       const dir = join(store.dir, "productions", production.meta.id, "takes", childId);

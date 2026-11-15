@@ -446,6 +446,59 @@ describe("frame-run fold", () => {
     assert.equal(cancelled.steps[0]!.canRetryCell, false);
   });
 
+  it("fails a board refused at landing with its reason and offers a new board, not a cell (issue 3154)", () => {
+    const reason = "The picture came back 1024×1024 instead of 3072×1024";
+    const refused = { ...run.steps[0]!, landingRefusal: reason };
+    assert.equal(FrameRunSchema.parse({ ...run, steps: [refused], cursor: 1 }).steps[0]!.landingRefusal, reason);
+    const state = foldFrameRun(
+      { ...run, steps: [refused], cursor: 1 },
+      [{ id: JOB_1, status: "succeeded", finalization: "complete" }],
+    );
+    assert.equal(state.steps[0]!.status, "failed");
+    assert.equal(state.steps[0]!.error, reason, "the scene's board line reads the reason itself");
+    assert.equal(state.steps[0]!.canRetry, true, "another board is what helps");
+    assert.equal(state.steps[0]!.canRetryCell, false, "a sheet with no panels found is no cell context");
+    assert.deepEqual(state.steps[0]!.shots.map((shot) => [shot.status, shot.error, shot.landingOutcome]), [["failed", reason, null]]);
+    assert.equal(state.failedShots, 1);
+    assert.equal(state.filedShots, 0);
+    assert.equal(state.status, "completed");
+
+    // Until its job settles cleanly, the refusal is not the story: the queue's state is.
+    const pending = foldFrameRun({ ...run, steps: [refused], cursor: 1 }, [{ id: JOB_1, status: "succeeded", finalization: "pending" }]);
+    assert.equal(pending.steps[0]!.status, "running");
+
+    const retry = {
+      ...run.steps[0]!,
+      label: "Board A retry",
+      sourceStepIndex: 0,
+      grain: "step-retry" as const,
+      retryOf: 0,
+      jobId: JOB_2,
+      dispatch: { ...run.steps[0]!.dispatch, idempotencyKey: "01J8E0000000000000000000K8" },
+    };
+    const landed = foldFrameRun(
+      { ...run, steps: [refused, { ...retry, landingOutcomes: { sh_1: "filed" as const } }], cursor: 2 },
+      [{ id: JOB_1, status: "succeeded", finalization: "complete" }, { id: JOB_2, status: "succeeded", finalization: "complete" }],
+    );
+    assert.equal(landed.steps[0]!.status, "reconciled", "a board that lands answers the refused one");
+    assert.equal(landed.steps[0]!.canRetry, false);
+    assert.equal(landed.failedShots, 0);
+    const refusedAgain = foldFrameRun(
+      { ...run, steps: [refused, { ...retry, landingRefusal: reason }], cursor: 2 },
+      [{ id: JOB_1, status: "succeeded", finalization: "complete" }, { id: JOB_2, status: "succeeded", finalization: "complete" }],
+    );
+    assert.equal(refusedAgain.steps[0]!.status, "failed", "a second refusal reconciles nothing");
+    assert.equal(refusedAgain.steps[0]!.canRetry, false, "only the newest attempt is offered");
+    assert.equal(refusedAgain.steps[1]!.canRetry, true);
+    assert.equal(refusedAgain.failedShots, 1);
+
+    const perShot = { ...run.steps[0]!, dispatch: { ...run.steps[0]!.dispatch, target: { kind: "shot" as const, id: "sh_1", coversShots: ["sh_1", "sh_2"] } } };
+    assert.ok(
+      FrameRunSchema.safeParse({ ...run, mode: "per-shot", steps: [{ ...perShot, landingRefusal: reason }], cursor: 1 }).error?.issues
+        .some((issue) => issue.message === "only a board sheet can be refused at landing"),
+    );
+  });
+
   it("offers only the newest whole-board attempt after a terminal refusal", () => {
     const initial = run.steps[0]!;
     const retry = {
