@@ -2969,7 +2969,24 @@ describe("an empty scene keeps its canonical path (SPEC-029 R-29)", () => {
     const talk = all(mounted, ".fy-swflow__empty button").find((button) => button.textContent === "Talk to Arke");
     assert.ok(talk);
     await click(talk);
-    assert.equal(q(mounted, '[data-testid="scene-workspace"]')?.getAttribute("data-dock"), "true");
+    // The scene's conversation is Builder Chat's, so Talk to Arke opens that, as the rail does,
+    // rather than a dock with nothing in it (issue 3085).
+    assert.equal(dom.document.body.dataset.globalChatOpen, "true");
+  });
+
+  it("opens Builder Chat from the storyboard's Talk to Arke (issue 3085)", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const at = production.scenes.findIndex((scene) => scene.id === "sc_04");
+    const empty = { ...production.scenes[at], shots: [] } as unknown as SceneRecord;
+    delete (empty as { flow?: unknown }).flow;
+    production.scenes[at] = empty;
+    const mounted = await mountState(state);
+    assert.notEqual(dom.document.body.dataset.globalChatOpen, "true", "the chat starts closed");
+    const talk = all(mounted, '[data-testid="workspace-empty"] button').find((button) => button.textContent === "Talk to Arke");
+    assert.ok(talk);
+    await click(talk);
+    assert.equal(dom.document.body.dataset.globalChatOpen, "true");
   });
 });
 
