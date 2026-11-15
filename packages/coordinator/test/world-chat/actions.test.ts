@@ -1881,6 +1881,32 @@ describe("World Chat authority adapters", () => {
     assert.equal(card.status, "pending", "preview validation grants no execution permission");
   });
 
+  it("clears a scene's location alone, keeping its time of day and tone (issue 3153)", async () => {
+    const w = await setup();
+    const production = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+    const scene = production.scenes[0]!;
+    assert.deepEqual(scene.inherits, { location: "the-vigil", timeOfDay: "dusk", tone: "quiet dread" });
+    const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: scene.id };
+    const scenes = currentReceipt(w.store, "scenes", `${PRODUCTION}:${scene.id}`);
+    const action = (inherits: Record<string, string | null>) => ({
+      kind: "production-scene" as const,
+      productionId: PRODUCTION,
+      change: { operation: "edit" as const, sceneId: scene.id, changes: { inherits } },
+      checkReceiptIds: [scenes.id],
+    });
+    // The empty slug Arke sent twice is still refused, by the schema, with the clearing word beside it.
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, { receipts: [scenes], actions: [action({ location: "" })] })), /location/);
+    const oneTurn = turn(w.conversationId, context, { receipts: [scenes], actions: [action({ location: null })] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    const after = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!
+      .scenes.find((candidate) => candidate.id === scene.id)!;
+    assert.deepEqual(after.inherits, { timeOfDay: "dusk", tone: "quiet dread" });
+  });
+
   it("refuses a production frame-rate card after a timeline exists", async () => {
     const context = { kind: "production" as const, productionId: PRODUCTION };
     const w = await setup(context);

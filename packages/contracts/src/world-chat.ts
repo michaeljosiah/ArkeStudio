@@ -2935,7 +2935,7 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-season": "Change the season's question, ending, direction, arcs and episode defaults.",
   "production-episode": "Create or edit an episode: title, order, promise, scenes, links and release details.",
   "production-chapter": "Outline chapters, create one, or edit a chapter's text, plan or a passage.",
-  "production-scene": "Create a scene with its script, edit its title, synopsis, inherited place and defaults, or replace its script. Keep an existing block's id when only its text changes.",
+  "production-scene": "Create a scene with its script, edit its title, synopsis, inherited place and defaults, or replace its script. An edit's inherits changes only the fields it names; inherits.location null leaves the scene with no location. Keep an existing block's id when only its text changes.",
   "production-episode-order": "Put episodes in a new order; name every episode once.",
   "chapter-review": "Run bounded script and visual specialists over a saved chapter; return evidence-backed advisory findings without changing prose or media.",
   "production-chapter-order": "Put chapters in a new order; name every chapter once.",
