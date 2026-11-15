@@ -75,20 +75,30 @@ function snapshot(state: ClientState): void {
   __handleFrameForTest({ kind: "snapshot", seq: ++seq, state });
 }
 
-async function mountCut(state: ClientState) {
+async function mountCut(state: ClientState, search = "") {
   const sent: ClientMessage[] = [];
   const bridge = { appVersion: "test", platform: "test", connect() {}, subscribe() {}, send(json: string) { sent.push(JSON.parse(json)); } };
   Object.assign(window, { arke: bridge });
   __setBridgeForTest(bridge);
   __setStateForTest(state);
   const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
-  await act(async () => root.render(<MemoryRouter initialEntries={[`/w/${state.world!.meta.worldId}/p/${state.world!.productions[0]!.meta.id}/cut`]}>
+  await act(async () => root.render(<MemoryRouter initialEntries={[`/w/${state.world!.meta.worldId}/p/${state.world!.productions[0]!.meta.id}/cut${search}`]}>
     <Routes><Route path="/w/:worldId/p/:prodId/cut" element={<CutScreen />} /></Routes>
   </MemoryRouter>));
   const buttons = (text: string) => [...container.querySelectorAll<HTMLButtonElement>("button")].filter((b) => b.textContent?.trim() === text);
   const row = (id: string) => container.querySelector<HTMLElement>(`[data-library-item="artifact:${id}"]`)!;
   const pick = async (id: string) => { await act(async () => row(id).querySelector<HTMLButtonElement>(".fy-artrow__pick")!.click()); };
-  return { container, sent, buttons, row, pick,
+  const shelf = () => container.querySelector<HTMLSelectElement>("select[aria-label='Browse world']");
+  /** The world's files by hand, as a person chooses them under Browse world (issue 3095). */
+  const browseWorld = async () => {
+    const select = shelf()!;
+    await act(async () => {
+      for (const option of select.querySelectorAll("option[selected]")) option.removeAttribute("selected");
+      [...select.querySelectorAll("option")].find((option) => option.value === "world:files")!.setAttribute("selected", "");
+      select.dispatchEvent(new dom.Event("change", { bubbles: true }));
+    });
+  };
+  return { container, sent, buttons, row, pick, shelf, browseWorld,
     async close() { await act(async () => root.unmount()); container.remove(); Reflect.deleteProperty(window, "arke"); __setBridgeForTest(null); } };
 }
 
@@ -97,9 +107,13 @@ describe("the Cut asks for the song (issue 3088)", () => {
     const screen = await mountCut(musicVideo());
     try {
       assert.match(screen.container.querySelector("[data-testid='song-notice']")?.textContent ?? "", /No song yet/);
+      // The song is a world upload, as one dropped into World Chat or setup is: This production
+      // does not list it (issue 3095), and Choose the song opened an empty Audio list.
+      assert.equal(screen.row(SONG), null, "a world upload is not this production's");
       await act(async () => screen.buttons("Choose the song")[0]!.click());
       const audio = [...screen.container.querySelectorAll<HTMLButtonElement>("[aria-label='Library filters'] button")].find((b) => b.textContent === "Audio")!;
       assert.equal(audio.getAttribute("aria-pressed"), "true", "the Library opens on Audio");
+      assert.equal(screen.shelf()?.value, "world:files", "over the world's files");
 
       await screen.pick(SONG);
       await act(async () => screen.buttons("Use as the song")[0]!.click());
@@ -138,6 +152,7 @@ describe("the Cut asks for the song (issue 3088)", () => {
   it("releases a press whose answer went with the connection, without sending it again", async () => {
     const screen = await mountCut(musicVideo());
     try {
+      await act(async () => screen.buttons("Choose the song")[0]!.click());
       await screen.pick(SONG);
       await act(async () => screen.buttons("Use as the song")[0]!.click());
       assert.equal(screen.buttons("Use as the song").length, 0);
@@ -164,12 +179,28 @@ describe("the Cut asks for the song (issue 3088)", () => {
     } finally { await screen.close(); }
   });
 
+  it("lists the world's sound files when the Dashboard's card brings a music video with no song", async () => {
+    const screen = await mountCut(musicVideo(), "?library=audio");
+    try {
+      assert.equal(screen.shelf()?.value, "world:files");
+      assert.ok(screen.row(SONG), "the song's row is listed");
+    } finally { await screen.close(); }
+    // With a song, the Audio address is this production's audio as before.
+    const sung = await mountCut(musicVideo(spineOn(SONG)), "?library=audio");
+    try {
+      assert.equal(sung.shelf()?.value, "here");
+      assert.ok(sung.row(SONG), "its song is its own");
+      assert.equal(sung.row(OTHER), null, "the world's other sound files stay under Browse world");
+    } finally { await sung.close(); }
+  });
+
   it("says nothing about a song to a film", async () => {
     const state = musicVideo();
     delete state.world!.productions[0]!.meta.kind;
     const screen = await mountCut(state);
     try {
       assert.equal(screen.container.querySelector("[data-testid='song-notice']"), null);
+      await screen.browseWorld();
       await screen.pick(SONG);
       assert.equal(screen.buttons("Use as the song").length, 0);
     } finally { await screen.close(); }

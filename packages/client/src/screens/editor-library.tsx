@@ -218,7 +218,7 @@ export function ArtifactPanel({
   onUseAsSong?: ((artifact: ArtifactSidecar) => void) | null;
   initialFilter?: LibraryFilter;
   /** A filter asked for from outside the panel, such as the Cut's Choose the song; each serial once. */
-  filterRequest?: { filter: LibraryFilter; serial: number } | null;
+  filterRequest?: { filter: LibraryFilter; serial: number; worldFiles?: boolean } | null;
   open: boolean;
   onClose: () => void;
   panelRef: RefObject<HTMLElement | null>;
@@ -273,9 +273,12 @@ export function ArtifactPanel({
     setBrowseProduction(null);
     setWorldShelf(false);
   }, [worldId, production?.meta.id]);
-  // A filter asked for from outside lands on this production's own media rows: the Cut's Choose
-  // the song shows Audio, which shows nothing from Effects or Transitions (codex on PR 3118), and
-  // the song is never another shelf's.
+  // A filter asked for from outside lands on this world's media rows: the Cut's Choose the song
+  // shows Audio, which shows nothing from Effects or Transitions (codex on PR 3118), and the song
+  // is never another world's or another production's. It is often this world's, though: a song
+  // dropped into World Chat or setup is a world upload, which This production does not list
+  // (issue 3095), so Choose the song opened an empty Audio list. The ask says when it wants the
+  // world's files.
   useEffect(() => {
     if (filterRequest === null) return;
     setSection("media");
@@ -283,6 +286,7 @@ export function ArtifactPanel({
     setKindFilter("all");
     setBrowseSlug(null);
     setBrowseProduction(null);
+    setWorldShelf(filterRequest.worldFiles === true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterRequest?.serial]);
   /*

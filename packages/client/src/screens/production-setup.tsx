@@ -15,8 +15,9 @@ import {
   type NarratorSamples as NarratorSamplesValue, type ProductionSetupCommand, type ProductionSetupDraft, type ProductionSetupState,
 } from "@arke-studio/contracts";
 import { useOpenWorldGuard } from "../lib/selectors.js";
-import { listHarnessModels, openWorldChat, send, sendWorldChat, subscribeProductionSetupResults, useStore, useWorldChatProgress } from "../lib/store.js";
-import { ConversationTranscript, useReadsFromEnd } from "../components/conversation.js";
+import { attachHostFiles, listHarnessModels, openWorldChat, send, sendWorldChat, subscribeProductionSetupResults, useStore,
+  useWorldChatProgress, useWorldChatRefusals, worldChatAttachFiles, worldChatAttachTarget } from "../lib/store.js";
+import { ConversationTranscript, attachmentChipLabel, useReadsFromEnd } from "../components/conversation.js";
 import { Composer } from "../components/composer.js";
 import { useReadReplies } from "../components/read-replies.js";
 import { ProductionSetupOutline } from "../components/production-setup-outline.js";
@@ -77,6 +78,14 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   const pending = pendingRequest?.operation ?? null;
   const [tab, setTab] = useState<"conversation" | "outline">("conversation");
   const [modelId, setModelId] = useConversationState("languageModel", "");
+  /*
+   * Attach, as every chat composer has it (issue 3089): a music video starts from its song, and
+   * setup is where the video is planned. The setup is a conversation like any other, so its files
+   * are filed and read the way Builder Chat's are, and each line carries them.
+   */
+  const [omittedAttachments, setOmittedAttachments] = useConversationState<ReadonlySet<string>>("omittedAttachments", new Set());
+  const attachRefusals = useWorldChatRefusals(setupId ?? undefined);
+  const turnAttachments = (workspace?.attachments ?? []).slice(-20).filter(attachment => !omittedAttachments.has(attachment.id));
   const pendingRef = useRef(pendingRequest); pendingRef.current = pendingRequest;
   useLayoutEffect(() => { presentation?.owner.holdOpening(presentation.key, pendingRequest !== null); }, [presentation?.owner, presentation?.key, pendingRequest]);
   const opened = useRef<string | null>(null);
@@ -270,7 +279,17 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
               // picks for this conversation, and letting go of it is the configured writing model.
               modelControl={<ModelChip state={state} value={modelId || inheritedModel} set={modelId !== ""}
                 onPick={id => setModelId(id ?? "")} unsetLabel="Use the default" disabled={running} />}
-              onSubmit={() => command({ operation: "send", text: message, ...(modelId ? { modelId } : {}) })}
+              onSubmit={() => command({ operation: "send", text: message, ...(modelId ? { modelId } : {}),
+                ...(turnAttachments.length > 0 ? { attachmentIds: turnAttachments.map(attachment => attachment.id) } : {}) })}
+              attachments={turnAttachments.map(attachment => ({ id: attachment.id, file: attachmentChipLabel(attachment), kind: attachment.kind, promoted: attachment.promoted }))}
+              onRemoveAttachment={id => setOmittedAttachments(previous => new Set([...previous, id]))}
+              refusals={attachRefusals}
+              {...(worldId && !locked ? {
+                onAttach: () => { if (!running) worldChatAttachFiles(worldId, setupId); },
+                onAttachFiles: (files: readonly File[]) => running
+                  ? Promise.resolve(files.map(file => ({ name: file.name, reason: "Wait for the current turn to finish." })))
+                  : attachHostFiles(worldChatAttachTarget(worldId, setupId), files),
+              } : {})}
               agentLabel="Arke" busy={running} autoFocus={!phone}
               disabledReason={locked ? "Creation is being resolved." : !draft ? "Opening production setup…" : unavailable}
               onDictate={text => setMessage(value => value ? `${value} ${text}` : text)} readReplies={readReplies.composer} />

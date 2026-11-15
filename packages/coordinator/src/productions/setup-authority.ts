@@ -14,7 +14,10 @@ export async function guardProductionSetupAuthority(world: WorldStore | undefine
   const loaded = await world.operationalWrite(() => new WorldChatService(world.dir).load(message.conversationId!));
   if (!loaded?.productionSetup || loaded.productionSetup.status === "created") return;
   if ("worldId" in message && message.worldId !== world.worldId) throw new Error("This setup belongs to another world.");
-  if (message.kind !== "world-chat-open" && message.kind !== "world-chat-cancel") {
+  // Attaching files a file privately against the conversation and touches neither the draft nor
+  // its creation, so setup's composer can hand Arke a song as every other composer can (issue
+  // 3089). The line that carries it is still setup's own send.
+  if (!["world-chat-open", "world-chat-cancel", "world-chat-attach", "world-chat-attach-files", "world-chat-upload"].includes(message.kind)) {
     throw new Error("Continue this draft in Production setup. Its creation and changes are reviewed there.");
   }
 }

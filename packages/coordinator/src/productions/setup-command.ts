@@ -29,7 +29,7 @@ export async function handleProductionSetupCommand(
       if (!["draft", "reviewed"].includes(state.status)) throw new Error("This setup is not open for conversation.");
       const log = new ProductionSetupConversationStore(world, id);
       const running = action.operation === "send"
-        ? runner().send(log, id, action.text, [], undefined, action.modelId)
+        ? runner().send(log, id, action.text, action.attachmentIds ?? [], undefined, action.modelId)
         : runner().retry(log, id, action.turnId as TurnId);
       // A progress refresh can fail independently. Always drain the turn and publish its
       // terminal transcript before answering, including the durable failure and Retry action.
