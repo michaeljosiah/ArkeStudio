@@ -127,18 +127,22 @@ for (const viewport of [320, 390, 984, 1360]) it(`proposal and Inspector navigat
   const changes = [...document.querySelectorAll<HTMLElement>(".fy-effect-review-bar button")].find(button => /\d+ changes?$/.test(button.textContent!))!;
   await click(changes);
   for (let round = 0; round < 2; round++) {
-    if (viewport < 1100) assert.ok(find(".fy-cut-arke-sheet[open]"), "Changes/Back must show Arke");
-    else assert.equal(find("#cut-arke-panel").hidden, false);
+    // Arke is the app's Builder Chat (issue 3096): Changes and Back open it, and the Cut's own
+    // column stays the Inspector rather than an empty Arke tab beside the chat.
+    assert.equal(document.body.dataset["globalChatOpen"], "true", "Changes/Back must show Arke");
+    assert.equal(document.querySelector(".fy-cut-arke-sheet[open]"), null);
+    if (viewport >= 1100) assert.equal(find("#cut-arke-panel").hidden, true, "the column is not left to an empty tab");
     // Exercise the exact controller operation used by the connected card's Inspect effect button.
     await act(async () => { assert.equal(review!.inspect(reviewed.ref, "cl_dust"), true); });
     assert.equal(!!find(".fy-cut-arke-sheet[open]"), false, "Inspect must leave Arke rather than cover an open sheet");
+    // Below 1100px the chat lies over the Cut; beside a desktop Cut it can stay.
+    assert.equal(document.body.dataset["globalChatOpen"], viewport < 1100 ? "false" : "true", "Inspect must not open the Inspector under the chat");
     assert.ok(find(".fx-inspector"));
     if (viewport < 600) assert.ok(find(".fy-cut-trim-sheet[open]"));
     const back = [...document.querySelectorAll<HTMLElement>("#cut-inspector-panel button")].find(button => button.textContent === "Back to proposal · Version 1")!;
     await click(back);
     assert.equal(!!find(".fy-cut-trim-sheet[open]"), false, "Back must close the newer Inspector sheet");
-    if (viewport < 1100) assert.ok(find(".fy-cut-arke-sheet[open]"), "Back must uncover the same proposal sheet");
-    else assert.equal(find("#cut-arke-panel").hidden, false);
+    assert.equal(document.body.dataset["globalChatOpen"], "true", "Back must return to the same proposal in Arke");
     assert.deepEqual(review!.state.cardFocus!.ref, reviewed.ref);
     assert.deepEqual(review!.active!.ref, reviewed.ref);
     assert.equal(review!.active!.comparison, "suggested");
@@ -151,6 +155,27 @@ for (const viewport of [320, 390, 984, 1360]) it(`proposal and Inspector navigat
     assert.ok(current?.status === "ready");
     assert.equal(JSON.stringify(current.timeline), savedTimeline);
   }
+});
+
+/*
+ * The Arke tab opened a column holding one button, which opened Builder Chat beside it and left
+ * the column empty (issue 3096). Every way to Arke now opens the chat, on the Cut's own
+ * conversation, and the column stays the Inspector.
+ */
+for (const [viewport, way] of [[1360, "tab"], [984, "rail"], [390, "foot"]] as const) it(`Arke opens Builder Chat from the ${way} at ${viewport}px and leaves the column alone`, async () => {
+  await mount(viewport);
+  assert.equal(document.body.dataset["globalChatOpen"], "false");
+  const press = way === "tab" ? find("#cut-arke-tab")
+    : way === "rail" ? find(".fy-cut-arke-rail")
+      : [...document.querySelectorAll<HTMLElement>(".fy-cut-tools button")].find(button => button.textContent === "Arke")!;
+  await click(press);
+  assert.equal(document.body.dataset["globalChatOpen"], "true", "the chat is open");
+  assert.equal(find(".fy-global-chat-panel h2").textContent, "Builder Chat");
+  assert.match(find(".fy-global-chat-panel header p").textContent ?? "", / \/ Cut$/, "on the Cut's conversation");
+  assert.equal(document.querySelector(".fy-cut-arke-sheet[open]"), null, "no Arke sheet holding a button");
+  assert.equal(find("#cut-inspector-tab").getAttribute("aria-selected"), "true", "the column stays the Inspector");
+  if (viewport >= 1100) assert.equal(find("#cut-arke-panel").hidden, true);
+  assert.deepEqual(timelineCommands(), []);
 });
 
 for (const viewport of [320, 390, 900, 1360]) it(`Loop is reachable at ${viewport}px without moving the playhead or authoring edits`, async () => {
