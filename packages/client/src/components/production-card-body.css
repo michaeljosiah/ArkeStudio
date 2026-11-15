@@ -21,6 +21,17 @@
 .fy-production-preview__rows :is(.fy-swrow__actions, .fy-swrow__frameactions, .fy-swaddshot, .fy-swdivider, .fy-swboard__actions) { display: none; }
 .fy-production-preview__rows textarea { pointer-events: none; }
 .fy-production-preview__mark { padding: 6px 10px; color: var(--foreground); border-left: 3px solid var(--accent); font-size: 11px; }
+/* A review's shots are lines of a storyboard, not the workspace's rows (issue 3145). The list's
+   marker is the number; a picture floats beside the words only where the shot has one; the list
+   grows with the card rather than scrolling inside it, because short rows are what keep it short. */
+.fy-production-preview__shots { margin: 8px 0; padding-left: 28px; font-size: var(--text-sm); }
+.fy-production-preview__shots > li { padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.fy-production-preview__shots > li::after { content: ""; display: block; clear: both; }
+.fy-production-preview__shots > li[data-review-change] { border-left: 3px solid var(--accent); }
+.fy-production-preview__shots p { margin: 0; }
+.fy-production-preview__shots p + p { margin-top: 2px; }
+.fy-production-preview__shots [data-cast] { font: var(--type-meta); color: var(--muted-foreground); }
+.fy-production-preview__shots img { float: right; height: 64px; width: auto; max-width: 40%; margin: 0 0 4px 10px; object-fit: cover; border-radius: var(--radius-sm); background: var(--muted); }
 .fy-production-preview__cast { display: flex; flex-wrap: wrap; gap: 12px; }
 .fy-production-preview__cast figure { width: 72px; margin: 0; }
 .fy-production-preview__cast img { width: 100%; height: 72px; object-fit: cover; }
