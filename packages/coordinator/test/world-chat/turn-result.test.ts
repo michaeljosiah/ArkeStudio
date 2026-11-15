@@ -403,6 +403,17 @@ describe("parsing a turn result", () => {
     assert.match(preparationProblem("thrown string").safeMessage, /^The requested change could not be prepared\. If a read/);
   });
 
+  it("tells the person a bookkeeping or citation refusal in plain words, the model the detail (issue 3112)", () => {
+    // The two refusals a scene thread showed its author on 2026-11-15, word for word.
+    const read = { code: "candidate-read-required", safeMessage: "Read the proposition with get_candidate at its current registry revision through complete=true before replacing it. Preserve unchanged authored fields, evidence and groups." };
+    const quote = { code: "world-quote-not-found", safeMessage: "A quotation was not found in the entity it cites." };
+    assert.equal(personLine([read]), "it did not line up with the conversation as it stands");
+    assert.equal(personLine([quote]), "it cited something it could not point to");
+    assert.equal(personLine([read, quote, read]), "it did not line up with the conversation as it stands · it cited something it could not point to");
+    assert.match(correctiveMessage([read]), /get_candidate/, "the model still gets what to do");
+    assert.doesNotMatch(personLine([read, quote]), /get_candidate|complete=true|proposition|entity/);
+  });
+
   it("keeps the complete missing-read list in the bounded corrective prompt (#1911)", () => {
     const reason = ["chapters", "story", "sheets", "canon"].map(read =>
       `A production-chapter action requires the complete current ${read} read for the-ledger-of-nights.`).join(" ");

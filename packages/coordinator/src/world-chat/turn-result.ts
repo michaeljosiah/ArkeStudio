@@ -122,12 +122,33 @@ export type ValidationOutcome =
  * the model — "Return the complete result again as one JSON object — no prose around it, no
  * markdown fences." — or a validator path such as `candidateOperations.1.candidate.target is
  * required` (issues 1384, 1403). The log keeps every word of those; the screen says what went
- * wrong in terms the person can act on. Problems about the world itself — a quotation that is not
- * in its source, an entity that does not exist — are already written for a reader and pass through.
+ * wrong in terms the person can act on.
+ *
+ * Two families still reached the screen in the model's words (issue 3112): its own bookkeeping —
+ * "Read the proposition with get_candidate at its current registry revision through complete=true
+ * before replacing it" — and its citations — "A quotation was not found in the entity it cites".
+ * Both are instructions the model acts on and a person cannot, and a retry with the same words got
+ * past both. They are said once each, in plain words; the corrective message keeps the detail.
  */
+const BOOKKEEPING = new Set([
+  "candidate-read-required", "candidate-read", "duplicate-temporary-id", "unknown-candidate", "stale-revision",
+  "immutable-candidate", "unknown-temporary-reference", "no-evidence", "foreign-receipt", "unknown-group-member",
+  "unknown-group", "stale-group-revision", "production-plan-read", "production-plan", "setup-authority",
+  "setup-context", "revise", "revise-only", "reply-only",
+]);
+const CITATION = new Set([
+  "message-missing", "message-not-the-users", "message-span-mismatch", "message-span-out-of-range",
+  "world-entity-missing", "world-version-moved", "world-content-changed", "world-quote-not-found",
+  "attachment-missing", "attachment-content-changed", "attachment-quote-not-found",
+]);
+
 export function personLine(problems: readonly TurnProblem[]): string {
   const lines = problems.map((p) =>
-    p.code === "not-json"
+    BOOKKEEPING.has(p.code)
+      ? "it did not line up with the conversation as it stands"
+      : CITATION.has(p.code)
+        ? "it cited something it could not point to"
+      : p.code === "not-json"
       ? "the reply came back in a form the studio could not read"
       : p.code === "reply-too-long"
         ? "the answer ran longer than one reply can be. Ask for it shorter, or a part at a time"
