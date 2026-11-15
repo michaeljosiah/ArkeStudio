@@ -3,7 +3,8 @@ import {
   type RoutingCommand, type ClientMessage, type DramaChapterDecision, type DramaRole,
   type EpisodeScriptBlock, type SizeTier, ulid,
 } from "@arke-studio/contracts";
-import { send } from "./core.js";
+import { current, emitChange, send } from "./core.js";
+import { useStoreSelector } from "./hooks.js";
 import {
   noteGuideDrafting, type ChapterVersionResult, chapterVersionListeners, VERSION_READ_TIMEOUT_MS,
 } from "./events.js";
@@ -41,6 +42,31 @@ export function createProduction(
   const requestId = ulid();
   send({ kind: "create-production", worldId, requestId, ...input });
   return requestId;
+}
+
+/**
+ * One change to the production's song clock (issue 3088): the spine authority Arke's card applies,
+ * fenced by the revision shown (null creates it). Held in `spineAsks` until it is answered: a
+ * refusal is a `command.failed` under the id returned, success is the next snapshot's spine.
+ */
+export function sendSpineCommand(
+  worldId: string,
+  productionId: string,
+  baseRevision: number | null,
+  command: Extract<ClientMessage, { kind: "spine-command" }>["command"],
+): string | null {
+  const requestId = ulid();
+  if (!send({ kind: "spine-command", worldId, productionId, requestId, baseRevision, command })) return null;
+  emitChange({ ...current, spineAsks: { ...current.spineAsks, [requestId]: { worldId, productionId, revision: baseRevision } } });
+  return requestId;
+}
+
+/**
+ * Whether a spine command for this production is out. A second composed now would name the
+ * revision the first is about to move, and the authority would refuse it as stale.
+ */
+export function useSpineAskPending(worldId: string | undefined, productionId: string | undefined): boolean {
+  return useStoreSelector(store => Object.values(store.spineAsks).some(ask => ask.worldId === worldId && ask.productionId === productionId));
 }
 
 /** Stage the structured overview through the gate — nothing is written live (issue 385). */

@@ -28,6 +28,7 @@ import { useCompact } from "../lib/media-query.js";
 import { productionPlate } from "../lib/production-plate.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES } from "../components/models-card.js";
 import { seconds } from "../lib/format.js";
+import { wantsSong } from "../lib/song.js";
 import { acceptedTakeId, isDayOne, takeDecisions, useProduction } from "../lib/selectors.js";
 import {
   attachHostFiles,
@@ -207,6 +208,7 @@ export function ProductionDashboardScreen() {
     );
   }
   const dayOne = isDayOne(production);
+  const songCard = wantsSong(production) ? <SongCard onChoose={() => navigate(`/w/${worldId}/p/${prodId}/cut?library=audio`)} /> : null;
   const decisions = takeDecisions(production);
   // A visual novel's work is its pictures: a clip left from when it was an interactive movie is
   // no picture, and accepting one would cover nothing, so the lists leave clips out (codex round 14).
@@ -267,6 +269,7 @@ export function ProductionDashboardScreen() {
             }
             newScene={newScene}
           />
+          {songCard}
           {/* Below the frame's content, not above it: 53b opens on the production's own name and
               a box to type in. Delivery postdates that drawing and is the app's own (issue 389),
               so it sits where it cannot interrupt the opening. */}
@@ -276,6 +279,7 @@ export function ProductionDashboardScreen() {
       ) : (
         <>
           <div className="fy-dashrow">
+            {songCard}
             {/* With nothing made, the next shot's card says it all: two cards offered the same press. */}
             {(takes.length > 0 || !nextGap) && <div className="fy-threadcard">
               <div className="fy-threadcard__head">
@@ -415,6 +419,25 @@ export function ProductionDashboardScreen() {
           <ProductionSetup production={production} worldId={worldId} prodId={prodId} />
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * A music video with no song yet (issue 3088). The song is the clock every shot is pinned to, and
+ * a new one opened on Make the first clip with nothing anywhere asking for it. The press lands in
+ * the Cut's Library on Audio, where a sound file offers Use as the song.
+ */
+function SongCard({ onChoose }: { onChoose: () => void }) {
+  return (
+    <div className="fy-threadcard" data-testid="song-card">
+      <div className="fy-threadcard__head">
+        <span className="fy-threadcard__label">NO SONG YET</span>
+      </div>
+      <div className="fy-threadcard__title">Choose the song</div>
+      <div className="fy-threadcard__actions">
+        <Button variant="primary" onClick={onChoose}>Open the Library</Button>
+      </div>
     </div>
   );
 }

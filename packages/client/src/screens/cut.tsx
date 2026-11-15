@@ -62,6 +62,7 @@ import {
   Hand,
   Help,
   Minus,
+  MusicMark,
   Play,
   Plus,
   Pointer,
@@ -117,7 +118,10 @@ import {
   borrowArtifacts,
   borrowTakes,
   subscribeTimelineRefusals,
+  sendSpineCommand,
+  useSpineAskPending,
 } from "../lib/store.js";
+import { songCommand, wantsSong } from "../lib/song.js";
 import { storyShotCount } from "./production-story.js";
 import { type PendingImport, type LibraryFilter, ArtifactPanel, AddToLibraryDialog, LIBRARY_DRAWER_QUERY } from "./editor-library.js";
 import { seekDrag, CutScrubber, LANE_PRESS_OWNERS, CutPlayhead, useCutTransport } from "./editor-transport.js";
@@ -426,6 +430,10 @@ function CutEditorScreen() {
     // Once, on arrival: the drawer is the person's to close afterwards.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  /** Choose the song's Library on Audio, asked once per press (issue 3088). */
+  const [libraryAsk, setLibraryAsk] = useState<{ filter: LibraryFilter; serial: number } | null>(null);
+  /** A Use as the song press still out (issue 3088); the store holds it until it is answered. */
+  const songPending = useSpineAskPending(worldId, prodId);
   const [detailTab, setDetailTab] = useState<"inspector" | "arke">("inspector");
   /*
    * Arke, wherever the Cut asks for it (issue 3096). With the app's Builder Chat the conversation
@@ -1296,8 +1304,30 @@ function CutEditorScreen() {
   const found = timelineState.status === "ready" ? assemblyEntry(timelineState.timeline) : null;
   const assembly = found?.entry ?? null;
   const noticeKey = found === null ? null : `${found.index}:${found.entry.label}`;
+  /** Choose the song (issue 3088): the Library, on Audio, where each sound file offers Use as the song. */
+  const chooseSong = () => {
+    setLibraryAsk((ask) => ({ filter: "audio", serial: (ask?.serial ?? 0) + 1 }));
+    setRightOpen(false);
+    setLibraryOpen(true);
+    queueMicrotask(() => focusFirstControl(libraryPanelRef.current));
+  };
+  const makeSong = (artifact: ArtifactSidecar) => {
+    if (!worldId || !prodId || !production) return;
+    const next = songCommand(production.spine, artifact.id);
+    if (next !== null) sendSpineCommand(worldId, prodId, next.baseRevision, next.command);
+  };
   let notice: React.ReactNode = null;
-  if (assembly !== null && noticeKey !== noticeHidden) {
+  // A music video is cut to its song, so its absence is said before anything else (issue 3088).
+  if (production && wantsSong(production)) {
+    notice = (
+      <div className="fy-cutnotice" data-testid="song-notice">
+        <span className="fy-cutnotice__mark" aria-hidden="true"><MusicMark size={12} /></span>
+        <strong>No song yet.</strong>
+        <span className="fy-h1row__push" />
+        <button type="button" onClick={chooseSong}>Choose the song</button>
+      </div>
+    );
+  } else if (assembly !== null && noticeKey !== noticeHidden) {
     const shots = assembly.clips.filter((change) => change.before === null && change.after !== null && change.after.source.kind === "shot");
     // A gap is what the cut resolver draws as one — a take without media is a gap however the selection reads.
     const unplayable = new Set((cut?.entries ?? []).filter((entry) => entry.media === null).map((entry) => entry.shot.id));
@@ -1491,6 +1521,8 @@ function CutEditorScreen() {
         productions={world?.productions ?? []}
         onBorrowTake={commandsDisabled ? null : borrowTake}
         onOverlayArtifact={commandsDisabled ? null : artifact => placeArtifact(artifact, null, playheadFrame, { kind: "picture" })}
+        onUseAsSong={songPending ? null : makeSong}
+        filterRequest={libraryAsk}
         onRemoveFromLibrary={commandsDisabled ? null : removeFromLibrary}
         onImport={commandsDisabled || remote ? null : files => importMedia("library", files)}
         onAddShot={editableTimeline !== null && !commandsDisabled ? placeShot : null}
