@@ -23,6 +23,11 @@ export interface BudgetCandidate {
   billing?: string;
   /** Order of first appearance in the shot description; lower first. */
   appearanceOrder: number;
+  /**
+   * Another picture in the same request already shows this subject: a board's fixed cell, its
+   * frame riding ahead of every sheet (issue 3168). Unset everywhere a request has no such cell.
+   */
+  pictured?: boolean;
   /** Whether a reference image actually exists to carry (a designated compilation). */
   hasReference: boolean;
   /** A character with both sheet and main photo may spend a spare slot on identity depth. */
@@ -62,6 +67,12 @@ function rank(a: BudgetCandidate, b: BudgetCandidate): number {
   // 1 — characters before locations and factions: a face drifting is noticed most (§2.9).
   const kind = KIND_RANK[a.kind] - KIND_RANK[b.kind];
   if (kind !== 0) return kind;
+  // On a board, before billing: a subject no fixed cell shows has nothing else in the request to
+  // draw them from. Ranked without it, a board carried two people already in both its fixed
+  // frames and left the singer of three new cells as a line of text, a different man in each
+  // (issue 3168).
+  const pictured = Number(a.pictured === true) - Number(b.pictured === true);
+  if (pictured !== 0) return pictured;
   // 2 — billing: leads before supporting.
   const aLead = a.billing === "lead" ? 0 : 1;
   const bLead = b.billing === "lead" ? 0 : 1;
