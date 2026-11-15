@@ -377,6 +377,19 @@ function describeShape(production: ProductionBundle | undefined, writesTheSeason
     bits.push(
       `It delivers in ${aspect}${aspect === "9:16" ? ", so blocking is vertical: one subject, close, and the frame cannot hold a wide two-shot" : ""}.`,
     );
+    /*
+     * The cast is checked before the plan, not after it (issue 3141). A music video's direction
+     * named a singer and a dancer the world had no sheets for, and Arke divided the whole song
+     * between them without a word; only when asked did it search, and say that every shot would
+     * invent a different face. A person who does not ask finds out at the first generated frame.
+     *
+     * Only where there are shots, which is why it sits with the frame: a story's prose needs no
+     * sheet to name somebody. And only the people the work is built around, or every passer-by in
+     * a script becomes a question before anything is planned.
+     */
+    bits.push(
+      "A shot draws a person from their character sheet and its pictures, so someone without a sheet is a different person in every shot. When the direction or a request names a person the work is to be built around (a lead, a singer, a dancer), look for their sheet with search_sheets before planning shots around them. If there is none, say so in that same reply and offer to make the sheet first. This is for the people the work is built around, not every name in the story.",
+    );
   }
   return bits.join(" ");
 }
