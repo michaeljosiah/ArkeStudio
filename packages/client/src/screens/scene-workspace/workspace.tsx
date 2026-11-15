@@ -2,6 +2,7 @@ import { ProductionSpend } from "../../components/production-spend.js";
 import { SceneBackRow, SceneDock, SceneRenameSheet, useSceneDock } from "./responsive-chrome.js";
 import { FOLD_QUERY, useMediaQuery, usePhone } from "../../lib/media-query.js";
 import { PageSheet } from "../../components/page-sheet.js";
+import { useGlobalChat } from "../../components/global-chat-context.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import {
@@ -167,6 +168,7 @@ export function SceneWorkspace({
   // Arke can be put away (R-28). Local to the session rather than a setting: it is a gesture
   // about right now — "give me the width" — not a preference about how the app should be.
   const [dock, setDock] = useSceneDock();
+  const globalChat = useGlobalChat();
   const [renameOpen, setRenameOpen] = useState(false);
   const phone = usePhone();
   useEffect(() => { if (phone && view === "flow") { setView("storyboard"); setFull(false); } }, [phone, view]);
@@ -270,9 +272,13 @@ export function SceneWorkspace({
   const talkToArke = () => {
     // The dock sits beneath full screen; a pinned dock nobody can see is nothing.
     setFull(false);
-    setDock(true);
+    // With Builder Chat the scene's conversation is mounted there, not in the dock, so opening
+    // the dock after the chat was closed showed an empty column (issue 3085). The rail already
+    // opens the chat; this does the same.
+    if (globalChat) globalChat.open();
+    else setDock(true);
     requestAnimationFrame(() => {
-      (document.querySelector(".fy-arke .fy-cx__editor") as HTMLElement | null)?.focus();
+      (document.querySelector(globalChat ? ".fy-global-chat-conversation .fy-cx__editor" : ".fy-arke .fy-cx__editor") as HTMLElement | null)?.focus();
     });
   };
   const sceneRuns = [...(state?.frameRuns ?? [])]
