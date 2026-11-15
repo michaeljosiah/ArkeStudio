@@ -176,6 +176,9 @@ const AudioSpineCommandBaseSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("set-anchor"), shotId: ShotIdSchema, anchor: SpineAnchorSchema }).strict(),
   z.object({ kind: z.literal("set-anchor-audio"), shotId: ShotIdSchema, clipAudio: ClipAudioPolicySchema }).strict(),
   z.object({ kind: z.literal("delete-anchor"), shotId: ShotIdSchema }).strict(),
+  // Several shots unpinned as one revision (issue 3136). Removing a pinned scene's four shots
+  // took four unpin cards, chained, before the deletion: five approvals for one request.
+  z.object({ kind: z.literal("delete-anchors"), shotIds: z.array(ShotIdSchema).min(1).max(500) }).strict(),
   z.object({ kind: z.literal("delete-spine") }).strict(),
 ]);
 
@@ -288,6 +291,19 @@ export function applyAudioSpineCommand(
       if (current.anchors[command.shotId] === undefined) throw new AudioSpineOperationRefused(`shot ${command.shotId} is not anchored`);
       const anchors = { ...current.anchors };
       delete anchors[command.shotId];
+      next = { ...next, anchors };
+      break;
+    }
+    case "delete-anchors": {
+      // Every shot named is unpinned or none is, as one shot's is: a list that names a shot with
+      // no anchor was written against another spine, and half of it applied would hide that.
+      const anchors = { ...current.anchors };
+      for (const shotId of command.shotIds) {
+        if (anchors[shotId] === undefined) {
+          throw new AudioSpineOperationRefused(current.anchors[shotId] === undefined ? `shot ${shotId} is not anchored` : `shot ${shotId} is named twice`);
+        }
+        delete anchors[shotId];
+      }
       next = { ...next, anchors };
       break;
     }

@@ -97,11 +97,20 @@ function spineWords(bundle: WorldBundle, productionId: string) {
     }
     return shotId;
   };
+  // Several shots as a count, with their scene when they share one: "4 shots of Intro". Each is
+  // named on its own row below the title, so the title only has to say how many and where.
+  const shots = (shotIds: readonly string[]) => {
+    if (shotIds.length === 1) return shot(shotIds[0]!);
+    const scenes = new Set(shotIds.map((shotId) =>
+      production?.scenes.find((scene) => orderedShots(scene).some((candidate) => candidate.id === shotId)) ?? null));
+    const [only] = [...scenes];
+    return `${shotIds.length} shots${scenes.size === 1 && only ? ` of ${only.title}` : ""}`;
+  };
   const marker = (one: SpineMarker) => one.kind === "section" ? one.label : `“${one.text}”`;
   const markerAt = (one: SpineMarker) => `${one.kind} at ${songTime(one.atSec)}`;
   const anchor = (one: SpineAnchor) => `${songTime(one.startSec)}–${songTime(one.endSec)}${
     one.clipAudio.mode === "keep-diegetic" ? ` · own sound at ${one.clipAudio.gainDb} dB` : ""}`;
-  return { file, shot, marker, markerAt, anchor };
+  return { file, shot, shots, marker, markerAt, anchor };
 }
 
 function spineTitle(
@@ -140,6 +149,8 @@ function spineTitle(
         : `Keep ${words.shot(command.shotId)}'s own sound at ${command.clipAudio.gainDb} dB`;
     case "delete-anchor":
       return `Unpin ${words.shot(command.shotId)}`;
+    case "delete-anchors":
+      return `Unpin ${words.shots(command.shotIds)}`;
     case "delete-spine":
       return "Remove the song";
   }
@@ -155,7 +166,8 @@ function spineConsequence(command: AudioSpineCommand): string {
     case "delete-marker": return "Changes the song's sections and lyrics.";
     case "set-anchor":
     case "set-anchor-audio":
-    case "delete-anchor": return "Changes where shots sit in the song.";
+    case "delete-anchor":
+    case "delete-anchors": return "Changes where shots sit in the song.";
     case "delete-spine": return "Removes the song, its marks and every pinned shot.";
   }
 }

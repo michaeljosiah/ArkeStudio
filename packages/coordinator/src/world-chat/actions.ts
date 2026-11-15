@@ -243,8 +243,8 @@ import {
 } from "../productions/ops.js";
 import { AudioSpineCommandRefused, applyProductionSpineCommand, previewAudioSpineCommand, type AudioSpineCommandPreview } from "../productions/spine.js";
 import { applyAudioSpineCommand, type WorldBundle } from "@arke-studio/contracts";
-import { applySceneCommand, applySceneCommands, sceneCommandFrom } from "../productions/scene-commands.js";
-import { sceneActionCommands, sequenceTurnActions, dependencyPreviewWorld, type TurnActionGroup } from "./action-sequencing.js";
+import { SceneCommandRefused, applySceneCommand, applySceneCommands, sceneCommandFrom } from "../productions/scene-commands.js";
+import { sceneActionCommands, sequenceTurnActions, dependencyPreviewWorld, shotDeletionBlockers, type TurnActionGroup } from "./action-sequencing.js";
 import { modelActionInputRefusal } from "./model-action-input.js";
 import { filePlayblast, conversationStagePlayblastArtifact } from "../productions/stage-playblast.js";
 import {
@@ -2170,6 +2170,29 @@ async function spineAfterDependencies(
   }
   return spine === before ? bundle
     : { ...bundle, productions: bundle.productions.map((production) => production.meta.id === productionId ? { ...production, spine } : production) };
+}
+
+/**
+ * A shot deletion its authority is bound to refuse is not offered (issue 3136).
+ *
+ * The turn's dry run has already refused it, which is where Arke hears why and can do something
+ * about it. This is the same check where the card is bound, for a pin or an accepted take that
+ * landed in between and for a card recovered after a restart, against what the cards it waits on
+ * leave: the scenes their dry runs fixed, and the song after the spine cards among them, so
+ * "unpin these shots, then delete them" is still two cards in one turn. Not asked at approval: a
+ * blocker that arrives after the card was shown is the authority's to refuse, in its own words
+ * on the failed card.
+ */
+async function refuseBlockedShotDeletion(store: WorldStore, intent: ConversationActionPrepareIntent, payload: WorldChatPreparedAction): Promise<void> {
+  if (payload.kind !== "world-chat-production-scene-command") return;
+  const commands = sceneActionCommands(payload.action);
+  if (!commands.some(command => command.kind === "delete-shot")) return;
+  const { productionId, sceneId } = payload.action;
+  const bundle = await spineAfterDependencies(store, dependencyPreviewWorld(store.getBundle(), payload.dependencyPreview), intent, productionId);
+  const scene = payload.scenePlan?.before ?? bundle.productions.find(production => production.meta.id === productionId)?.scenes.find(candidate => candidate.id === sceneId);
+  if (!scene) return;
+  const blockers = shotDeletionBlockers(bundle, productionId, scene, commands);
+  if (blockers.length > 0) throw new ConversationActionPreparationError(describeRefusal(new SceneCommandRefused(blockers)) ?? blockers.join(" "));
 }
 
 function dependencyScenesCurrent(store: WorldStore, payload: WorldChatPreparedAction): string | null {
@@ -5369,6 +5392,7 @@ export function worldChatActionAdapters(
         const input = parse(payload);
         const current = observationsCurrent(store, preparationObservations(input, intent), deps);
         if (!current.ok) throw new Error(current.detail);
+        await refuseBlockedShotDeletion(store, intent, input);
         return sharedResourceProjection(store, intent, input, deps);
       },
       recoverPreparation: async (intent) => {
@@ -5377,6 +5401,7 @@ export function worldChatActionAdapters(
         const input = parse(payload);
         const current = observationsCurrent(store, preparationObservations(input, intent), deps);
         if (!current.ok) throw new Error(current.detail);
+        await refuseBlockedShotDeletion(store, intent, input);
         return sharedResourceProjection(store, intent, input, deps);
       },
       abandonPreparation: (intent) => abandon(intent.actionId),
