@@ -274,8 +274,6 @@ export function handleFrame(json: string): void {
     frame.state = shareSnapshot(current.state, frame.state);
     if (helloFallbackTimer) clearTimeout(helloFallbackTimer);
     helloFallbackTimer = null;
-    frameRunQuoteListeners.clear();
-    frameRunStartResultListeners.clear();
     // Prune notices for proposals the snapshot no longer carries — and "the studio is still
     // drafting" for any run the snapshot says has since ended. That refusal describes the run
     // rather than the proposal, so unlike its siblings it must not wait for a resolution to
@@ -290,6 +288,16 @@ export function handleFrame(json: string): void {
     const changedWorld = current.state?.world?.meta.worldId !== frame.state.world?.meta.worldId;
     const rejoined = rejoining;
     rejoining = false;
+    // A frame-run quote is checked again where it counts: the coordinator recompiles the run at
+    // the press and starts it only when the signature and amount still match. A refresh follows
+    // every job that lands, so voiding quotes and starts in flight on each one left most presses
+    // starting nothing while other runs were landing (issue 3159). A rejoin may have lost the
+    // answer with the socket, and another world has no use for this one's.
+    const frameRunAnswersLost = rejoined || changedWorld;
+    if (frameRunAnswersLost) {
+      frameRunQuoteListeners.clear();
+      frameRunStartResultListeners.clear();
+    }
     // Only hello gets a replay. Refreshes have missed no events; clearing live state here
     // would hide permissions and Stop controls until another progress event happened.
     if (rejoined) lastTallProgress.clear();
@@ -407,11 +415,9 @@ export function handleFrame(json: string): void {
       mainPhotoAcceptance: changedWorld ? {} : current.mainPhotoAcceptance,
       characterSheetAcceptance: changedWorld ? {} : current.characterSheetAcceptance,
       locationViewUpload: changedWorld ? {} : current.locationViewUpload,
-      // Quotes authorize the exact snapshot used to compile them. A snapshot supersedes that
-      // read even in the same world, so no quote survives reconnect or refresh.
-      frameRunQuotes: {},
-      frameRunStartResults: {},
-      frameRunRequestEpoch: current.frameRunRequestEpoch + 1,
+      frameRunQuotes: frameRunAnswersLost ? {} : current.frameRunQuotes,
+      frameRunStartResults: frameRunAnswersLost ? {} : current.frameRunStartResults,
+      frameRunRequestEpoch: current.frameRunRequestEpoch + (frameRunAnswersLost ? 1 : 0),
       rejoins: current.rejoins + (rejoined ? 1 : 0),
     });
   } else if (current.state) {

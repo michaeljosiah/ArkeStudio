@@ -77,6 +77,28 @@ export function finalizationRetryJobId(
   return job?.finalization?.status === "failed" && isReplayableFinalization(job) ? job.id : null;
 }
 
+/**
+ * What a refused press approved that the fresh quote moved, as the label the dialog shows
+ * (issue 3159). The coordinator starts a run only on the run that was priced; when it refuses,
+ * the dialog asks again and names the price, shots or references that changed. Whatever else
+ * the signature covers — the scene's script and frames, the sheets its prompt draws on — reads
+ * as the scene. Null when nothing priced moved, so the refusal's own reason stands.
+ */
+export function quoteChange(before: FrameRunQuote, after: FrameRunQuote): string | null {
+  if (before.mode !== after.mode || before.modelId !== after.modelId || before.scope !== after.scope || before.shotId !== after.shotId) return null;
+  if (before.signature === after.signature && before.estimatedMicroUsd === after.estimatedMicroUsd) return null;
+  const shots = (quote: FrameRunQuote) => JSON.stringify(quote.steps.map((step) => [step.requestShotIds, step.updateShotIds]));
+  const references = (quote: FrameRunQuote) => JSON.stringify(quote.steps.map((step) => step.references));
+  const moved = [
+    ...(before.estimatedMicroUsd === after.estimatedMicroUsd ? [] : ["price"]),
+    ...(shots(before) === shots(after) ? [] : ["shots"]),
+    ...(references(before) === references(after) ? [] : ["references"]),
+  ];
+  if (moved.length === 0) return "Scene changed";
+  const named = moved.length === 1 ? moved[0]! : `${moved.slice(0, -1).join(", ")} and ${moved.at(-1)!}`;
+  return `${named.charAt(0).toUpperCase()}${named.slice(1)} changed`;
+}
+
 function moveRadio(event: KeyboardEvent<HTMLElement>, select: (index: number) => void): void {
   if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
   const group = event.currentTarget.closest('[role="radiogroup"]');
@@ -226,6 +248,8 @@ function GenerateFramesDialogOpen({
   const [deliveryReason, setDeliveryReason] = useState<string | null>(null);
   const [startPending, setStartPending] = useState<{ requestId: string; quoteId: string } | null>(null);
   const [startReason, setStartReason] = useState<string | null>(null);
+  /** The quote a refused press was sent on, so the fresh quote can say what moved (issue 3159). */
+  const [refusedQuote, setRefusedQuote] = useState<FrameRunQuote | null>(null);
   const [quoteRevision, setQuoteRevision] = useState(0);
   const currentRequest = useRef<string | null>(null);
   const startSubscription = useRef<(() => void) | null>(null);
@@ -297,10 +321,13 @@ function GenerateFramesDialogOpen({
   useEffect(() => {
     if (seenRequestEpoch.current === requestEpoch) return;
     seenRequestEpoch.current = requestEpoch;
-    startSubscription.current?.();
+    // Only a reconnect moves the epoch now (issue 3159), and only a start in flight has an
+    // answer it may have lost; with none pending the quote effect simply asks again.
+    if (startSubscription.current === null) return;
+    startSubscription.current();
     startSubscription.current = null;
     setStartPending(null);
-    setStartReason("The studio refreshed before the frame run was confirmed.");
+    setStartReason("The studio reconnected before the frame run was confirmed.");
   }, [requestEpoch]);
 
   const matchingOptions = quote !== null &&
@@ -319,6 +346,7 @@ function GenerateFramesDialogOpen({
     quote.estimatedMicroUsd !== null &&
     (propIssues.length === 0 || propsAcknowledged);
   const blockedReason = matchingOptions ? quote.blockedReason : deliveryReason;
+  const changed = refusedQuote !== null && matchingOptions && quote.blockedReason === null ? quoteChange(refusedQuote, quote) : null;
   const aspectVerdict = knownModel === null ? null : aspectSupport(knownModel, aspect);
   const compatibleAlternative = aspectVerdict?.ok === false && knownModel !== null ? deliverableInstead(knownModel) : null;
   const alternativeName = compatibleAlternative === null ? null : modelLabel(compatibleAlternative);
@@ -337,6 +365,7 @@ function GenerateFramesDialogOpen({
   const start = () => {
     if (startPending !== null || !canStart || quote.signature === null || quote.estimatedMicroUsd === null) return;
     const pending = { requestId: quote.requestId, quoteId: quote.quoteId };
+    const pressed = quote;
     startSubscription.current?.();
     startSubscription.current = subscribeFrameRunStartResult(quote.requestId, quote.quoteId, (event) => {
       if (
@@ -356,10 +385,12 @@ function GenerateFramesDialogOpen({
       }
       setQuote(null);
       setStartPending(null);
+      setRefusedQuote(pressed);
       setStartReason(event.reason ?? "The frame run was refused.");
       setQuoteRevision((revision) => revision + 1);
     });
     setStartReason(null);
+    setRefusedQuote(null);
     setStartPending(pending);
     const sent = frameRunCommand({
       kind: "frame-run-start",
@@ -540,7 +571,7 @@ function GenerateFramesDialogOpen({
                       : "Quote unavailable"}
               </span>
               <Button variant={compact ? "outline" : "ghost"} size="sm" onClick={onClose}>Cancel</Button>
-              {startReason === null ? null : <p className="fy-swgen__guard" role="status">{startReason}</p>}
+              {(changed ?? startReason) === null ? null : <p className="fy-swgen__guard" role="status">{changed ?? startReason}</p>}
               {displayedBlockedReason !== null && startPending === null ? <p className="fy-swgen__guard" role="status">{displayedBlockedReason}</p> : <Button variant="primary" size="sm" disabled={!canStart || startPending !== null} onClick={start}>{startPending === null ? compact ? "Generate" : "Generate frames" : "Starting..."}</Button>}
             </div>
           )}
