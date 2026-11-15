@@ -20,6 +20,7 @@ import {
   parseAspect,
   planScene,
   productionAspect,
+  promptedShapeLine,
   resolveCast,
   sceneImageOutput,
   compilePasses,
@@ -134,6 +135,7 @@ function boardSheetPrompt(
   body: string,
   panels: FrameStepRequest["panels"],
   layout: FrameBoardLayout,
+  shapeLine: string | null,
 ): string {
   const fixed = panels
     .filter((panel) => panel.role === "fixed")
@@ -143,6 +145,9 @@ function boardSheetPrompt(
     .map((region) => `Panel ${region.panel}: x ${region.x}, y ${region.y}, ${region.width}x${region.height}.`)
     .join(" ");
   return [
+    // A route that sizes its own pictures makes the canvas's shape only when asked in words
+    // (issue 3106), and a sheet in any other shape fails the canvas check on landing.
+    ...(shapeLine === null ? [] : [shapeLine]),
     `Render one ${panels.length}-panel sheet inside the ${layout.canvasWidth}x${layout.canvasHeight} canvas using this exact ${layout.columns}-column by ${layout.rows}-row layout. ${regions} Keep every pixel outside those rectangles blank. No gutters inside a panel, borders, captions, or text.${unused > 0 ? ` The final ${unused} grid position${unused === 1 ? " is" : "s are"} unused.` : ""}`,
     ...fixed,
     body,
@@ -484,7 +489,7 @@ export async function compileFrameRunEvidence(input: CompileFrameRunInput): Prom
         ...(routeOutput.resolution !== undefined ? { resolution: routeOutput.resolution } : {}),
       };
       const request: FrameStepRequest = {
-        prompt: boardSheetPrompt(creativePrompt, panels, layout),
+        prompt: boardSheetPrompt(creativePrompt, panels, layout, promptedShapeLine(input.model, aspect)),
         panels,
         references: frozenReferences(boardPasses, input.model.accepts.referenceImages - fixedCount),
         droppedReferences: [],

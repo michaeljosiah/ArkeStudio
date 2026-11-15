@@ -28,6 +28,7 @@ import {
   offeredAspects,
   parseAspect,
   passesForDuration,
+  promptedShapeLine,
   providerModelId,
   reconcileStrategy,
   sceneImageOutput,
@@ -57,11 +58,45 @@ describe("the shipped manifest (R-9, §3.2)", () => {
     assert.match(modelPriceCopy(codex), /ChatGPT plan.*Codex allowance/);
     assert.equal(modelCapabilityCopy(codex), "refs ×4");
     // Lettering is a declared ability, not an output control: GPT Image letters on this route too (issue 2249).
-    assert.deepEqual(codex.limits, { providerSelectedSize: true, lettering: true });
+    assert.deepEqual(codex.limits, {
+      providerSelectedSize: true,
+      promptedSizes: { "9:16": { width: 941, height: 1672 }, "16:9": { width: 1672, height: 941 } },
+      lettering: true,
+    });
+    // No size control is drawn: the shapes are asked for in words, not picked.
     assert.deepEqual(offeredAspects(codex), []);
     assert.deepEqual(offeredAspects({ ...codex, limits: { ...codex.limits, aspects: ["16:9"] } }), []);
-    assert.deepEqual(aspectSupport(codex, "16:9"), { ok: false, supported: [] });
     assert.equal(aspectOffered(codex, "1:1"), false);
+    assert.equal(aspectOffered(codex, "9:16"), false);
+  });
+
+  it("lets Codex Image deliver the two shapes its prompt has returned, at their measured sizes (issue 3106)", () => {
+    const codex = model("codex-image");
+    assert.deepEqual(aspectSupport(codex, "9:16"), { ok: true });
+    assert.deepEqual(aspectSupport(codex, " 16 : 9 "), { ok: true });
+    assert.deepEqual(aspectSupport(codex, "4:5"), { ok: false, supported: ["9:16", "16:9"] });
+    assert.deepEqual(sceneImageOutput(codex, undefined, "9:16"), { width: 941, height: 1672, aspect: "9:16" });
+    assert.deepEqual(sceneImageOutput(codex, undefined, "16:9"), { width: 1672, height: 941, aspect: "16:9" });
+    // An undeclared shape keeps the old nominal habit; nothing is invented for it.
+    assert.deepEqual(sceneImageOutput(codex, undefined, "1:1"), sceneImageOutput({ ...codex, limits: { providerSelectedSize: true } }, undefined, "1:1"));
+    assert.equal(promptedShapeLine(codex, "9:16"), "Make the picture a tall 9:16 portrait.");
+    assert.equal(promptedShapeLine(codex, "16:9"), "Make the picture a wide 16:9 landscape.");
+    assert.equal(promptedShapeLine(codex, "1:1"), null);
+    assert.equal(promptedShapeLine(codex, undefined), null);
+    // A row that takes real dimensions is never asked in words, even if it carried the field.
+    assert.equal(promptedShapeLine({ ...model("gpt-image-2"), limits: { ...model("gpt-image-2").limits, promptedSizes: { "9:16": { width: 941, height: 1672 } } } }, "9:16"), null);
+  });
+
+  it("declares prompted sizes only beside a provider-chosen size, each true to its shape", () => {
+    for (const m of SHIPPED_MANIFEST.models) {
+      const prompted = m.limits.promptedSizes;
+      if (prompted === undefined) continue;
+      assert.equal(m.limits.providerSelectedSize, true, `${m.id} takes real dimensions, so it needs no words for a shape`);
+      for (const [aspect, size] of Object.entries(prompted)) {
+        const off = Math.abs(size.width / size.height / parseAspect(aspect)! - 1);
+        assert.ok(off < 0.01, `${m.id} declares ${aspect} at ${size.width}×${size.height}`);
+      }
+    }
   });
   it("every model round-trips through the schema", () => {
     const reparsed = ModelManifestSchema.parse(JSON.parse(JSON.stringify(SHIPPED_MANIFEST)));

@@ -5,6 +5,7 @@ import {
   estimateMicroUsd,
   orderedShots,
   planStoryboard,
+  promptedShapeLine,
   sceneImageOutput,
   storyboardUsable,
   type Job,
@@ -100,9 +101,14 @@ export function storyboardRequest(
   // reviewer reads is the prompt the model gets. Production constraints included — a board is
   // production work, unlike a kit, which belongs to the world.
   const production = world.productions.find((candidate) => candidate.meta.id === productionId)?.meta;
+  // Drawn in the shape it will steer (issue 389): a landscape board read by a 9:16 dispatch
+  // frames every panel the wrong way round, and the estimate prices the pixels actually asked.
+  const aspect = production?.aspect;
+  // A route that sizes its own pictures is asked for that shape in words (issue 3106).
+  const shapeLine = promptedShapeLine(drawnBy, aspect);
   const plan = {
     ...planned,
-    prompt: `${planned.prompt}${imageConstraintSuffix(
+    prompt: `${shapeLine === null ? "" : `${shapeLine}\n\n`}${planned.prompt}${imageConstraintSuffix(
       world.artDirection,
       production
         ? {
@@ -112,9 +118,6 @@ export function storyboardRequest(
         : null,
     )}`,
   };
-  // Drawn in the shape it will steer (issue 389): a landscape board read by a 9:16 dispatch
-  // frames every panel the wrong way round, and the estimate prices the pixels actually asked.
-  const aspect = production?.aspect;
   const output = sceneImageOutput(drawnBy, undefined, aspect);
   const estimatedMicroUsd = estimateMicroUsd(drawnBy, {
     images: 1,
