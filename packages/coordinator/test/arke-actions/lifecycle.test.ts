@@ -676,6 +676,36 @@ describe("conversation action folding and decisions", () => {
     assert.equal(state.executions, 1);
   });
 
+  it("settles a stale card's authority after the stale status is durable, and retries it on restart (issue 3104)", async () => {
+    const worldPath = await tempDir("arke-actions-");
+    const conversationId = await conversation(worldPath);
+    const settled: string[] = [];
+    let fail = true;
+    const authority = (state: { executions: number; stale?: boolean }): ConversationActionAuthorityAdapter => ({
+      ...adapter(state),
+      execute: async () => ({ status: "stale", detail: "The locked source changed." }),
+      settleStale: async (action) => {
+        assert.equal((await loaded(worldPath, conversationId)).actions.find((one) => one.actionId === action.actionId)!.status, "stale");
+        settled.push(action.actionId);
+        if (fail) { fail = false; throw new Error("interrupted cleanup"); }
+      },
+    });
+    const lifecycle = new ConversationActionLifecycle({ worldPath, worldId: WORLD_ID, adapters: [authority({ executions: 0, stale: true })], now: NOW });
+
+    const refused = await prepare(lifecycle, conversationId);
+    assert.equal((await lifecycle.decide(decision(refused, (await loaded(worldPath, conversationId)).seq))).status, "stale");
+    assert.deepEqual(settled, [refused.actionId], "a decision that finds the card stale settles it");
+
+    const moved = new ConversationActionLifecycle({ worldPath, worldId: WORLD_ID, adapters: [authority({ executions: 0 })], now: NOW });
+    const executed = await prepare(moved, conversationId);
+    assert.equal((await moved.decide(decision(executed, (await loaded(worldPath, conversationId)).seq))).status, "stale");
+    assert.deepEqual(settled, [refused.actionId, executed.actionId], "so does an execution that comes back stale");
+
+    settled.length = 0;
+    await moved.recoverConversation(conversationId);
+    assert.deepEqual(new Set(settled), new Set([refused.actionId, executed.actionId]), "and a restart settles each again");
+  });
+
   it("records an authority that becomes stale under its execution lock", async () => {
     const worldPath = await tempDir("arke-actions-");
     const conversationId = await conversation(worldPath);

@@ -4753,6 +4753,24 @@ export function worldChatActionAdapters(
       await recordBoundProposalResolution(store, action, "discarded", now);
       await gate.discard(proposal.id);
     },
+    /*
+     * A stale card's proposal goes back to the conversation with it (issue 3104, SPEC-040 R-14).
+     *
+     * Left open, it kept a live Accept in the scene's dock and the Storyboard drew its scene, a
+     * snapshot from before the scene moved, over the real one: one shot shown where four had
+     * landed. Sent back, its points are live on the rail again and can be saved against the
+     * scene as it is now. Only while the proposal is still the one the card prepared: a revision
+     * made on it since belongs to whoever made it, and is theirs to decide.
+     */
+    settleStale: async (action) => {
+      if (!gate) return;
+      const proposal = await gate.readManifest(action.authority.id).catch(() => null);
+      if (!proposal || proposal.draftRevision !== action.authorityRevision) return;
+      const log = new WorldChatStore(conversationDir(store.dir, action.conversationId));
+      if (!(await log.readMeta())) return;
+      const { returnToRail } = await import("./wrapup.js");
+      await returnToRail(log, gate, proposal, now);
+    },
     reconcile: async (action) => {
       if (!gate) return null;
       if ((await gate.listOpen()).some((proposal) => proposal.id === action.authority.id)) return null;

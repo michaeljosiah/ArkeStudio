@@ -752,6 +752,39 @@ describe("World Chat authority adapters", () => {
     assert.equal((await loaded(w.log)).candidates.find((one) => one.id === point.id)!.status, "accepted");
   });
 
+  it("sends a stale card's proposal back to the conversation instead of leaving it open (issue 3104)", async () => {
+    // Two shots for one scene settled in two turns: two cards, both prepared against one version.
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    const scene = () => w.store.getBundle().productions.find((one) => one.meta.id === PRODUCTION)!.scenes[0]!;
+    const before = orderedShots(scene()).length;
+    const cards: ConversationActionCard[] = [];
+    const points: WorldChangeCandidate[] = [];
+    for (const title of ["Black water", "The hold"]) {
+      const point = candidate(w.conversationId, title, {
+        classification: "development.shot",
+        target: { kind: "shot", productionId: PRODUCTION, sceneId: scene().id },
+        draft: { title, description: `${title}, held.` },
+      } as Partial<WorldChangeCandidate>);
+      const oneTurn = turn(w.conversationId, context, { existingCandidates: points, candidates: [point] });
+      const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+      await appendTurn(w.log, oneTurn, prepared);
+      await bindAll(w.lifecycle, prepared);
+      points.push(point);
+      cards.push((await loaded(w.log)).actions.at(-1)!);
+    }
+    assert.equal(cards.length, 2);
+
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed");
+    assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).status, "stale");
+    assert.equal(await w.gate.isStaged(cards[1]!.authority.id), false, "nothing is left open to accept over the newer scene");
+    assert.equal((await w.gate.listOpen()).filter((one) => one.kind === "scene-edit").length, 0);
+    const view = await loaded(w.log);
+    assert.equal(view.candidates.find((one) => one.id === points[1]!.id)!.status, "live", "the point is back on the rail");
+    assert.equal(view.candidates.find((one) => one.id === points[0]!.id)!.status, "accepted");
+    assert.equal(orderedShots(scene()).length, before + 1, "and the scene holds only what was accepted");
+  });
+
   it("binds an atomic candidate group to one existing ProposalManager authority", async () => {
     const w = await setup();
     const groupId = newId("grp");
