@@ -241,6 +241,7 @@ import {
   landBoard,
 } from "../productions/ops.js";
 import { AudioSpineCommandRefused, applyProductionSpineCommand, previewAudioSpineCommand, type AudioSpineCommandPreview } from "../productions/spine.js";
+import { applyAudioSpineCommand, type WorldBundle } from "@arke-studio/contracts";
 import { applySceneCommand, applySceneCommands, sceneCommandFrom } from "../productions/scene-commands.js";
 import { sceneActionCommands, sequenceTurnActions, dependencyPreviewWorld } from "./action-sequencing.js";
 import { modelActionInputRefusal } from "./model-action-input.js";
@@ -2048,13 +2049,82 @@ function observationsCurrent(
 /** A dependent scene's future fence is validated at approval. Its original read was checked
  * before the turn completed; preparation must also survive partially completed dependencies. */
 function preparationObservations(payload: WorldChatPreparedAction, intent: ConversationActionPrepareIntent) {
-  return (payload.kind === "world-chat-production-scene-command" && payload.scenePlan) || ("dependencyPreview" in payload && payload.dependencyPreview)
+  const observed = (payload.kind === "world-chat-production-scene-command" && payload.scenePlan) || ("dependencyPreview" in payload && payload.dependencyPreview)
     ? { baseObservations: intent.baseObservations.filter(observation => observation.requirement !== "scenes") } : intent;
+  return withoutChainedSpineRead(payload, intent, observed);
 }
 
-function approvalObservations(payload: WorldChatPreparedAction, action: Pick<ConversationActionPrepareIntent, "baseObservations">) {
-  return payload.kind === "world-chat-production-scene-command" && payload.scenePlan ? { baseObservations: payload.scenePlan.expectedObservations } :
+function approvalObservations(payload: WorldChatPreparedAction, action: Pick<ConversationActionPrepareIntent, "baseObservations" | "dependencies">) {
+  const observed = payload.kind === "world-chat-production-scene-command" && payload.scenePlan ? { baseObservations: payload.scenePlan.expectedObservations } :
     "dependencyPreview" in payload && payload.dependencyPreview ? { baseObservations: payload.dependencyPreview.expectedObservations } : action;
+  return withoutChainedSpineRead(payload, action, observed);
+}
+
+/**
+ * A spine card that waits on other cards is fenced by its own base revision, not its spine read
+ * (issue 3103). The read was taken before the cards it waits on, so once they land it no longer
+ * matches, and a card chained after a create could never be approved. The revision is the exact
+ * fence on the spine itself, checked when the card is previewed and again when it applies; the
+ * read's other rows, the shots and tracks, are checked again by the spine authority.
+ */
+function withoutChainedSpineRead<T extends Pick<ConversationActionPrepareIntent, "baseObservations">>(
+  payload: WorldChatPreparedAction,
+  action: Pick<ConversationActionPrepareIntent, "dependencies">,
+  observed: T,
+): T | { baseObservations: T["baseObservations"] } {
+  return payload.kind === "world-chat-audio-spine-command" && action.dependencies.length > 0
+    ? { baseObservations: observed.baseObservations.filter(observation => observation.requirement !== "spine") } : observed;
+}
+
+const UNAPPLIED: ReadonlySet<ConversationActionCard["status"]> = new Set<ConversationActionCard["status"]>(["failed", "cancelled", "denied", "stale", "superseded"]);
+
+/**
+ * The world with the spine as the spine cards this card waits on will leave it (issue 3103).
+ *
+ * Arke pinned a scene's four shots as four set-anchor cards chained with after, each naming the
+ * revision the one before it leaves. Only the first prepared: each was previewed against the live
+ * spine, still at the earlier revision. Scene cards get a dry run carried in their payload; a
+ * spine card needs none, because each card's base revision says exactly which spine it applies
+ * to. The cards it waits on are read back from their own preparations and applied in turn order,
+ * each only when its base revision is the spine's so far: one that has landed is already live and
+ * is passed over by that same check. At approval every one has landed, so the live spine is the
+ * one previewed here, and the preview matches.
+ */
+async function spineAfterDependencies(
+  store: WorldStore,
+  bundle: WorldBundle,
+  card: Pick<ConversationActionPrepareIntent, "conversationId" | "dependencies">,
+  productionId: string,
+): Promise<WorldBundle> {
+  if (card.dependencies.length === 0) return bundle;
+  const log = new WorldChatStore(conversationDir(store.dir, card.conversationId));
+  const meta = await log.readMeta();
+  if (!meta) return bundle;
+  const actions = foldConversation(meta.id, meta.createdAt, (await log.read()).events).view.actions;
+  const byId = new Map(actions.map((action) => [action.actionId, action]));
+  const waitedOn = new Set<string>();
+  const visit = (id: string): void => {
+    if (waitedOn.has(id)) return;
+    waitedOn.add(id);
+    for (const parent of byId.get(id)?.dependencies ?? []) visit(parent);
+  };
+  for (const id of card.dependencies) visit(id);
+  let spine = bundle.productions.find((production) => production.meta.id === productionId)?.spine ?? null;
+  const before = spine;
+  // Conversation order is turn order, and an after names only an earlier card.
+  for (const action of actions) {
+    if (!waitedOn.has(action.actionId) || action.actionKind !== "world-chat-audio-spine-command" || UNAPPLIED.has(action.status)) continue;
+    const prepared = await readPreparation(store, "world", action);
+    if (prepared?.kind !== "world-chat-audio-spine-command" || prepared.action.productionId !== productionId) continue;
+    if (prepared.action.baseRevision !== (spine?.revision ?? null)) continue;
+    try {
+      spine = applyAudioSpineCommand(spine, prepared.action.command, store.now());
+    } catch {
+      // That card says why on its own; this one is previewed against the spine before it.
+    }
+  }
+  return spine === before ? bundle
+    : { ...bundle, productions: bundle.productions.map((production) => production.meta.id === productionId ? { ...production, spine } : production) };
 }
 
 function dependencyScenesCurrent(store: WorldStore, payload: WorldChatPreparedAction): string | null {
@@ -3845,8 +3915,9 @@ async function sharedResourceProjection(
     case "world-chat-audio-spine-command": {
       authority = { kind: "audio-spine", id: intent.actionId };
       let preview: AudioSpineCommandPreview;
+      const spineBundle = await spineAfterDependencies(store, bundle, intent, payload.action.productionId);
       try {
-        preview = previewAudioSpineCommand(bundle, payload.action, store.now());
+        preview = previewAudioSpineCommand(spineBundle, payload.action, store.now());
       } catch (error) {
         // The authority's own reason, not "could not prepare" (issue 3081, as 1883 was for
         // production authoring): a spine created with a revision of 1 was refused for a reason
