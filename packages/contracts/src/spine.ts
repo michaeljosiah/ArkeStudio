@@ -299,21 +299,6 @@ export function applyAudioSpineCommand(
   return parsed;
 }
 
-export function describeAudioSpineCommand(command: AudioSpineCommand): string {
-  switch (command.kind) {
-    case "create": return `Create the audio spine with ${command.trackArtifactId}`;
-    case "assign-track": return `Assign ${command.trackArtifactId} as the master track`;
-    case "add-marker": return `Add marker ${command.marker.id}`;
-    case "import-markers": return `Import ${command.markers.length} ${command.format.toUpperCase()} marker${command.markers.length === 1 ? "" : "s"}`;
-    case "edit-marker": return `Edit marker ${command.markerId}`;
-    case "delete-marker": return `Delete marker ${command.markerId}`;
-    case "set-anchor": return `Anchor ${command.shotId} from ${command.anchor.startSec}s to ${command.anchor.endSec}s`;
-    case "set-anchor-audio": return `Set ${command.shotId} clip audio to ${command.clipAudio.mode}`;
-    case "delete-anchor": return `Delete the anchor for ${command.shotId}`;
-    case "delete-spine": return "Delete the audio spine";
-  }
-}
-
 /**
  * Markers in the order they are stored and shown: ascending time, insertion order preserved on a
  * tie. Sorted on every write rather than on every read — a file a person opens by hand should

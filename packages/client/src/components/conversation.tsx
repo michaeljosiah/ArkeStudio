@@ -424,8 +424,9 @@ export function ConversationPermissionCard({
         </div>
         <span className="fy-actioncard__status">{recorded && action.status === "pending" ? "Starting…" : comicDraft && action.status === "pending" ? "Waiting in Pages" : ACTION_STATUS[action.status]}</span>
       </div>
-      {/* A comic draft is read in Pages: its card names it and goes there (issue 2459). */}
-      {!comicDraft && !comicCard && <StudioShow action={action} />}
+      {/* A comic draft is read in Pages: its card names it and goes there (issue 2459). A song card
+          has no picture: Show opened the production overview beside it (issue 3092). */}
+      {!comicDraft && !comicCard && action.actionKind !== "world-chat-audio-spine-command" && <StudioShow action={action} />}
       {/* A proposal's rows are what it does; "Writes one reviewed world record" added nothing. */}
       {!comicDraft && !comicMake && !generation && !(action.shown.body.family === "authored-diff" && action.authority.kind === "proposal-manager") && <p className="fy-actioncard__consequence">{action.shown.consequence}</p>}
       {comicMake ? <ComicMakeCardBody action={action} /> : terminal ? (

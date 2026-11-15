@@ -3,10 +3,12 @@ import {
   ProductionSpineSchema,
   anchorProblems,
   applyAudioSpineCommand,
-  describeAudioSpineCommand,
   orderedShots,
+  type AudioSpineCommand,
   type AudioSpineModelAction,
   type ProductionSpine,
+  type SpineAnchor,
+  type SpineMarker,
   type WorldBundle,
 } from "@arke-studio/contracts";
 import type { CommitResult } from "../world/commit.js";
@@ -67,13 +69,100 @@ function validatedNext(
   return { current, next, durationSec };
 }
 
-function clipped(value: unknown): string {
-  const shown = JSON.stringify(value);
-  return shown.length <= 4_000 ? shown : `${shown.slice(0, 3_999)}...`;
+/** `0:16`, `1:02.5`: a place in the song as a player shows it, exact to the millisecond given. */
+export function songTime(sec: number): string {
+  const ms = Math.round(sec * 1000);
+  const fraction = ms % 1000;
+  return `${Math.floor(ms / 60_000)}:${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")}${
+    fraction === 0 ? "" : `.${String(fraction).padStart(3, "0").replace(/0+$/, "")}`}`;
+}
+
+function counted(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+/**
+ * The words a spine card uses (issue 3092): the song by its file name and length, a shot by its
+ * number and scene, a marker by what it says. The card was written in the authority's words —
+ * "Create the audio spine with ar_01M7E6…", "227.639979s measured audio", a marker as its JSON —
+ * and a person approving it could not tell which song, or which part of it, they were agreeing to.
+ */
+function spineWords(bundle: WorldBundle, productionId: string) {
+  const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
+  const file = (artifactId: string) => bundle.artifacts.find((artifact) => artifact.id === artifactId)?.file.split(/[\\/]/).at(-1) ?? artifactId;
+  const shot = (shotId: string) => {
+    for (const scene of production?.scenes ?? []) {
+      const found = orderedShots(scene).find((candidate) => candidate.id === shotId);
+      if (found !== undefined) return `shot ${found.number} of ${scene.title}`;
+    }
+    return shotId;
+  };
+  const marker = (one: SpineMarker) => one.kind === "section" ? one.label : `“${one.text}”`;
+  const markerAt = (one: SpineMarker) => `${one.kind} at ${songTime(one.atSec)}`;
+  const anchor = (one: SpineAnchor) => `${songTime(one.startSec)}–${songTime(one.endSec)}${
+    one.clipAudio.mode === "keep-diegetic" ? ` · own sound at ${one.clipAudio.gainDb} dB` : ""}`;
+  return { file, shot, marker, markerAt, anchor };
+}
+
+function spineTitle(
+  command: AudioSpineCommand,
+  current: ProductionSpine | null,
+  durationSec: number | null,
+  words: ReturnType<typeof spineWords>,
+): string {
+  const onSpine = (markerId: string) => current?.markers.find((one) => one.id === markerId);
+  switch (command.kind) {
+    case "create":
+    case "assign-track":
+      // Whole seconds, as a player shows a song's length: 227.64s is 3:47, never 3:48.
+      return `Use ${words.file(command.trackArtifactId)} as the song${durationSec === null ? "" : ` · ${songTime(Math.floor(durationSec))}`}`;
+    case "add-marker":
+      return `Mark ${words.marker(command.marker)} at ${songTime(command.marker.atSec)}`;
+    case "import-markers": {
+      const sections = command.markers.filter((one) => one.kind === "section").length;
+      const lyrics = command.markers.length - sections;
+      const parts = [...(sections > 0 ? [counted(sections, "section")] : []), ...(lyrics > 0 ? [counted(lyrics, "lyric")] : [])];
+      return parts.length === 0 ? (command.format === "lrc" ? "Clear the song's lyrics" : "Clear the song's marks") : `Mark ${parts.join(" and ")}`;
+    }
+    case "edit-marker": {
+      const marker = onSpine(command.markerId);
+      return `Change ${marker === undefined ? command.markerId : words.marker(marker)}`;
+    }
+    case "delete-marker": {
+      const marker = onSpine(command.markerId);
+      return `Remove ${marker === undefined ? command.markerId : words.marker(marker)}`;
+    }
+    case "set-anchor":
+      return `Pin ${words.shot(command.shotId)} to ${words.anchor(command.anchor)}`;
+    case "set-anchor-audio":
+      return command.clipAudio.mode === "mute"
+        ? `Mute ${words.shot(command.shotId)}'s own sound`
+        : `Keep ${words.shot(command.shotId)}'s own sound at ${command.clipAudio.gainDb} dB`;
+    case "delete-anchor":
+      return `Unpin ${words.shot(command.shotId)}`;
+    case "delete-spine":
+      return "Remove the song";
+  }
+}
+
+function spineConsequence(command: AudioSpineCommand): string {
+  switch (command.kind) {
+    case "create": return "The Cut plays to this song.";
+    case "assign-track": return "The Cut plays to this song. Marks and pinned shots keep their times.";
+    case "add-marker":
+    case "import-markers":
+    case "edit-marker":
+    case "delete-marker": return "Changes the song's sections and lyrics.";
+    case "set-anchor":
+    case "set-anchor-audio":
+    case "delete-anchor": return "Changes where shots sit in the song.";
+    case "delete-spine": return "Removes the song, its marks and every pinned shot.";
+  }
 }
 
 export interface AudioSpineCommandPreview {
   readonly title: string;
+  readonly consequence: string;
   readonly authorityRevision: number;
   readonly commands: Array<{ label: string; detail?: string }>;
   readonly expectedResult: string;
@@ -87,14 +176,19 @@ export function previewAudioSpineCommand(
   at: string,
 ): AudioSpineCommandPreview {
   const { current, next, durationSec } = validatedNext(bundle, action, at);
+  const words = spineWords(bundle, action.productionId);
   const commands: Array<{ label: string; detail?: string }> = [];
   if (current === null && next !== null) {
-    commands.push({ label: `Assign master track ${next.trackArtifactId}`, detail: `${durationSec}s measured audio` });
+    commands.push({ label: `Use ${words.file(next.trackArtifactId)} as the song`, ...(durationSec === null ? {} : { detail: songTime(Math.floor(durationSec)) }) });
   } else if (current !== null && next === null) {
-    commands.push({ label: "Delete the audio spine", detail: `Revision ${current.revision}, ${current.markers.length} markers, ${Object.keys(current.anchors).length} anchors` });
+    const sections = current.markers.filter((one) => one.kind === "section").length;
+    const pinned = Object.keys(current.anchors).length;
+    commands.push({ label: `Remove ${words.file(current.trackArtifactId)}`, detail: [counted(sections, "section"),
+      counted(current.markers.length - sections, "lyric"), counted(pinned, "pinned shot")].join(" · ") });
   } else if (current !== null && next !== null) {
     if (current.trackArtifactId !== next.trackArtifactId) {
-      commands.push({ label: "Change master track", detail: `${current.trackArtifactId} -> ${next.trackArtifactId} (${durationSec}s)` });
+      commands.push({ label: `Use ${words.file(next.trackArtifactId)} as the song`,
+        detail: `${durationSec === null ? "" : `${songTime(Math.floor(durationSec))} · `}was ${words.file(current.trackArtifactId)}` });
     }
     const beforeMarkers = new Map(current.markers.map((marker) => [marker.id, marker]));
     const afterMarkers = new Map(next.markers.map((marker) => [marker.id, marker]));
@@ -102,27 +196,26 @@ export function previewAudioSpineCommand(
       const before = beforeMarkers.get(id);
       const after = afterMarkers.get(id);
       if (JSON.stringify(before) === JSON.stringify(after)) continue;
-      commands.push({
-        label: `${before === undefined ? "Add" : after === undefined ? "Remove" : "Change"} marker ${id}`,
-        detail: `${before === undefined ? "not present" : clipped(before)} -> ${after === undefined ? "not present" : clipped(after)}`,
-      });
+      if (before === undefined) commands.push({ label: words.marker(after!), detail: words.markerAt(after!) });
+      else if (after === undefined) commands.push({ label: `Remove ${words.marker(before)}`, detail: words.markerAt(before) });
+      else commands.push({ label: `Change ${words.marker(before)}`, detail: `${words.marker(before)} at ${songTime(before.atSec)} → ${words.marker(after)} at ${songTime(after.atSec)}` });
     }
     for (const shotId of new Set([...Object.keys(current.anchors), ...Object.keys(next.anchors)])) {
       const before = current.anchors[shotId];
       const after = next.anchors[shotId];
       if (JSON.stringify(before) === JSON.stringify(after)) continue;
-      commands.push({
-        label: `${before === undefined ? "Add" : after === undefined ? "Remove" : "Change"} anchor ${shotId}`,
-        detail: `${before === undefined ? "not present" : clipped(before)} -> ${after === undefined ? "not present" : clipped(after)}`,
-      });
+      if (before === undefined) commands.push({ label: `Pin ${words.shot(shotId)}`, detail: words.anchor(after!) });
+      else if (after === undefined) commands.push({ label: `Unpin ${words.shot(shotId)}`, detail: `was ${words.anchor(before)}` });
+      else commands.push({ label: `Change ${words.shot(shotId)}`, detail: `${words.anchor(before)} → ${words.anchor(after)}` });
     }
   }
   if (commands.length === 0) throw new AudioSpineCommandRefused("the command changes nothing");
   return {
-    title: describeAudioSpineCommand(action.command),
+    title: spineTitle(action.command, current, durationSec, words),
+    consequence: spineConsequence(action.command),
     authorityRevision: current?.revision ?? 0,
     commands,
-    expectedResult: next === null ? "The production no longer has an audio spine." : `The audio spine advances to revision ${next.revision}.`,
+    expectedResult: next === null ? "The production has no song." : `Saved as revision ${next.revision} of the song.`,
     next,
   };
 }

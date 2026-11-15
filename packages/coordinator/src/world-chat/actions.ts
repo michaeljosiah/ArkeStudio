@@ -3972,12 +3972,10 @@ async function sharedResourceProjection(
       authorityRevision = preview.authorityRevision;
       shown = {
         title: preview.title.slice(0, 200),
-        consequence: payload.action.command.kind === "delete-spine"
-          ? "Deletes the production's authored song clock, markers, and shot anchors."
-          : "Applies this semantic command through the version-fenced production audio-spine authority.",
+        consequence: preview.consequence,
         affectedTargets: [...intent.targets],
         ripples: payload.action.command.kind === "delete-spine"
-          ? ["A saved timeline remains authoritative and is not reordered or deleted."]
+          ? ["A saved Cut keeps its clips and their order."]
           : [],
         permissionReason: "authored-change",
         body: {
