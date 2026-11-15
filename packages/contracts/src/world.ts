@@ -377,6 +377,15 @@ export const ProductionSchema = z
      */
     musicPolicy: z.literal("environmental-only").optional(),
     /**
+     * What a clip is made from (issue 3185). Absent is `frames`, today's behaviour: a shot opens
+     * on its start frame where the model has a first-frame route, and a whole-scene plan opens
+     * every pass after the first on the previous pass's last frame. Both drop the cast, looks
+     * and place, because a first-frame route takes one picture. `references` keeps them: no
+     * frame travels and no pass chains, so the model composes each clip from the people, their
+     * clothes and the place. A shot may say otherwise in `continuity.clipsFrom`.
+     */
+    clipsFrom: z.enum(["frames", "references"]).optional(),
+    /**
      * Which model this production reaches for, per capability (SPEC-033 §1.12, R-74..R-76).
      *
      * A **concrete model reference**, never the word `local` or `cloud`. With two local video

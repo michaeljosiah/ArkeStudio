@@ -18,6 +18,7 @@ import {
   resolvePropStates,
   shotCoverage,
   shotLookId,
+  shotSingsToSong,
   shotSpeakers,
   withoutMention,
   type ClientMessage,
@@ -609,6 +610,22 @@ export function ShotFields({
           checked={shot.continuity?.continuesPrevious ?? false}
           onChange={(event) => continuitySet({ continuesPrevious: event.target.checked || undefined })}
         />
+        {/* Issue 3185: this shot's clip from a frame or from the cast and place pictures, where it
+            differs from the production. The first option follows the production and says how. */}
+        <div className="fy-shot__row">
+          <span className="fy-shot__rowlabel">clip</span>
+          <Select
+            label="Clip from"
+            className="fy-shot__select"
+            value={shot.continuity?.clipsFrom ?? ""}
+            disabled={disabled}
+            onChange={(event) => continuitySet({ clipsFrom: event.target.value === "frames" || event.target.value === "references" ? event.target.value : undefined })}
+          >
+            <option value="">{production.meta.clipsFrom === "references" ? "Production · from references" : "Production · from frames"}</option>
+            <option value="frames">From frames</option>
+            <option value="references">From references</option>
+          </Select>
+        </div>
         <div className="fy-shot__row">
           <span className="fy-shot__rowlabel">keep out</span>
           <input
@@ -628,6 +645,23 @@ export function ShotFields({
       </Section>
 
       <Section icon={<Speaker size={15} />} name="Sound">
+        {/* Issue 3186: in a production cut to a song, a singer's shot sends its slice of the song
+            for lip sync. On marks the shot's sound as the song; off keeps the sound and opts out. */}
+        {production.spine === null ? null : (
+          <Checkbox
+            className="fy-shot__check"
+            label="Sings to the song"
+            disabled={disabled}
+            checked={shotSingsToSong(shot)}
+            onChange={(event) => {
+              const audio: NonNullable<Shot["audio"]> = { ...(shot.audio ?? { kind: "music" }) };
+              delete audio.lipSync;
+              edit({ audio: event.target.checked
+                ? { ...audio, kind: shotSingsToSong({ audio }) ? audio.kind : "music" }
+                : { ...audio, lipSync: false } });
+            }}
+          />
+        )}
         {([["line", "dialogue", "None · the shot is silent"], ["ambience", "ambience", "The bed under the line"], ["effects", "effects", "The hits beside it"]] as const).map(([key, label, placeholder]) => (
           <div key={key} className="fy-shot__row">
             <span className="fy-shot__rowlabel">{label}</span>

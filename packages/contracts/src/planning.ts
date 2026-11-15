@@ -2,7 +2,7 @@ import { referencePrompt } from "./reference-prompt.js";
 import { dialogueSlots, type DialogueSlot } from "./dialogue-timing.js";
 import type { ProductionBundle } from "./client-state.js";
 import { resolvedAuthoredDuration, DEFAULT_SHOT_SEC } from "./scene.js";
-import { planCharacterAudio, characterAudioInstructions, type CharacterAudioPlan, type FrozenPerformanceAudio, type FrozenMasterAudio } from "./audio-reference.js";
+import { planCharacterAudio, characterAudioInstructions, characterAudioRoute, type CharacterAudioPlan, type FrozenPerformanceAudio, type FrozenMasterAudio } from "./audio-reference.js";
 import {
   compilationIsStale,
   designatedCompilation,
@@ -1570,6 +1570,12 @@ export interface DispatchWarnings {
   aspectUnsupported: { aspect: string; model: string; supported: readonly string[] } | null;
   /** Subjects past the model's stated reliable range — carried anyway, and said so (R-42). */
   subjectsOverRange: BudgetResult["subjectsOverRange"];
+  /**
+   * A singer's slice of the song the route that shot takes cannot carry (issue 3186), with the
+   * label the plan card says. The slice is left out and the clip is made without it, rather than
+   * refusing a scene over one shot's lip sync.
+   */
+  songNotSent?: Array<{ shotId: string; number: number; reason: string }>;
 }
 
 /**
@@ -1656,6 +1662,8 @@ export interface ScenePlanInput {
     styleOverride?: string;
     musicPolicy?: "environmental-only";
     failureModes?: readonly string[];
+    /** What its clips are made from (issue 3185); absent is frames. A shot may differ. */
+    clipsFrom?: "frames" | "references";
   };
   /**
    * The production's audio design, which is where the score negative comes from (R-11). Absent
@@ -1719,6 +1727,8 @@ export interface ShotDispatchPlan {
    * and the warnings name them.
    */
   continuation?: ContinuationPlan;
+  /** The clip is made from references by choice (issue 3185): no frame was even looked for. */
+  fromReferences?: true;
 }
 
 export interface ScenePlan {
@@ -1743,6 +1753,11 @@ export interface ScenePlan {
     negatives: string | null;
     /** The prop states the pass's shots cite, distinct by prop and state (issue 536). */
     propStates: ShotPropResolution[];
+    /**
+     * The pass's first shot makes its clip from references (issue 3185), so the pass opens on
+     * nothing: the compiler does not chain it behind the previous pass's last frame.
+     */
+    fromReferences?: true;
   }>;
   pack: PackResult;
   /**
@@ -1844,6 +1859,27 @@ function budgetFor(
  */
 export const START_FRAME_PREAMBLE =
   "The attached image is this clip's exact first frame. Continue the motion from it.";
+
+/**
+ * The line a clip made from references adds beneath the numbered pictures (issue 3185). A
+ * reference route reads a portrait or a place as loosely as it likes, and a model handed a
+ * picture of a room with nobody in it has opened the clip on that room. The words say what the
+ * pictures are for, so the model composes the shot rather than animating one of them.
+ */
+export const REFERENCES_NOT_FRAMES_LINE =
+  "These pictures show who is in the clip, what they wear and where it happens. None is a frame of the clip: compose each shot from the words.";
+
+/**
+ * Whether a shot's clip is made from its references rather than a frame (issue 3185): the
+ * shot's own choice, else its production's, else frames, which is what every production made
+ * before the choice existed did.
+ */
+export function clipFromReferences(
+  production: { clipsFrom?: "frames" | "references" } | undefined,
+  shot: Pick<Shot, "continuity">,
+): boolean {
+  return (shot.continuity?.clipsFrom ?? production?.clipsFrom ?? "frames") === "references";
+}
 
 /**
  * The line a continuation replaces the binding preamble with (SPEC-019 R-50).
@@ -2058,6 +2094,7 @@ function resolveBoundaryFrames(
   model: ManifestModel,
   artifacts: readonly ArtifactSidecar[] | undefined,
   mode: "per-shot" | "whole-scene",
+  fromReferences: (shot: Shot) => boolean = () => false,
 ): Map<string, { frame?: BoundaryFramePlan; stale?: string }> {
   const states = new Map<string, { frame?: BoundaryFramePlan; stale?: string }>();
   const shots = orderedShots(scene);
@@ -2066,6 +2103,9 @@ function resolveBoundaryFrames(
   if (artifacts === undefined) return states;
   const route = frameDispatchFor(model, 1);
   for (const [shotIndex, shot] of shots.entries()) {
+    // A clip made from references never looks at the frame (issue 3185), so a frame that has
+    // gone stale cannot refuse the plan either: it stays filed, unread, until the shot asks for it.
+    if (fromReferences(shot)) continue;
     const artifactId = selections[shot.id]?.startFrameArtifactId ?? null;
     if (artifactId === null) continue;
     const artifact = artifacts.find((candidate) => candidate.id === artifactId);
@@ -2201,7 +2241,8 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
 
   // Boundary frames resolved before anything is bound or priced (issue 154): a shot that opens
   // on a durable frame takes the first-frame route, which changes what else may travel with it.
-  const boundaryFrames = resolveBoundaryFrames(scene, selections, model, input.artifacts, mode);
+  const fromReferences = (shot: Shot) => clipFromReferences(input.production, shot);
+  const boundaryFrames = resolveBoundaryFrames(scene, selections, model, input.artifacts, mode, fromReferences);
   // Resolved beside them, and consulted first where both landed on one shot (R-50): a frame is
   // issue 154's workaround for models that could not take video, and this model can. Continuing
   // keeps the motion and the audio the extracted still throws away, so the frame steps aside
@@ -2290,7 +2331,9 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
             ? [bindingPreamble(bound), CARRY_PREAMBLE].filter(Boolean).join("\n")
             : frame !== undefined
               ? START_FRAME_PREAMBLE
-              : bindingPreamble(bound),
+              : fromReferences(shot) && bound.length > 0
+                ? [bindingPreamble(bound), REFERENCES_NOT_FRAMES_LINE].join("\n")
+                : bindingPreamble(bound),
       body: prompt.text,
       negatives: derivedNegatives({
         capability: model.capability,
@@ -2311,6 +2354,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       estimatedMicroUsd: estimate,
       ...(frame !== undefined ? { frame } : {}),
       ...(continuation !== undefined ? { continuation } : {}),
+      ...(fromReferences(shot) ? { fromReferences: true as const } : {}),
     };
   });
 
@@ -2372,10 +2416,15 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     );
   })();
 
+  // A singer's shot is a clip of its own (issue 3186): its slice of the song is its length, so
+  // a pass that ran on into the next shot would ask the singer to mouth a song that has stopped.
+  const singing = new Set((input.masterReferences ?? []).map((ref) => ref.master.shotId));
+  const songBreaks = ordered.flatMap((shot, index) =>
+    singing.has(shot.id) ? [shot.id, ...(ordered[index + 1] ? [ordered[index + 1]!.id] : [])] : []);
   const pack = packScene(ordered, capSec, {
     referenceCapSec,
     shotCarriesReferences: (shotId) => boundByShot.get(shotId) ?? false,
-    forceBreakBefore: new Set([...boardBoundaries,...timingBreaks]),
+    forceBreakBefore: new Set([...boardBoundaries,...timingBreaks, ...songBreaks]),
   });
 
   const passReferences: ScenePlan["passReferences"] = pack.ok
@@ -2402,12 +2451,16 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
           .filter((s): s is Shot => s !== undefined);
         const budget = budgetFor([...seen.values()], kits, scene, sheets, model, passShots, input.productionId, propStates);
         const references = attachmentsFor(budget.carried, propStates, passShots);
+        // The pass opens where its first shot opens, so that shot decides whether it may open on
+        // the previous pass's last frame (issue 3185).
+        const opening = ordered.find((s) => s.id === pass.plan[0]?.shotId);
         return {
           passIndex: pass.index,
           references,
           budget,
           bound: bindReferences(references, sheets),
           propStates,
+          ...(opening !== undefined && fromReferences(opening) ? { fromReferences: true as const } : {}),
           // A pass is one clip, so its negatives are the clip's. Silence is still stated, but
           // only when the whole clip is silent — one spoken beat among four is not a silent pass.
           negatives: derivedNegatives({
@@ -2510,6 +2563,8 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
             .filter(
               (s) =>
                 continuations.get(s.id)?.continuation === undefined &&
+                // A clip made from references opens on no frame by choice (issue 3185).
+                !fromReferences(s) &&
                 !(selections[s.id]?.startFrameArtifactId ?? selections[s.id]?.startFrameTakeId ?? null),
             )
             .map((s) => ({ shotId: s.id, number: s.number }))
@@ -2630,10 +2685,33 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     })(),
   };
 
+  /*
+   * A singer's slice rides only where the route can sync to it (issue 3186): performance sync on
+   * a reference route that also carries a picture. Anywhere else — a frame or an extend route, a
+   * model that hears no audio, a pass with no picture to sing — the slice stays home and the shot
+   * is named with the reason, once, from the dispatch shape this plan is for.
+   */
+  const songNotSent: NonNullable<DispatchWarnings["songNotSent"]> = [];
+  const songFor = (shotIds: ReadonlySet<string>, imageCount: number, videoCount: number, taskMode: string, record: boolean) =>
+    (input.masterReferences ?? []).filter((ref) => {
+      if (!shotIds.has(ref.master.shotId)) return false;
+      const route = characterAudioRoute(model, taskMode);
+      const reason = route === null && (taskMode === "first-frame" || taskMode === "continue") ? "opens on a frame"
+        : !route?.supportsPerformanceSync ? "model takes no song"
+        : route.requiresImages && imageCount + videoCount === 0 ? "no picture rides" : null;
+      if (reason !== null && record) {
+        const shot = ordered.find((candidate) => candidate.id === ref.master.shotId);
+        if (shot !== undefined) songNotSent.push({ shotId: shot.id, number: shot.number, reason });
+      }
+      return reason === null;
+    });
   for (const entry of shots) {
+    const taskMode = entry.continuation?.kind === "extend" ? "continue" : entry.frame ? "first-frame" : "generate";
+    const videoCount = entry.continuation?.kind === "carry" ? 1 : 0;
     entry.audioReferences = planCharacterAudio({ scene, shots: [entry.shot], sheets, kits, model,
-      imageCount: entry.bound.length, videoCount: entry.continuation?.kind === "carry" ? 1 : 0, taskMode: entry.continuation?.kind === "extend" ? "continue" : entry.frame ? "first-frame" : "generate",
-      disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences, masterReferences: input.masterReferences });
+      imageCount: entry.bound.length, videoCount, taskMode,
+      disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences,
+      masterReferences: songFor(new Set([entry.shot.id]), entry.bound.length, videoCount, taskMode, mode === "per-shot") });
     const audioText = characterAudioInstructions(entry.audioReferences);
     if (audioText) entry.parts.preamble = [entry.parts.preamble, audioText].filter(Boolean).join("\n");
     const videos = entry.continuation?.kind === "carry" ? 1 : 0;
@@ -2644,8 +2722,10 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     const packed = pack.ok ? pack.passes.find(p => p.index === reference.passIndex) : undefined;
     const ids = new Set(packed?.plan.map(p => p.shotId) ?? []);
     reference.audioReferences = planCharacterAudio({ scene, shots: shots.filter(s => ids.has(s.shot.id)).map(s => s.shot),
-      sheets, kits, model, imageCount: reference.bound.length, disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences, masterReferences: input.masterReferences });
+      sheets, kits, model, imageCount: reference.bound.length, disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences,
+      masterReferences: songFor(ids, reference.bound.length, 0, "generate", mode === "whole-scene") });
   }
+  if (songNotSent.length > 0) warnings.songNotSent = songNotSent;
 
   return {
     mode,

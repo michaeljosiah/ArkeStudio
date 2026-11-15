@@ -520,6 +520,21 @@ describe("frame-run quote authorization", () => {
     assert.ok(!references.some((text) => /The Vigil/.test(text)), "and the scene's is not");
   });
 
+  it("says what the scene's clips are made from (issue 3185)", async () => {
+    const frames = await mount(stateWith(), []);
+    await click(named(frames, "Generate frames"));
+    assert.equal(one(frames, '[data-testid="clips-from"]')?.textContent, "clips from frames");
+    const state = stateWith();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.meta.clipsFrom = "references";
+    const shots = orderedShots(production.scenes.find((candidate) => candidate.id === "sc_04")!);
+    // One shot keeps opening on its frame: the label counts the clips made from references.
+    shots[0]!.continuity = { clipsFrom: "frames" };
+    const references = await mount(state, []);
+    await click(named(references, "Generate frames"));
+    assert.equal(one(references, '[data-testid="clips-from"]')?.textContent, `${shots.length - 1} of ${shots.length} clips from references`);
+  });
+
   it("quotes current options, displays the backend amount, and echoes the authorization on start", async () => {
     const sent: ClientMessage[] = [];
     const item = await mount(stateWith(), sent);

@@ -1,5 +1,7 @@
-import { AUDIO_TRACK_KINDS, basePictureTrack } from "./timeline.js";
+import { AUDIO_TRACK_KINDS, basePictureTrack, effectiveAudioRole } from "./timeline.js";
 import type { ProductionBundle } from "./client-state.js";
+import type { ProductionSpine } from "./spine.js";
+import { sha256Hex } from "./sha256.js";
 import { z } from "zod";
 import { AudioRangeSchema, AudioAssetProvenanceSchema, AudioAttestationSchema, FullSha256Schema } from "./audio.js";
 import { ArtifactIdSchema, ShotIdSchema, IsoDateTimeSchema, SlugSchema } from "./ids.js";
@@ -70,21 +72,55 @@ export const FrozenMasterAudioSchema = z.object({ intent: z.literal("performance
 }).strict();
 export type FrozenMasterAudio = z.infer<typeof FrozenMasterAudioSchema>;
 
-/** Physical soundtrack time derives from the placed music, never a picture take's trim. */
+/** The binding's source when the song is the spine's own track, with no saved timeline (issue 3186). */
+export const SPINE_SONG_SOURCE = "spine";
+
+/**
+ * Physical soundtrack time derives from the placed music, never a picture take's trim.
+ *
+ * A Picture slot that names its soundtrack (`performanceSourceClipId`) is sliced from that clip.
+ * One that names none is sliced from the song under it (issue 3186): the Music clip of an artifact
+ * covering the whole slot, the production's spine track first. A production cut to a song whose
+ * timeline is not saved yet slices the spine's track at the shot's anchor, which is the clock its
+ * plans run on (`dialogueSlots`). Every refusal is a short label a plan card can say.
+ */
 export function masterAudioBinding(production: ProductionBundle, shotId: string): z.infer<typeof MasterAudioBindingSchema> {
   const state = production.timeline;
+  const spine = production.spine;
+  if (spine && (state === undefined || state.status === "absent")) {
+    const anchor = spine.anchors[shotId];
+    if (!anchor) throw new Error("not on the song");
+    return MasterAudioBindingSchema.parse({ productionId: production.meta.id, shotId, timelineHash: spineSongHash(spine),
+      timelineRevision: spine.revision, sourceClipId: SPINE_SONG_SOURCE, artifactId: spine.trackArtifactId,
+      range: { inSec: anchor.startSec, outSec: anchor.endSec } });
+  }
   if (state?.status !== "ready" || !state.hash) throw new Error("Save the production timeline before preparing master playback.");
   const timeline = state.timeline;
   const clips = basePictureTrack(timeline)?.clips.filter(c => c.source.kind === "shot" && c.source.shotId === shotId) ?? [];
   const picture = clips[0];
-  if (clips.length !== 1 || !picture?.performanceSourceClipId) throw new Error("Choose one Picture slot with an enabled performance soundtrack.");
-  const source = timeline.tracks.flatMap(track => AUDIO_TRACK_KINDS.has(track.kind) ? track.clips : []).find(c => c.id === picture.performanceSourceClipId);
-  if (!source || source.source.kind !== "artifact" || picture.startFrame < source.startFrame ||
-    picture.startFrame + picture.durationFrames > source.startFrame + source.durationFrames) throw new Error("The selected master soundtrack no longer covers this shot.");
+  if (clips.length !== 1 || !picture) throw new Error(clips.length === 0 ? "not on the Cut" : "on the Cut twice");
+  const covers = (clip: (typeof timeline.tracks)[number]["clips"][number]) => clip.source.kind === "artifact" &&
+    picture.startFrame >= clip.startFrame && picture.startFrame + picture.durationFrames <= clip.startFrame + clip.durationFrames;
+  const audio = timeline.tracks.flatMap(track => AUDIO_TRACK_KINDS.has(track.kind) ? track.clips.map(clip => ({ track, clip })) : []);
+  let source;
+  if (picture.performanceSourceClipId) {
+    source = audio.find(entry => entry.clip.id === picture.performanceSourceClipId)?.clip;
+    if (!source || !covers(source)) throw new Error("The selected master soundtrack no longer covers this shot.");
+  } else {
+    const songs = audio.filter(entry => effectiveAudioRole(entry.track, entry.clip) === "music" && covers(entry.clip)).map(entry => entry.clip);
+    source = songs.find(clip => clip.source.kind === "artifact" && clip.source.artifactId === spine?.trackArtifactId) ?? songs[0];
+    if (!source) throw new Error("song not on the Cut");
+  }
+  if (source.source.kind !== "artifact") throw new Error("The selected master soundtrack no longer covers this shot.");
   const inSec = (source.sourceInFrames + picture.startFrame - source.startFrame) / timeline.frameRate;
   return MasterAudioBindingSchema.parse({ productionId: production.meta.id, shotId, timelineHash: state.hash,
     timelineRevision: timeline.revision, sourceClipId: source.id, artifactId: source.source.artifactId,
     range: { inSec, outSec: inSec + picture.durationFrames / timeline.frameRate } });
+}
+
+/** What a spine-sourced binding is fenced on: the spine as read, so any edit to it is a new slice. */
+export function spineSongHash(spine: ProductionSpine): string {
+  return `sha256:${sha256Hex(JSON.stringify(spine))}`;
 }
 export const AudioReferenceEffectsSchema = z.object({
   wording: z.literal("prompt-guided"), timing: z.literal("not-preserved"), identity: z.literal("guidance"),

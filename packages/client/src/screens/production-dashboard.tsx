@@ -35,6 +35,7 @@ import {
   attachHostText,
   hostCanAttach,
   setProductionAspect,
+  setProductionClips,
   setProductionModel,
   uploadArtifacts,
   useStore,
@@ -443,7 +444,7 @@ function SongCard({ onChoose }: { onChoose: () => void }) {
 }
 
 function ProductionSetup({ production, worldId, prodId }: {
-  production: { meta: { aspect?: string; models?: ModelChoices } };
+  production: { meta: { aspect?: string; models?: ModelChoices; clipsFrom?: "frames" | "references" }; scenes: readonly unknown[] };
   worldId: string | undefined;
   prodId: string | undefined;
 }) {
@@ -453,7 +454,9 @@ function ProductionSetup({ production, worldId, prodId }: {
     const id = production.meta.models?.[capability] ?? state?.app.routing.defaults[capability];
     return state?.app.manifest?.models.find(model => model.id === id)?.displayName ?? id;
   }).filter(Boolean).join(" · ") || "Models";
-  const controls = <><DeliveryAspect production={production} worldId={worldId} prodId={prodId} /><ProductionModels production={production} worldId={worldId} prodId={prodId} /></>;
+  const controls = <><DeliveryAspect production={production} worldId={worldId} prodId={prodId} />
+    {production.scenes.length > 0 && <ClipSource production={production} worldId={worldId} prodId={prodId} />}
+    <ProductionModels production={production} worldId={worldId} prodId={prodId} /></>;
   return <>
     <button className="fy-production-setup-row" type="button" aria-label="Delivery and models" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><b>{productionAspect(production.meta)}</b><span>· {models}</span><ChevronRight size={16} /></button>
     <PageSheet open={open} title="Production settings" className="fy-production-settings-sheet" onClose={() => setOpen(false)}>{controls}</PageSheet>
@@ -523,6 +526,42 @@ function DeliveryAspect({
         ))}
       </select>
       {production.meta.aspect === undefined && <span className="fy-mono">default</span>}
+    </div>
+  );
+}
+
+/**
+ * What every clip is made from (issue 3185): a start frame, or the cast, looks and place as
+ * references with nothing opening on the shot before. A shot may differ on its own page.
+ */
+function ClipSource({
+  production,
+  worldId,
+  prodId,
+}: {
+  production: { meta: { clipsFrom?: "frames" | "references" } };
+  worldId: string | undefined;
+  prodId: string | undefined;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <span className="fy-mono">Clips</span>
+      <select
+        aria-label="Clips from"
+        value={production.meta.clipsFrom ?? "frames"}
+        onChange={(e) => worldId && prodId && setProductionClips(worldId, prodId, e.target.value === "references" ? "references" : "frames")}
+        style={{
+          font: "500 12px var(--font-sans)",
+          padding: "4px 8px",
+          borderRadius: 8,
+          border: "1px solid var(--border)",
+          background: "var(--background)",
+          color: "inherit",
+        }}
+      >
+        <option value="frames">From frames</option>
+        <option value="references">From references</option>
+      </select>
     </div>
   );
 }

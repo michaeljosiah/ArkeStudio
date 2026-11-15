@@ -78,6 +78,12 @@ export function PlansPanel({
       pass.askedSec === undefined ? null : `${pass.askedSec.toFixed(1)}s`,
       usd(pass.estimatedMicroUsd),
       carries?.frame === undefined ? null : `frame: shot ${carries.frame.number}`,
+      // Issue 3185: a clip made from references by choice says so, where a frame would be named.
+      carries?.fromReferences === true ? "from references" : null,
+      // Issue 3186: the singer whose slice of the song rides, or the reason it does not.
+      carries?.song === undefined ? null
+        : carries.song.rides ? `${carries.song.name}: sings to the song`
+        : `${carries.song.name}: song not sent${carries.song.reason === undefined ? "" : ` · ${carries.song.reason}`}`,
       carries?.place === undefined ? null
         : carries.place.rides ? `${carries.place.name}: plate`
         : `${carries.place.name}: plate not sent${carries.place.reason === undefined ? "" : ` · ${carries.place.reason}`}`,

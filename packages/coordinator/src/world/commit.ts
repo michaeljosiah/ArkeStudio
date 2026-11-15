@@ -699,6 +699,16 @@ export const EDITOR_CLIP_SPEED_SCHEMA_VERSION = 132;
 export const EDITOR_SOUND_FADE_SCHEMA_VERSION = 133;
 /** SPEC-038 R-45..R-50: a cut's picture look is a strict timeline field an older Cut would refuse to read, on the record or in Undo or Redo. */
 export const EDITOR_PICTURE_LOOK_SCHEMA_VERSION = 134;
+/**
+ * Issue 3185: what a production's or a shot's clips are made from is a strict field on
+ * production.json and on a shot's continuity. An older build would refuse the production or the
+ * scene over it, so the world is raised with the first one written. (135 is PR 3133's.)
+ */
+export const CLIPS_FROM_SCHEMA_VERSION = 136;
+const CLIPS_FROM_KEY = /"clipsFrom"\s*:/;
+/** Issue 3186: a shot's `audio.lipSync` opt-out is a strict sound field an older scene reader refuses. */
+export const LIP_SYNC_SCHEMA_VERSION = 137;
+const LIP_SYNC_KEY = /"lipSync"\s*:/;
 /** SPEC-047 R-191: older readers cannot discard the chapter's authoritative arrangement. */
 export const AUDIO_STUDIO_SCHEMA_VERSION = 83;
 
@@ -1199,6 +1209,8 @@ export class Committer {
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesClipSpeed(f.newContent)) ? EDITOR_CLIP_SPEED_SCHEMA_VERSION : 0,
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesSoundFade(f.newContent)) ? EDITOR_SOUND_FADE_SCHEMA_VERSION : 0,
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesPictureLook(f.newContent)) ? EDITOR_PICTURE_LOOK_SCHEMA_VERSION : 0,
+      files.some(f => (classify(f.path).track === "production-meta" || classify(f.path).track === "scene") && f.newContent != null && CLIPS_FROM_KEY.test(f.newContent)) ? CLIPS_FROM_SCHEMA_VERSION : 0,
+      files.some(f => classify(f.path).track === "scene" && f.newContent != null && LIP_SYNC_KEY.test(f.newContent)) ? LIP_SYNC_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageConstruction(f.newContent)) ? 11 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageReferenceFrames(f.newContent)) ? 20 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageSpeed(f.newContent)) ? 21 : 0,

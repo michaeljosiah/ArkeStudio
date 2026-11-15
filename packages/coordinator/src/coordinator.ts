@@ -110,6 +110,7 @@ import { reviewPerformance, clearPerformanceSelection, selectKeptPerformance, ch
 import { purgePerformance } from "./audio/performance-purge.js";
 import { keepPerformanceRecording, performanceConversionRequest, readPerformanceConversionInputs, finalizePerformanceConversion } from "./audio/performances.js";
 import { readCharacterAudioInputs, resolveCastVoices, resolveSubjectCastVoices, preparePerformanceAudioRange, prepareMasterAudioReference, resolveMasterAudioReferences } from "./audio/reference-inputs.js";
+import { resolveSongSlices } from "./audio/song-slices.js";
 import { resumeCharacterSample, prepareCharacterSample, acceptCharacterSample, clearCharacterSample, withdrawCharacterSample, characterSpeakingRequest } from "./audio/character-sample.js";
 import type { AudioMediaTools } from "./audio/media-tools.js";
 import { CataloguePreviewService } from "./voice/catalogue-preview.js";
@@ -10188,10 +10189,16 @@ export class Coordinator {
               .map(([sheetId]) => ({ sheetId, name: bundle.sheets.find((s) => s.id === sheetId)?.name ?? sheetId, reason: "takes no audio" })) : [], refused: [] }
           : await resolveCastVoices(store, production, scene, msg.requestId, undefined, characterAudioRoute(model)?.local === true);
         let performanceReferences, masterReferences;
+        // A singer's shot carries its slice of the song (issue 3186), resolved here as the cast's
+        // reads are: one at a time, each that cannot be made a clause rather than a refusal.
+        const explicitShots = new Set((msg.masterAudio ?? []).map((request) => request.binding.shotId));
+        const songs = msg.audioReferencesDisabled ? { references: [], notSent: [] }
+          : await resolveSongSlices(store, this.opts.audioMediaTools, production, scene, model, msg.requestId,
+            { shotIds: orderedShots(scene).map((shot) => shot.id).filter((id) => !explicitShots.has(id)) });
         try {
           if (msg.audioReferencesDisabled && msg.masterAudio?.length) throw new Error("Disabled references cannot carry selected performances.");
           performanceReferences = castVoices.references;
-          masterReferences = await resolveMasterAudioReferences(store, production.meta.id, scene.id, msg.masterAudio ?? [], msg.requestId);
+          masterReferences = [...await resolveMasterAudioReferences(store, production.meta.id, scene.id, msg.masterAudio ?? [], msg.requestId), ...songs.references];
         } catch (error) {
           fail(describeCoordinatorError(error));
           return;
@@ -10214,6 +10221,7 @@ export class Coordinator {
               ...(production.meta.musicPolicy !== undefined
                 ? { musicPolicy: production.meta.musicPolicy }
                 : {}),
+              ...(production.meta.clipsFrom !== undefined ? { clipsFrom: production.meta.clipsFrom } : {}),
               failureModes: production.meta.failureModes,
             },
             sheets: bundle.sheets,
@@ -10242,6 +10250,7 @@ export class Coordinator {
           const aggregate = await createDispatchPlan(store, {
             manifest: this.opts.manifest, acknowledgedRecommendationIds: msg.acknowledgedRecommendationIds,
             castNotSent: [...castVoices.notSent, ...castVoices.refused],
+            songNotSent: songs.notSent,
             worldId: msg.worldId,
             productionId: production.meta.id,
             scene,
@@ -18342,13 +18351,19 @@ export class Coordinator {
           .filter(([, member]) => member.voice?.kind === "performance")
           .map(([sheetId]) => ({ sheetId, name: bundle.sheets.find(sheet => sheet.id === sheetId)?.name ?? sheetId, reason: "takes no audio" })) : [], refused: [] }
           : await resolveCastVoices(store, production, scene, id, acknowledgeShotIds, route?.local === true, { acknowledge: acknowledgeShotIds !== undefined, at });
+        // The singers' slices of the song (issue 3186), resolved as the cast's reads are: priced
+        // without writing their upload right, and acknowledged for the shots the approval sends.
+        const songs = action.audioReferencesDisabled ? { references: [], notSent: [] }
+          : await resolveSongSlices(store, this.opts.audioMediaTools, production, scene, model, id,
+            { ...(acknowledgeShotIds === undefined ? { acknowledge: false } : { shotIds: acknowledgeShotIds, acknowledge: true }), at });
         const audioDesign = await audioDesignFor(store, production.meta.id);
         const plan = planScene({ timingProduction: production, world: bundle.meta, artDirection: bundle.artDirection, productionId: action.productionId,
-          production: { styleOverride: production.meta.styleOverride, musicPolicy: production.meta.musicPolicy, failureModes: production.meta.failureModes },
+          production: { styleOverride: production.meta.styleOverride, musicPolicy: production.meta.musicPolicy, failureModes: production.meta.failureModes,
+            clipsFrom: production.meta.clipsFrom },
           sheets: bundle.sheets, kits: bundle.referenceKits, props: bundle.props, scene, selections: production.selections, model, audioDesign,
           artifacts: bundle.artifacts, takes: production.takes, aspect: production.meta.aspect, resolution: action.resolution,
-          audioReferencesDisabled: disabled, performanceReferences: cast.references, masterReferences: [] }, action.mode);
-        return { manifest: this.opts.manifest, castNotSent: [...cast.notSent, ...cast.refused], worldId: store.worldId,
+          audioReferencesDisabled: disabled, performanceReferences: cast.references, masterReferences: songs.references }, action.mode);
+        return { manifest: this.opts.manifest, castNotSent: [...cast.notSent, ...cast.refused], songNotSent: songs.notSent, worldId: store.worldId,
           productionId: action.productionId, scene, plan, model, world: bundle, policy: action.policy, requestId: id.slice(4), clock: () => at };
       },
     };

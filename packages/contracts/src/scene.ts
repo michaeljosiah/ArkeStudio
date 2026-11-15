@@ -31,16 +31,41 @@ export type ScriptBlock = z.infer<typeof ScriptBlockSchema>;
 
 export const ShotAudioSchema = z
   .object({
-    /** "vo" | "dialogue" | "sfx" | "silence" — display vocabulary owned by SPEC-012. */
-    kind: z.string().min(1),
+    /** "vo" | "dialogue" | "sfx" | "silence" — display vocabulary owned by SPEC-012; "music" is sung (issue 3186). */
+    kind: z
+      .string()
+      .min(1)
+      .describe("dialogue, vo, sfx, silence, or music when the speaker (else the first character cited) sings the production's song: in a production with a song, that shot's slice of it is sent for lip sync."),
     speaker: SlugSchema.optional(),
     line: z.string().optional(),
     /** Turn 97 (14d, Sound): the bed under the line and the hits beside it. Free text, optional. */
     ambience: z.string().optional(),
     effects: z.string().optional(),
+    /**
+     * Issue 3186: `false` keeps a shot whose sound is the song (`kind` "music") from singing to
+     * it. A sax player's hands or a dancer's feet are music too, and a mouth synced to the vocal
+     * over them is the one thing that shot must not do. Absent means it sings.
+     */
+    lipSync: z
+      .boolean()
+      .optional()
+      .describe("false: this shot's sound is the song but nobody in it sings, so no slice of the song is sent for lip sync. Leave it out for a singer's shot."),
   })
   .strict();
 export type ShotAudio = z.infer<typeof ShotAudioSchema>;
+
+/** The sound kinds that mean the shot's singer sings the song (issue 3186). Display words, any case. */
+const SUNG_KINDS = new Set(["music", "song", "sung", "singing", "sings", "lip-sync", "lipsync"]);
+
+/**
+ * Whether a shot sings to the production's song (issue 3186): its sound is the song and it has
+ * not opted out. Who sings is the shot's speaker, else the first character it cites; that is the
+ * caller's to resolve, because only it holds the sheets.
+ */
+export function shotSingsToSong(shot: Pick<Shot, "audio">): boolean {
+  const audio = shot.audio;
+  return audio !== undefined && SUNG_KINDS.has(audio.kind.trim().toLowerCase()) && audio.lipSync !== false;
+}
 
 /**
  * The structured camera (turn 97, 14d). One shape serves two places: a scene's `defaults`,
@@ -567,6 +592,16 @@ export const ShotSchema = z
          * take, or its take was itself continued, the plan names the refusal (R-51, R-52).
          */
         continuesPrevious: z.boolean().optional(),
+        /**
+         * What this shot's clip is made from, where it differs from the production's
+         * `clipsFrom` (issue 3185). Absent follows the production. `references` sends no start
+         * frame and opens no pass on the previous one; `frames` keeps today's behaviour for a
+         * shot in a production that makes its clips from references.
+         */
+        clipsFrom: z
+          .enum(["frames", "references"])
+          .optional()
+          .describe("What this shot's clip is made from when it differs from the production's: references (no start frame, the cast and place pictures ride) or frames. Leave it out to follow the production."),
       })
       .strict()
       .optional(),

@@ -86,7 +86,10 @@ export function productionBatchSource(store: WorldStore, ports: ProductionBatchP
     compile: async (action, id, at) => {
       if (action.kind === "production-scene-dispatch") {
         const input = await ports.planInput(action, id, at);
-        const plan = await compileDispatchPlan(store, { ...input, planId: `pl_${id.slice(4)}`, idempotencyKeyFor: index => key(`${id}/pass/${index}`), clock: () => at });
+        // Priced before approval: the audio's upload rights are written when the card is approved
+        // (beforeDispatch), so a slice of the song or a cast read is checked as evidence here.
+        const plan = await compileDispatchPlan(store, { ...input, planId: `pl_${id.slice(4)}`, idempotencyKeyFor: index => key(`${id}/pass/${index}`), clock: () => at,
+          audioEvidenceOnly: true });
         const inputs: EnqueueInput[] = plan.passes.map(pass => ports.freeze({ worldId: plan.worldId, productionId: plan.productionId,
           target: pass.compiled.target, capability: pass.compiled.model.capability as "video" | "image",
           provider: pass.compiled.model.provider, model: pass.compiled.model.id, params: { ...pass.compiled.params, generationQuoteProduction: true },
@@ -99,6 +102,9 @@ export function productionBatchSource(store: WorldStore, ports: ProductionBatchP
             { label: "Dropped inputs", value: plan.passes.flatMap(pass => pass.compiled.dropped.map(ref => `${ref.sheetId}: ${ref.reason}`)).join("; ") || "None" },
             ...plan.passes.flatMap(pass => (pass.carries?.cast ?? []).map(member => ({ label: `Pass ${pass.passIndex + 1}: ${member.name}`, value: `Look ${member.look}; voice ${member.voice}${member.reason ? `; ${member.reason}` : ""}${member.voiceReason ? `; ${member.voiceReason}` : ""}` }))),
             ...(plan.castNotSent ?? []).map(member => ({ label: `${member.name}: audio not sent`, value: member.reason })),
+            // Which shots sing to the song (issue 3186), and which cannot and why.
+            ...plan.passes.flatMap(pass => pass.carries?.song ? [{ label: `Pass ${pass.passIndex + 1}: song`,
+              value: pass.carries.song.rides ? `${pass.carries.song.name} · sings to the song` : `${pass.carries.song.name} · not sent · ${pass.carries.song.reason ?? "not cleared"}` }] : []),
             { label: "Continuation policy", value: plan.policy === "pre-authorized" ? "Approval pre-authorizes every quoted pass; later passes advance automatically. Changed-price reconfirmation remains human." : "Later dependent passes require human Continue. Changed-price reconfirmation also remains human." },
           ]) };
       }
