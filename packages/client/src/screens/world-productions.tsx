@@ -169,7 +169,9 @@ export const DOOR_CHOICES = [
     id: "watch",
     eyebrow: "WATCH",
     label: "Make a film",
-    body: "Short film or micro-drama",
+    // Music video is named here because it is made here, in Format; holding a song, a person
+    // otherwise looks under Listen, which makes no video (issue 3094).
+    body: "Short film, music video or micro-drama",
     affordance: "Begin with a screen",
     medium: "video",
   },
