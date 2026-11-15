@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ConversationIdSchema, SlugSchema, UlidSchema, Sha256Schema, TurnIdSchema } from "./ids.js";
+import { ChatAttachmentIdSchema, ConversationIdSchema, SlugSchema, UlidSchema, Sha256Schema, TurnIdSchema } from "./ids.js";
 import { FrameRateSchema, SeasonSchema, pickableSheets, type ChapterSummary, type Production, type Sheet } from "./world.js";
 import { productionShape } from "./production-shape.js";
 import { ProductionTargetSchema, presetTarget } from "./production-target.js";
@@ -374,7 +374,9 @@ export const ProductionSetupCommandSchema = z.object({
     z.object({ operation: z.literal("create"), expectedRevision: z.number().int().min(1), reviewId: UlidSchema }).strict(),
     z.object({ operation: z.literal("discard") }).strict(),
     z.object({ operation: z.literal("resume") }).strict(),
-    z.object({ operation: z.literal("send"), text: z.string().trim().min(1).max(100_000), modelId: z.string().min(1).optional() }).strict(),
+    // What the setup conversation was handed goes with the line, as a World Chat send carries it (issue 3089).
+    z.object({ operation: z.literal("send"), text: z.string().trim().min(1).max(100_000), modelId: z.string().min(1).optional(),
+      attachmentIds: z.array(ChatAttachmentIdSchema).max(20).optional() }).strict(),
     z.object({ operation: z.literal("cancel") }).strict(),
     z.object({ operation: z.literal("retry"), turnId: TurnIdSchema }).strict(),
   ]),

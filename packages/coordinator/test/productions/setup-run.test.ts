@@ -6,6 +6,7 @@ import { newId, ulid, type ConversationId, type HarnessAdapter, type WorldChatMe
 import { WorldChatRunner, type RunDeps } from "../../src/world-chat/run.js";
 import { WorldChatRunnerCache } from "../../src/world-chat/runner-cache.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
+import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { recoverConversations } from "../../src/world-chat/recovery.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { checkpointPath } from "../../src/world-chat/checkpoint.js";
@@ -268,6 +269,20 @@ describe("setup turns share conversation durability but no world-mutation author
     assert.equal(view.actions.length, 0);
     await assert.rejects(guardProductionSetupAuthority(h.world, { kind: "world-chat-send", worldId: h.world.worldId,
       conversationId: h.id, requestId: ulid(), text: "Bypass the setup", attachmentIds: [] }), /Production setup/);
+  });
+
+  it("takes a file into setup and hands it to the turn that carries it (issue 3089)", async () => {
+    const h = await setup(() => reply());
+    for (const kind of ["world-chat-attach", "world-chat-attach-files", "world-chat-upload"]) {
+      await guardProductionSetupAuthority(h.world, { kind, worldId: h.world.worldId, conversationId: h.id } as never);
+    }
+    const song = await new WorldChatAttachmentStore(h.world.dir, () => AT).ingest(h.id, { fileName: "song-map.txt", bytes: new TextEncoder().encode("Verse one runs 0:16 to 0:44.") });
+    await handleProductionSetupCommand(h.world, { kind: "production-setup", worldId: h.world.worldId, setupId: h.id, requestId: ulid(),
+      action: { operation: "send", text: "Here is how the song runs.", attachmentIds: [song.id] } }, () => h.runner, async () => {});
+    const view = (await h.view())!;
+    assert.deepEqual(view.messages.find(message => message.role === "user")!.attachmentIds, [song.id]);
+    assert.match(h.prompts[0]!, /song-map\.txt/, "the turn is told what it was handed");
+    assert.equal(view.productionSetup!.status, "draft", "attaching changes nothing about the draft");
   });
 
   it("reads current canon and world sheets through receipts while excluding another production's guest", async () => {

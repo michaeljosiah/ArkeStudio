@@ -18,6 +18,10 @@ import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 const dom = parseHTML("<!doctype html><html><body></body></html>");
 Object.assign(dom.window, { getComputedStyle: () => ({ direction: "ltr" }), innerWidth: 1024, innerHeight: 768 });
 Object.assign(dom.HTMLElement.prototype, { focus() {}, scrollIntoView() {} });
+// linkedom's innerText has no setter, and the composer writes its box through it.
+Object.defineProperty(dom.HTMLElement.prototype, "innerText", {
+  configurable: true, get(this: HTMLElement) { return this.textContent ?? ""; }, set(this: HTMLElement, value: string) { this.textContent = value; },
+});
 Object.assign(globalThis, {
   window: dom.window, document: dom.document, HTMLElement: dom.HTMLElement, Node: dom.Node,
   Event: dom.Event, IS_REACT_ACT_ENVIRONMENT: true,
@@ -286,6 +290,29 @@ describe("production setup interaction (issue #976)", () => {
     assert.deepEqual(create.action, { operation: "create", expectedRevision: 3, reviewId: REVIEW_ID });
     await answer(create, { ...reviewed, status: "created", productionId: "the-crossing-2" });
     assert.match(m.container.textContent!, /Created production workspace/);
+  });
+
+  it("attaches a file to setup and sends it with the line (issue 3089)", async () => {
+    const SONG = "wca_01J8F3K2QW9VZX4N7M0RTYB6HE";
+    const withSong = (setup: ProductionSetupState) => {
+      const state = fixture(setup);
+      state.worldChat = { ...state.worldChat!, attachments: [{ id: SONG as never, fileName: "Why You Do Me Like That.mp3", kind: "audio", readability: "not-readable", promoted: false }] };
+      return state;
+    };
+    const m = await mount(withSong(draft()));
+    await act(async () => {
+      __setStateForTest(withSong(draft()), { connection: "open" });
+      __applyEventForTest({ type: "production-setup.result", at: AT, worldId: FIXTURE_WORLD_ID, setupId: ID, requestId: m.commands()[0]!.requestId, state: draft() });
+    });
+    assert.ok(m.container.querySelector("button.fy-cx__attach"), "the composer offers attach");
+    assert.match(m.container.textContent!, /Why You Do Me Like That\.mp3/, "the song is on a chip");
+    const composer = m.container.querySelector<HTMLElement>(".fy-cx__editor")!;
+    composer.textContent = "A music video for this song.";
+    await act(async () => { composer.dispatchEvent(new dom.Event("input", { bubbles: true })); });
+    const sendButton = [...m.container.querySelectorAll("button")].find(button => /send/i.test(button.getAttribute("aria-label") ?? button.textContent ?? ""))!;
+    await act(async () => sendButton.click());
+    const sent = m.commands().at(-1)!;
+    assert.deepEqual(sent.action, { operation: "send", text: "A music video for this song.", attachmentIds: [SONG] });
   });
 
   it("names the format as Format does and leaves out what is zero (issue 3091)", async () => {

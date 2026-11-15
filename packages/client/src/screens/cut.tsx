@@ -430,8 +430,13 @@ function CutEditorScreen() {
     // Once, on arrival: the drawer is the person's to close afterwards.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  /** Choose the song's Library on Audio, asked once per press (issue 3088). */
-  const [libraryAsk, setLibraryAsk] = useState<{ filter: LibraryFilter; serial: number } | null>(null);
+  /**
+   * Choose the song's Library on Audio, asked once per press (issue 3088), over the world's files:
+   * the song is usually a world upload, which This production does not list (issue 3095). The
+   * Dashboard's card arrives by the Audio address and asks the same while there is no song.
+   */
+  const [libraryAsk, setLibraryAsk] = useState<{ filter: LibraryFilter; serial: number; worldFiles?: boolean } | null>(
+    () => (libraryFilter === "audio" && production && wantsSong(production) ? { filter: "audio", serial: 1, worldFiles: true } : null));
   /** A Use as the song press still out (issue 3088); the store holds it until it is answered. */
   const songPending = useSpineAskPending(worldId, prodId);
   const [detailTab, setDetailTab] = useState<"inspector" | "arke">("inspector");
@@ -1306,7 +1311,7 @@ function CutEditorScreen() {
   const noticeKey = found === null ? null : `${found.index}:${found.entry.label}`;
   /** Choose the song (issue 3088): the Library, on Audio, where each sound file offers Use as the song. */
   const chooseSong = () => {
-    setLibraryAsk((ask) => ({ filter: "audio", serial: (ask?.serial ?? 0) + 1 }));
+    setLibraryAsk((ask) => ({ filter: "audio", worldFiles: true, serial: (ask?.serial ?? 0) + 1 }));
     setRightOpen(false);
     setLibraryOpen(true);
     queueMicrotask(() => focusFirstControl(libraryPanelRef.current));
