@@ -194,6 +194,15 @@ describe("what a point is about, by name (issue 3093)", () => {
     assert.equal(shotPoint?.subject, "The verse rises");
     assert.equal(overviewPoint?.subject, "Saltlight");
   });
+  it("keeps two scenes with one title apart by what they are", () => {
+    const shot = (sceneId: string) => lookChange({ classification: "development.shot", target: { kind: "shot", productionId: "saltlight", sceneId },
+      draft: { title: "The hold", description: "Nothing moves." } } as Partial<WorldChangeCandidate>);
+    const [one, two] = projectPoints([shot("sc_04"), shot("sc_05")], { ...titles, sceneTitle: () => "Intro" });
+    assert.equal(one?.subject, "Intro");
+    assert.equal(two?.subject, "Intro");
+    assert.equal(one?.subjectKey, "scene:saltlight/sc_04");
+    assert.equal(two?.subjectKey, "scene:saltlight/sc_05");
+  });
   it("keeps the id when the scene is gone", () => {
     const shot = lookChange({ classification: "development.shot", target: { kind: "shot", productionId: "saltlight", sceneId: "sc_99" },
       draft: { title: "The hold", description: "Nothing moves." } } as Partial<WorldChangeCandidate>);

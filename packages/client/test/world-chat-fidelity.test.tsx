@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router";
 import { parseHTML } from "linkedom";
 import type { ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
+import { groupPointsBySubject } from "../src/components/conversation.js";
 import { __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -483,6 +484,22 @@ describe("the understanding panel", () => {
     assert.ok(rail.includes("sheet · v4"));
     const subjects = rail.split('class="fy-panel__subject"').length - 1;
     assert.equal(subjects, 2, "two Maren points share one heading, and open threads get their own");
+  });
+
+  it("keeps two things that share a name under their own headings (issue 3093)", () => {
+    const state = stateWithConversation();
+    const [first, second] = state.worldChat!.points;
+    state.worldChat!.points = [
+      { ...first!, subject: "Intro", subjectKey: "scene:saltlight/sc_01", subjectKind: "new shot" },
+      { ...second!, subject: "Intro", subjectKey: "scene:saltlight/sc_02", subjectKind: "new shot", kind: "point" },
+    ];
+    __setStateForTest(state);
+    const rail = railHtml(renderToString(
+      <MemoryRouter initialEntries={[`/w/${FIXTURE_WORLD_ID}/chat/${CONVERSATION_ID}`]}><App /></MemoryRouter>,
+    ));
+    assert.equal(rail.split('class="fy-panel__subject"').length - 1, 2, "one heading per scene, each named by its title");
+    assert.equal(rail.split(">Intro<").length - 1, 2);
+    assert.deepEqual(groupPointsBySubject(state.worldChat!.points).map(group => group.items.length), [1, 1], "and the dock's grouping agrees");
   });
 
   it("keeps open questions in their own group rather than mixed among statements", () => {

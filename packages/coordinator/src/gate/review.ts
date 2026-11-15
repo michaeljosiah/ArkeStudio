@@ -129,7 +129,13 @@ function fieldsOf(path: string, content: string): { label: string; kind: string;
           ...(camera ? [`Camera: ${camera}`] : []), ...(intent ? [`Intent: ${intent}`] : []), ...(notes ? [`Notes: ${notes}`] : []),
           ...Object.entries(more).map(([key, value]) => `${key}: ${JSON.stringify(value)}`)].join("\n"));
         if (visualFacts) fields.set(`Shot ${shot.id} · Authored visual facts`, JSON.stringify(visualFacts, null, 2));
-        if (promptOverride !== undefined) fields.set(`Shot ${shot.id} · Prompt override`, promptOverride.text);
+        if (promptOverride !== undefined) {
+          fields.set(`Shot ${shot.id} · Prompt override`, promptOverride.text);
+          // What the words are for and which sheets they were written against change behaviour
+          // too (`promptFor`, `overrideStaleAgainst`): an edit to these alone must still be seen.
+          const { text: _text, ...settings } = promptOverride;
+          fields.set(`Shot ${shot.id} · Prompt override settings`, JSON.stringify(settings, null, 2));
+        }
       }
       // The rest of the file, so a change the fields above do not show is still seen. The title,
       // synopsis, shots and their order are shown above, and the version is in the kind; a field

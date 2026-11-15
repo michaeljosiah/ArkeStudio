@@ -806,7 +806,7 @@ export function WorldChatView({ embedded }: { embedded?: { worldId: string; conv
       ) : (
         <>
           {groups.map((group) => (
-            <div key={group.subject} className="fy-panel__group">
+            <div key={group.key} className="fy-panel__group">
               <div className="fy-panel__grouphead">
                 <div className="fy-panel__subject">{group.subject}</div>
                 <div className="fy-panel__kind">{group.kind}</div>
@@ -1166,15 +1166,17 @@ function aboutLabel(context: NonNullable<WorldChatSummary["entryContext"]>, worl
 }
 
 /** Points group under the thing they are about, per R-15 — not under what kind of change they are. */
-function groupBySubject<P extends { id: string; kind: string; subject: string; subjectKind: string }>(
+function groupBySubject<P extends { id: string; kind: string; subject: string; subjectKey?: string; subjectKind: string }>(
   points: readonly P[],
-): Array<{ subject: string; kind: string; items: P[] }> {
-  const groups: Array<{ subject: string; kind: string; items: P[] }> = [];
+): Array<{ key: string; subject: string; kind: string; items: P[] }> {
+  const groups: Array<{ key: string; subject: string; kind: string; items: P[] }> = [];
   for (const point of points) {
     if (point.kind === "question") continue;
-    const existing = groups.find((g) => g.subject === point.subject);
+    // By what the thing is, not what it is called: two scenes can share a title (issue 3093).
+    const key = point.subjectKey ?? point.subject;
+    const existing = groups.find((g) => g.key === key);
     if (existing) existing.items.push(point);
-    else groups.push({ subject: point.subject, kind: point.subjectKind, items: [point] });
+    else groups.push({ key, subject: point.subject, kind: point.subjectKind, items: [point] });
   }
   return groups;
 }

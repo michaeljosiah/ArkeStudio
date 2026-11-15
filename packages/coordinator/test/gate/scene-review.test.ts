@@ -40,6 +40,15 @@ it("shows a scene's shots by number, title and length rather than its JSON (issu
   assert.ok(target.fields.every((field) => !String(field.proposed).includes('"flow"')));
 });
 
+it("shows a prompt override's settings when only they change", () => {
+  const override = (capability: "image" | "video", version: number) =>
+    ({ ...hold, promptOverride: { text: "A locked wide on the water.", capability, sheetVersions: { "the-lady": version } } });
+  const [target] = projectReview({ proposal, base: () => sceneFile([override("image", 1)] as never), proposed: () => sceneFile([override("video", 2)] as never) }).targets;
+  assert.deepEqual(target!.fields.map((field) => field.field), ["Shot sh_hold · Prompt override settings"], "the words did not change, what they are for did");
+  assert.match(target!.fields[0]!.before!, /"capability": "image"/);
+  assert.match(target!.fields[0]!.proposed!, /"capability": "video"[\s\S]*"the-lady": 2/);
+});
+
 it("still shows a change the shot list does not cover", () => {
   const [target] = projectReview({ proposal, base: () => sceneFile([water]), proposed: () => sceneFile([water], { inherits: { timeOfDay: "night" } }) }).targets;
   assert.deepEqual(target!.fields.map((field) => field.field), ["Other scene details"]);
