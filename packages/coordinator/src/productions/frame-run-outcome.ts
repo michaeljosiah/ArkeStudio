@@ -5,18 +5,31 @@ import { discoverConversations } from "../world-chat/discover.js";
 import { conversationDir, WorldChatStore } from "../world-chat/store.js";
 import { FRAME_RUN_OUTCOME_SCHEMA_VERSION } from "../world/commit.js";
 
+/**
+ * Where a run's narration lives, and whether this call is what put it there. Every emit of a
+ * terminal run asks, so most answers find it already written: those changed nothing, and the
+ * caller has nothing to publish for them (issue 3167).
+ */
+export interface FrameRunOutcomeRecord {
+  conversationId: ConversationId;
+  recorded: boolean;
+}
+
 /** Append one terminal frame-run narration to its scene's Arke thread. */
 export async function recordFrameRunOutcome(
   store: WorldStore,
   state: FrameRunState,
-): Promise<ConversationId> {
+): Promise<FrameRunOutcomeRecord> {
   if (state.status !== "completed" && state.status !== "cancelled") {
     throw new Error("only a terminal frame run has an outcome");
   }
   // The schema commit must precede ownership: ensureSchemaVersion enters the store queue itself.
-  // A close between the two phases is then refused by ownedWrite before conversation bytes move.
+  // A close between the two phases is then refused by the write gate before conversation bytes move.
   await store.ensureSchemaVersion(FRAME_RUN_OUTCOME_SCHEMA_VERSION, "frame-run-outcome");
-  return store.ownedWrite(() =>
+  // Only the conversation log moves, which the scan never reads (issue 1840). ownedWrite's full
+  // rescan was paid on every call, and listing a production's runs asks once per past run, so
+  // each listing held the write gate a frame-run start waits on for a scan per run (issue 3167).
+  return store.operationalWrite(() =>
     serialiseSceneConversation(
       store.dir,
       state.productionId,
@@ -29,7 +42,7 @@ export async function recordFrameRunOutcome(
 async function recordFrameRunOutcomeUnserialised(
   store: WorldStore,
   state: FrameRunState,
-): Promise<ConversationId> {
+): Promise<FrameRunOutcomeRecord> {
   const run = state.run;
   const requestId = `frame-run-outcome:${run.id}`;
   const matching = (await discoverConversations(store.dir)).summaries
@@ -46,7 +59,7 @@ async function recordFrameRunOutcomeUnserialised(
   for (const summary of matching) {
     const log = new WorldChatStore(conversationDir(store.dir, summary.id));
     const { events } = await log.read();
-    if (events.some((event) => event.requestId === requestId)) return summary.id;
+    if (events.some((event) => event.requestId === requestId)) return { conversationId: summary.id, recorded: false };
   }
 
   let conversationId = matching.find((summary) => summary.status !== "archived")?.id;
@@ -82,7 +95,7 @@ async function recordFrameRunOutcomeUnserialised(
     },
     { at: store.now(), requestId },
   );
-  return conversationId;
+  return { conversationId, recorded: true };
 }
 
 function frameRunNarration(state: FrameRunState): string {

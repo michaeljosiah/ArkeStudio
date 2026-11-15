@@ -18419,9 +18419,13 @@ export class Coordinator {
       return;
     }
     try {
-      const conversationId = await recordFrameRunOutcome(store, state);
-      if (!this.stillOpen(store)) return;
-      await this.refreshConversationOutcome(store, conversationId);
+      const outcome = await recordFrameRunOutcome(store, state);
+      // Every scene page that opens lists its production's runs, and the listing emits each past
+      // run again. A narration already in its thread changed nothing: publishing it anyway sent
+      // the whole world once per past run, and every snapshot voided an open frame quote before
+      // it could be confirmed (issue 3167).
+      if (!outcome.recorded || !this.stillOpen(store)) return;
+      await this.refreshConversationOutcome(store, outcome.conversationId);
     } catch (error) {
       // The folded run remains authoritative and recovery retries this deterministic request.
       void this.appLog?.append({
