@@ -150,7 +150,7 @@ const WORLD_CHAT_TOOLS = [
   {
     name: "search_sheets",
     description:
-      "Lexically search accepted character, location and faction sheets by name, role or region, and authored prose. Use this to find out whether an entity already exists before proposing a new one. Retired sheets are not searched.",
+      "Lexically search accepted character, location and faction sheets by name, role or region, and authored prose. Use this to find out whether an entity already exists before proposing a new one. Inside a production it also searches that production's own sheets; another production's are left out, as are retired sheets. A slug you already know is read with get_sheet.",
     inputSchema: {
       type: "object",
       properties: {

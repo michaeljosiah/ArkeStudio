@@ -107,11 +107,14 @@ export interface RunDeps {
    * `attachmentIds` are the only attachments this run may read. Scoped per run rather than per
    * conversation: a document handed over in one turn should not become readable forever, and a
    * file attached to another conversation must never be reachable at all (§9.1, §13.2).
+   * `productionId` is the production the conversation is about, so its reads see that
+   * production's own sheets (SPEC-020 R-7).
    */
   prepare: (input: {
     conversationId: ConversationId;
     runId: RunId;
     attachmentIds: readonly ChatAttachmentId[];
+    productionId?: string;
   }) => Promise<{ cwd: string; leaseToken: string }>;
   /** Atomically configure and create the harness session after preparation succeeds. */
   createSession?: (input: { cwd: string; runId: RunId; model?: string; variant?: string; signal?: AbortSignal; agent?: "voice-companion";
@@ -809,6 +812,7 @@ export class WorldChatRunner {
         conversationId,
         runId,
         attachmentIds: linked,
+        ...(view.entryContext !== undefined && "productionId" in view.entryContext ? { productionId: view.entryContext.productionId } : {}),
       });
       prepared = true;
       let brief = chapterSubject && this.deps.chapterBrief && view.entryContext?.kind === "production"
