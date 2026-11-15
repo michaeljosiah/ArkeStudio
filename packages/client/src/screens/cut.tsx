@@ -1548,7 +1548,6 @@ function CutEditorScreen() {
             Details
           </button>
         </header>
-        {notice}
         {/* Beside Arke's assembly banner rather than behind it (SPEC-039 R-46): both are true at once. */}
         {songMissing && (
           <div className="fy-cutnotice" data-testid="song-notice">
@@ -1558,6 +1557,7 @@ function CutEditorScreen() {
             <button type="button" disabled={commandsDisabled} onClick={addSong}>Add the song</button>
           </div>
         )}
+        {notice}
         {pictureReview.active && worldId && production && <PictureReviewBar worldId={worldId} production={production} onBack={() => { setDetailTab("arke"); if (compact) setArkeOpen(true); else setRightOpen(true); }} />}
         {transitionReview.active && worldId && production && <TransitionReviewBar worldId={worldId} production={production} onBack={() => { setDetailTab("arke"); if (compact) setArkeOpen(true); else setRightOpen(true); }} />}
         {effectReview.active && <EffectReviewBar version={effectReview.active.version.number} changes={effectReview.active.version.delta.length}
