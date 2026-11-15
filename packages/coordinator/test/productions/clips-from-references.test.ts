@@ -164,7 +164,7 @@ describe("clips from references (issue 3185)", () => {
       world: bundle.meta, productionId: production.meta.id, sheets: bundle.sheets, kits, scene, selections: {},
       model: MODEL, production: { clipsFrom: "references" },
     }, mode);
-    const files = (references: readonly { file?: string }[]) => references.map((reference) => reference.file ?? "");
+    const files = (references: readonly { file?: string | null }[]) => references.map((reference) => reference.file ?? "");
     const sheetIds = (references: readonly { sheetId: string }[]) => references.map((reference) => reference.sheetId);
 
     const [away, home] = input("per-shot").shots;
