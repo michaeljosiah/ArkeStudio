@@ -379,7 +379,8 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
     assert.equal(prepared.prefill.composer.params.kind, "video");
     assert.equal(prepared.prefill.composer.params.durationSec, subject.durationSec);
     assert.equal(subject.durationSec, subject.members.reduce((total, member) => total + member.durationSec, 0));
-    assert.match(prepared.prefill.composer.brief, /1\. Maren Kest grips the rail/);
+    // Shot 15 cites only the Saltmarket, so the board's panels say where each is (issue 3152).
+    assert.match(prepared.prefill.composer.brief, /1\. (At The Vigil\. )?Maren Kest grips the rail/);
     const voice = prepared.prefill.references.find((reference) => reference.kind === "audio");
     assert.equal(voice?.label, "voice sample · @maren-kest");
     assert.equal(voice?.durationSec, 9);

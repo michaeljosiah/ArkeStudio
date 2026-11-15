@@ -17,6 +17,7 @@ import {
   seedFirstPictureTimeline,
   seedSpinePictureTimeline,
   shotCast,
+  shotPlaceId,
   sortScenes,
   spineTimelineFingerprint,
   storyShotFrames,
@@ -353,7 +354,7 @@ function timelineRows(production: ProductionBundle | undefined, artifacts: World
   if (production !== undefined && sheets !== undefined) {
     for (const scene of sortScenes(production.scenes)) {
       for (const shot of orderedShots(scene)) {
-        story.set(shot.id, { scene: { id: scene.id, number: scene.number, title: scene.title }, cast: shotCast(scene, shot, sheets), place: scene.inherits?.location ?? null });
+        story.set(shot.id, { scene: { id: scene.id, number: scene.number, title: scene.title }, cast: shotCast(scene, shot, sheets), place: shotPlaceId(scene, shot, sheets) ?? null });
       }
     }
   }

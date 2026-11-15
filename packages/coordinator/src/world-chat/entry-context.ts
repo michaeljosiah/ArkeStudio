@@ -195,7 +195,9 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
         if (scene.inherits) {
           const { location, timeOfDay, tone } = scene.inherits;
           const parts = [location ? `location ${location}` : null, timeOfDay, tone].filter(Boolean);
-          if (parts.length > 0) lines.push(`Every shot inherits: ${parts.join(", ")}.`);
+          // A shot that cites a place is there instead (issue 3152), which is how Arke sets a
+          // mixed section's strands in their own places without changing the scene's.
+          if (parts.length > 0) lines.push(`Every shot inherits: ${parts.join(", ")}.${location ? " A shot that cites a location with @ is set there instead of the scene's location." : ""}`);
         }
         /*
          * And that they can be changed here. The shots were narrated into this thread before the

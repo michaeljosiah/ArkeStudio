@@ -22,6 +22,7 @@ import {
   productionStyleFor,
   promptFor,
   resolveCast,
+  scenePlaceApplies,
   stagingMoveWord,
   stagePlayblastIsStale,
   stagingPromptClause,
@@ -129,7 +130,8 @@ function assembledPromptSheetVersions(
 ): Record<string, number> {
   const versions: Record<string, number> = {};
   for (const { sheet } of sheetOrder(shots, world)) versions[sheet.id] = sheet.version;
-  const location = scene.inherits?.location === undefined
+  // The scene's place enters only a prompt one of these shots takes it for (issue 3152).
+  const location = !scenePlaceApplies(scene, shots, world.sheets)
     ? undefined
     : world.sheets.find((sheet) => sheet.id === scene.inherits?.location);
   if (location !== undefined) versions[location.id] = location.version;

@@ -17,6 +17,7 @@ import {
 import {
   advanceFrameRun,
   cancelFrameRun,
+  compileFrameRun,
   dismissFrameRun,
   frameRunState,
   listFrameRuns,
@@ -309,6 +310,35 @@ describe("frame-run coordinator service", () => {
     const frozenReferences = run.steps.map((step) => step.request.references);
     assert.ok(frozenReferences.some((references) => references.length > 0));
     assert.deepEqual(quotedReferences, frozenReferences);
+  });
+
+  it("sends a shot that cites its own place without the scene's, per shot and per panel (issue 3152)", async () => {
+    const f = await fixture();
+    const shots = orderedShots(f.scene);
+    const market = shots.find((shot) => shot.description.includes("@the-saltmarket"))!;
+    const stair = shots.find((shot) => shot.description.includes("@bray-half-hitch"))!;
+    assert.equal(f.scene.inherits?.location, "the-vigil");
+    const plate = (sheetId: string) => ({
+      sheetId, tiles: [], compilations: [],
+      mainPhoto: { file: "main-photo.png", sheetVersion: 1, acceptedAt: "2026-08-01T12:00:00.000Z", source: "upload" as const },
+    });
+    const world = { ...f.world, referenceKits: [...f.world.referenceKits, plate("the-vigil"), plate("the-saltmarket")] };
+    const compile = (mode: "per-shot" | "board") => compileFrameRun({
+      worldId: WORLD_ID, productionId: f.production.meta.id, scene: f.scene as SceneRecord, production: f.production, world,
+      model: IMAGE, mode, scope: "all", boardCapSec: 30, boardPanelCap: 6, eligible: true, clock: CLOCK,
+    });
+    const perShot = await compile("per-shot");
+    const step = (shotId: string) => perShot.steps.find((candidate) => candidate.requestShotIds.includes(shotId))!;
+    const places = (shotId: string) => step(shotId).request.references.map((reference) => reference.sheetId).filter((id) => id.startsWith("the-"));
+    assert.deepEqual(places(market.id), ["the-saltmarket"], "the market's own plate rides, and the Vigil's does not");
+    assert.ok(!step(market.id).request.prompt.includes("The Vigil"), "nor is the shot told it is there");
+    assert.deepEqual(places(stair.id), ["the-vigil"], "a shot that names no place takes the scene's");
+
+    const board = await compile("board");
+    const sheet = board.steps.find((candidate) => candidate.requestShotIds.includes(market.id) && candidate.requestShotIds.includes(stair.id));
+    assert.ok(sheet, "the stair and the market share a board");
+    assert.match(sheet.request.prompt, /At The Saltmarket\. /, "a panel set elsewhere says where it is");
+    assert.match(sheet.request.prompt, /At The Vigil\. /);
   });
 
   it("refuses a quote for shot A when start asks for shot B", async () => {

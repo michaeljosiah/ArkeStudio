@@ -474,6 +474,21 @@ describe("frame-run quote authorization", () => {
     assert.match(maren?.textContent ?? "", /rides · look · Formal council coat, storm-grey wool with a hig…/, "cut where the kit's tile cuts it");
   });
 
+  it("leaves the scene's place out of the context and the references when every shot names its own (issue 3152)", async () => {
+    const state = stateWith();
+    state.world!.sheets.push({ id: "the-weigh-house", type: "location", name: "The Weigh-House", version: 1, status: "draft", canonRules: [], links: [], created: "2026-05-02", updated: "2026-05-02", sections: [] } as never);
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")!;
+    for (const shot of orderedShots(scene)) (shot as { description: string }).description = `${shot.description.replaceAll("@the-vigil", "the rail")} @the-weigh-house`;
+    const item = await mount(state, []);
+    await click(named(item, "Generate frames"));
+    const context = one(item, '[aria-label="Inherited scene context"]')?.textContent ?? "";
+    assert.match(context, /applies the scene context/);
+    assert.doesNotMatch(context, /The Vigil/, "no shot in scope is set at the scene's place");
+    const references = all(item, ".fy-swgen__references article").map((reference) => reference.textContent ?? "");
+    assert.ok(references.some((text) => /The Weigh-House/.test(text)), "the shots' own place is cited");
+    assert.ok(!references.some((text) => /The Vigil/.test(text)), "and the scene's is not");
+  });
+
   it("quotes current options, displays the backend amount, and echoes the authorization on start", async () => {
     const sent: ClientMessage[] = [];
     const item = await mount(stateWith(), sent);

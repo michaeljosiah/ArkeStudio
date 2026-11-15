@@ -16,7 +16,9 @@ import {
   promptFor,
   resolveCast,
   assembleBlocks,
+  assembleBoardPrompt,
   assemblePrompt,
+  shotPlaceId,
   UNTITLED_SHOT,
   assemblePassBlocks,
   joinBlocks,
@@ -1268,6 +1270,53 @@ describe("SPEC-019 prompt structure (R-5..R-8, D5..D7)", () => {
     // A citation that resolves to a character rather than a location does not qualify either.
     const wrongKind: Scene = { ...scene([s]), inherits: { location: "maren-kest" } };
     assert.equal(spatialLayoutFor(wrongKind, bundle.sheets), null, "a character sheet is not a room");
+    await store.close();
+  });
+
+  it("sets a shot that cites its own place there, and only a shot that cites none in the scene's (issue 3152)", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const market = bundle.sheets.find((sheet) => sheet.id === "the-saltmarket")!;
+    assert.equal(market.type, "location");
+    const away: Shot = shot(1, 6, "@maren-kest walks the pilings of @the-saltmarket");
+    const home: Shot = shot(2, 6, "@maren-kest grips the rail");
+    const both = scene([away, home]);
+    assert.equal(shotPlaceId(both, away, bundle.sheets), "the-saltmarket");
+    assert.equal(shotPlaceId(both, home, bundle.sheets), "the-vigil");
+    const looking: Shot = shot(3, 6, "@maren-kest watches @the-saltmarket from the rail of @the-vigil");
+    assert.equal(shotPlaceId(both, looking, bundle.sheets), "the-vigil", "a shot that cites the scene's place is there, whatever else it names");
+
+    const awayBlocks = assembleBlocks({ world: bundle.meta, sheets: bundle.sheets, scene: both, shot: away, capability: "video" });
+    assert.equal(awayBlocks.summary.split(".")[0], `Maren Kest at ${market.name}, night`, "the place is where she is, not one of the cast");
+    assert.ok(!joinBlocks(awayBlocks).includes("The Vigil"), "the scene's place is not in a shot set elsewhere");
+    assert.match(awayBlocks.spatial, new RegExp(`^SPATIAL LAYOUT\\n${market.name} — `), "the room described is the shot's own");
+    const homeBlocks = assembleBlocks({ world: bundle.meta, sheets: bundle.sheets, scene: both, shot: home, capability: "video" });
+    assert.match(homeBlocks.summary, /^Maren Kest at The Vigil, night\./);
+
+    const plate = (sheetId: string): ReferenceKit => ({
+      sheetId,
+      tiles: [],
+      mainPhoto: { file: "main-photo.png", sheetVersion: 1, acceptedAt: "2026-08-01T12:00:00.000Z", source: "upload" },
+      compilations: [],
+    });
+    const plan = planScene(
+      { world: bundle.meta, sheets: bundle.sheets, kits: [...bundle.referenceKits, plate("the-vigil"), plate("the-saltmarket")], scene: both, selections: {},
+        model: { ...VIDEO_MODEL, accepts: { ...VIDEO_MODEL.accepts, referenceImages: 8 } } },
+      "per-shot",
+    );
+    const carried = (shotId: string) => plan.shots.find((entry) => entry.shot.id === shotId)!.references.map((reference) => reference.sheetId);
+    assert.ok(carried(away.id).includes("the-saltmarket"));
+    assert.ok(!carried(away.id).includes("the-vigil"), "the scene's plate does not ride beside the shot's own place");
+    assert.ok(carried(home.id).includes("the-vigil"), "a shot that names no place still takes the scene's");
+
+    // A board of the two says where each panel is, and names no one place for the sheet.
+    const board = assembleBoardPrompt({ world: bundle.meta, sheets: bundle.sheets, scene: both, shots: [away, home], aspect: "16:9" });
+    assert.match(board, new RegExp(`1\\. At ${market.name}\\. `));
+    assert.match(board, /2\. At The Vigil\. /);
+    assert.ok(!board.split("\n\n")[0]!.startsWith("The Vigil"), "the head names no shared place");
+    const together = assembleBoardPrompt({ world: bundle.meta, sheets: bundle.sheets, scene: both, shots: [home], aspect: "16:9" });
+    assert.match(together, /^The Vigil, night/, "one shared place still heads the sheet");
+    assert.ok(!together.includes("At The Vigil."));
     await store.close();
   });
 

@@ -9,6 +9,7 @@ import {
   orderedShots,
   resolveCast,
   sceneImageOutput,
+  scenePlaceApplies,
   ulid,
   type FrameRunQuote,
   type FrameRunState,
@@ -17,6 +18,7 @@ import {
   type ManifestModel,
   type ProductionBundle,
   type SceneRecord,
+  type Shot,
   type WorldBundle,
   resolvePropStates,
   beatPictureShotId,
@@ -516,10 +518,10 @@ function GenerateFramesDialogOpen({
           </section>
         )}
 
-        {phone && <p className="fy-swgen__context fy-swgen__context-body" aria-label="Inherited scene context">{contextValues(scene, world, aspect).join(" · ")}</p>}
+        {phone && <p className="fy-swgen__context fy-swgen__context-body" aria-label="Inherited scene context">{contextValues(scene, world, aspect, included).join(" · ")}</p>}
         <footer className="fy-swgen__foot">
           {!phone && <span className="fy-swgen__context" aria-label="Inherited scene context">
-            applies the scene context · {contextValues(scene, world, aspect).join(", ")}
+            applies the scene context · {contextValues(scene, world, aspect, included).join(", ")}
           </span>}
           {emptyScope ? (
             <div className="fy-swgen__actions">
@@ -603,9 +605,12 @@ function PackingPreview({
   );
 }
 
-/** The same values the header's context chips carry, in the same order. */
-function contextValues(scene: SceneRecord, world: WorldBundle, aspect: string): string[] {
-  const location = scene.inherits?.location === undefined
+/**
+ * The same values the header's context chips carry, in the same order. The place only where a
+ * shot in scope takes it (issue 3152): a shot that cites its own place is not in the scene's.
+ */
+function contextValues(scene: SceneRecord, world: WorldBundle, aspect: string, shots: readonly Shot[]): string[] {
+  const location = scene.inherits?.location === undefined || !scenePlaceApplies(scene, shots, world.sheets)
     ? null
     : world.sheets.find((sheet) => sheet.id === scene.inherits?.location)?.name ?? scene.inherits.location;
   return [location, scene.inherits?.timeOfDay ?? null, scene.inherits?.tone ?? null, aspect]
@@ -634,10 +639,10 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
   }>();
   for (const step of quote.steps) {
     const cited = new Set<string>();
-    if (scene.inherits?.location !== undefined) cited.add(scene.inherits.location);
-    for (const shotId of step.requestShotIds) {
-      const shot = shotById.get(shotId);
-      if (shot === undefined) continue;
+    const stepShots = step.requestShotIds.flatMap((shotId) => shotById.get(shotId) ?? []);
+    // The scene's place is cited by a step only through a shot that names no place (issue 3152).
+    if (scene.inherits?.location !== undefined && scenePlaceApplies(scene, stepShots, world.sheets)) cited.add(scene.inherits.location);
+    for (const shot of stepShots) {
       for (const entry of resolveCast(shot.description, world.sheets).cast) cited.add(entry.sheet.id);
     }
     for (const reference of step.references) cited.add(reference.sheetId);

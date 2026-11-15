@@ -1,6 +1,6 @@
 import { clearBoardOverride, clearBoardPrompt, deleteShot, duplicateShot, editScene, editShot, insertShot, moveShot, moveBoardBoundary, nextShotIdIn, SceneOperationRefused, setBoardOverride, setBoardPrompt, type ShotAnchor } from "./scene-operations.js";
 import { orderedShots, type GraphScene, type SceneRecord } from "./scene-flow.js";
-import { parseMentions } from "./planning.js";
+import { parseMentions, shotPlaceId } from "./planning.js";
 import { stageProblems, resolvedShotStaging, stagingRetimed } from "./staging.js";
 import { stageReframed } from "./stage-framing.js";
 import { effectiveFraming, ScriptBlockSchema } from "./scene.js";
@@ -189,7 +189,9 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
         return editShot(record, { shotId: command.shotId, change: { promptOverride: undefined } });
       }
       const sheetVersions: Record<string, number> = {};
-      for (const slug of new Set([...parseMentions(shot.description), ...(record.inherits?.location ? [record.inherits.location] : [])])) {
+      // The place the prompt was written in: the shot's own when it cites one (issue 3152).
+      const place = shotPlaceId(record, shot, bundle.sheets);
+      for (const slug of new Set([...parseMentions(shot.description), ...(place ? [place] : [])])) {
         const sheet = bundle.sheets.find((candidate) => candidate.id === slug);
         if (sheet !== undefined) sheetVersions[slug] = sheet.version;
       }
