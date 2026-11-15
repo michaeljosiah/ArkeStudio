@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { effectiveFraming, resolveCast, orderedShots, shotChanges, type ProductionCardPreview, type ConversationActionCard } from "@arke-studio/contracts";
+import { effectiveFraming, namedWithoutCitation, resolveCast, orderedShots, shotChanges, type ProductionCardPreview, type ConversationActionCard } from "@arke-studio/contracts";
 import { useWorld } from "../lib/store.js";
 import { StoryboardRows } from "../screens/scene-workspace/rows.js";
 import { boardsForScene } from "../screens/scene-workspace/boards.js";
@@ -20,9 +20,14 @@ export function ProductionCardBody({ preview, action, onSelectShot }: { preview:
   const changes = useMemo(() => preview.kind === "scene" ? shotChanges(preview.before, preview.after) : null, [preview]);
   const marks = useMemo(() => new Map(changes?.shots.map(row => [row.shot.id, [row.inserted ? "Inserted" : "", row.moved ? `Moved ↑ ${row.from} → ${row.shot.number}` : "", row.changed ? "Changed" : ""].filter(Boolean).join(" · ")]) ?? []), [changes]);
   const newShots = useMemo(() => new Set(changes?.shots.filter(row => row.inserted).map(row => row.shot.id) ?? []), [changes]);
+  // A shot naming someone with a sheet in plain words is said on the card before it is approved
+  // (issue 3155): only a mention sends their picture, and six sections of a music video went out
+  // with every face invented while these rows showed no cast line and nothing else. The scene's
+  // own place rides whatever a shot says, so naming it is not flagged.
   const reviewShots = useMemo(() => preview.kind === "scene" ? new Map(orderedShots(preview.after).map(shot => [shot.id, {
     framing: Object.values(effectiveFraming(preview.after, shot)).filter(Boolean).join(" · "),
     cast: world ? resolveCast(shot.description, world.sheets).cast.filter(entry => entry.sheet.type === "character").map(entry => entry.sheet.name) : [],
+    unseen: world ? namedWithoutCitation(shot.description, world.sheets, new Set(preview.after.inherits?.location === undefined ? [] : [preview.after.inherits.location])).map(entry => entry.name) : [],
   }])) : undefined, [preview, world]);
   if (preview.kind === "production") return <div className="fy-production-preview" aria-label="Resulting production">
     <h4>{preview.title}</h4><dl>{[

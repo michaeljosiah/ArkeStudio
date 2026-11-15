@@ -45,7 +45,7 @@ import { packBoards, packShotsFor } from "./boards.js";
 import type { Shot, ShotFraming } from "./scene.js";
 import type { Selections } from "./scene.js";
 import type { Take } from "./take.js";
-import type { Sheet, WorldMeta } from "./world.js";
+import { quotedNickname, type Sheet, type WorldMeta } from "./world.js";
 import type { Prop } from "./prop.js";
 
 /**
@@ -111,6 +111,87 @@ export function resolveCast(description: string, sheets: Sheet[]): ResolvedCast 
     else unknown.push(slug);
   }
   return { cast, unknown };
+}
+
+/** One sheet a description names in plain words, and the words it is named by. */
+export interface PlainName {
+  sheet: Sheet;
+  name: string;
+}
+
+/**
+ * Who a description names in plain words and does not cite (issue 3155): each character or place
+ * with a sheet whose name stands in the text while no mention cites it.
+ *
+ * Mentions stay the one cast list (R-9, D5); this resolves nothing and sends nothing. It exists
+ * because a plain name reads as cast to a person and to Arke and as nothing to a dispatch: a music
+ * video's shots from chorus 1 on said "Timi J on his dark set" and "Ade small at the frame edge",
+ * went out with no picture of either, and every face was invented while the scene card and the
+ * frame dialog said nothing. The surfaces that show who rides say who will not from here.
+ *
+ * Deliberately narrow, because a name found wrongly is a warning about somebody nobody wrote: the
+ * sheet's full name, its written short name, the nickname its name quotes (`Ade` of `Adeyemi "Ade"
+ * Akinola`) and its authored aliases, each matched whole and with its capitals. Never the
+ * first-word default short name, which would read every "The" and "Mrs." as a person. A short name
+ * or alias two sheets share names neither. Longer names are found first and keep the words they
+ * cover, so "Timi J's Dark Set" is the place and not Timi J as well, whether or not the place is
+ * itself cited.
+ *
+ * Retired sheets and characters who are never pictured are not reported: no picture should ride
+ * for either. `riding` holds sheets that travel whatever the text says (a scene's own place, or
+ * whoever another shot on the same board brings), so naming them costs nothing.
+ */
+export function namedWithoutCitation(
+  description: string,
+  sheets: readonly Sheet[],
+  riding: ReadonlySet<string> = new Set(),
+): PlainName[] {
+  const cited = new Set(parseMentions(description));
+  // A mention is not prose: blanked rather than cut, so every later index still points into the
+  // description as written.
+  let text = description;
+  for (const span of mentionSpans(description)) {
+    text = text.slice(0, span.start) + " ".repeat(span.end - span.start) + text.slice(span.end);
+  }
+  const named = sheets.filter((sheet) => sheet.type === "character" || sheet.type === "location");
+  const formsOf = (sheet: Sheet, whole: boolean): string[] => {
+    const forms = whole
+      ? [sheet.name]
+      : [sheet.shortName ?? "", quotedNickname(sheet.name) ?? "", ...(sheet.aliases ?? [])];
+    return forms.map((form) => form.trim().replace(/\s+/g, " ")).filter((form) => form.length > 0);
+  };
+  const owners = new Map<string, Set<string>>();
+  for (const sheet of named) {
+    for (const form of [...formsOf(sheet, true), ...formsOf(sheet, false)]) {
+      owners.set(form, (owners.get(form) ?? new Set()).add(sheet.id));
+    }
+  }
+  // A full name is the sheet's own even when another sheet's short name happens to match it; a
+  // shorter form shared by two sheets says nothing about which of them is meant.
+  const candidates = named.flatMap((sheet) => [
+    ...formsOf(sheet, true).map((form) => ({ sheet, form })),
+    ...formsOf(sheet, false)
+      .filter((form) => owners.get(form)?.size === 1)
+      .map((form) => ({ sheet, form })),
+  ]);
+  candidates.sort((a, b) => b.form.length - a.form.length);
+  const taken: Array<[number, number]> = [];
+  const found = new Map<string, { at: number; entry: PlainName }>();
+  for (const { sheet, form } of candidates) {
+    const words = form.split(" ").map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+");
+    for (const match of text.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${words}(?![\\p{L}\\p{N}])`, "gu"))) {
+      const start = match.index;
+      const end = start + match[0].length;
+      if (taken.some(([from, to]) => start < to && end > from)) continue;
+      taken.push([start, end]);
+      const reported = !cited.has(sheet.id) && !riding.has(sheet.id) && sheet.retired !== true && sheet.neverDepicted !== true;
+      const earlier = found.get(sheet.id);
+      if (reported && (earlier === undefined || start < earlier.at)) {
+        found.set(sheet.id, { at: start, entry: { sheet, name: match[0].replace(/\s+/g, " ") } });
+      }
+    }
+  }
+  return [...found.values()].sort((a, b) => a.at - b.at).map(({ entry }) => entry);
 }
 
 /** The slug a prop is mentioned by: `@polaroid` for a prop named "Polaroid" (issue 536). */

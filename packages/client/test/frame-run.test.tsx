@@ -474,6 +474,37 @@ describe("frame-run quote authorization", () => {
     assert.match(maren?.textContent ?? "", /rides · look · Formal council coat, storm-grey wool with a hig…/, "cut where the kit's tile cuts it");
   });
 
+  /**
+   * A shot that names somebody in plain words sends no picture of them (issue 3155): the frames of
+   * six music-video sections went out with every face invented while this dialog had no
+   * References at all. Shot 13 names Maren Kest without citing her.
+   */
+  describe("a person named without a citation (issue 3155)", () => {
+    const naming = (): ClientState => {
+      const state = stateWith();
+      const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")!;
+      orderedShots(scene).find((shot) => shot.id === "sh_13")!.description = "Maren Kest watches the lamps flare from The Vigil.";
+      return state;
+    };
+
+    it("says who goes with no picture, and nothing for the scene's own place", async () => {
+      const item = await mount(naming(), []);
+      const row = one(item, '[data-testid="workspace-row-sh_13"]')!;
+      await click([...row.querySelectorAll("button")].find((button) => button.textContent === "Generate frame") as HTMLElement);
+      const section = all(item, ".fy-swgen__section").find((candidate) => candidate.querySelector("h3")?.textContent === "References");
+      assert.ok(section, "a References section, though no picture rides for this shot's people");
+      assert.deepEqual(all(item, '[data-testid="unseen-name"]').map((line) => line.textContent), ["Names Maren Kest · no picture"]);
+    });
+
+    it("says nothing for someone another shot on the same board brings", async () => {
+      const item = await mount(naming(), []);
+      await click(named(item, "Generate frames"));
+      const maren = all(item, ".fy-swgen__references article").find((reference) => reference.textContent?.includes("Maren Kest"));
+      assert.match(maren?.textContent ?? "", /rides/, "shot 12 cites her, so her picture rides for the board");
+      assert.equal(all(item, '[data-testid="unseen-name"]').length, 0);
+    });
+  });
+
   it("quotes current options, displays the backend amount, and echoes the authorization on start", async () => {
     const sent: ClientMessage[] = [];
     const item = await mount(stateWith(), sent);
