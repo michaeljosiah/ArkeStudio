@@ -54,6 +54,7 @@ import { createChapter, createEpisode, createProduction, openChapter } from "../
 import { addMusicTrack, editMusicTrack, ensureMusicSession, musicRecordFence, readMusicRecord } from "../../src/productions/music.js";
 import { bookAuthoringRefusal } from "../../src/world-chat/production-authoring.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
+import { applyProductionSpineCommand } from "../../src/productions/spine.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { recordUploadedShotFrameTake } from "../../src/takes/drawn-frame.js";
 import { applySceneEdits, sceneVersionFor } from "../../src/productions/scene-edits.js";
@@ -2252,6 +2253,8 @@ describe("World Chat authority adapters", () => {
       const card = (await loaded(w.log)).actions[0]!;
       assert.equal((await decide(w.lifecycle, w.log, card)).status, "failed");
       assert.ok(probed, "the command probes live plans after approval");
+      // The blocker in the authority's words, not "The authority failed while executing" (issue 3135).
+      assert.equal((await loaded(w.log)).actions[0]!.statusDetail, "A dispatch for this scene is still running (plan-live) — let it finish or cancel it.");
       const after = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!
         .scenes.find((scene) => scene.id === context.sceneId)!;
       assert.deepEqual(after, before);
@@ -4149,6 +4152,33 @@ describe("Arke sets a production's song (issue 3081)", () => {
     const card = (await loaded(w.log)).actions.at(-1)!;
     assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
     assert.equal(w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.spine?.trackArtifactId, w.song);
+  });
+
+  // The card that deleted a pinned scene's shots said only "The authority failed while executing
+  // the approved action", and Arke, asked why, guessed a wrong cause and prepared it again (issue 3135).
+  it("says on the failed card which shot is pinned, and tells Arke the same, when a deletion is refused after approval", async () => {
+    const w = await songWorld();
+    const production = () => w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+    const scene = production().scenes.find((candidate) => orderedShots(candidate).length >= 2)!;
+    const shot = orderedShots(scene)[0]!;
+    await applyProductionSpineCommand(w.store, { productionId: PRODUCTION, baseRevision: null, command: { kind: "create", trackArtifactId: w.song } }, { source: "test" });
+    const receipt = currentReceipt(w.store, "scenes", `${PRODUCTION}:${scene.id}`);
+    const oneTurn = turn(w.conversationId, context, { receipts: [receipt], actions: [{ kind: "production-scene-command", productionId: PRODUCTION,
+      sceneId: scene.id, command: { kind: "delete-shot", shotId: shot.id }, checkReceiptIds: [receipt.id] }] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    // Pinned after the card was prepared, so only the authority, at approval, is placed to refuse.
+    await applyProductionSpineCommand(w.store, { productionId: PRODUCTION, baseRevision: 1,
+      command: { kind: "set-anchor", shotId: shot.id, anchor: { startSec: 0, endSec: 4, clipAudio: { mode: "mute" } } } }, { source: "test" });
+
+    assert.equal((await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!)).status, "failed");
+
+    const failed = (await loaded(w.log)).actions[0]!;
+    assert.equal(failed.statusDetail, `Shot ${shot.number} is anchored to the track — move or clear the anchor first.`);
+    const outcomes = assembleContext({ candidates: [], messages: [], tombstones: [], currentUserMessage: "Why did that fail?", currentUserMessageId: newId("msg"), actions: [failed] }).actionReceipts;
+    assert.equal((JSON.parse(outcomes) as { reason?: string }).reason, failed.statusDetail);
+    assert.ok(orderedShots(production().scenes.find((candidate) => candidate.id === scene.id)!).some((candidate) => candidate.id === shot.id), "the shot is still there");
   });
 
   // Four set-anchor cards chained with after: the first prepared and the rest were refused, each

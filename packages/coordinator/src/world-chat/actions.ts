@@ -177,6 +177,7 @@ import {
   type WorldChatPreparedAction,
 } from "@arke-studio/contracts";
 import { resolveCandidate } from "../artifacts/extraction.js";
+import { describeRefusal } from "../errors/refusal.js";
 import { describeCoordinatorError } from "../errors/user-message.js";
 import {
   ATTACHABLE_EXTENSIONS,
@@ -5934,6 +5935,8 @@ export function worldChatActionAdapters(
     (result) => ({ kind: "art-direction-version", id: result?.commitId ?? "art-direction-version", summary: "The selected art direction was restored as a new version." }),
   );
 
+  // Every authority here refuses through the same classes, so each card reads them the same way
+  // (issue 3135): a deletion its authority refused said only that the authority had failed.
   return [
     proposal,
     bible,
@@ -5963,7 +5966,7 @@ export function worldChatActionAdapters(
     productionScene,
     productionBranchCanon,
     ...sharedResources.map(sharedResource),
-  ];
+  ].map((adapter) => ({ ...adapter, refusal: describeRefusal }));
 }
 
 async function saveProposalPoint(

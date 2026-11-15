@@ -3,8 +3,8 @@ import { ConversationExportStateSchema, type ConversationActionCard, type Prepar
 import { prepareConversationTakeReview, ConversationTakeReviewRefusal } from "./conversation-take-review.js";
 export { ConversationTakeReviewRefusal } from "./conversation-take-review.js";
 import type { ProposalManager } from "../gate/proposals.js";
-import { ConversationActionLifecycle, recoverConversationActions,
-  type ConversationActionAuthorityAdapter, type ConversationActionLifecycleOptions } from "../arke-actions/lifecycle.js";
+import { ConversationActionLifecycle, recoverConversationActions, type ConversationActionAuthorityAdapter,
+  type ConversationActionFailure, type ConversationActionLifecycleOptions } from "../arke-actions/lifecycle.js";
 import { worldChatActionAdapters, type WorldChatActionAdapterDeps } from "../world-chat/actions.js";
 
 export interface ConversationActionDependencies {
@@ -15,6 +15,8 @@ export interface ConversationActionDependencies {
   supplied?: readonly ConversationActionAuthorityAdapter[];
   archiveWorld?: () => Promise<{ id: string; folder: string }>;
   archived?: (result: { id: string; folder: string }) => Promise<void>;
+  /** An approved card whose authority threw something that was not a refusal, for the log (issue 3135). */
+  failed?: (failure: ConversationActionFailure) => void;
 }
 
 /**
@@ -51,6 +53,7 @@ export class ConversationActionService {
       ],
       now: deps.now,
       isWorldOpen: deps.isWorldOpen,
+      ...(deps.failed ? { onUnexpectedFailure: deps.failed } : {}),
     };
     this.lifecycle = new ConversationActionLifecycle(this.options);
   }
