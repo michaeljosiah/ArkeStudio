@@ -15,6 +15,7 @@ import { WorldStore } from "../../src/world/store.js";
 import { VISUAL_NOVEL_SCHEMA_VERSION } from "../../src/productions/scene-record.js";
 import { createProduction } from "../../src/productions/ops.js";
 import { SUPPORTED_SCHEMA_VERSION } from "../../src/world/scan.js";
+import { SHOT_LOOKS_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 import { sha256 } from "../../src/world/text-files.js";
@@ -526,6 +527,52 @@ describe("an edit is a patch on one shot, and everything else is untouched", () 
     await applySceneCommand(store, { ...base, baseVersion: dressed.version,
       command: sceneCommandFrom({ kind: "edit-shot", shotId: hers.id, change: {}, clear: ["looks"] }) });
     assert.equal(orderedShots(await sceneOnDisk(store)).find((shot) => shot.id === hers.id)!.looks, undefined);
+  });
+
+  it("raises the world past builds that would refuse a shot's look, and nothing else does (issue 3178)", async () => {
+    const { store } = await open();
+    const before = await sceneOnDisk(store);
+    const hers = orderedShots(before).find((shot) => shot.description.includes("@maren-kest"))!;
+    const base = { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID };
+    await applySceneCommand(store, { ...base, baseVersion: before.version, command: { kind: "edit-shot", shotId: hers.id, change: { durationSec: 7 } } });
+    // A kit holds its looks under the same key; only a scene's is the shot field.
+    await acceptCharacterLook(store, "maren-kest", { id: "storm-oilskin", file: "looks/storm-oilskin.png", kind: "costume",
+      prompt: "Storm oilskin", takeId: "tk_01J8E0000000000000000000T3", artDirectionVersion: 3 });
+    assert.ok(store.getBundle().meta.schemaVersion < SHOT_LOOKS_SCHEMA_VERSION, "a scene write without a look and a kit's looks leave it");
+    await applySceneCommand(store, { ...base, baseVersion: (await sceneOnDisk(store)).version,
+      command: { kind: "edit-shot", shotId: hers.id, change: { looks: [{ sheetId: "maren-kest", lookId: "storm-oilskin" }] } } });
+    assert.equal(store.getBundle().meta.schemaVersion, SHOT_LOOKS_SCHEMA_VERSION);
+    assert.ok(SHOT_LOOKS_SCHEMA_VERSION <= SUPPORTED_SCHEMA_VERSION, "this build reads what it writes");
+  });
+
+  /*
+   * A world can hold shot looks below the boundary: a build that wrote them before the fence
+   * existed left the world where it was. Opening it must neither refuse the scene nor drop the
+   * looks, and the next write of that scene raises the world, looks intact.
+   */
+  it("opens a scene that already holds shot looks below the boundary, keeps them, and raises the world when that scene is written", async () => {
+    const dir = await makeTempWorld();
+    const scenePath = join(dir, "productions", PRODUCTION, "scenes", `${SCENE}.json`);
+    const record = JSON.parse(await readFile(scenePath, "utf8")) as { shots: Array<{ id: string; description: string; looks?: unknown }> };
+    const hers = record.shots.find((shot) => shot.description.includes("@maren-kest"))!;
+    hers.looks = [{ sheetId: "maren-kest", lookId: "storm-oilskin" }];
+    await writeFile(scenePath, `${JSON.stringify(record, null, 2)}\n`);
+    const worldPath = join(dir, "world.json");
+    const below = SHOT_LOOKS_SCHEMA_VERSION - 1;
+    await writeFile(worldPath, `${JSON.stringify({ ...JSON.parse(await readFile(worldPath, "utf8")), schemaVersion: below }, null, 2)}\n`);
+
+    const store = await WorldStore.open(dir, { clock: CLOCK });
+    closeOnCleanup(() => store.close());
+    const opened = store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!.scenes.find((scene) => scene.id === SCENE_ID)!;
+    assert.deepEqual(orderedShots(opened).find((shot) => shot.id === hers.id)!.looks, [{ sheetId: "maren-kest", lookId: "storm-oilskin" }], "nothing strips the look on open");
+    assert.equal(store.getBundle().meta.schemaVersion, below, "opening refuses nothing and raises nothing");
+
+    const other = orderedShots(opened).find((shot) => shot.id !== hers.id)!;
+    await applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: opened.version,
+      command: { kind: "edit-shot", shotId: other.id, change: { durationSec: 7 } } });
+    assert.deepEqual(orderedShots(await sceneOnDisk(store)).find((shot) => shot.id === hers.id)!.looks, [{ sheetId: "maren-kest", lookId: "storm-oilskin" }]);
+    assert.equal(store.getBundle().meta.schemaVersion, SHOT_LOOKS_SCHEMA_VERSION, "the scene's next write raises the world");
+    assert.equal(JSON.parse(await readFile(worldPath, "utf8")).schemaVersion, SHOT_LOOKS_SCHEMA_VERSION);
   });
 
   it("retimes a staged shot's staging with its duration, as a new staging version", async () => {

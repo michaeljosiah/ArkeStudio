@@ -709,6 +709,15 @@ const CLIPS_FROM_KEY = /"clipsFrom"\s*:/;
 /** Issue 3186: a shot's `audio.lipSync` opt-out is a strict sound field an older scene reader refuses. */
 export const LIP_SYNC_SCHEMA_VERSION = 137;
 const LIP_SYNC_KEY = /"lipSync"\s*:/;
+/**
+ * Issue 3178: what a person wears in one shot is a strict shot field. A build that predates it
+ * refuses the whole scene over it, so the world is raised with the first scene written carrying
+ * it. A scene already holding looks below the boundary still opens: the fence is on the write,
+ * and the next write of that scene raises the world. (135 to 137 are PRs 3133, 3191 and 3193's;
+ * renumber at merge if they land in another order.)
+ */
+export const SHOT_LOOKS_SCHEMA_VERSION = 138;
+const SHOT_LOOKS_KEY = /"looks"\s*:/;
 /** SPEC-047 R-191: older readers cannot discard the chapter's authoritative arrangement. */
 export const AUDIO_STUDIO_SCHEMA_VERSION = 83;
 
@@ -1211,6 +1220,9 @@ export class Committer {
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesPictureLook(f.newContent)) ? EDITOR_PICTURE_LOOK_SCHEMA_VERSION : 0,
       files.some(f => (classify(f.path).track === "production-meta" || classify(f.path).track === "scene") && f.newContent != null && CLIPS_FROM_KEY.test(f.newContent)) ? CLIPS_FROM_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && LIP_SYNC_KEY.test(f.newContent)) ? LIP_SYNC_SCHEMA_VERSION : 0,
+      // `looks` is a shot field and nothing else in a scene record, so the key is the fence; an
+      // empty list is still a key an older reader refuses.
+      files.some(f => classify(f.path).track === "scene" && f.newContent != null && SHOT_LOOKS_KEY.test(f.newContent)) ? SHOT_LOOKS_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageConstruction(f.newContent)) ? 11 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageReferenceFrames(f.newContent)) ? 20 : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageSpeed(f.newContent)) ? 21 : 0,
