@@ -2,7 +2,7 @@ import {
   orderedShots, pinnedInWindowSec, productionShape, sceneSections, songTime,
   type ArtifactSidecar, type AudioSpineCommand, type ProductionSpine, type SceneRecord, type SongWindow,
 } from "@arke-studio/contracts";
-import { runtimeSeconds } from "./format.js";
+import { seconds } from "./format.js";
 
 /**
  * A music video's song (issue 3088): the master track its audio spine is cut to.
@@ -61,12 +61,17 @@ export function songWindowLabel(window: SongWindow): string {
  * to. A music video's scene read "0 shots · 0s" until it had shots, with its sixteen seconds of
  * the song only in its title. Null where there is nothing to say — no master track, or a scene
  * with no place in it — and the scene then shows its shots' own lengths, as it always has.
+ *
+ * The two lengths read to a tenth of a second, as the Cut reads an anchor's length on the song's
+ * track: `12s of 28s`, and `12.5s of 27.8s` for a window off the second. Whole seconds made a
+ * window of 27.75 seconds read `28s` beside the boundaries that say otherwise, and 27.6 of it
+ * pinned read as all of it; anything finer than a tenth is a measured take's tail, or a float's.
  */
 export function sceneSongLine(production: Pick<SongProduction, "spine">, scene: SceneRecord): string | null {
   const window = scene.songWindow;
   if (production.spine === null || window === undefined) return null;
   const pinned = pinnedInWindowSec(window, production.spine, orderedShots(scene).map((shot) => shot.id));
-  return `${songWindowLabel(window)} · ${runtimeSeconds(pinned)} of ${runtimeSeconds(window.endSec - window.startSec)} pinned`;
+  return `${songWindowLabel(window)} · ${seconds(pinned)} of ${seconds(window.endSec - window.startSec)} pinned`;
 }
 
 /**

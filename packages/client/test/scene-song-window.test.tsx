@@ -84,6 +84,28 @@ describe("a scene's line in the song (issue 3101)", () => {
     assert.equal(sceneSongLine({ spine: spineOn() }, production.scenes[0]!), "0:16–0:44 · 0s of 28s pinned", "nothing pinned yet");
   });
 
+  it("keeps a window's fractions, and reads its lengths to a tenth of a second", () => {
+    const scene = pinnedFilm().world!.productions[0]!.scenes[0]!;
+    const pins = (anchors: Record<string, [number, number]>) => ({ spine: spineOn(3, { anchors: Object.fromEntries(
+      Object.entries(anchors).map(([shotId, [startSec, endSec]]) => [shotId, { startSec, endSec, clipAudio: { mode: "mute" as const } }])) }) });
+
+    // Off the second: the boundaries the section marker will be written at, not their nearest seconds.
+    const offBeat = { ...scene, songWindow: { startSec: 16.5, endSec: 44.25 } };
+    assert.equal(sceneSongLine(pins({ sh_12: [16.5, 22.75], sh_13: [22.75, 29] }), offBeat), "0:16.5–0:44.25 · 12.5s of 27.8s pinned");
+    // Whole seconds read 27.6 of 27.75 as "28s of 28s": all of it, when it is not.
+    assert.equal(sceneSongLine(pins({ sh_12: [16.5, 44.1] }), offBeat), "0:16.5–0:44.25 · 27.6s of 27.8s pinned");
+    assert.equal(sceneSongLine(pins({ sh_12: [16.5, 44.25] }), offBeat), "0:16.5–0:44.25 · 27.8s of 27.8s pinned");
+
+    // Under a second: two times and a length, where whole seconds read 0:16–0:16.
+    const blink = { ...scene, songWindow: { startSec: 16.1, endSec: 16.4 } };
+    assert.equal(sceneSongLine(pins({}), blink), "0:16.1–0:16.4 · 0s of 0.3s pinned");
+    assert.equal(sceneSongLine(pins({ sh_12: [16.1, 16.3] }), blink), "0:16.1–0:16.4 · 0.2s of 0.3s pinned");
+
+    // A measured take's milliseconds are not carried into the summary, and a whole second stays whole.
+    assert.equal(sceneSongLine(pins({ sh_12: [16, 21.283], sh_13: [21.283, 28] }), scene), "0:16–0:44 · 12s of 28s pinned");
+    assert.equal(sceneSongLine(pins({ sh_12: [16, 21.283] }), scene), "0:16–0:44 · 5.3s of 28s pinned");
+  });
+
   it("says nothing without a master track, or for a scene with no place in the song", () => {
     const production = pinnedFilm().world!.productions[0]!;
     assert.equal(sceneSongLine({ spine: null }, production.scenes[0]!), null);
@@ -109,6 +131,10 @@ describe("a scene's line in the song (issue 3101)", () => {
     const noSong = pinnedFilm();
     noSong.world!.productions[0]!.spine = null;
     assert.equal((await mount(noSong)).text, "10s", "and so does one whose production has no master track");
+    // A window off the second reads its fractions on the page, as it does in the line itself.
+    const offBeat = pinnedFilm();
+    offBeat.world!.productions[0]!.scenes[0]!.songWindow = { startSec: 16.5, endSec: 44.25 };
+    assert.equal((await mount(offBeat)).text, "0:16.5–0:44.25 · 11.5s of 27.8s pinned");
   });
 
   it("shows on the scene's row in Scenes", () => {
