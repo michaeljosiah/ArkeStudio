@@ -310,6 +310,26 @@ describe("setup turns share conversation durability but no world-mutation author
     await assert.rejects(productionSetupBrief(bundle, draft, async () => ({ result: {}, receipt: { status: "complete" } }) as never, 100), /larger writing-model context/);
   });
 
+  // Asked for a music video, Arke said it had set one up while Format stayed Film · short, then
+  // told the author it could see no music-video option (issue 3083).
+  it("names every Format by the page's words and gives a music video its own section", async () => {
+    const h = await setup(() => reply());
+    const bundle = h.world.getBundle();
+    const read = async (tool: string, args: Record<string, unknown>) => ({ result: { id: args.id }, receipt: {
+      id: newId("check"), runId: newId("run"), tool: tool === "get_sheet" ? "get-sheet" : "get-entry", status: "complete", consulted: [], at: AT,
+    } }) as never;
+    const draft = (await h.service.resume(h.id)).draft;
+    const film = await productionSetupBrief(bundle, { ...draft, kind: "film" }, read, 400_000);
+    assert.ok(film.includes('fields.kind is the Format the page shows, one of "microdrama" (Micro drama), "film" (Film · short), "music-video" (Music video), "audio-drama" (Story · audio drama), "graphic-novel" (Story · graphic novel), "other" (Other).'));
+    assert.match(film, /Set it from what the author says they are making, in the same reply/);
+    assert.doesNotMatch(film, /This production is a music video/, "a film's brief is unchanged");
+    const video = await productionSetupBrief(bundle, { ...draft, kind: "music-video" }, read, 400_000);
+    assert.match(video, /This production is a music video \(kind "music-video"\)/);
+    assert.match(video, /Its scenes follow the song's sections, in order\. It has no episodes and no Series\./);
+    assert.match(video, /Start each scene's synopsis with its place in the song, start–end \("0:16–0:44"\)/);
+    assert.match(video, /once the production exists, it becomes the master track in the Cut/);
+  });
+
   // Adapt from (design turn 205, SPEC-052 R-14): the story's chapters in order, built from the world,
   // with the beats its audiobook named read through the lease for the chapters that have a record.
   it("carries the story a setup adapts as a digest of its chapters and their named beats", async () => {

@@ -55,6 +55,16 @@ const STILLS: ManifestModel = {
   pricing: { kind: "perMegapixel", microUsdPerMegapixel: 30_000 },
 };
 
+const CODEX: ManifestModel = {
+  id: "codex-image",
+  provider: "codex",
+  capability: "image",
+  displayName: "Codex Image",
+  accepts: { referenceImages: 4, referenceRoles: false, startFrame: false, endFrame: false },
+  limits: { providerSelectedSize: true, promptedSizes: { "9:16": { width: 941, height: 1672 }, "16:9": { width: 1672, height: 941 } } },
+  pricing: { kind: "included-plan" },
+};
+
 const shot = (n: number, description = `Shot ${n}`): Shot => ({
   id: `sh_${n}`,
   number: n,
@@ -256,6 +266,44 @@ describe("the production aspect end to end (issue 389)", () => {
     assert.ok(board.height > board.width, "the board is drawn in the shape it will steer");
     const frozen = request.input.params["provenance"] as { aspect?: string };
     assert.equal(frozen.aspect, "9:16", "the drawn shape is frozen with the rest");
+  });
+
+  it("a route that sizes its own pictures is asked for the delivery shape in words (issue 3106)", async () => {
+    const { bundle } = await open();
+    const production = bundle.productions[0]!;
+    const scene: Scene = { ...production.scenes[0]!, shots: [shot(1)] };
+    const still = (aspect: string) => {
+      const plan = planScene(
+        {
+          world: bundle.meta,
+          productionId: production.meta.id,
+          sheets: bundle.sheets,
+          kits: bundle.referenceKits,
+          scene,
+          selections: {},
+          model: CODEX,
+          aspect,
+        },
+        "per-shot",
+      );
+      return composeDispatches(WORLD_ID, production.meta.id, scene, plan, CODEX, bundle)[0]!;
+    };
+    const tall = still("9:16");
+    assert.match(String(tall.params["prompt"]), /^Make the picture a tall 9:16 portrait\.\n\n/);
+    assert.deepEqual(tall.params["output"], { width: 941, height: 1672, aspect: "9:16" }, "the size it was measured at");
+    // A shape the route was never seen to make is not asked for, and claims no size of its own.
+    const square = still("1:1");
+    assert.doesNotMatch(String(square.params["prompt"]), /Make the picture/);
+    assert.notEqual((square.params["output"] as { aspect: string }).aspect, "1:1");
+
+    const vertical = {
+      ...bundle,
+      productions: bundle.productions.map((p) => ({ ...p, meta: { ...p.meta, aspect: "9:16" } })),
+    };
+    const request = storyboardRequest(vertical, production.meta.id, scene, CODEX, VIDEO);
+    assert.match(request.plan.prompt, /^Make the picture a tall 9:16 portrait\.\n\n/);
+    assert.equal(request.input.params["prompt"], request.plan.prompt, "the prompt reviewed is the prompt sent");
+    assert.deepEqual(request.input.params["output"], { width: 941, height: 1672, aspect: "9:16" });
   });
 
   it("a continuous range verdicts by ratio, and silence is a pass, not a refusal", () => {

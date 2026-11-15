@@ -31,13 +31,19 @@ import { ComicAskCards, ComicPlanCard, GraphicNovelReview, comicPilotAsk } from 
 
 type SetupSeed = NonNullable<Extract<ProductionSetupCommand["action"], { operation: "start" }>["seed"]>;
 
+/** Each format as Format's select names it, in its order; anything that repeats the format says it the same way (issue 3091). */
+const FORMAT_LABEL: Record<ProductionSetupDraft["kind"], string> = {
+  microdrama: "Micro drama", film: "Film · short", "music-video": "Music video",
+  [AUDIO_DRAMA_KIND]: "Story · audio drama", [GRAPHIC_NOVEL_KIND]: "Story · graphic novel", other: "Other",
+};
+
 /** How the Format reads back, in the words the door used (design turn 230c). */
 function formatLine(draft: ProductionSetupDraft): string {
   return draft.kind === AUDIO_DRAMA_KIND
     ? `story · audio drama · ${draft.audioDrama?.episodes ?? 0} episodes`
     : draft.kind === GRAPHIC_NOVEL_KIND
       ? `story · graphic novel · ${draft.graphicNovel?.chapters.length ?? 0} chapters`
-      : `${draft.kind} · ${draft.aspect} · ${draft.scenes.length} scenes`;
+      : `${FORMAT_LABEL[draft.kind].toLowerCase()} · ${draft.aspect} · ${draft.scenes.length} scenes`;
 }
 
 /** Same transcript and composer as production chat; the rail is the authoritative setup draft. */
@@ -304,9 +310,7 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
                 update(kind === AUDIO_DRAMA_KIND || kind === GRAPHIC_NOVEL_KIND ? { kind, ...(audioDrama && kind !== AUDIO_DRAMA_KIND ? { audioDrama: null } : {}) }
                   : { kind, aspect: kind === "microdrama" ? "9:16" : "16:9", ...(audioDrama ? { audioDrama: null } : {}) });
               }}>
-                <option value="microdrama">Micro drama</option><option value="film">Film · short</option>
-                <option value="music-video">Music video</option><option value={AUDIO_DRAMA_KIND}>Story · audio drama</option><option value={GRAPHIC_NOVEL_KIND}>Story · graphic novel</option>
-                <option value="other">Other</option>
+                {Object.entries(FORMAT_LABEL).map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}
               </select></label>
               {/* A story for the ear is delivered in no frame and at no rate (SPEC-057 R-82). */}
               {!storyKind && <div className="fy-production-setup__delivery">
@@ -442,21 +446,26 @@ function AudioDramaReview({ setup, sourceTitle }: { setup: ProductionSetupState;
   </section>;
 }
 
+/** A count as the review says it, or nothing: "0 episodes" on a film described what it is not (issue 3091). */
+const counted = (count: number, noun: string) => count === 0 ? null : `${count} ${noun}${count === 1 ? "" : "s"}`;
+
 function SetupReview({ setup }: { setup: ProductionSetupState }) {
   const plan = setup.review!.plan;
   const content = plan.initialContent!;
   const blocks = content.scenes.reduce((n, scene) => n + (scene.record.script?.blocks.length ?? 0), 0);
+  const counts = [counted(content.episodes.length, "episode"), counted(content.scenes.length, "scene"), counted(blocks, "script block")].filter(Boolean);
+  const questions = setup.draft.openQuestions.length;
   const defaults = plan.initialSeason?.defaults;
   return <section className="fy-production-setup__review" aria-label="Review production">
     <h3>Ready to create · {plan.production.title}</h3>
-    <p>{setup.draft.kind} · {plan.production.aspect} · {plan.production.frameRate} fps</p>
-    <p>{content.episodes.length} episodes · {content.scenes.length} scenes · {blocks} script block{blocks === 1 ? "" : "s"}</p>
+    <p>{FORMAT_LABEL[setup.draft.kind]} · {plan.production.aspect} · {plan.production.frameRate} fps</p>
+    {counts.length > 0 && <p>{counts.join(" · ")}</p>}
     {defaults && <p>Episodes: {defaults.episodeSecondsMin ?? "—"}–{defaults.episodeSecondsMax ?? "—"} seconds
       {defaults.hookWindowSec !== undefined && <> · hook within {defaults.hookWindowSec}s</>}
       {defaults.exportPreset && <> · {defaults.exportPreset}</>}</p>}
     {plan.series.operation !== "none" && <p>{plan.series.operation === "join" ? "Join" : "Create"} Series: {plan.series.record.title}
       {plan.series.record.engine && <> · {plan.series.record.engine}</>}</p>}
-    <p>Includes the outline and developed text shown above. {setup.draft.openQuestions.length} open question{setup.draft.openQuestions.length === 1 ? " stays" : "s stay"} in the conversation.</p>
+    <p>Includes the outline and developed text shown above.{questions > 0 && ` ${questions} open question${questions === 1 ? " stays" : "s stay"} in the conversation.`}</p>
     <p>No images, video, voice or renders will be generated.</p>
   </section>;
 }

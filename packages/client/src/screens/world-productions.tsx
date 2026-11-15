@@ -1,12 +1,12 @@
 // A world's productions: the list and a new production (issue 2816).
 import {
   type ProductionBundle, type WorldBundle, productionShape, orderedShots, beatPictureShotId,
-  sortScenes, AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, type FrameRate, adaptableStories, newId,
+  sortScenes, AUDIO_DRAMA_KIND, GRAPHIC_NOVEL_KIND, type FrameRate, adaptableStories, newId, artifactPicturePath,
 } from "@arke-studio/contracts";
 import { shotHasFrame } from "./scene-workspace/boards.js";
 import { usePhone } from "../lib/media-query.js";
 import { useParams, useNavigate, useLocation } from "react-router";
-import { useOpenWorldGuard } from "../lib/selectors.js";
+import { acceptedTakeId, useOpenWorldGuard } from "../lib/selectors.js";
 import { episodeThumbnailPath } from "./production-episode-picker.js";
 import { takeMediaPath } from "../lib/take-presentation.js";
 import { Button, cx, Badge, Input, Select, Callout } from "../components/ui.js";
@@ -33,6 +33,28 @@ export function coveredProductionShots(production: ProductionBundle, artifacts: 
   }, 0);
 }
 
+/**
+ * The first picture of a production's Cut: what its film opens on. A cut made from the Library's
+ * clips has no takes of its own, so a trailer and each of its cuts drew the world's key art and
+ * could be told apart only by title (issue 3098). Words drawn by the program have no picture.
+ *
+ * Only what the film shows: the render leaves a hidden Picture track out, an upper one entirely
+ * and the base one as black (render-plan.ts), so a clip on either never stands for the film.
+ */
+export function cutPicturePath(production: ProductionBundle, artifacts: WorldBundle["artifacts"]): string | null {
+  if (production.timeline?.status !== "ready") return null;
+  const clips = production.timeline.timeline.tracks.filter((track) => track.kind === "picture" && !track.muted).flatMap((track) => track.clips)
+    .sort((a, b) => a.startFrame - b.startFrame);
+  for (const { source } of clips) {
+    const takeId = source.kind === "take" ? source.takeId : source.kind === "shot" ? acceptedTakeId(production, source.shotId) : null;
+    const take = takeId === null ? undefined : production.takes.find((candidate) => candidate.id === takeId);
+    const artifact = source.kind === "artifact" ? artifacts.find((candidate) => candidate.id === source.artifactId) : undefined;
+    const path = take ? takeMediaPath(production, take) : artifact ? artifactPicturePath(artifact) : null;
+    if (path) return path;
+  }
+  return null;
+}
+
 export function ProductionsScreen() {
   const phone = usePhone();
   const { worldId } = useParams();
@@ -40,10 +62,16 @@ export function ProductionsScreen() {
   const navigate = useNavigate();
   const productions = world?.productions ?? [];
   const artOf = (p: (typeof productions)[number]): string => {
+    // An album's own cover is the production's picture, chosen for it (SPEC-060 R-4).
+    const cover = p.music?.cover ? world?.artifacts.find((artifact) => artifact.id === p.music!.cover) : undefined;
+    const coverPath = cover ? artifactPicturePath(cover) : null;
+    if (coverPath) return coverPath;
     const accepted = episodeThumbnailPath(p, { scenes: sortScenes(p.scenes).map((scene) => scene.id) });
     if (accepted) return accepted;
     const board = p.scenes.find((s) => s.board)?.board;
     if (board) return `productions/${p.meta.id}/${board.image}`;
+    const cut = cutPicturePath(p, world?.artifacts ?? []);
+    if (cut) return cut;
     const take = p.takes.find((t) => t.media);
     if (take) return takeMediaPath(p, take) ?? world?.keyArt ?? "";
     return world?.keyArt ?? "";
@@ -169,7 +197,9 @@ export const DOOR_CHOICES = [
     id: "watch",
     eyebrow: "WATCH",
     label: "Make a film",
-    body: "Short film or micro-drama",
+    // Music video is named here because it is made here, in Format; holding a song, a person
+    // otherwise looks under Listen, which makes no video (issue 3094).
+    body: "Short film, music video or micro-drama",
     affordance: "Begin with a screen",
     medium: "video",
   },

@@ -3,15 +3,17 @@ import { measureProductionMedia } from "../media/measurement.js";
 import type { MediaProbe } from "../media/probe.js";
 import { saveProductionNarrative } from "../productions/narrative.js";
 import { handleProductionSetupCommand } from "../productions/setup-command.js";
+import { applyProductionSpineCommand } from "../productions/spine.js";
 import type { WorldChatRunner } from "../world-chat/run.js";
 import type { WorldStore } from "../world/store.js";
 import type { CommandContext } from "./context.js";
 import type { CommandModule } from "./router.js";
 
 /**
- * A production's spend refreshed, its media measured, its narrative saved and its setup turn run.
- * Each checks its world itself: the spend refresh is sent on its own and is dropped without a word
- * once its world is no longer shown, and the rest answer a world that is not open in their own words.
+ * A production's spend refreshed, its media measured, its narrative saved, its setup turn run and
+ * its song clock changed. Each but the last checks its world itself: the spend refresh is sent on
+ * its own and is dropped without a word once its world is no longer shown, and the rest answer a
+ * world that is not open in their own words. The spine command is the router's open-world kind.
  */
 export function productionCommands(ctx: CommandContext, deps: {
   mediaProbe: MediaProbe | null;
@@ -64,6 +66,20 @@ export function productionCommands(ctx: CommandContext, deps: {
         deps.broadcastSnapshot({ immediate: true });
         ctx.emit({ type: "production-narrative.saved", at: ctx.nowIso(), worldId: msg.worldId,
           productionId: msg.productionId, requestId: msg.requestId });
+      },
+    },
+    "spine-command": {
+      scope: "open-world",
+      async handle(msg, store) {
+        // Use as the song (#3088): the authority Arke's audio-spine card applies, so the person's
+        // press passes the card's checks — this production's track, known to carry sound and
+        // measured, every marker and anchor inside it, and the revision it was composed against.
+        // A refusal throws to the router, which says it on the toaster under this request.
+        try {
+          await applyProductionSpineCommand(store, msg, { source: "studio", requestId: msg.requestId });
+        } finally {
+          if (deps.stillOpen(store)) await ctx.refreshWorldSnapshot(msg.worldId);
+        }
       },
     },
     "production-setup": {

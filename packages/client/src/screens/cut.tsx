@@ -62,6 +62,7 @@ import {
   Hand,
   Help,
   Minus,
+  MusicMark,
   Play,
   Plus,
   Pointer,
@@ -78,6 +79,7 @@ import {
 } from "../components/icons.js";
 import { EDITOR_KEYS, EditorDialog } from "../components/editor-dialog.js";
 import { ProductionConversation, type DockAsk } from "../components/conversation.js";
+import { useGlobalChat } from "../components/global-chat-context.js";
 import { mediaUrl } from "../lib/media.js";
 import { runtimeSeconds, seconds } from "../lib/format.js";
 import { artifactDisplayName, artifactsForProduction, linkNameResolver } from "../lib/artifact-view.js";
@@ -116,7 +118,10 @@ import {
   borrowArtifacts,
   borrowTakes,
   subscribeTimelineRefusals,
+  sendSpineCommand,
+  useSpineAskPending,
 } from "../lib/store.js";
+import { songCommand, wantsSong } from "../lib/song.js";
 import { storyShotCount } from "./production-story.js";
 import { type PendingImport, type LibraryFilter, ArtifactPanel, AddToLibraryDialog, LIBRARY_DRAWER_QUERY } from "./editor-library.js";
 import { seekDrag, CutScrubber, LANE_PRESS_OWNERS, CutPlayhead, useCutTransport } from "./editor-transport.js";
@@ -246,6 +251,32 @@ function useFileDrag(): DroppedKind[] | null {
 export const arkeEmptyLine = (requests: number) => requests > 0
   ? "Ask Arke for another change to the cut."
   : "Nothing written with Arke about this cut yet. Ask for a change and Arke stages it as a request you accept or reject.";
+
+/**
+ * The master track placed on a saved timeline (issue 3086): from 0:00 for the song's whole
+ * measured length, on a Music track that is free there — a new one when none is — and in the
+ * record's Library like any placed file. One batch, so one revision and one Undo.
+ */
+export function songPlacementCommands(timeline: ProductionTimeline, master: ArtifactSidecar, durationFrames: number, clipId: TimelineClipId): TimelineClipCommand[] {
+  const frames = Math.max(1, durationFrames);
+  const commands: TimelineClipCommand[] = [];
+  if (!timeline.library.some(item => item.kind === "artifact" && item.artifactId === master.id)) {
+    commands.push({ kind: "add-to-library", items: [{ kind: "artifact", artifactId: master.id }] });
+  }
+  // A muted Music track would take the song and play none of it.
+  let trackId = [...timeline.tracks].sort((a, b) => a.order - b.order)
+    .find(track => track.kind === "music" && !track.muted && !track.clips.some(clip => clip.startFrame < frames))?.id;
+  if (trackId === undefined) {
+    let number = 1;
+    const idFor = (n: number): TimelineTrackId => (n === 1 ? "tr_music" : `tr_music-${n}`);
+    while (timeline.tracks.some(track => track.id === idFor(number))) number++;
+    trackId = idFor(number);
+    commands.push({ kind: "add-track", trackId, trackKind: "music", name: number === 1 ? "Music" : `Music ${number}` });
+  }
+  commands.push({ kind: "place", trackId, clip: { id: clipId, startFrame: 0, durationFrames: frames, sourceInFrames: 0,
+    source: { kind: "artifact", artifactId: master.id, label: master.file.split("/").pop() ?? master.file }, gainDb: 0, role: "music" } });
+  return commands;
+}
 
 export function CutScreen() {
   const { worldId, prodId } = useParams();
@@ -399,7 +430,25 @@ function CutEditorScreen() {
     // Once, on arrival: the drawer is the person's to close afterwards.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  /** Choose the song's Library on Audio, asked once per press (issue 3088). */
+  const [libraryAsk, setLibraryAsk] = useState<{ filter: LibraryFilter; serial: number } | null>(null);
+  /** A Use as the song press still out (issue 3088); the store holds it until it is answered. */
+  const songPending = useSpineAskPending(worldId, prodId);
   const [detailTab, setDetailTab] = useState<"inspector" | "arke">("inspector");
+  /*
+   * Arke, wherever the Cut asks for it (issue 3096). With the app's Builder Chat the conversation
+   * lives in that panel, and the Arke tab's column held one button that opened the chat and then
+   * sat empty beside it, squeezing the Cut. So every way in opens the chat and the column stays
+   * the Inspector. The Arke panel stays mounted, hidden: it is what hands this Cut's conversation —
+   * its subject and its request cards — to the chat. Without the shared chat, Arke is the panel.
+   */
+  const globalChat = useGlobalChat();
+  const showArke = (inPanel: () => void) => {
+    if (!globalChat) { inPanel(); return; }
+    setDetailTab("inspector");
+    globalChat.open();
+  };
+  const arkePanel = () => { setDetailTab("arke"); if (compact) setArkeOpen(true); else setRightOpen(true); };
   const [draft, setDraft] = useState<ProductionTimeline | null>(null);
   const [scrubFrame, setScrubFrame] = useState<number | null>(null);
   /** Which of Arke's pending requests is drawn as a ghost (SPEC-039 R-33); local view state. */
@@ -695,6 +744,9 @@ function CutEditorScreen() {
     const inspection = effectReview.state.inspect;
     if (!inspection || inspection.ref.versionId !== effectReview.active?.ref.versionId) return;
     setArkeOpen(false);
+    // Below 1100px the chat lies over the Cut, so the Inspector this opens would sit under it
+    // (SPEC-053 R-31); Back to proposal opens the chat again.
+    if (compact) globalChat?.close();
     selectEffect(inspection.effectId);
   }, [effectReview.state.inspect?.serial]);
   useEffect(() => {
@@ -703,7 +755,7 @@ function CutEditorScreen() {
     // covered by the newer Inspector in the overlay stack (SPEC-053 R-31, R-39).
     if (phone) setRightOpen(false);
     setLibraryOpen(false);
-    setDetailTab("arke"); if (compact) setArkeOpen(true); else setRightOpen(true);
+    showArke(arkePanel);
   }, [effectReview.state.cardFocus?.serial]);
   const selectedCueId = activeSelection?.kind === "cue" ? activeSelection.id : null;
   // What the cut uses is what the record holds (round four): a legacy placement is a typed clip
@@ -711,12 +763,14 @@ function CutEditorScreen() {
   const usedArtifactIds = new Set(
     editableTimeline?.tracks.flatMap((track) => track.clips.flatMap((clip) => (clip.source.kind === "artifact" ? [clip.source.artifactId] : []))) ?? [],
   );
+  // The film's length, which the plan states: a song on a timeline with no picture yet is as long
+  // as the song, where the picture track alone read 0s (issue 3086).
   const cutMeta = spineCut
     ? `${runtimeSeconds(spineCut.trackDurationSec)} · ${runtimeSeconds(spineCut.trackDurationSec - spineCut.blackSec)} of ${runtimeSeconds(spineCut.trackDurationSec)} covered · cut to the track`
     : mediaOnly
       ? `${runtimeSeconds(filmSec)} · no story · what you place is the film`
       : cut
-        ? `${runtimeSeconds(cut.totalSec)} · ${cut.covered} of ${storyShotCount(production)} shots covered · ${production?.spine ? "cut to the track" : timelineState.status === "ready" ? "saved timeline" : "nothing saved yet"}`
+        ? `${runtimeSeconds(planTotalSec ?? cut.totalSec)} · ${cut.covered} of ${storyShotCount(production)} shots covered · ${production?.spine ? "cut to the track" : timelineState.status === "ready" ? "saved timeline" : "nothing saved yet"}`
         : "";
   const selectedPictureClip =
     activeSelection?.kind === "picture"
@@ -910,6 +964,23 @@ function CutEditorScreen() {
     setTimelineCommandError(null);
     setInFlight({ revision: timelineRevision, since: Date.now() });
     sendTimelineCommands(worldId, prodId, [], null, sourceFingerprint, "Open the song on the timeline");
+  };
+  /*
+   * A song that became the master after the timeline was saved (issue 3086). The opening above
+   * only seeds an unsaved record, and a saved one is never rewritten by a spine edit (SPEC-037
+   * R-4), so a person who imported the song first and let Arke make it the master afterwards had
+   * a timeline with no song on it and nothing that said so. R-4 lets the editor say it and offer
+   * the update; the update is the Library's own placement, so it is one revision and one Undo.
+   */
+  const masterArtifactId = production?.spine?.trackArtifactId ?? null;
+  const songMissing = timelineState.status === "ready" && editableTimeline !== null && view.kind === "spine" && masterArtifactId !== null &&
+    !editableTimeline.tracks.some(track => track.clips.some(clip => clip.source.kind === "artifact" && clip.source.artifactId === masterArtifactId));
+  const addSong = () => {
+    if (!songMissing || !editableTimeline || view.kind !== "spine") return;
+    const master = artifacts.find(candidate => candidate.id === masterArtifactId);
+    if (!master) { setTimelineCommandError("The song is not in this production's files."); return; }
+    try { sendCommands(songPlacementCommands(editableTimeline, master, secondsToFrames(view.cut.trackDurationSec, frameRate), mintClipId()), "Add the song"); }
+    catch (error) { setTimelineCommandError(error instanceof Error ? error.message : String(error)); }
   };
   const sendHistory = (action: "undo" | "redo") => {
     if (pictureReview.active) { pictureReview.operate({ kind: "history", ref: pictureReview.active.ref, direction: action }); return; }
@@ -1233,8 +1304,30 @@ function CutEditorScreen() {
   const found = timelineState.status === "ready" ? assemblyEntry(timelineState.timeline) : null;
   const assembly = found?.entry ?? null;
   const noticeKey = found === null ? null : `${found.index}:${found.entry.label}`;
+  /** Choose the song (issue 3088): the Library, on Audio, where each sound file offers Use as the song. */
+  const chooseSong = () => {
+    setLibraryAsk((ask) => ({ filter: "audio", serial: (ask?.serial ?? 0) + 1 }));
+    setRightOpen(false);
+    setLibraryOpen(true);
+    queueMicrotask(() => focusFirstControl(libraryPanelRef.current));
+  };
+  const makeSong = (artifact: ArtifactSidecar) => {
+    if (!worldId || !prodId || !production) return;
+    const next = songCommand(production.spine, artifact.id);
+    if (next !== null) sendSpineCommand(worldId, prodId, next.baseRevision, next.command);
+  };
   let notice: React.ReactNode = null;
-  if (assembly !== null && noticeKey !== noticeHidden) {
+  // A music video is cut to its song, so its absence is said before anything else (issue 3088).
+  if (production && wantsSong(production)) {
+    notice = (
+      <div className="fy-cutnotice" data-testid="song-notice">
+        <span className="fy-cutnotice__mark" aria-hidden="true"><MusicMark size={12} /></span>
+        <strong>No song yet.</strong>
+        <span className="fy-h1row__push" />
+        <button type="button" onClick={chooseSong}>Choose the song</button>
+      </div>
+    );
+  } else if (assembly !== null && noticeKey !== noticeHidden) {
     const shots = assembly.clips.filter((change) => change.before === null && change.after !== null && change.after.source.kind === "shot");
     // A gap is what the cut resolver draws as one — a take without media is a gap however the selection reads.
     const unplayable = new Set((cut?.entries ?? []).filter((entry) => entry.media === null).map((entry) => entry.shot.id));
@@ -1271,7 +1364,7 @@ function CutEditorScreen() {
         <strong>{`Arke assembled ${spineCut.segments.filter((segment) => segment.kind === "clip").length} picture anchors on the track.`}</strong>
       </div>
     );
-  } else if (editableTimeline !== null && allClips.length === 0 && !commandPending) {
+  } else if (editableTimeline !== null && allClips.length === 0 && !commandPending && !songMissing) {
     notice = (
       <div className="fy-cutnotice" data-testid="empty-notice">
         <span className="fy-cutnotice__mark" aria-hidden="true"><Sparkle size={12} /></span>
@@ -1428,6 +1521,8 @@ function CutEditorScreen() {
         productions={world?.productions ?? []}
         onBorrowTake={commandsDisabled ? null : borrowTake}
         onOverlayArtifact={commandsDisabled ? null : artifact => placeArtifact(artifact, null, playheadFrame, { kind: "picture" })}
+        onUseAsSong={songPending ? null : makeSong}
+        filterRequest={libraryAsk}
         onRemoveFromLibrary={commandsDisabled ? null : removeFromLibrary}
         onImport={commandsDisabled || remote ? null : files => importMedia("library", files)}
         onAddShot={editableTimeline !== null && !commandsDisabled ? placeShot : null}
@@ -1503,9 +1598,18 @@ function CutEditorScreen() {
             Details
           </button>
         </header>
+        {/* Beside Arke's assembly banner rather than behind it (SPEC-039 R-46): both are true at once. */}
+        {songMissing && (
+          <div className="fy-cutnotice" data-testid="song-notice">
+            <span className="fy-cutnotice__mark" aria-hidden="true"><Sparkle size={12} /></span>
+            <strong>{"The song isn't on the timeline."}</strong>
+            <span className="fy-h1row__push" />
+            <button type="button" disabled={commandsDisabled} onClick={addSong}>Add the song</button>
+          </div>
+        )}
         {notice}
-        {pictureReview.active && worldId && production && <PictureReviewBar worldId={worldId} production={production} onBack={() => { setDetailTab("arke"); if (compact) setArkeOpen(true); else setRightOpen(true); }} />}
-        {transitionReview.active && worldId && production && <TransitionReviewBar worldId={worldId} production={production} onBack={() => { setDetailTab("arke"); if (compact) setArkeOpen(true); else setRightOpen(true); }} />}
+        {pictureReview.active && worldId && production && <PictureReviewBar worldId={worldId} production={production} onBack={() => showArke(arkePanel)} />}
+        {transitionReview.active && worldId && production && <TransitionReviewBar worldId={worldId} production={production} onBack={() => showArke(arkePanel)} />}
         {effectReview.active && <EffectReviewBar version={effectReview.active.version.number} changes={effectReview.active.version.delta.length}
           comparison={effectReview.active.comparison} busy={effectReview.busy} reason={effectReview.statusReason ?? effectProjection.problem}
           canApply={effectReview.active.version.delta.length > 0 && connection === "open"}
@@ -1963,9 +2067,9 @@ function CutEditorScreen() {
         </EditorDialog>
       </main>
       <aside ref={rightPanelRef} className="fy-cutside" id="cut-right-pane" data-open={rightOpen} aria-label="Editor details">
-        {portraitPhone && rightOpen && (selectedTransition || transitionBatchOpen) && <TransitionPhoneNavigation onJoin={() => setRightOpen(false)} onArke={() => setArkeOpen(true)} onDone={() => setRightOpen(false)} />}
+        {portraitPhone && rightOpen && (selectedTransition || transitionBatchOpen) && <TransitionPhoneNavigation onJoin={() => setRightOpen(false)} onArke={() => showArke(() => setArkeOpen(true))} onDone={() => setRightOpen(false)} />}
         <div className="fy-cutside__head">
-          <EditorPanelTabs value={detailTab} onChange={setDetailTab} />
+          <EditorPanelTabs value={detailTab} onChange={tab => tab === "arke" ? showArke(() => setDetailTab("arke")) : setDetailTab(tab)} />
           <button
             type="button"
             className="fy-cutside__close"
@@ -2068,7 +2172,7 @@ function CutEditorScreen() {
         </EditorSheetSlot>
       </aside>
       {compact && <>
-        {!phone && <button type="button" className="fy-cut-arke-rail" onClick={() => setArkeOpen(true)}><Sparkle size={16} /><span>Ask Arke</span></button>}
+        {!phone && <button type="button" className="fy-cut-arke-rail" onClick={() => showArke(() => setArkeOpen(true))}><Sparkle size={16} /><span>Ask Arke</span></button>}
         <div className="fy-cut-tools" data-picked={phone && selectedTimed !== null || undefined}>
           {phone && selectedTimed && <div className="fy-cut-tools__selection">{textSelected ? <TypeMark size={13} /> : <Film size={13} />}{selectedLabel} · {(selectedTimed.durationFrames / frameRate).toFixed(1)}s</div>}
           {(!phone || !selectedTimed) && <button type="button" onClick={() => setLibraryOpen(true)}><Grid2x2 size={20} /><span>Library</span></button>}
@@ -2082,7 +2186,7 @@ function CutEditorScreen() {
             <button type="button" disabled={selectionCommandsDisabled || !selectedTimed} onClick={() => selectedAction(phone || selectedEffect ? "delete" : "ripple")}><Trash2 size={20} /><span>{phone || selectedEffect ? "Delete" : "Ripple delete"}</span></button></>}
           {phone && selectedTimed ? <button type="button" onClick={() => document.querySelector<HTMLElement>(`[data-clip="${selectedTimed.id}"]`)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }))}><More size={20} /><span>More</span></button>
             : <><button type="button" disabled={!canUndo} onClick={() => sendHistory("undo")}><Undo2 size={20} /><span>Undo</span></button><button type="button" disabled={!canRedo} onClick={() => sendHistory("redo")}><Redo2 size={20} /><span>Redo</span></button></>}
-          {phone && !selectedTimed && <button type="button" onClick={() => setArkeOpen(true)}><Sparkle size={20} /><span>Arke</span></button>}
+          {phone && !selectedTimed && <button type="button" onClick={() => showArke(() => setArkeOpen(true))}><Sparkle size={20} /><span>Arke</span></button>}
           {!phone && <><button type="button" aria-label="Zoom out" disabled={zoom <= 1} onClick={() => zoomBy(-.5)}><Minus size={16} /></button><button type="button" aria-label="Zoom in" disabled={zoom >= 4} onClick={() => zoomBy(.5)}><Plus size={16} /></button></>}
         </div>
       </>}

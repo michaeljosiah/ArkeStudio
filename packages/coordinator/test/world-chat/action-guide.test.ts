@@ -55,6 +55,19 @@ it("advertises available audio actions, dependent cues, spine verbs and the huma
   assert.match(guide, /sample rights and purge remain human/); assert.match(guide, /attach\/detach/); assert.match(guide, /Refuse sound effects\/SFX/);
 });
 
+it("tells Arke how a spine is created, how markers are named and when they can follow (issue 3081)", () => {
+  const entry = describeAction("audio-spine-command")!;
+  assert.match(entry.description, /create \{trackArtifactId\} with baseRevision null/);
+  assert.match(entry.description, /mk_ and a 26-character ULID/);
+  // Chained in one turn since issue 3103; before it, they had to wait for a later turn.
+  assert.match(entry.description, /chain with after, each naming the revision the card before it leaves: a create leaves 1/);
+  for (const budget of [HUGE, 1000]) {
+    const guide = renderActionGuide(["world", "production"], budget, { kind: "cut", productionId: "saltlight" }).text;
+    assert.match(guide, /The first master is create with baseRevision null/);
+    assert.match(guide, /may follow in the same turn as cards chained with after/);
+  }
+});
+
 // Direct editor commands include human-only effect/protection operations. The model guide
 // must follow the narrower request schema rather than advertise those commands (SPEC-053 R-36).
 it("names only generic editor request commands in full and compact guides and states the effect review boundary", () => {
@@ -197,4 +210,12 @@ it("details only the thread's prioritised kinds and keeps the rest discoverable 
   assert.ok(production.text.length < renderActionGuide(["world", "production"], HUGE).text.length / 2);
   assert.equal(renderActionGuide(["world", "production"], 1000, { kind: "production", productionId: "saltlight" }).mode, "compact");
   for (const refused of ACTION_GUIDE_ENTRIES.filter(item => item.unavailable !== null)) assert.ok(production.text.includes(refused.unavailable!));
+});
+
+it("tells Arke where a new shot can go and how several go in order on one card (issue 3084)", () => {
+  const entry = describeAction("production-scene-command")!;
+  assert.match(entry.description, /\{"atStart":true\}, \{"after":shotId\} or \{"before":shotId\}, nothing else: there is no end or index/);
+  assert.match(entry.description, /one production-scene-command per new shot on the same scene, each with its own ref and no after/);
+  assert.match(entry.description, /each next at \{"after":"ref:<previous ref>"\}/);
+  assert.ok("example" in entry && entry.example?.kind === "production-scene-command" && entry.example.command?.kind === "insert-shot");
 });

@@ -94,14 +94,20 @@ export const SHIPPED_MANIFEST: ModelManifest = ModelManifestSchema.parse({
     // Four references is what has been verified through Arke's own adapter: on 2026-10-07 two,
     // three and four character looks each came back with every face and outfit kept, where one
     // reference had left the second person in a two-shot drawn from the prompt alone. Codex itself
-    // set no lower limit; raise this only after the same check. No size or aspect control is promised.
+    // set no lower limit; raise this only after the same check. The tool has no size field, so no
+    // size control is promised; the shape comes from the prompt instead. A "tall 9:16 portrait"
+    // prompt came back 941×1672 (2026-10-23, and twice more on 2026-11-14) and wide 16:9 prompts
+    // 1672×941, so those two are declared (issue 3106). Add another only once a real call returns it.
     {
       id: "codex-image",
       provider: "codex",
       capability: "image",
       displayName: "Codex Image",
       accepts: { referenceImages: 4, referenceRoles: false, startFrame: false, endFrame: false },
-      limits: { providerSelectedSize: true },
+      limits: {
+        providerSelectedSize: true,
+        promptedSizes: { "9:16": { width: 941, height: 1672 }, "16:9": { width: 1672, height: 941 } },
+      },
       pricing: { kind: "included-plan" },
     },
     // Higgsfield rows are keyed on the CLI's `job_type`, because that is the string

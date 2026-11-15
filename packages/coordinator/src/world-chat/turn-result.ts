@@ -122,12 +122,33 @@ export type ValidationOutcome =
  * the model — "Return the complete result again as one JSON object — no prose around it, no
  * markdown fences." — or a validator path such as `candidateOperations.1.candidate.target is
  * required` (issues 1384, 1403). The log keeps every word of those; the screen says what went
- * wrong in terms the person can act on. Problems about the world itself — a quotation that is not
- * in its source, an entity that does not exist — are already written for a reader and pass through.
+ * wrong in terms the person can act on.
+ *
+ * Two families still reached the screen in the model's words (issue 3112): its own bookkeeping —
+ * "Read the proposition with get_candidate at its current registry revision through complete=true
+ * before replacing it" — and its citations — "A quotation was not found in the entity it cites".
+ * Both are instructions the model acts on and a person cannot, and a retry with the same words got
+ * past both. They are said once each, in plain words; the corrective message keeps the detail.
  */
+const BOOKKEEPING = new Set([
+  "candidate-read-required", "candidate-read", "duplicate-temporary-id", "unknown-candidate", "stale-revision",
+  "immutable-candidate", "unknown-temporary-reference", "no-evidence", "foreign-receipt", "unknown-group-member",
+  "unknown-group", "stale-group-revision", "production-plan-read", "production-plan", "setup-authority",
+  "setup-context", "revise", "revise-only", "reply-only",
+]);
+const CITATION = new Set([
+  "message-missing", "message-not-the-users", "message-span-mismatch", "message-span-out-of-range",
+  "world-entity-missing", "world-version-moved", "world-content-changed", "world-quote-not-found",
+  "attachment-missing", "attachment-content-changed", "attachment-quote-not-found",
+]);
+
 export function personLine(problems: readonly TurnProblem[]): string {
   const lines = problems.map((p) =>
-    p.code === "not-json"
+    BOOKKEEPING.has(p.code)
+      ? "it did not line up with the conversation as it stands"
+      : CITATION.has(p.code)
+        ? "it cited something it could not point to"
+      : p.code === "not-json"
       ? "the reply came back in a form the studio could not read"
       : p.code === "reply-too-long"
         ? "the answer ran longer than one reply can be. Ask for it shorter, or a part at a time"
@@ -213,6 +234,11 @@ function schemaIssueLine(issue: z.ZodIssue): string {
       if (/^candidateOperations\.\d+\.(?:candidate|replacements\.\d+)\.draft\.links\.\d+$/.test(path)) {
         return `${path} must be a typed link: {kind:"sheet",sheetId}, {kind:"canon",entryId}, or {kind:"pending-entity",ref:{temporaryId}} for a create in this result. Copy existing ids from current reads; do not use a string, title or URL.`;
       }
+      // A shot's position (issue 3084): told only that nothing matched, Arke tried {"kind":"end"}
+      // and then {"index":1}, and the turn failed with three shots unplaced.
+      if (/^actions\.\d+\.(?:command|commands\.\d+)\.(?:at|to)$/.test(path)) {
+        return `${path} must be {"atStart":true}, {"after":shotId} or {"before":shotId}, where shotId may be "ref:<name>" for a shot an earlier action inserts. There is no end or index: a shot goes last after the scene's last shot.`;
+      }
       return `${path} matches none of the allowed shapes for that field`;
     case z.ZodIssueCode.too_small: {
       const unit = issue.type === "string" ? " characters" : issue.type === "array" ? " items" : "";
@@ -281,11 +307,24 @@ export function refusedChangeReason(detail: string | undefined): string | undefi
  * contract exists to refuse.
  */
 export function turnResultJson(raw: string): unknown {
+  return locateTurnResultJson(raw)?.json;
+}
+
+/**
+ * The object `turnResultJson` reads, and the prose the model wrote around it.
+ *
+ * The prose is kept for one use only: a reply the object left empty (issue 3082). Asked to
+ * storyboard a scene, a model wrote the whole plan and a question for the author as paragraphs,
+ * then a fenced object whose `reply` was "", and the person saw an empty bubble, the question
+ * lost, beside four notes they had not been told about. The fence markers are not the model's
+ * words, so they are left out of it.
+ */
+function locateTurnResultJson(raw: string): { json: unknown; prose: string } | undefined {
   const text = raw.replace(/^\uFEFF/, "").trim();
-  try { return JSON.parse(text); } catch { /* look for the object inside it */ }
+  try { return { json: JSON.parse(text), prose: "" }; } catch { /* look for the object inside it */ }
   const fenced = /^```[a-zA-Z]*[ \t]*\r?\n([\s\S]*?)\r?\n?```\s*$/.exec(text);
   if (fenced) {
-    try { return JSON.parse(fenced[1]!); } catch { /* fall through to the object scan */ }
+    try { return { json: JSON.parse(fenced[1]!), prose: "" }; } catch { /* fall through to the object scan */ }
   }
   const start = text.indexOf("{");
   if (start < 0) return undefined;
@@ -307,7 +346,10 @@ export function turnResultJson(raw: string): unknown {
       try { found = JSON.parse(text.slice(start, i + 1)); } catch { return undefined; }
       // One object or none. Two — an example in the prose, then the answer — would leave the
       // parser choosing which one the model meant, and the first is not reliably the answer.
-      return turnResultJson(text.slice(i + 1)) === undefined ? found : undefined;
+      if (turnResultJson(text.slice(i + 1)) !== undefined) return undefined;
+      const before = text.slice(0, start).trimEnd().replace(/```[a-zA-Z]*$/, "").trim();
+      const after = text.slice(i + 1).trimStart().replace(/^```/, "").trim();
+      return { json: found, prose: [before, after].filter((part) => part !== "").join("\n\n") };
     }
   }
   return undefined;
@@ -353,8 +395,9 @@ function misplacedActionLine(issue: z.ZodIssue, json: unknown): string | null {
  * is nothing useful to say about the evidence in a result that is not a result.
  */
 export function parseTurnResult(raw: string, productionThread = false, allowActionRecovery = true): { ok: true; value: WorldChatTurnResult } | { ok: false; problems: TurnProblem[] } {
-  const json = turnResultJson(raw);
-  if (json === undefined) {
+  const located = locateTurnResultJson(raw);
+  const json = located?.json;
+  if (located === undefined) {
     return {
       ok: false,
       problems: [
@@ -386,6 +429,13 @@ export function parseTurnResult(raw: string, productionThread = false, allowActi
       if (lines.size >= MAX_PROBLEMS) break;
     }
     return { ok: false, problems: [...(replyTooLong ? [replyTooLong] : []), ...[...lines].map((line) => problem("schema", line))] };
+  }
+  // The object stays the result, held to the schema as it arrived; only an empty reply takes the
+  // words written around it (issue 3082). It is swapped in after the schema has passed, and cut
+  // at the bound rather than measured against it, so prose the object never claimed cannot turn
+  // a result that validated into a refusal.
+  if (parsed.data.reply.trim() === "" && located.prose !== "") {
+    return { ok: true, value: { ...parsed.data, reply: truncate(located.prose, TURN_RESULT_BOUNDS.reply) } };
   }
   return { ok: true, value: parsed.data };
 }

@@ -54,6 +54,7 @@ import { CharacterAliasesInputSchema } from "./world.js";
 import { RoutingCommandSchema } from "./world-chat-actions.js";
 import { BenchModeSchema, BenchParamsSchema, WorldFilePathSchema } from "./bench.js";
 import { MusicSequenceSchema, MusicTrackEditSchema } from "./music.js";
+import { AudioSpineCommandSchema } from "./spine.js";
 import { ClientStateSchema, type ClientState } from "./client-state.js";
 import { AdapterActionSchema } from "./adapters.js";
 import { MAX_CLIP_LANE } from "./cut.js";
@@ -3263,6 +3264,22 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       productionId: SlugSchema,
       action: z.enum(["undo", "redo"]),
       baseRevision: z.number().int().min(0),
+    })
+    .strict(),
+  /**
+   * The song's own control (#3088, SPEC-041 R-68): one semantic spine command from the Studio,
+   * through the same version-fenced authority Arke's audio-spine card applies. Before it, a person
+   * could make a song the master track only by asking Arke for a card. `baseRevision` is null to
+   * create the spine and the live revision for every other command; a stale one is refused.
+   */
+  z
+    .object({
+      kind: z.literal("spine-command"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      requestId: UlidSchema,
+      baseRevision: z.number().int().min(1).nullable(),
+      command: AudioSpineCommandSchema,
     })
     .strict(),
   /** SPEC-013 R-16/R-17: cut.json holds audio tracks and placement only. */

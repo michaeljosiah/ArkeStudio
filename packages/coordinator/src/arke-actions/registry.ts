@@ -592,6 +592,8 @@ const CLIENT_COMMAND_METADATA = {
   "editor-effect-analysis": humanOnly("The editor prepares local audio analysis; this does not apply an arrangement or release protection."),
   "editor-effect-proposal": humanOnly("Only the authenticated editor can review, adjust, release, discard or apply an exact effects version."),
   "timeline-history": action("production", "command", "timeline", "authored-change", ["timeline"], { reads: COMPLETE_TIMELINE_READ }),
+  // The Cut's Use as the song (#3088): the person's direct spine command, the one Arke's card applies.
+  "spine-command": action("production", "command", "audio-spine", "authored-change", ["spine"]),
   "text-draft": readOnly("Draws a title's unsaved words for the window typing them and changes nothing; Arke proposes titles through editor requests."),
   "text-typefaces": readOnly("Sends the typeface files to the window whose Typeface menu draws them; nothing is changed."),
   "world-cleanup": humanOnly("Running a clean-up plan, restoring, emptying the hold and Put back on shelf are the person's, in the Studio that holds the world (SPEC-066 R-2)."),
@@ -956,6 +958,7 @@ const COMMAND_MODEL_PATHS = {
   "set-trim": ["production-take-trim"],
   "timeline-move-picture": ["editorRequests"],
   "timeline-command": ["editorRequests"],
+  "spine-command": ["audio-spine-command"],
   "upload-artifacts": ["artifact-import"],
   "export-cut": ["production-cut-export"],
   "export-comic": ["production-comic-export"],
