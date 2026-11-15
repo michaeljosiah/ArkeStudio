@@ -545,6 +545,47 @@ describe("frame-run quote authorization", () => {
     assert.equal(sent.some((message) => message.kind === "timeline-assemble"), false, "no film cut is assembled");
   });
 
+  it("a film's scene-wide run opens the Cut, which asks once for the scene to be assembled (SPEC-039 R-44)", async () => {
+    const sent: ClientMessage[] = [];
+    const item = await mount(stateWith(), sent);
+    await click(named(item, "Generate frames"));
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
+    await click([...one(item, ".fy-swgen")!.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLElement);
+    await act(async () => emitStartResult({ requestId: request.requestId, quoteId: QUOTE_ID, disposition: "accepted" }));
+    assert.equal(one(item, '[data-testid="workspace-row-sh_12"]'), null, "the scene gave way to the Cut");
+    const assemblies = sent.filter((message) => message.kind === "timeline-assemble");
+    assert.equal(assemblies.length, 1);
+    assert.equal(assemblies[0]!.kind === "timeline-assemble" && assemblies[0]!.sceneId, "sc_04");
+  });
+
+  it("a production cut to a song stays on the scene and sends no timeline command (issue 3151)", async () => {
+    const sent: ClientMessage[] = [];
+    const state = stateWith();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.meta = { ...production.meta, kind: "music-video" };
+    production.spine = {
+      schemaVersion: 1,
+      revision: 1,
+      trackArtifactId: state.world!.artifacts[0]!.id,
+      markers: [],
+      anchors: {},
+      updatedAt: "2026-11-15T10:00:00Z",
+    };
+    const item = await mount(state, sent);
+    await click(named(item, "Generate frames"));
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
+    await click([...one(item, ".fy-swgen")!.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLElement);
+    assert.ok(sent.some((message) => message.kind === "frame-run-start"));
+    await act(async () => emitStartResult({ requestId: request.requestId, quoteId: QUOTE_ID, disposition: "accepted" }));
+    assert.equal(one(item, ".fy-swgen"), null, "the acceptance closes the dialog");
+    assert.ok(one(item, '[data-testid="workspace-row-sh_12"]'), "still on the scene's shots");
+    assert.equal(
+      sent.some((message) => message.kind === "timeline-assemble" || message.kind === "timeline-command"),
+      false,
+      "placing the shots at the song's times is the person's",
+    );
+  });
+
   it("a visual novel's run packs the shots it quotes, never a kept picture (codex round 12)", async () => {
     const sent: ClientMessage[] = [];
     const state = stateWith();
