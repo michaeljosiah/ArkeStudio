@@ -1608,7 +1608,7 @@ describe("the Arke filing outcome", () => {
     const [first, concurrent, frameConversation] = await Promise.all([
       recordBenchOutcome(store, session, take, filing),
       recordBenchOutcome(store, otherSession, otherTake, filing),
-      recordFrameRunOutcome(store, frameState),
+      recordFrameRunOutcome(store, frameState).then((outcome) => outcome.conversationId),
     ]);
     assert.equal(concurrent, first, "one scene gets one live Arke thread");
     assert.equal(frameConversation, first, "Bench and frame runs share that scene's Arke thread");

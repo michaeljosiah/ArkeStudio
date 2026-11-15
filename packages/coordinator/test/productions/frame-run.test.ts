@@ -1613,8 +1613,8 @@ describe("frame-run Arke outcomes", () => {
     await log.append({ type: "conversation.created", title: "Generate this shot",
       entryContext: { kind: "generate", productionId: f.production.meta.id, sceneId: f.scene.id,
         shotId: completed.state.run.steps[0]!.updateShotIds[0]! } }, { at: CLOCK() });
-    assert.equal(await recordFrameRunOutcome(f.store, completed.state), conversationId);
-    assert.equal(await recordFrameRunOutcome(f.store, completed.state), conversationId);
+    assert.deepEqual(await recordFrameRunOutcome(f.store, completed.state), { conversationId, recorded: true });
+    assert.deepEqual(await recordFrameRunOutcome(f.store, completed.state), { conversationId, recorded: false });
     assert.equal((await log.read()).events.filter(event => event.event.type === "frame-run.outcome-recorded").length, 1);
   });
   it("raises schema 4 before appending to an existing scene conversation", async () => {
@@ -1635,7 +1635,7 @@ describe("frame-run Arke outcomes", () => {
     });
     const completed = await finishRun(f, "succeeded");
 
-    assert.equal(await recordFrameRunOutcome(f.store, completed.state), conversationId);
+    assert.equal((await recordFrameRunOutcome(f.store, completed.state)).conversationId, conversationId);
     assert.equal((await readWorldMeta(f.dir)).schemaVersion, 4);
     await assert.rejects(
       () => readWorldMeta(f.dir, { supports: 3 }),
@@ -1666,16 +1666,18 @@ describe("frame-run Arke outcomes", () => {
     const f = await fixture();
     const completed = await finishRun(f, "succeeded");
     assert.equal(completed.state.status, "completed");
-    const [first, duplicate] = await Promise.all([
+    const [recorded, duplicate] = await Promise.all([
       recordFrameRunOutcome(f.store, completed.state),
       recordFrameRunOutcome(f.store, completed.state),
     ]);
-    assert.equal(duplicate, first);
+    const first = recorded.conversationId;
+    assert.equal(duplicate.conversationId, first);
+    assert.deepEqual([recorded.recorded, duplicate.recorded].sort(), [false, true], "only the call that wrote it reports it");
 
     const failed = await finishRun(f, "failed");
     assert.equal(failed.state.status, "completed");
     assert.ok(failed.state.failedShots > 0);
-    assert.equal(await recordFrameRunOutcome(f.store, failed.state), first);
+    assert.equal((await recordFrameRunOutcome(f.store, failed.state)).conversationId, first);
 
     const cancelledQueue = queue();
     const cancelledRun = await start(f, "per-shot");
@@ -1692,7 +1694,7 @@ describe("frame-run Arke outcomes", () => {
       [...cancelledQueue.jobs.values()],
     );
     assert.equal(cancelledState.status, "cancelled");
-    assert.equal(await recordFrameRunOutcome(f.store, cancelledState), first);
+    assert.equal((await recordFrameRunOutcome(f.store, cancelledState)).conversationId, first);
 
     const summaries = (await discoverConversations(f.store.dir)).summaries.filter(
       (summary) => summary.entryContext?.kind === "scene" && summary.entryContext.sceneId === f.scene.id,
@@ -1854,5 +1856,66 @@ describe("frame-run Arke outcomes", () => {
     assert.equal(runIds.filter((runId) => runId === recovered.run.id).length, 1, "recovery records the missing outcome");
     hooks["jobQueue"] = null;
     await coordinator.stop();
+  });
+
+  it("publishes a run's narration once, however often the production's runs are listed (issue 3167)", async () => {
+    const f = await fixture();
+    const completed = await finishRun(f, "succeeded");
+    const provider: WorldProvider = {
+      listWorlds: async () => [],
+      loadWorld: async () => f.store.getBundle(),
+      openStore: () => f.store,
+    };
+    const events: string[] = [];
+    const coordinator = new Coordinator({
+      provider,
+      adapter: null,
+      appVersion: "test",
+      changeLogPath: join(f.dir, "changes.jsonl"),
+      observeEvent: (event) => { if (event.type === "production.frame-run") events.push(event.runId); },
+    });
+    const hooks = coordinator;
+    hooks["readModel"].setWorld(f.store.getBundle());
+    hooks["jobQueue"] = fakeJobQueue(() => [...completed.q.jobs.values()]);
+    let snapshots = 0;
+    hooks["transport"].broadcastSnapshot = () => { snapshots += 1; };
+    try {
+      await hooks["emitFrameRun"](f.store, WORLD_ID, f.production.meta.id, completed.run.id);
+      // Publishing the thread also refreshes the production's spend, which answers with its own.
+      await hooks["productionSpendWork"];
+      assert.ok(snapshots > 0, "the landing that narrates the run publishes its thread");
+      snapshots = 0;
+
+      // Every scene page that opens lists the production's runs, and the listing emits each past
+      // run again. In the installed app each of those re-emits broadcast the whole world, and
+      // each snapshot voided an open frame quote before it could be confirmed.
+      const list = { kind: "frame-run-list", worldId: WORLD_ID, productionId: f.production.meta.id } as const;
+      await coordinator.dispatch(list);
+      await coordinator.dispatch(list);
+      await hooks["productionSpendWork"];
+      assert.deepEqual(events, [completed.run.id, completed.run.id, completed.run.id], "the run bar still hears every listing");
+      assert.equal(snapshots, 0, "a narration already in its thread publishes nothing");
+    } finally {
+      hooks["jobQueue"] = null;
+      await coordinator.stop();
+    }
+  });
+
+  it("finds a narration already recorded without rescanning the world (issue 3167)", async () => {
+    const f = await fixture();
+    const completed = await finishRun(f, "succeeded");
+    await recordFrameRunOutcome(f.store, completed.state);
+    const rescans = { n: 0 };
+    const live = f.store as unknown as { rescan: () => Promise<unknown> };
+    const rescan = live.rescan.bind(f.store);
+    live.rescan = async () => { rescans.n++; return rescan(); };
+    try {
+      // A listing of a production's runs asks this once per past run. On a large world each full
+      // rescan costs seconds, and every one holds the gate a frame-run start waits on.
+      await recordFrameRunOutcome(f.store, completed.state);
+      assert.equal(rescans.n, 0);
+    } finally {
+      live.rescan = rescan;
+    }
   });
 });
