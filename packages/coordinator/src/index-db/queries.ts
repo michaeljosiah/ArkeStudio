@@ -97,8 +97,36 @@ export interface SheetCandidate {
 
 export interface SheetSearchResult {
   searched: number;
+  /**
+   * True when a sheet is named by a word of the query, or a prose match cleared the floor. As with
+   * canon, it says something was found, not that it answers the question.
+   */
   floorCleared: boolean;
+  /** Name matches first, then prose matches above the floor; the closest prose matches when neither. */
   candidates: SheetCandidate[];
+}
+
+/**
+ * Words that turn up inside names without naming anybody: "The Lady in White", "House of Tides".
+ * Counted, a question that began with "the" would make every "The …" sheet a name match and put
+ * it ahead of the sheet whose prose answers it.
+ */
+const NAME_FILLER = new Set(["an", "and", "at", "by", "for", "from", "in", "of", "on", "or", "the", "to", "with"]);
+
+/**
+ * The words a name, a slug or a question is made of, folded as the index folds them (case and
+ * accents) and split at everything that is not a letter or digit. Quotes, hyphens and apostrophes
+ * separate words rather than join them, so `Adeyemi "Ade" Akinola` is adeyemi, ade and akinola,
+ * and the slug `ife-s-flat` is ife and flat. Single letters go, as they do from `ftsQuery`: an
+ * initial or the `s` of a possessive would otherwise match half the cast.
+ */
+function nameWords(text: string): string[] {
+  return text
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((w) => w.length > 1 && !NAME_FILLER.has(w));
 }
 
 /**
@@ -107,6 +135,14 @@ export interface SheetSearchResult {
  * Same bounded discipline as `searchCanon`: a floor, an honest `searched` count, and the closest
  * few as receipts when nothing clears it. The question this answers is "is this person already
  * written down?", so a name match outranks a passing mention in someone else's prose.
+ *
+ * A name match is decided here rather than left to bm25, because bm25 cannot see one for the
+ * people a story is about. A word's weight falls with the number of sheets that use it, and the
+ * leads are named in nearly every other sheet: in Na Love or Juju "Ife" scored zero on eight
+ * sheets with her own eighth, and "Ade Ife Musa" returned Musa alone, the one name that cleared
+ * the floor (issue 3109). So a sheet whose name or slug holds a word of the query is found,
+ * whatever it scores, and comes first; the floor filters only the prose matches. The slug counts
+ * because it outlives a rename, and is what a caller copies from a cast list.
  *
  * The weights are positional over *every* column, including the UNINDEXED ones, which is why the
  * two leading zeros are here rather than omitted — a weight list that skips them silently shifts
@@ -126,28 +162,56 @@ export function searchSheets(
   const visible =
     "sheet_id NOT IN (SELECT id FROM entities WHERE owner_production IS NOT NULL AND owner_production IS NOT ?)";
   const scope = opts.production ?? null;
-  // `searched` counts the same corpus the search ran over. A scoped search reporting the whole
-  // world's total would make "searched all 40" a lie in the one place the product promises it.
-  const searched = (
+  // The corpus is read whole, without its prose, because name matching has to see every sheet:
+  // the name the floor cannot find is the one bm25 ranks below the cut. Scoping lives in this one
+  // query, and everything returned comes from it, so `searched` counts the same corpus the search
+  // ran over. A scoped search reporting the whole world's total would make "searched all 40" a
+  // lie in the one place the product promises it.
+  const corpus = (
     opts.kind === undefined
-      ? (db.prepare(`SELECT COUNT(*) AS n FROM sheet_fts WHERE ${visible}`).get(scope) as { n: number })
-      : (db
-          .prepare(`SELECT COUNT(*) AS n FROM sheet_fts WHERE kind = ? AND ${visible}`)
-          .get(opts.kind, scope) as { n: number })
-  ).n;
+      ? db.prepare(`SELECT sheet_id AS sheetId, kind, name, descriptor FROM sheet_fts WHERE ${visible}`).all(scope)
+      : db
+          .prepare(`SELECT sheet_id AS sheetId, kind, name, descriptor FROM sheet_fts WHERE kind = ? AND ${visible}`)
+          .all(opts.kind, scope)
+  ) as Array<Omit<SheetCandidate, "score">>;
+  const searched = corpus.length;
+  const asked = new Set(nameWords(query));
   const match = ftsQuery(query);
-  if (match === null) return { searched, floorCleared: false, candidates: [] };
+  if (match === null && asked.size === 0) return { searched, floorCleared: false, candidates: [] };
 
-  const select = `SELECT sheet_id AS sheetId, kind, name, descriptor, -bm25(sheet_fts, 0.0, 0.0, 8.0, 3.0, 1.0) AS score FROM sheet_fts WHERE sheet_fts MATCH ? AND ${visible}`;
-  const rows = (
-    opts.kind === undefined
-      ? db.prepare(`${select} ORDER BY score DESC LIMIT ?`).all(match, scope, limit)
-      : db.prepare(`${select} AND kind = ? ORDER BY score DESC LIMIT ?`).all(match, scope, opts.kind, limit)
-  ) as SheetCandidate[];
+  // No LIMIT: ordering by score computes bm25 for every match anyway, and a name match needs its
+  // score wherever it ranks.
+  const scores = new Map<string, number>();
+  if (match !== null) {
+    const scored = db
+      .prepare(
+        "SELECT sheet_id AS sheetId, -bm25(sheet_fts, 0.0, 0.0, 8.0, 3.0, 1.0) AS score FROM sheet_fts WHERE sheet_fts MATCH ?",
+      )
+      .all(match) as Array<{ sheetId: string; score: number }>;
+    for (const row of scored) scores.set(row.sheetId, row.score);
+  }
 
-  const above = rows.filter((r) => r.score >= floor);
-  if (above.length > 0) return { searched, floorCleared: true, candidates: above };
-  return { searched, floorCleared: false, candidates: rows.slice(0, 3) };
+  const named: Array<{ candidate: SheetCandidate; hits: number; share: number }> = [];
+  const prose: SheetCandidate[] = [];
+  for (const row of corpus) {
+    const own = new Set([...nameWords(row.name), ...nameWords(row.sheetId)]);
+    let hits = 0;
+    for (const word of asked) if (own.has(word)) hits++;
+    const score = scores.get(row.sheetId);
+    if (hits > 0) named.push({ candidate: { ...row, score: score ?? 0 }, hits, share: hits / own.size });
+    else if (score !== undefined) prose.push({ ...row, score });
+  }
+  // Among names: more of the question's words first, then more of the name accounted for, so
+  // "Ife" puts Ife ahead of Ife's Flat, and only then bm25, which is zero for exactly the names
+  // this exists to find.
+  named.sort((a, b) => b.hits - a.hits || b.share - a.share || b.candidate.score - a.candidate.score);
+  prose.sort((a, b) => b.score - a.score);
+
+  const above = prose.filter((r) => r.score >= floor);
+  if (named.length > 0 || above.length > 0) {
+    return { searched, floorCleared: true, candidates: [...named.map((n) => n.candidate), ...above].slice(0, limit) };
+  }
+  return { searched, floorCleared: false, candidates: prose.slice(0, Math.min(3, limit)) };
 }
 
 /** Ranked lexical overlap for a proposed entry — an aid for human judgement, never a block (R-19, D11). */
