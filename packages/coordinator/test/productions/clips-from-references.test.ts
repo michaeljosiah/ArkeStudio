@@ -8,6 +8,7 @@ import {
   START_FRAME_PREAMBLE,
   type ArtifactSidecar,
   type ManifestModel,
+  type ReferenceKit,
   type Scene,
   type Shot,
 } from "@arke-studio/contracts";
@@ -130,6 +131,63 @@ describe("clips from references (issue 3185)", () => {
     assert.deepEqual(plan.passes.map((pass) => pass.compiled.route.kind), ["reference", "reference", "frame"]);
     assert.deepEqual(plan.passes.map((pass) => pass.dependsOn), [[], [], [{ passIndex: 1, needs: "boundary-frame" }]]);
     assert.deepEqual(plan.passes.map((pass) => pass.carries?.fromReferences ?? false), [false, true, false]);
+  });
+
+  /*
+   * The references route is where a shot's own look (issue 3178) and its own place (issue 3152)
+   * matter most: with no frame to carry them, the pictures are all the model has. They landed on
+   * separate branches, so this holds the three together: per shot and per pass, the shot that
+   * names its look and its place sends those, and the shot that names neither takes the scene's.
+   */
+  it("sends each shot's own look and place, and the scene's only where a shot names neither", async () => {
+    const { store, bundle, production } = await open();
+    const base = production.scenes[0]!;
+    const sceneLook = {
+      id: "third-verse", file: "looks/third-verse.png", kind: "costume" as const, prompt: "After the third verse", acceptedAt: CLOCK(),
+      attachedTo: { kind: "scene" as const, productionId: production.meta.id, sceneId: base.id },
+    };
+    const own = { id: "storm-oilskin", file: "looks/storm-oilskin.png", kind: "costume" as const, prompt: "Storm oilskin", acceptedAt: CLOCK() };
+    const plate = (sheetId: string): ReferenceKit => ({
+      sheetId, tiles: [], compilations: [],
+      mainPhoto: { file: "main-photo.png", sheetVersion: 1, acceptedAt: "2026-08-01T12:00:00.000Z", source: "upload" },
+    });
+    const kits = [
+      ...bundle.referenceKits.filter((kit) => kit.sheetId !== "the-vigil" && kit.sheetId !== "the-saltmarket")
+        .map((kit) => (kit.sheetId === "maren-kest" ? { ...kit, looks: [sceneLook, own] } : kit)),
+      plate("the-vigil"), plate("the-saltmarket"),
+    ];
+    const scene: Scene = { ...base, inherits: { ...base.inherits, location: "the-vigil" }, shots: [
+      { ...shot(1, "@maren-kest walks the pilings of @the-saltmarket"), looks: [{ sheetId: "maren-kest", lookId: "storm-oilskin" }] },
+      shot(2, "@maren-kest grips the rail"),
+    ] };
+    const input = (mode: "per-shot" | "whole-scene") => planScene({
+      world: bundle.meta, productionId: production.meta.id, sheets: bundle.sheets, kits, scene, selections: {},
+      model: MODEL, production: { clipsFrom: "references" },
+    }, mode);
+    const files = (references: readonly { file?: string }[]) => references.map((reference) => reference.file ?? "");
+    const sheetIds = (references: readonly { sheetId: string }[]) => references.map((reference) => reference.sheetId);
+
+    const [away, home] = input("per-shot").shots;
+    assert.equal(away!.fromReferences, true);
+    assert.ok(files(away!.references).some((file) => file.includes("storm-oilskin")), "the shot's own look rides");
+    assert.ok(!files(away!.references).some((file) => file.includes("third-verse")), "the scene's look stands aside for it");
+    assert.ok(sheetIds(away!.references).includes("the-saltmarket"), "the shot's own place rides");
+    assert.ok(!sheetIds(away!.references).includes("the-vigil"), "the scene's place does not ride beside it");
+    assert.ok(files(home!.references).some((file) => file.includes("third-verse")), "a shot that names no look wears the scene's");
+    assert.ok(sheetIds(home!.references).includes("the-vigil"), "a shot that names no place is in the scene's");
+
+    const plan = await createDispatchPlan(store, {
+      worldId: WORLD_ID, productionId: production.meta.id, scene, model: MODEL, world: { ...bundle, referenceKits: kits },
+      policy: "review-gated", requestId: "01J8E0000000000000000000C4", clock: CLOCK, plan: input("whole-scene"),
+    });
+    assert.deepEqual(plan.passes.map((pass) => pass.compiled.route.kind), ["reference", "reference"]);
+    const [first, second] = plan.passes;
+    assert.ok(files(first!.compiled.references).some((file) => file.includes("storm-oilskin")));
+    assert.ok(!files(first!.compiled.references).some((file) => file.includes("third-verse")));
+    assert.deepEqual([first!.carries?.place?.sheetId, second!.carries?.place?.sheetId], ["the-saltmarket", "the-vigil"]);
+    assert.ok(!sheetIds(first!.compiled.references).includes("the-vigil"));
+    assert.ok(files(second!.compiled.references).some((file) => file.includes("third-verse")));
+    assert.ok(sheetIds(second!.compiled.references).includes("the-vigil"));
   });
 
   it("the production's choice is a strict field, so writing it raises the world past older builds", async () => {
