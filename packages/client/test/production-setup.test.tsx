@@ -288,6 +288,32 @@ describe("production setup interaction (issue #976)", () => {
     assert.match(m.container.textContent!, /Created production workspace/);
   });
 
+  it("names the format as Format does and leaves out what is zero (issue 3091)", async () => {
+    const video = (): ProductionSetupState => {
+      const setup = draft();
+      return { ...setup, draft: { ...setup.draft, kind: "music-video", aspect: "9:16", openQuestions: [] } };
+    };
+    const m = await mount(fixture(video()));
+    await answer(m.commands()[0]!, video());
+    await click(m.container, "Review production");
+    const reviewed: ProductionSetupState = {
+      ...video(), status: "reviewed", review: {
+        id: REVIEW_ID, sourceDigest: `sha256:${"a".repeat(64)}`,
+        plan: {
+          production: { id: "the-crossing", title: "The crossing", format: "video", kind: "music-video", status: "in-progress",
+            created: AT, updated: AT, aspect: "9:16", frameRate: 24, failureModes: [] },
+          initialSeason: null, series: { operation: "none" },
+          initialContent: { worldId: FIXTURE_WORLD_ID, setupId: ID, revision: 3, narrative: null, scenes: [], episodes: [] },
+        },
+      },
+    };
+    await answer(m.commands().at(-1)!, reviewed);
+    const card = m.container.querySelector('[aria-label="Review production"]')!.textContent!;
+    assert.match(card, /Music video · 9:16 · 24 fps/);
+    assert.doesNotMatch(card, /music-video|\b0 (episode|scene|script|open)/);
+    assert.doesNotMatch(card, /open question/);
+  });
+
   it("switches narrow-panel tabs without losing the composer or outline", async () => {
     const m = await mount();
     await answer(m.commands()[0]!, draft());
