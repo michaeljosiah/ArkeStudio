@@ -247,6 +247,32 @@ export const arkeEmptyLine = (requests: number) => requests > 0
   ? "Ask Arke for another change to the cut."
   : "Nothing written with Arke about this cut yet. Ask for a change and Arke stages it as a request you accept or reject.";
 
+/**
+ * The master track placed on a saved timeline (issue 3086): from 0:00 for the song's whole
+ * measured length, on a Music track that is free there — a new one when none is — and in the
+ * record's Library like any placed file. One batch, so one revision and one Undo.
+ */
+export function songPlacementCommands(timeline: ProductionTimeline, master: ArtifactSidecar, durationFrames: number, clipId: TimelineClipId): TimelineClipCommand[] {
+  const frames = Math.max(1, durationFrames);
+  const commands: TimelineClipCommand[] = [];
+  if (!timeline.library.some(item => item.kind === "artifact" && item.artifactId === master.id)) {
+    commands.push({ kind: "add-to-library", items: [{ kind: "artifact", artifactId: master.id }] });
+  }
+  // A muted Music track would take the song and play none of it.
+  let trackId = [...timeline.tracks].sort((a, b) => a.order - b.order)
+    .find(track => track.kind === "music" && !track.muted && !track.clips.some(clip => clip.startFrame < frames))?.id;
+  if (trackId === undefined) {
+    let number = 1;
+    const idFor = (n: number): TimelineTrackId => (n === 1 ? "tr_music" : `tr_music-${n}`);
+    while (timeline.tracks.some(track => track.id === idFor(number))) number++;
+    trackId = idFor(number);
+    commands.push({ kind: "add-track", trackId, trackKind: "music", name: number === 1 ? "Music" : `Music ${number}` });
+  }
+  commands.push({ kind: "place", trackId, clip: { id: clipId, startFrame: 0, durationFrames: frames, sourceInFrames: 0,
+    source: { kind: "artifact", artifactId: master.id, label: master.file.split("/").pop() ?? master.file }, gainDb: 0, role: "music" } });
+  return commands;
+}
+
 export function CutScreen() {
   const { worldId, prodId } = useParams();
   const { production } = useProduction(worldId, prodId);
@@ -711,12 +737,14 @@ function CutEditorScreen() {
   const usedArtifactIds = new Set(
     editableTimeline?.tracks.flatMap((track) => track.clips.flatMap((clip) => (clip.source.kind === "artifact" ? [clip.source.artifactId] : []))) ?? [],
   );
+  // The film's length, which the plan states: a song on a timeline with no picture yet is as long
+  // as the song, where the picture track alone read 0s (issue 3086).
   const cutMeta = spineCut
     ? `${runtimeSeconds(spineCut.trackDurationSec)} · ${runtimeSeconds(spineCut.trackDurationSec - spineCut.blackSec)} of ${runtimeSeconds(spineCut.trackDurationSec)} covered · cut to the track`
     : mediaOnly
       ? `${runtimeSeconds(filmSec)} · no story · what you place is the film`
       : cut
-        ? `${runtimeSeconds(cut.totalSec)} · ${cut.covered} of ${storyShotCount(production)} shots covered · ${production?.spine ? "cut to the track" : timelineState.status === "ready" ? "saved timeline" : "nothing saved yet"}`
+        ? `${runtimeSeconds(planTotalSec ?? cut.totalSec)} · ${cut.covered} of ${storyShotCount(production)} shots covered · ${production?.spine ? "cut to the track" : timelineState.status === "ready" ? "saved timeline" : "nothing saved yet"}`
         : "";
   const selectedPictureClip =
     activeSelection?.kind === "picture"
@@ -910,6 +938,23 @@ function CutEditorScreen() {
     setTimelineCommandError(null);
     setInFlight({ revision: timelineRevision, since: Date.now() });
     sendTimelineCommands(worldId, prodId, [], null, sourceFingerprint, "Open the song on the timeline");
+  };
+  /*
+   * A song that became the master after the timeline was saved (issue 3086). The opening above
+   * only seeds an unsaved record, and a saved one is never rewritten by a spine edit (SPEC-037
+   * R-4), so a person who imported the song first and let Arke make it the master afterwards had
+   * a timeline with no song on it and nothing that said so. R-4 lets the editor say it and offer
+   * the update; the update is the Library's own placement, so it is one revision and one Undo.
+   */
+  const masterArtifactId = production?.spine?.trackArtifactId ?? null;
+  const songMissing = timelineState.status === "ready" && editableTimeline !== null && view.kind === "spine" && masterArtifactId !== null &&
+    !editableTimeline.tracks.some(track => track.clips.some(clip => clip.source.kind === "artifact" && clip.source.artifactId === masterArtifactId));
+  const addSong = () => {
+    if (!songMissing || !editableTimeline || view.kind !== "spine") return;
+    const master = artifacts.find(candidate => candidate.id === masterArtifactId);
+    if (!master) { setTimelineCommandError("The song is not in this production's files."); return; }
+    try { sendCommands(songPlacementCommands(editableTimeline, master, secondsToFrames(view.cut.trackDurationSec, frameRate), mintClipId()), "Add the song"); }
+    catch (error) { setTimelineCommandError(error instanceof Error ? error.message : String(error)); }
   };
   const sendHistory = (action: "undo" | "redo") => {
     if (pictureReview.active) { pictureReview.operate({ kind: "history", ref: pictureReview.active.ref, direction: action }); return; }
@@ -1271,7 +1316,7 @@ function CutEditorScreen() {
         <strong>{`Arke assembled ${spineCut.segments.filter((segment) => segment.kind === "clip").length} picture anchors on the track.`}</strong>
       </div>
     );
-  } else if (editableTimeline !== null && allClips.length === 0 && !commandPending) {
+  } else if (editableTimeline !== null && allClips.length === 0 && !commandPending && !songMissing) {
     notice = (
       <div className="fy-cutnotice" data-testid="empty-notice">
         <span className="fy-cutnotice__mark" aria-hidden="true"><Sparkle size={12} /></span>
@@ -1504,6 +1549,15 @@ function CutEditorScreen() {
           </button>
         </header>
         {notice}
+        {/* Beside Arke's assembly banner rather than behind it (SPEC-039 R-46): both are true at once. */}
+        {songMissing && (
+          <div className="fy-cutnotice" data-testid="song-notice">
+            <span className="fy-cutnotice__mark" aria-hidden="true"><Sparkle size={12} /></span>
+            <strong>{"The song isn't on the timeline."}</strong>
+            <span className="fy-h1row__push" />
+            <button type="button" disabled={commandsDisabled} onClick={addSong}>Add the song</button>
+          </div>
+        )}
         {pictureReview.active && worldId && production && <PictureReviewBar worldId={worldId} production={production} onBack={() => { setDetailTab("arke"); if (compact) setArkeOpen(true); else setRightOpen(true); }} />}
         {transitionReview.active && worldId && production && <TransitionReviewBar worldId={worldId} production={production} onBack={() => { setDetailTab("arke"); if (compact) setArkeOpen(true); else setRightOpen(true); }} />}
         {effectReview.active && <EffectReviewBar version={effectReview.active.version.number} changes={effectReview.active.version.delta.length}
