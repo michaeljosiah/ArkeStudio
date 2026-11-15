@@ -256,12 +256,15 @@ export function ArtifactPanel({
   const [browseProduction, setBrowseProduction] = useState<string | null>(null);
   const others = productions.filter((candidate) => candidate.meta.id !== production?.meta.id);
   const other = browseProduction === null ? null : (others.find((candidate) => candidate.meta.id === browseProduction) ?? null);
+  // Every file this production can place, its own and the world's, chosen in the same select (issue 3095).
+  const [worldShelf, setWorldShelf] = useState(false);
   const worldName = (slug: string): string => worlds.find((world) => world.slug === slug)?.name ?? slug;
   // A shelf browsed from another world is that world's only while this one is open; the screen
   // can outlive a world change, and the shelf it was browsing may be the world it is now in.
   useEffect(() => {
     setBrowseSlug(null);
     setBrowseProduction(null);
+    setWorldShelf(false);
   }, [worldId, production?.meta.id]);
   /*
    * Which use Locate reached last, per item (R-11): the next press goes on from there, and the
@@ -318,7 +321,7 @@ export function ArtifactPanel({
   // The panel can outlive a production change (the router keeps the screen); a scene of the last
   // production is no filter here. Nor is any scene while another world's shelf is shown: its
   // files belong to no scene of this production, so the control goes and the scope is every row.
-  const sceneScope = hasShots && browseSlug === null && other === null && (production?.scenes ?? []).some((scene) => scene.id === sceneFilter) ? sceneFilter : "all";
+  const sceneScope = hasShots && browseSlug === null && other === null && !worldShelf && (production?.scenes ?? []).some((scene) => scene.id === sceneFilter) ? sceneFilter : "all";
   const shots = (production?.scenes ?? []).flatMap((scene) =>
     orderedShots(scene).filter((shot) => inLibrary.has(`shot:${shot.id}`)).map((shot) => {
       const takeId = production ? acceptedTakeId(production, shot.id) : null;
@@ -418,8 +421,22 @@ export function ArtifactPanel({
   const placeableKinds = new Set<ArtifactSidecar["kind"]>(["audio", "video", "image", "board"]);
   const visible = new Set(artifactsForProduction(artifacts, production?.meta.id).map((artifact) => artifact.id));
   const onShelf = new Set(pickableArtifacts([...artifacts]).map((artifact) => artifact.id));
+  /*
+   * What "This production" lists (issue 3095): the files it owns, the ones its record's Library
+   * holds or its tracks place, its song, and the ones made for it — linked to it, to one of its
+   * scenes or to one of its shots. A world upload names no production, and counting every one as
+   * this production's listed another film's clips and songs in a new production. The world's
+   * other files are one choice away, under Browse world.
+   */
+  const madeFor = new Set(production ? [production.meta.id, ...production.scenes.flatMap((scene) => [scene.id, ...orderedShots(scene).map((shot) => shot.id)])] : []);
+  const ours = (artifact: ArtifactSidecar): boolean =>
+    (production !== null && production !== undefined && artifact.production === production.meta.id) ||
+    inLibrary.has(`artifact:${artifact.id}`) || usesIndex.has(`artifact:${artifact.id}`) ||
+    production?.spine?.trackArtifactId === artifact.id || artifact.links.some((link) => madeFor.has(link));
+  const worldFile = (artifact: ArtifactSidecar): boolean => onShelf.has(artifact.id) && placeableKinds.has(artifact.kind) && visible.has(artifact.id);
+  const worldOnly = artifacts.some((artifact) => worldFile(artifact) && !ours(artifact));
   const shelf = artifacts
-    .filter((artifact) => (onShelf.has(artifact.id) && placeableKinds.has(artifact.kind) && visible.has(artifact.id)) || inLibrary.has(`artifact:${artifact.id}`))
+    .filter((artifact) => (worldFile(artifact) && (worldShelf || ours(artifact))) || inLibrary.has(`artifact:${artifact.id}`))
     .sort((a, b) => b.created.localeCompare(a.created));
   const artifactItems: LibraryItem[] = shelf.map((artifact) => {
     const lane = laneOf(artifact);
@@ -535,7 +552,8 @@ export function ArtifactPanel({
     if (filter === "all" && item.kind === "shot") return true;
     return normalQuery === "" || item.search.toLocaleLowerCase().includes(normalQuery);
   };
-  const items = [...shotItems, ...lineItems, ...artifactItems].filter((item) => passes(item) && (normalQuery === "" || item.search.toLocaleLowerCase().includes(normalQuery)));
+  // The world's shelf is files: this production's shots and lines stay on its own list.
+  const items = (worldShelf ? artifactItems : [...shotItems, ...lineItems, ...artifactItems]).filter((item) => passes(item) && (normalQuery === "" || item.search.toLocaleLowerCase().includes(normalQuery)));
   const narrowed = normalQuery !== "" || filter !== "all" || kindFilter !== "all" || sceneScope !== "all";
   const foreignRows = (foreign?.rows ?? []).filter((row) => {
     // The pressed filter still means what it says on another world's rows: no shots, no takes
@@ -644,16 +662,18 @@ export function ArtifactPanel({
               {label}
             </button>
           ))}
-          {(worlds.length > 1 || others.length > 0) && (
-            <select className="fy-artpanel__kind" aria-label="Browse world" value={other !== null ? `production:${other.meta.id}` : (browseSlug ?? "here")}
+          {(worlds.length > 1 || others.length > 0 || worldOnly || worldShelf) && (
+            <select className="fy-artpanel__kind" aria-label="Browse world" value={other !== null ? `production:${other.meta.id}` : (browseSlug ?? (worldShelf ? "world:files" : "here"))}
               onChange={(event) => {
-                // A slug has no colon, so the prefix cannot be a world's.
+                // A slug has no colon, so neither prefix can be a world's.
                 const value = event.target.value;
                 setPicked(null);
+                setWorldShelf(value === "world:files");
                 setBrowseProduction(value.startsWith("production:") ? value.slice(11) : null);
-                setBrowseSlug(value === "here" || value.startsWith("production:") ? null : value);
+                setBrowseSlug(value === "here" || value === "world:files" || value.startsWith("production:") ? null : value);
               }}>
               <option value="here">This production</option>
+              <option value="world:files">This world’s files</option>
               {others.length > 0 && (
                 <optgroup label="This world’s productions">
                   {others.map((candidate) => (
@@ -677,7 +697,7 @@ export function ArtifactPanel({
             <option value="image">Image</option>
             <option value="audio">Audio</option>
           </select>
-          {hasShots && browseSlug === null && other === null && (production?.scenes.length ?? 0) > 1 && (
+          {hasShots && browseSlug === null && other === null && !worldShelf && (production?.scenes.length ?? 0) > 1 && (
             <select className="fy-artpanel__scene" aria-label="Scene" value={sceneScope} onChange={(event) => setSceneFilter(event.target.value)}>
               <option value="all">All scenes</option>
               {(production?.scenes ?? []).map((scene) => (

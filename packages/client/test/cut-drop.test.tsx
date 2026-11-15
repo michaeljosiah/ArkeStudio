@@ -344,7 +344,16 @@ describe("a cut with no scenes (issue 1033)", () => {
       assert.equal(screen.container.querySelector(".fy-artpanel__add"), null, "nothing to pick shots from");
       assert.equal([...screen.container.querySelectorAll<HTMLButtonElement>(".fy-artpanel__filters button")].some((button) => button.textContent === "Needs a take"), false);
       assert.match(screen.container.querySelector("[data-track='picture'] .fy-track__empty")?.textContent ?? "", /add from the Library/);
-      // The world's one video is a row without being picked, with its picture, kind and length.
+      // The world's one video is no file of this production's until it is used (issue 3095); the
+      // world's files list it without its being picked, with its picture, kind and length.
+      assert.equal(screen.container.querySelector("[data-library-item^='artifact:']"), null, "not under This production");
+      const browse = screen.container.querySelector<HTMLSelectElement>("select[aria-label='Browse world']");
+      assert.ok(browse, "the world's files are one choice away");
+      await act(async () => {
+        for (const option of browse.querySelectorAll("option[selected]")) option.removeAttribute("selected");
+        [...browse.querySelectorAll("option")].find((option) => option.value === "world:files")!.setAttribute("selected", "");
+        browse.dispatchEvent(new Event("change", { bubbles: true }));
+      });
       const row = screen.container.querySelector<HTMLElement>("[data-library-item^='artifact:']");
       assert.ok(row, "the file is listed directly");
       assert.match(row.querySelector(".fy-artrow__meta")?.textContent ?? "", /video · 5s/);
