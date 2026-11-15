@@ -243,7 +243,7 @@ import {
 import { AudioSpineCommandRefused, applyProductionSpineCommand, previewAudioSpineCommand, type AudioSpineCommandPreview } from "../productions/spine.js";
 import { applyAudioSpineCommand, type WorldBundle } from "@arke-studio/contracts";
 import { applySceneCommand, applySceneCommands, sceneCommandFrom } from "../productions/scene-commands.js";
-import { sceneActionCommands, sequenceTurnActions, dependencyPreviewWorld } from "./action-sequencing.js";
+import { sceneActionCommands, sequenceTurnActions, dependencyPreviewWorld, type TurnActionGroup } from "./action-sequencing.js";
 import { modelActionInputRefusal } from "./model-action-input.js";
 import { filePlayblast, conversationStagePlayblastArtifact } from "../productions/stage-playblast.js";
 import {
@@ -311,6 +311,8 @@ import {
   audioStudioSubjectFence,
   chapterFence,
   spineFence,
+  spineMediaFence,
+  SPINE_MEDIA_TARGET_SUFFIX,
   timelineFence,
   takesFence,
   voicesFence,
@@ -680,6 +682,11 @@ function currentWorldObservation(
     }
     case "spine": {
       const productionId = target ?? store.worldId;
+      // A chained spine card's fence on the shots and tracks alone (issue 3103); never a read's target.
+      if (productionId.endsWith(SPINE_MEDIA_TARGET_SUFFIX)) {
+        const owner = productionId.slice(0, -SPINE_MEDIA_TARGET_SUFFIX.length);
+        return { target: productionId, fence: spineMediaFence(bundle.productions.find((candidate) => candidate.meta.id === owner), bundle.artifacts) };
+      }
       return { target: productionId, fence: spineFence(bundle.productions.find((candidate) => candidate.meta.id === productionId), bundle.artifacts) };
     }
     case "takes": {
@@ -1639,7 +1646,7 @@ export function prepareWorldChatActions(
       resolveChapterViewpointEdit(store, action.productionId, action.change.changes.viewpointCharacter);
     }
     const actionId = actionIds[index]!;
-    const baseObservations = worldActionObservations(store, turn.receipts ?? [], action, deps);
+    const baseObservations = withSpineMediaFence(worldActionObservations(store, turn.receipts ?? [], action, deps), action, group, store.getBundle());
     // Checked whole before the turn completes (issue 1883): refused only at staging, a draft was
     // lost behind a reply that said it had been written, and Arke never heard why.
     if (action.kind === "production-episode-script") episodeScriptDraft(store, action);
@@ -2049,31 +2056,56 @@ function observationsCurrent(
 /** A dependent scene's future fence is validated at approval. Its original read was checked
  * before the turn completed; preparation must also survive partially completed dependencies. */
 function preparationObservations(payload: WorldChatPreparedAction, intent: ConversationActionPrepareIntent) {
-  const observed = (payload.kind === "world-chat-production-scene-command" && payload.scenePlan) || ("dependencyPreview" in payload && payload.dependencyPreview)
-    ? { baseObservations: intent.baseObservations.filter(observation => observation.requirement !== "scenes") } : intent;
-  return withoutChainedSpineRead(payload, intent, observed);
+  const dependent = (payload.kind === "world-chat-production-scene-command" && payload.scenePlan) || ("dependencyPreview" in payload && payload.dependencyPreview);
+  const observed = dependent ? { baseObservations: intent.baseObservations.filter(observation => observation.requirement !== "scenes") } : intent;
+  // A media fence taken against the scenes the dependencies leave is checked at approval, as
+  // their scene reads are.
+  return withoutChainedSpineRead(payload, intent, observed, Boolean(dependent));
 }
 
 function approvalObservations(payload: WorldChatPreparedAction, action: Pick<ConversationActionPrepareIntent, "baseObservations" | "dependencies">) {
   const observed = payload.kind === "world-chat-production-scene-command" && payload.scenePlan ? { baseObservations: payload.scenePlan.expectedObservations } :
     "dependencyPreview" in payload && payload.dependencyPreview ? { baseObservations: payload.dependencyPreview.expectedObservations } : action;
-  return withoutChainedSpineRead(payload, action, observed);
+  return withoutChainedSpineRead(payload, action, observed, false);
 }
 
 /**
- * A spine card that waits on other cards is fenced by its own base revision, not its spine read
- * (issue 3103). The read was taken before the cards it waits on, so once they land it no longer
- * matches, and a card chained after a create could never be approved. The revision is the exact
- * fence on the spine itself, checked when the card is previewed and again when it applies; the
- * read's other rows, the shots and tracks, are checked again by the spine authority.
+ * A spine card that waits on other cards is fenced on the spine by its own base revision, not by
+ * its spine read (issue 3103). The read was taken before the cards it waits on, so once they land
+ * it no longer matches, and a card chained after a create could never be approved. The revision is
+ * the exact fence on the spine itself, checked when the card is previewed and again when it applies.
+ * The read's other rows, every shot and track it showed, keep their own fence (codex on PR 3129):
+ * the spine authority checks only that a shot exists, so a shot rewritten after the card was
+ * prepared would otherwise be pinned without anyone seeing the change.
  */
 function withoutChainedSpineRead<T extends Pick<ConversationActionPrepareIntent, "baseObservations">>(
   payload: WorldChatPreparedAction,
   action: Pick<ConversationActionPrepareIntent, "dependencies">,
   observed: T,
+  mediaLater: boolean,
 ): T | { baseObservations: T["baseObservations"] } {
-  return payload.kind === "world-chat-audio-spine-command" && action.dependencies.length > 0
-    ? { baseObservations: observed.baseObservations.filter(observation => observation.requirement !== "spine") } : observed;
+  if (payload.kind !== "world-chat-audio-spine-command" || action.dependencies.length === 0) return observed;
+  return { baseObservations: observed.baseObservations.filter(observation => observation.requirement !== "spine" ||
+    (observation.target === spineMediaTarget(payload.action.productionId) && !mediaLater)) };
+}
+
+const spineMediaTarget = (productionId: string) => `${productionId}${SPINE_MEDIA_TARGET_SUFFIX}`;
+
+/**
+ * The fence a chained spine card keeps in place of its spine read: the shots and tracks that read
+ * showed, as the cards it waits on leave them. A spine card changes neither, so only scene cards
+ * before it can, and their dry run is the bundle it is taken against.
+ */
+function withSpineMediaFence(
+  observations: ArkeReadObservation[],
+  action: ModelWorldChatAction,
+  group: Pick<TurnActionGroup, "dependencies" | "dependencyPreview">,
+  bundle: WorldBundle,
+): ArkeReadObservation[] {
+  if (action.kind !== "audio-spine-command" || group.dependencies.length === 0) return observations;
+  const projected = group.dependencyPreview?.beforeBundle ?? bundle;
+  return [...observations, { requirement: "spine", target: spineMediaTarget(action.productionId), complete: true,
+    revisionOrDigest: spineMediaFence(projected.productions.find((production) => production.meta.id === action.productionId), projected.artifacts) }];
 }
 
 const UNAPPLIED: ReadonlySet<ConversationActionCard["status"]> = new Set<ConversationActionCard["status"]>(["failed", "cancelled", "denied", "stale", "superseded"]);

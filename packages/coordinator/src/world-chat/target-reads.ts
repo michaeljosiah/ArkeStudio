@@ -487,6 +487,17 @@ export function spineFence(production: ProductionBundle | undefined, artifacts: 
   return fence(spineRows(production, artifacts).map((row) => row.value), spine?.revision ?? "absent");
 }
 
+/** The observation target a chained spine card's shots-and-tracks fence is kept under (issue 3103). */
+export const SPINE_MEDIA_TARGET_SUFFIX = ":shots-and-tracks";
+
+/**
+ * The spine read's shots and tracks without the spine itself (issue 3103): what a spine card that
+ * waits on other spine cards is still fenced by, once the spine it read has moved under them.
+ */
+export function spineMediaFence(production: ProductionBundle | undefined, artifacts: WorldBundle["artifacts"] = []): string {
+  return fence(spineRows(production, artifacts).filter((row) => row.key.startsWith("30:") || row.key.startsWith("40:")).map((row) => row.value), "shots-and-tracks");
+}
+
 function boundedLimit(raw: unknown): number {
   const value = typeof raw === "number" && Number.isFinite(raw) ? Math.trunc(raw) : DEFAULT_LIMIT;
   return Math.min(Math.max(1, value), MAX_LIMIT);
