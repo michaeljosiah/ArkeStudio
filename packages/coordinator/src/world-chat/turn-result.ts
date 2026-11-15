@@ -213,6 +213,11 @@ function schemaIssueLine(issue: z.ZodIssue): string {
       if (/^candidateOperations\.\d+\.(?:candidate|replacements\.\d+)\.draft\.links\.\d+$/.test(path)) {
         return `${path} must be a typed link: {kind:"sheet",sheetId}, {kind:"canon",entryId}, or {kind:"pending-entity",ref:{temporaryId}} for a create in this result. Copy existing ids from current reads; do not use a string, title or URL.`;
       }
+      // A shot's position (issue 3084): told only that nothing matched, Arke tried {"kind":"end"}
+      // and then {"index":1}, and the turn failed with three shots unplaced.
+      if (/^actions\.\d+\.(?:command|commands\.\d+)\.(?:at|to)$/.test(path)) {
+        return `${path} must be {"atStart":true}, {"after":shotId} or {"before":shotId}, where shotId may be "ref:<name>" for a shot an earlier action inserts. There is no end or index: a shot goes last after the scene's last shot.`;
+      }
       return `${path} matches none of the allowed shapes for that field`;
     case z.ZodIssueCode.too_small: {
       const unit = issue.type === "string" ? " characters" : issue.type === "array" ? " items" : "";

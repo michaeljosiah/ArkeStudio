@@ -3381,6 +3381,26 @@ describe("turn-local scene action sequencing (#1417)", () => {
     assert.equal(orderedShots(scene(w)).find(shot => shot.id === newShot.id)!.promptOverride?.text, "Low angle, looking up at the bell.");
     assert.equal(scene(w).version, before.version + 2);
   });
+  it("adds several new shots in order on one card, each placed after the one before it (issue 3084)", async () => {
+    const w = await setup(context), before = structuredClone(scene(w));
+    const { id: _id, number: _number, visualFacts: _facts, ...shot } = orderedShots(before)[0]!;
+    const last = orderedShots(before).at(-1)!.id;
+    const receipt = currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`);
+    // The pattern the action guide teaches: one action per new shot, each with a ref and no after,
+    // so they share a card, and each next one at after the previous one's ref.
+    const insert = (ref: string, at: { after: string }, title: string) => ModelWorldChatActionSchema.parse({ kind: "production-scene-command",
+      productionId: PRODUCTION, sceneId: context.sceneId, ref, command: { kind: "insert-shot", at, shot: { ...shot, title } }, checkReceiptIds: [receipt.id] });
+    const input = turn(w.conversationId, context, { receipts: [receipt], actions: [
+      insert("lagoon", { after: last }, "The lagoon"), insert("phone", { after: "ref:lagoon" }, "The phone"), insert("door", { after: "ref:phone" }, "The door"),
+    ] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, input);
+    assert.equal(prepared.length, 1, "one card for the three shots");
+    await appendTurn(w.log, input, prepared); await bindAll(w.lifecycle, prepared);
+    const [card] = (await loaded(w.log)).actions;
+    assert.equal((await decide(w.lifecycle, w.log, card!)).status, "completed");
+    assert.deepEqual(orderedShots(scene(w)).map(one => one.title), [...orderedShots(before).map(one => one.title), "The lagoon", "The phone", "The door"]);
+    assert.equal(scene(w).version, before.version + 1);
+  });
   function shotPrompt(before: ReturnType<typeof scene>) { return orderedShots(before)[0]!.promptOverride?.text; }
   for (const parentCompleted of [false, true]) it(`recovers an interrupted dependent binding with its parent ${parentCompleted ? "completed" : "pending"}`, async () => {
     const { w, before, prepared } = await insertThenPrompt(false);
