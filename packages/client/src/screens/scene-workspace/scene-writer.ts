@@ -7,7 +7,7 @@ type Command = Extract<ClientMessage, { kind: "scene-command" }>["command"];
 export interface SceneWriter {
   /** The scene's file stem, or undefined for a scene the bundle cannot place on disk. */
   sceneFile: string | undefined;
-  /** The latest staged proposal touching this scene, if one is awaiting review. */
+  /** The latest staged proposal touching this scene and built on its current version, if one is awaiting review. */
   staged: WorldBundle["proposals"][number] | undefined;
   /** The scene as the staged proposal would leave it, or the accepted scene when nothing is staged. */
   workingScene: SceneRecord;
@@ -57,8 +57,16 @@ export function stagedShotChanges(accepted: SceneRecord, working: SceneRecord): 
 export function useSceneWriter(world: WorldBundle, production: ProductionBundle, scene: SceneRecord): SceneWriter {
   const sceneFile = production.sceneFiles[scene.id];
   const scenePath = sceneFile === undefined ? null : `productions/${production.meta.id}/scenes/${sceneFile}.json`;
+  /*
+   * Only a proposal built on this version of the scene, or a later one, is drawn over it. One built
+   * on an older version is stale: its scene is a snapshot from before the scene moved, and drawn
+   * in place it hid the shots that had landed since — one staged shot where four were accepted
+   * (issue 3104). Older, not merely different, so a snapshot that has not caught up with a fresh
+   * proposal never hides it.
+   */
   const staged = [...world.proposals]
-    .filter((entry) => scenePath !== null && entry.proposal.kind === "scene-edit" && entry.scenes?.[scenePath] !== undefined)
+    .filter((entry) => scenePath !== null && entry.proposal.kind === "scene-edit" && entry.scenes?.[scenePath] !== undefined &&
+      !entry.proposal.targets.some((target) => target.path === scenePath && target.baseVersion !== null && target.baseVersion < scene.version))
     .sort((left, right) =>
       left.proposal.created.localeCompare(right.proposal.created) || left.proposal.id.localeCompare(right.proposal.id),
     )

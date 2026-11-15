@@ -1075,22 +1075,53 @@ export class ProposalManager {
     await this.store.gateOp(async () => {
       // Again under the gate: a discard or an accept queued ahead may have taken it (codex on PR 1850).
       if (!(await this.proposalPresent(proposalId))) return;
-      const proposal = await this.readManifest(proposalId).catch(() => null);
-      // The line before the directory (codex on PR 1850): a folder gone is then always one whose
-      // discard is on record, which is what lets the check above trust its absence. A removal that
-      // fails after the line is written is retried and writes the line again: a rare duplicate,
-      // where the other order could lose the record for good.
-      await appendChanges(this.abs("changes.jsonl"), [
-        {
-          ts: this.store.now(),
-          entity: `.proposals/${proposalId}`,
-          discarded: true,
-          ...(proposal ? { reservedCanonIds: proposal.reservedCanonIds } : {}),
-          source: proposal?.source ?? "unknown",
-        },
-      ]);
-      await rm(toExtendedLength(this.proposalDir(proposalId)), { recursive: true, force: true });
+      await this.removeStaged(proposalId, await this.readManifest(proposalId).catch(() => null));
     }, precondition);
+  }
+
+  /**
+   * Discard one draft revision of a proposal and never a newer one; whether it went.
+   *
+   * Cleanup that decides to discard from a revision it read outside the gate cannot use `discard`:
+   * a form edit or a rebase queued ahead of it lands a newer draft, and the discard then deletes
+   * the person's revision along with the one the cleanup meant (codex on PR 3124). The revision
+   * is read again under the gate, after any interrupted edit is recovered as `accept` recovers it.
+   * `beforeRemove` runs under the same gate once the revision holds, so what it records about the
+   * draft — its points going back to their conversation — is true of the draft that goes.
+   */
+  async discardRevision(
+    proposalId: string,
+    draftRevision: number,
+    beforeRemove?: (proposal: Proposal) => Promise<void>,
+  ): Promise<boolean> {
+    if (!(await this.proposalPresent(proposalId))) return false;
+    return this.store.gateOp(async () => {
+      if (!(await this.proposalPresent(proposalId))) return false;
+      if ((await this.recoverDrafts(proposalId)).status === "blocked") return false;
+      const proposal = await this.readManifest(proposalId).catch(() => null);
+      if (!proposal || proposal.draftRevision !== draftRevision) return false;
+      await beforeRemove?.(proposal);
+      await this.removeStaged(proposalId, proposal);
+      return true;
+    });
+  }
+
+  /** The removal itself, under the gate: the change line, then the directory. */
+  private async removeStaged(proposalId: string, proposal: Proposal | null): Promise<void> {
+    // The line before the directory (codex on PR 1850): a folder gone is then always one whose
+    // discard is on record, which is what lets the presence checks trust its absence. A removal that
+    // fails after the line is written is retried and writes the line again: a rare duplicate,
+    // where the other order could lose the record for good.
+    await appendChanges(this.abs("changes.jsonl"), [
+      {
+        ts: this.store.now(),
+        entity: `.proposals/${proposalId}`,
+        discarded: true,
+        ...(proposal ? { reservedCanonIds: proposal.reservedCanonIds } : {}),
+        source: proposal?.source ?? "unknown",
+      },
+    ]);
+    await rm(toExtendedLength(this.proposalDir(proposalId)), { recursive: true, force: true });
   }
 
   /** Whether the proposal's directory is there. Only its absence answers no; any other failure to look is thrown (codex on PR 1850). */

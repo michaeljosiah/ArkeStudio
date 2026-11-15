@@ -753,6 +753,78 @@ describe("World Chat authority adapters", () => {
     assert.equal((await loaded(w.log)).candidates.find((one) => one.id === point.id)!.status, "accepted");
   });
 
+  it("sends a stale card's proposal back to the conversation instead of leaving it open (issue 3104)", async () => {
+    // Two shots for one scene settled in two turns: two cards, both prepared against one version.
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    const scene = () => w.store.getBundle().productions.find((one) => one.meta.id === PRODUCTION)!.scenes[0]!;
+    const before = orderedShots(scene()).length;
+    const cards: ConversationActionCard[] = [];
+    const points: WorldChangeCandidate[] = [];
+    for (const title of ["Black water", "The hold"]) {
+      const point = candidate(w.conversationId, title, {
+        classification: "development.shot",
+        target: { kind: "shot", productionId: PRODUCTION, sceneId: scene().id },
+        draft: { title, description: `${title}, held.` },
+      } as Partial<WorldChangeCandidate>);
+      const oneTurn = turn(w.conversationId, context, { existingCandidates: points, candidates: [point] });
+      const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+      await appendTurn(w.log, oneTurn, prepared);
+      await bindAll(w.lifecycle, prepared);
+      points.push(point);
+      cards.push((await loaded(w.log)).actions.at(-1)!);
+    }
+    assert.equal(cards.length, 2);
+
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed");
+    assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).status, "stale");
+    assert.equal(await w.gate.isStaged(cards[1]!.authority.id), false, "nothing is left open to accept over the newer scene");
+    assert.equal((await w.gate.listOpen()).filter((one) => one.kind === "scene-edit").length, 0);
+    const view = await loaded(w.log);
+    assert.equal(view.candidates.find((one) => one.id === points[1]!.id)!.status, "live", "the point is back on the rail");
+    assert.equal(view.candidates.find((one) => one.id === points[0]!.id)!.status, "accepted");
+    assert.equal(orderedShots(scene()).length, before + 1, "and the scene holds only what was accepted");
+  });
+
+  it("never discards a draft revised while its stale card is being cleaned up (codex on PR 3124)", async () => {
+    // The edit is queued at the gate ahead of the cleanup's discard. Read outside the gate, the
+    // cleanup saw the card's revision, and the discard then deleted the edit that landed first.
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    const sceneId = w.store.getBundle().productions.find((one) => one.meta.id === PRODUCTION)!.scenes[0]!.id;
+    const point = candidate(w.conversationId, "Black water", {
+      classification: "development.shot",
+      target: { kind: "shot", productionId: PRODUCTION, sceneId },
+      draft: { title: "Black water", description: "Black water, held." },
+    } as Partial<WorldChangeCandidate>);
+    const oneTurn = turn(w.conversationId, context, { candidates: [point] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    const proposal = await w.gate.readManifest(card.authority.id);
+    const proposalAdapter = w.adapters.find((adapter) => adapter.actionKind === "world-chat-proposal")!;
+
+    const edit = w.gate.mergeFormEdit({
+      proposalId: proposal.id,
+      requestId: "edit-while-stale",
+      path: proposal.targets[0]!.path,
+      expectedDraftRevision: card.authorityRevision,
+      edit: (content) => ({ content: content.replace("Black water, held.", "Black water, held longer.") }),
+    });
+    const cleanup = proposalAdapter.settleStale!({ ...card, status: "stale" });
+    assert.equal((await edit).status, "updated");
+    await cleanup;
+
+    assert.equal(await w.gate.isStaged(proposal.id), true, "the revised draft is still there to decide");
+    assert.equal((await w.gate.readManifest(proposal.id)).draftRevision, card.authorityRevision + 1);
+    assert.equal((await loaded(w.log)).candidates.find((one) => one.id === point.id)!.status, "proposed", "and its point was not sent back");
+
+    await proposalAdapter.settleStale!({ ...card, status: "stale", authorityRevision: card.authorityRevision + 1 });
+    assert.equal(await w.gate.isStaged(proposal.id), false, "the draft the card names is the one that goes");
+    assert.equal((await loaded(w.log)).candidates.find((one) => one.id === point.id)!.status, "live");
+  });
+
   it("binds an atomic candidate group to one existing ProposalManager authority", async () => {
     const w = await setup();
     const groupId = newId("grp");
