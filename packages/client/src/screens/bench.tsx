@@ -42,8 +42,14 @@ import {
   modeSpec,
   modeCapability,
   MUSIC_DURATION_SEC,
+  balanceFaulted,
+  pausedLaneFor,
+  pauseReasonWords,
   pricedDuration,
   presetFault,
+  providerName,
+  subjectClipDuration,
+  subjectClipOptions,
   supportedDeliveries,
   tiersFor,
   takeCostCopy,
@@ -57,6 +63,7 @@ import {
   type BenchSession,
   type BenchTake,
   type ManifestModel,
+  type QueueStatus,
   type SizeTier,
   type TaskMode,
 } from "@arke-studio/contracts";
@@ -81,6 +88,7 @@ import {
   sendBenchDraftLyrics,
   sendBenchTitle,
   sendBenchUploadReferences,
+  resumeQueue,
   subscribeBriefEnhanced,
   subscribeBenchSubjectAccepted,
   subscribeBenchSubjectOpened,
@@ -652,6 +660,16 @@ function BenchWorkspace({
     if (!laneTabs && lane === "keyframe") setLane("reference");
   }, [laneTabs, lane]);
   /**
+   * One clip request carries references or keyframes, never both: dispatch refuses the pair. Each
+   * lane hid the other, so a start frame set in one and a reference added in the other met for the
+   * first time as a refused Generate (issue 3196). Counted as dispatch counts them — tokens the
+   * session still knows — so each lane can say what the other holds and clear it.
+   */
+  const known = (token: string) => session.tokenRegistry.some((entry) => entry.token === token);
+  const ridingReferences = draft.mode === "video" ? session.composer.activeTokens.filter(known) : [];
+  const ridingFrames = draft.mode === "video" ? frames.filter(known) : [];
+  const laneClash = ridingReferences.length > 0 && ridingFrames.length > 0;
+  /**
    * The Reference lane on a row with a reference route (design turn 179): its pictures go in as
    * who is in the clip, each with a name. A row without the route keeps the picture and holds
    * Generate with the gate's own clause, so the screen cannot promise what dispatch refuses.
@@ -971,6 +989,18 @@ function BenchWorkspace({
     const job = take.jobId ? jobs.get(take.jobId) : undefined;
     return job ? job.status : take.status;
   };
+  /**
+   * The paused lane a take waits behind, by the rule Activity reads (issue 3195). Its job is
+   * `queued`, which is in flight by the queue's vocabulary, so the take went on reading
+   * `rendering…` while fal refused it for an exhausted balance and Activity alone said it was held.
+   */
+  const heldBy = (take: BenchTake): QueueStatus | undefined => {
+    const job = take.jobId ? jobs.get(take.jobId) : undefined;
+    return job === undefined ? undefined : pausedLaneFor(job, state?.app.queues ?? []);
+  };
+  /** Out there and being worked on — not held, which is waiting on a person. */
+  const working = (take: BenchTake): boolean => inFlight(liveStatus(take)) && heldBy(take) === undefined;
+  const selectedHold = selected === null ? undefined : heldBy(selected);
 
   // 4K joins the wall only when the session has video to answer for it (issue 305 §3).
   const [cropTakeId, setCropTakeId] = useState<string | null>(null);
@@ -1066,10 +1096,21 @@ function BenchWorkspace({
       ...(params.tier !== undefined ? { tier: params.tier } : {}),
       ...(params.aspect !== undefined ? { aspect: params.aspect } : {}),
     });
-  const videoSeconds = (candidate: ManifestModel, params: BenchVideoParams) =>
-    params.durationSec ??
-    durationLimitsFor(candidate, taskModeForKeyframes(candidate, session.composer.keyframeTokens.length)).maxDurationSec ??
-    5;
+  /**
+   * The authored length a shot's clip or a board's covers — read from the params, as dispatch
+   * reads it — or null without one. The clip is never shorter (issue 3197).
+   */
+  const clipCovers = subject !== undefined && draft.params.kind === "video" ? (draft.params.durationSec ?? subject.durationSec) : null;
+  const videoSeconds = (candidate: ManifestModel, params: BenchVideoParams) => {
+    const route = {
+      taskMode: taskModeForKeyframes(candidate, session.composer.keyframeTokens.length),
+      withReferences: session.composer.activeTokens.length > 0,
+    };
+    // A shot's or a board's clip is the length its control shows (issue 3197), priced as such.
+    const clip = clipCovers !== null ? subjectClipDuration(candidate, clipCovers, params.clipSec, route) : null;
+    if (clip?.kind === "asked") return clip.seconds;
+    return params.durationSec ?? durationLimitsFor(candidate, route.taskMode).maxDurationSec ?? 5;
+  };
   const estimateFor = (candidate: ManifestModel): number => {
     if (draft.params.kind === "image") {
       const output = imageOutput(candidate, draft.params);
@@ -1258,6 +1299,15 @@ function BenchWorkspace({
   const durationValue = track?.value ?? -1;
   const durationFill = track?.fill ?? 0;
   const durationLostToReferences = track?.lostToReferences ?? null;
+  // A subject's clip length (issue 3197): the route's lengths that cover the authored one, and
+  // the one that will go — never the authored length printed as a fact when the route cannot
+  // make it, which is what a 3s shot read as on a 4s-minimum model while 4s was sent.
+  const clipOptions = model !== null && clipCovers !== null ? subjectClipOptions(model, clipCovers, { taskMode, withReferences }) : [];
+  const clipChoice =
+    model !== null && clipCovers !== null && videoParams !== null
+      ? subjectClipDuration(model, clipCovers, videoParams.clipSec, { taskMode, withReferences })
+      : null;
+  const clipSeconds = clipChoice?.kind === "asked" ? clipChoice.seconds : null;
   const durationPanel =
     model === null ? null : (
       <div className="fy-bench__duration" role="dialog" aria-label="Duration">
@@ -1833,6 +1883,20 @@ function BenchWorkspace({
               </button>
             </div>
           )}
+          {lane === "reference" && !soundOnly && laneClash && (
+            <div className="fy-bench__laneclash" data-testid="bench-keyframes-set">
+              <span>{ridingFrames.length === 1 ? "1 keyframe set" : `${ridingFrames.length} keyframes set`}</span>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  for (const token of ridingFrames) sendBenchRemoveReference(worldId, session.id, token, "keyframe");
+                }}
+              >
+                Clear keyframes
+              </Button>
+            </div>
+          )}
 
           {/* keyframe tiles — the pictures the shot must pass through, in order */}
           {lane === "keyframe" && (
@@ -1883,6 +1947,20 @@ function BenchWorkspace({
                 <p className="fy-bench__refusal">
                   {(keyframePlan(model, frames.length) as { ok: false; reason: string }).reason}
                 </p>
+              )}
+              {laneClash && (
+                <div className="fy-bench__laneclash" data-testid="bench-references-set">
+                  <span>{ridingReferences.length === 1 ? "1 reference set" : `${ridingReferences.length} references set`}</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      for (const token of ridingReferences) sendBenchRemoveReference(worldId, session.id, token);
+                    }}
+                  >
+                    Clear references
+                  </Button>
+                </div>
               )}
             </>
           )}
@@ -2113,10 +2191,46 @@ function BenchWorkspace({
           >
             {subject !== undefined && (
               <>
-                {draft.mode === "video" && (
-                  <span className="fy-bench__chip fy-bench__chip--fact" title="the shot's length">
-                    {`${subject.durationSec}s`}
-                  </span>
+                {/* The clip's length is the route's to offer, from the shortest that covers the
+                    shot (issue 3197); the shot's own length rides beside it only where they
+                    differ. A model with no lengths to offer cannot be chosen here at all. */}
+                {draft.mode === "video" && clipSeconds !== null && videoParams !== null ? (
+                  <>
+                    <select
+                      aria-label="Length"
+                      className="fy-bench__chip"
+                      data-testid="bench-clip-length"
+                      value={String(clipSeconds)}
+                      onChange={(e) => {
+                        const seconds = Number(e.target.value);
+                        const { clipSec: _cleared, ...rest } = videoParams;
+                        // The shortest is where the clip starts, so choosing it again clears the
+                        // choice: the next model starts from the shot's own length too.
+                        compose({ ...draft, params: seconds === clipOptions[0] ? rest : { ...rest, clipSec: seconds } });
+                      }}
+                    >
+                      {clipOptions.map((seconds) => (
+                        <option key={seconds} value={String(seconds)}>
+                          {`${seconds}s`}
+                        </option>
+                      ))}
+                    </select>
+                    {clipSeconds !== clipCovers && (
+                      <span
+                        className="fy-bench__chip fy-bench__chip--fact"
+                        data-testid="bench-clip-authored"
+                        title={subject.kind === "shot" ? "the shot's length" : "the board's length"}
+                      >
+                        {`${subject.kind === "shot" ? "shot" : "board"} ${clipCovers}s`}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  draft.mode === "video" && (
+                    <span className="fy-bench__chip fy-bench__chip--fact" title="the shot's length">
+                      {`${subject.durationSec}s`}
+                    </span>
+                  )
                 )}
                 <span className="fy-bench__chip fy-bench__chip--fact" title="the production's aspect">
                   {draft.mode === "image" && model?.limits.providerSelectedSize ? `Composition · ${subject.aspect}` : subject.aspect}
@@ -2630,6 +2744,7 @@ function BenchWorkspace({
                 // button tells, and the missing half is right there on screen.
                 (musicParams !== null && musicParams.lyrics.trim().length === 0) ||
                 routeRefusal !== null ||
+                laneClash ||
                 overCap ||
                 pendingDispatch.current !== null
               }
@@ -2650,6 +2765,11 @@ function BenchWorkspace({
           {routeRefusal !== null && (
             <p role="alert" className="fy-bench__refusal" data-testid="bench-route-refusal">
               {routeRefusal}
+            </p>
+          )}
+          {laneClash && (
+            <p role="alert" className="fy-bench__refusal" data-testid="bench-lane-clash">
+              References or keyframes, not both
             </p>
           )}
           {refusal !== null && (
@@ -2901,7 +3021,7 @@ function BenchWorkspace({
               {/* Something to watch while a take is out. Only while it is out: an empty bench
                   and a failed take are both still, because a moving picture reads as work
                   happening and neither of those is work happening. */}
-              {selected !== null && inFlight(liveStatus(selected)) && (
+              {selected !== null && working(selected) && (
                 <video
                   className="fy-bench__waiting"
                   data-testid="bench-waiting"
@@ -2913,7 +3033,27 @@ function BenchWorkspace({
                   aria-hidden
                 />
               )}
-              {subject === undefined ? (
+              {selected !== null && selectedHold !== undefined ? (
+                /* Held behind a paused provider, on either bench (issue 3195): which provider and
+                   why, and the same two ways on Activity's row offers — nothing moves until one. */
+                <span className="fy-bench__held" data-testid="bench-held">
+                  <span className="fy-bench__emptyline">
+                    {`Held · ${providerName(selectedHold.provider)} ${balanceFaulted({ fault: selectedHold.reason ?? null }) ? "out of credit" : "paused"}`}
+                  </span>
+                  {!balanceFaulted({ fault: selectedHold.reason ?? null }) && pauseReasonWords(selectedHold) !== null && (
+                    <span className="fy-bench__emptysub">{pauseReasonWords(selectedHold)}</span>
+                  )}
+                  <span className="fy-bench__emptysub">{`${takeRouteName(selected)} · take ${selected.n}`}</span>
+                  <span className="fy-bench__heldactions">
+                    <Button size="sm" disabled={connection !== "open"} onClick={() => resumeQueue(selectedHold.provider)}>
+                      {`Resume ${providerName(selectedHold.provider)}`}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => void navigate("/settings/providers")}>
+                      Settings
+                    </Button>
+                  </span>
+                </span>
+              ) : subject === undefined ? (
                 <strong style={{ font: "600 15px var(--font-sans)" }}>
                   {selected ? statusLine(liveStatus(selected), selected) : "The bench is empty"}
                 </strong>
@@ -3035,7 +3175,7 @@ function BenchWorkspace({
                 <span className="fy-bench__taken">{take.n}</span>
                 <span
                   className="fy-bench__takeframe"
-                  data-inflight={inFlight(status) ? "true" : undefined}
+                  data-inflight={working(take) ? "true" : undefined}
                 >
                   {hasAdultAdapter(take.request.params) && !state?.app.adapters?.adultContent.enabled ? <span className="fy-bench__takestate">Hidden</span> : take.media ? (
                     <>
@@ -3055,6 +3195,9 @@ function BenchWorkspace({
                         </span>
                       )}
                     </>
+                  ) : heldBy(take) !== undefined ? (
+                    /* Held is not generating, so no spinner (issue 3195). */
+                    <span className="fy-bench__takestate fy-bench__takestate--held">held</span>
                   ) : inFlight(status) ? (
                     /* R-24: a generating take is a hatched placeholder with a spinner. */
                     <span className="fy-bench__takespin" role="img" aria-label="rendering" />
@@ -3428,7 +3571,8 @@ export function BenchSentBox({ take, routeName, bundleName, sampling }: {
           record.route,
           strengths ? `${bundleName ?? "Adapters"} ${strengths}` : null,
           sampling,
-          params?.durationSec !== undefined ? `${params.durationSec} s` : null,
+          // A subject's picked length is the one that went, not the shot's (issue 3197).
+          (params?.clipSec ?? params?.durationSec) !== undefined ? `${params?.clipSec ?? params?.durationSec} s` : null,
         ]
           .filter(Boolean)
           .join(" · ")}

@@ -4664,6 +4664,11 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-bench__lanes button[aria-selected="true"] { background: var(--background); box-shadow: var(--shadow-xs); color: var(--foreground); font-weight: 500; }
 /* "A model that takes no keyframes shows no Keyframe tab, and the composer says so in a line." */
 .fy-bench__nolane { margin: 10px 2px 0; font: 400 10.5px var(--font-mono); color: var(--muted-foreground); }
+/* The other lane's pictures, said in this one beside the way to clear them (issue 3196). */
+.fy-bench__laneclash {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 10px 2px 0;
+  font: 400 10.5px var(--font-mono); color: var(--muted-foreground); flex: none;
+}
 .fy-bench__slotchip {
   position: absolute; right: 5px; top: 5px; padding: 2px 6px; border-radius: 5px;
   background: var(--background); border: 1px solid var(--border);
@@ -5128,6 +5133,9 @@ span.fy-bench__who { border-bottom: 0; }
   display: flex; flex-direction: column; align-items: center; gap: 8px;
   color: var(--muted-foreground); animation: fy-pulse 1.6s ease-in-out infinite;
 }
+/* Held behind a paused provider (issue 3195): still, because nothing is happening. */
+.fy-bench__held { display: flex; flex-direction: column; align-items: center; gap: 8px; color: var(--warning); }
+.fy-bench__heldactions { display: flex; gap: 6px; margin-top: 4px; }
 /* A playblast has no poster: the design's three greybox figures on a floor grid stand in
    (2635-2639). The colours are the illustration's, not the theme's — it is a picture. */
 .fy-bench__blockstand {
@@ -5146,6 +5154,7 @@ span.fy-bench__who { border-bottom: 0; }
   font: 400 8.5px var(--font-mono); color: var(--neutral-400);
 }
 .fy-bench__takestate--failed { color: var(--destructive); }
+.fy-bench__takestate--held { color: var(--warning); }
 
 /* ---- the reference picker (design 69a) ------------------------------------ */
 .fy-refpicker__grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
