@@ -7,7 +7,9 @@ import {
   compilationIsStale,
   designatedCompilation,
   mainPhotoFor,
+  orderedLocationViews,
   type Compilation,
+  type LocationView,
   type ReferenceKit,
 } from "./reference.js";
 import { DEFAULT_AUDIO_POLICY, type AudioPolicy, type ResolvedArtDirection } from "./art-direction.js";
@@ -1254,6 +1256,8 @@ export function attachmentFor(
   sheet: Sheet,
   role: "primary" | "secondary" = "primary",
   scope?: { productionId?: string; sceneId?: string },
+  /** What the dispatch makes. Only a place reads it: a video route never takes the location sheet. */
+  capability?: ManifestModel["capability"],
 ): AttachmentDecision {
   const scopedLooks = (kit?.looks ?? []).filter((look) => {
     if (!look.attachedTo || !scope?.productionId) return false;
@@ -1313,17 +1317,50 @@ export function attachmentFor(
       : { sheetId: sheet.id, file: null, mode: "sketch-citation", role, staleGap: null };
   }
   const stale = compilationIsStale(kit, designated, sheet.version);
+  const staleGap = stale
+    ? `model sheet is v${designated.sheetVersion}; ${sheet.name} is at v${sheet.version}`
+    : null;
+  const view = plainLocationView(kit, designated, capability);
+  if (view !== null) {
+    // The sheet's own staleness, kept: the view is what the sheet was assembled from, so a
+    // place whose words moved on since is exactly as out of date sent either way.
+    return { sheetId: sheet.id, file: `references/${sheet.id}/${view.file}`, mode: "main-photo", role, staleGap };
+  }
   const panels = locationSheetPanels(kit, designated);
   return {
     sheetId: sheet.id,
     file: `references/${sheet.id}/${designated.file}`,
     mode: "designated",
     role,
-    staleGap: stale
-      ? `model sheet is v${designated.sheetVersion}; ${sheet.name} is at v${sheet.version}`
-      : null,
+    staleGap,
     ...(panels ? { panels } : {}),
   };
+}
+
+/**
+ * The accepted view a place sends instead of its location sheet (issue 3194), or null for the
+ * sheet.
+ *
+ * The sheet is drawn for an image model: angles stacked, each over a caption band, and the
+ * prompt's panel map citing them by position. A reference-to-video model is asked to reproduce
+ * every picture it is given, so it was handed the caption and the grey pillarbox bars as things
+ * to put in the clip. A video route takes the establishing view instead — the angle every other
+ * one was made against, and the one a scene gets unless it chose another as its plate.
+ *
+ * A one-view sheet is that same picture shrunk into the band with a label that locates nothing:
+ * the only words that cite its panel are the panel map, drawn from this decision and so gone
+ * with the sheet. Every route takes the view. Two or more views keep the sheet on image routes,
+ * where the map earns its place.
+ */
+function plainLocationView(
+  kit: ReferenceKit,
+  designated: Compilation,
+  capability: ManifestModel["capability"] | undefined,
+): LocationView | null {
+  if (designated.format !== "location-sheet") return null;
+  const views = orderedLocationViews(kit);
+  if (views.length === 0) return null;
+  return capability === "video" || views.length === 1 ? views[0]! : null;
 }
 
 /**
@@ -2020,11 +2057,13 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
           prop: { name: entry.propName, state: entry.stateName ?? "unresolved" },
         };
       }
+      // The route decides which picture a place sends (issue 3194).
       return attachmentFor(
         kits.find((k) => k.sheetId === c.sheetId) ?? null,
         sheets.find((s) => s.id === c.sheetId)!,
         c.referenceRole,
         { ...(input.productionId ? { productionId: input.productionId } : {}), sceneId: scene.id },
+        model.capability,
       );
     });
   const capSec = durationLimitsFor(model).maxDurationSec ?? Number.POSITIVE_INFINITY;

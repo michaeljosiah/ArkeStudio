@@ -159,17 +159,21 @@ async function sheetTokens(
   production: ProductionBundle,
   scene: SceneRecord,
   reader: SubjectSourceReader,
+  mode: "image" | "video",
   startAt = 1,
 ): Promise<BenchReferenceToken[]> {
   const references: BenchReferenceToken[] = [];
   let image = startAt;
   const ordered = sheetOrder(shots, world);
+  // The composer's mode, as dispatch planning passes the model's: a place handed to a clip is
+  // its view, never its labelled sheet (issue 3194).
   const decisions = ordered.map(({ sheet }) =>
     attachmentFor(
       world.referenceKits.find((candidate) => candidate.sheetId === sheet.id) ?? null,
       sheet,
       "primary",
       { productionId: production.meta.id, sceneId: scene.id },
+      mode,
     ),
   );
   for (const bound of bindReferences(decisions, world.sheets)) {
@@ -486,7 +490,7 @@ export async function prepareBenchSubject(
     // A staged clip's location plate rides first (issue 1818, design turn 229h): the picture the
     // set was built from, so the generator sees the place the blockout moves through.
     const plate = mode === "video" && shot.staging !== undefined ? plateToken(scene, world) : null;
-    const references = [...(plate === null ? [] : [plate]), ...await sheetTokens([shot], world, production, scene, input.sources, plate === null ? 1 : 2)];
+    const references = [...(plate === null ? [] : [plate]), ...await sheetTokens([shot], world, production, scene, input.sources, mode, plate === null ? 1 : 2)];
     const staging = mode === "video" ? shot.staging : undefined;
     const shown = {
       durationSec: shot.durationSec ?? DEFAULT_SHOT_SEC,
@@ -603,7 +607,7 @@ export async function prepareBenchSubject(
   // staged shot does with its playblast (issue 1824, design turn 229h).
   const animatic = animaticToken(scene, world, board.memberShotIds, aspect, board.letter);
   const plate = animatic === null ? null : plateToken(scene, world);
-  const sheets = [...(plate === null ? [] : [plate]), ...await sheetTokens(members, world, production, scene, input.sources, plate === null ? 1 : 2)];
+  const sheets = [...(plate === null ? [] : [plate]), ...await sheetTokens(members, world, production, scene, input.sources, "video", plate === null ? 1 : 2)];
   const frames: BenchReferenceToken[] = [];
   let nextImage = sheets.length + 1;
   for (const shot of members) {

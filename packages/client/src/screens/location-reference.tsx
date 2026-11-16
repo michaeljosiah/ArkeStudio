@@ -552,10 +552,17 @@ export function LocationReferenceScreen() {
           </div>
           <p className="fy-mono">{sheetFile}</p>
           {/* The same function dispatch composes the preamble from, so what this promises and
-              what a request states cannot drift into disagreeing. */}
+              what a request states cannot drift into disagreeing. Only a frame of a place with
+              several views takes the sheet: a clip takes the establishing view, and so does
+              every shot of a place with one, whose panel label would locate nothing (issue 3194). */}
           <div className="fy-locref__carries">
             <span className="fy-mono">WHAT A SHOT CARRIES</span>
-            <p>{panelMapPhrase(views.map((view) => view.name))}</p>
+            {views.length > 1 ? (
+              <>
+                <p>Frame · {panelMapPhrase(views.map((view) => view.name))}</p>
+                <p>Clip · {views[0]!.name}</p>
+              </>
+            ) : views[0] && <p>{views[0].name}</p>}
           </div>
         </section>}
       </main>
