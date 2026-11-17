@@ -2775,6 +2775,30 @@ describe("block seams (design turn 198)", () => {
     assert.equal(q(n, '[data-testid="audiobook-blocks-press"]')!.textContent, "Blocks 1 changed");
   });
 
+  it("each line of a beat opens the speaker menu, and a choice pins that line, not the block (issue 3232, SPEC-012 R-63)", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { voices: CAST, audiobook: joined() });
+    const beat = q(m, '[data-block="p0.0"]')!;
+    const presses = [...beat.querySelectorAll('[data-testid="audiobook-turn-speaker"]')] as HTMLElement[];
+    assert.deepEqual(presses.map((press) => press.getAttribute("aria-label")), ["Maren Kest", "narrator"], "each later turn's name is a press");
+    assert.equal(beat.querySelector(".fy-ab__text")!.textContent, `${P0}\n\n${LINE}`, "the presses add nothing to the block's words");
+    await act(async () => presses[0]!.click());
+    const options = [...beat.querySelectorAll(".fy-ab__menu-opt")] as HTMLElement[];
+    assert.equal(options.find((option) => option.textContent?.startsWith("Maren Kest"))?.textContent, "Maren Kest✓", "the line's own speaker, in this chapter, is ticked");
+    await act(async () => options.find((option) => option.textContent === "Narration")!.click());
+    const line = m.sent.findLast((message) => message.kind === "set-voice-pin") as Extract<ClientMessage, { kind: "set-voice-pin" }>;
+    assert.deepEqual(
+      { paragraph: line.paragraph, occurrence: line.occurrence, quote: line.quote, narration: line.narration },
+      { paragraph: 1, occurrence: 0, quote: QUOTE, narration: true },
+      "the line in the beat's second paragraph, named as the saved prose holds it",
+    );
+    // The first turn's is the margin's press.
+    await act(async () => (beat.querySelector("button.fy-ab__speaker") as HTMLElement).click());
+    await act(async () => ([...beat.querySelectorAll(".fy-ab__menu-opt")] as HTMLElement[]).find((option) => option.textContent === "Maren Kest")!.click());
+    const first = m.sent.findLast((message) => message.kind === "set-voice-pin") as Extract<ClientMessage, { kind: "set-voice-pin" }>;
+    assert.deepEqual({ paragraph: first.paragraph, occurrence: first.occurrence, quote: first.quote, sheet: first.sheet }, { paragraph: 0, occurrence: 0, quote: P0, sheet: "maren-kest" });
+  });
+
   it("joins at once even where both blocks have a picture: the join keeps the second as a mark (design turn 237, R-203)", async () => {
     const m = await mount(inkbound());
     const picture = (text: string) => ({ file: "world-art.png", source: "generated" as const, textHash: audiobookTextHash(text), at: AT });
