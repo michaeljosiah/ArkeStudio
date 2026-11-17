@@ -224,6 +224,10 @@ export function ProductionDashboardScreen() {
     : production.takes;
   const pending = takes.filter((t) => decisions[t.id] === "pending");
   const shots = production.scenes.flatMap((s) => orderedShots(s));
+  // Scenes with no shots in them (issue 3218): nothing can be made until the shots are written, so
+  // the lead card points at Develop. A film adapted from a 29-scene book, with no script and no
+  // shots, opened on Make the first clip.
+  const unwritten = takes.length === 0 && shots.length === 0;
   // A visual novel's shot is a picture, not a clip (turn 174): it is covered when the picture its
   // beat shows is there — a filed frame or an accepted still, the one before where it keeps that
   // one — as the Beats view and the export read it (codex round 11).
@@ -280,8 +284,9 @@ export function ProductionDashboardScreen() {
         <>
           <div className="fy-dashrow">
             {songCard}
+            {unwritten && <NoShotsCard beats={beats} onOpen={() => navigate(`/w/${worldId}/p/${prodId}/story`)} />}
             {/* With nothing made, the next shot's card says it all: two cards offered the same press. */}
-            {(takes.length > 0 || !nextGap) && <div className="fy-threadcard">
+            {!unwritten && (takes.length > 0 || !nextGap) && <div className="fy-threadcard">
               <div className="fy-threadcard__head">
                 <span className="fy-threadcard__label">
                   {pending.length > 0 ? `TO REVIEW · ${pending.length}` : takes.length > 0 ? "ALL REVIEWED" : "NOTHING MADE YET"}
@@ -437,6 +442,21 @@ function SongCard({ onChoose }: { onChoose: () => void }) {
       <div className="fy-threadcard__title">Choose the song</div>
       <div className="fy-threadcard__actions">
         <Button variant="primary" onClick={onChoose}>Open the Library</Button>
+      </div>
+    </div>
+  );
+}
+
+/** Scenes but no shots yet (issue 3218): the shots are written in Develop before anything is made. */
+function NoShotsCard({ beats, onOpen }: { beats: boolean; onOpen: () => void }) {
+  return (
+    <div className="fy-threadcard" data-testid="no-shots-card">
+      <div className="fy-threadcard__head">
+        <span className="fy-threadcard__label">{beats ? "NO BEATS YET" : "NO SHOTS YET"}</span>
+      </div>
+      <div className="fy-threadcard__title">{beats ? "Write the beats" : "Write the shots"}</div>
+      <div className="fy-threadcard__actions">
+        <Button variant="primary" onClick={onOpen}>Open Develop</Button>
       </div>
     </div>
   );
