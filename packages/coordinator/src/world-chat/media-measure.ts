@@ -1,5 +1,5 @@
 import { AGENT_QUALITY_LIMITS, AGENT_REVIEW_LIMITS, AGENT_SHEET_LIMITS, AGENT_SYNC_LIMITS, AgentClipQualitySchema, AgentExportReviewSchema, AgentSongMapSchema, AgentSyncMeasurementSchema, EFFECT_ANALYSIS_PROFILE, SONG_SECTION_PROFILE,
-  createEffectPcmAnalyzer, findSongSections, productionExportFingerprint, type AgentClipQuality, type AgentContactSheet, type AgentExportReview, type AgentMediaInventory, type AgentMediaSource, type TimelineClip,
+  buildRenderPlan, createEffectPcmAnalyzer, defaultExportPreset, findSongSections, productionExportFingerprint, type AgentClipQuality, type AgentContactSheet, type AgentExportReview, type AgentMediaInventory, type AgentMediaSource, type TimelineClip,
   type AgentSongMap, type AgentSyncMeasurement, type ClipQualityArgs, type MeasureSyncArgs, type SongMapArgs } from "@arke-studio/contracts";
 import { hashContainedProductionMedia, withContainedProductionMedia } from "../world/reference-files.js";
 import { parseStreamRate, regionGeometry, type AgentMediaTools } from "../media/agent-media-tools.js";
@@ -147,8 +147,12 @@ export async function inParallel<T, R>(items: readonly T[], signal: AbortSignal,
 }
 
 type CutClip = TimelineClip & { startSec: number; endSec: number };
-/** The cut an export was made from, when its production still holds it: its picture clips in time order, its frame rate and its end. */
-async function exportCut(store: WorldStore, source: AgentMediaSource): Promise<{ productionId: string; rate: number; endSec: number; clips: CutClip[] } | null> {
+/**
+ * The cut an export was made from, when its production still holds it: its picture clips in time
+ * order, its frame rate, and its length as the export's own render plan sets it (sound trimmed to
+ * the picture, a base track's remembered end kept as black), null when that plan refuses.
+ */
+async function exportCut(store: WorldStore, source: AgentMediaSource): Promise<{ productionId: string; rate: number; endSec: number | null; clips: CutClip[] } | null> {
   if (source.kind !== "export") return null;
   const record = (await readCompletedExports(store)).find(row => row.id === source.exportId), bundle = store.getBundle();
   const production = bundle.productions.find(row => row.meta.id === record?.productionId);
@@ -156,12 +160,12 @@ async function exportCut(store: WorldStore, source: AgentMediaSource): Promise<{
   if (!record || record.episodeId || !record.sourceFingerprint || !production || production.timeline?.status !== "ready" ||
     productionExportFingerprint(bundle, production) !== record.sourceFingerprint) return null;
   const timeline = production.timeline.timeline, rate = timeline.frameRate;
-  const endFrame = Math.max(0, ...timeline.tracks.flatMap(track => track.clips.map(clip => clip.startFrame + clip.durationFrames)));
+  const planned = buildRenderPlan({ production, artifacts: bundle.artifacts, timeline: production.timeline, scope: { kind: "production" }, preset: defaultExportPreset(production.meta) });
   // A muted Picture track puts nothing in the export (render-plan's overlaysFromTimeline): above the base it is left out, and a muted base is black.
   const clips = timeline.tracks.filter(track => track.kind === "picture" && !track.muted).sort((a, b) => a.order - b.order)
     .flatMap(track => track.clips.map(clip => ({ ...clip, startSec: clip.startFrame / rate, endSec: (clip.startFrame + clip.durationFrames) / rate })))
     .sort((a, b) => a.startSec - b.startSec || a.endSec - b.endSec);
-  return { productionId: production.meta.id, rate, endSec: endFrame / rate, clips };
+  return { productionId: production.meta.id, rate, endSec: planned.ok ? planned.plan.totalSec : null, clips };
 }
 
 /** The export's own picture clips over a window, when its production still holds the cut it was made from; else null. */
@@ -237,29 +241,39 @@ export async function reviewInSnapshot(store: WorldStore, tools: AgentMediaTools
     .map(shot => ({ ...shot, clip: null as CutClip | null }));
   if (shots.length > AGENT_REVIEW_LIMITS.maxShots) throw new RetrievalError("bad-argument", `This window holds ${shots.length} shots, more than a review covers (${AGENT_REVIEW_LIMITS.maxShots}); name a shorter window.`);
 
-  // Every native frame, small, in 60 s reads three at a time; only the steps between them are kept.
+  /*
+   * Every native frame, small, in 60 s reads three at a time; only the steps between them are
+   * kept, each at the decoded time of the frame it leads into. A frame's index over the average
+   * rate is no clock in a variable-rate film: 60 fps then 24 averages 42 and puts the frames at
+   * the change seconds late, in the wrong shot.
+   */
   const starts: number[] = [];
   for (let at = film.startSec; at < film.endSec - .05; at += 60) starts.push(at);
-  const reads = await inParallel(starts, signal, (at, each) => grayFrames(film.path, film.video, at, Math.min(film.endSec, at + 60), { fps: null, edge: 48 }, each)
-    .then(read => ({ steps: Array.from(frameMotion(read.frames)), first: read.frames[0], last: read.frames[read.frames.length - 1] })));
-  const steps: number[] = [];
+  const reads = await inParallel(starts, signal, (at, each) => grayFrames(film.path, film.video, at, Math.min(film.endSec, at + 60), { fps: null, edge: 48, times: true }, each)
+    .then(read => {
+      const offset = from + (at - film.startSec), times = read.times;
+      if (!times || times.length !== read.frames.length) throw new RetrievalError("unavailable", "The film's frames carry no times to place them in their shots.");
+      return { steps: Array.from(frameMotion(read.frames)), times: times.map(time => offset + time), first: read.frames[0], last: read.frames[read.frames.length - 1] };
+    }));
+  const steps: number[] = [], stepTimes: number[] = [];
   for (const [i, read] of reads.entries()) {
     const before = reads[i - 1]?.last;
-    if (before && read.first) steps.push(...frameMotion([before, read.first]));
-    steps.push(...read.steps);
+    if (before && read.first) { steps.push(...frameMotion([before, read.first])); stepTimes.push(read.times[0]!); }
+    steps.push(...read.steps); stepTimes.push(...read.times.slice(1));
   }
-  // Step k leads into frame k + 1, at that frame's time on the film's clock.
-  const stepAt = (k: number) => from + (k + 1) / (rate ?? 30);
 
   // The film's own mix, once, for the clips' sync; each clip's source read from its own snapshot.
   const mix = film.audio && cut ? await decodeMono(monoAudio, film.path, film.audio, film.startSec, film.endSec, signal) : null;
-  const syncs = await inParallel(shots, signal, async (shot, each) => mix && shot.clip ? clipSync(store, tools, each, resolve, cut!, shot.clip, mix, shot.startSec - from, shot.endSec - shot.startSec) : null);
+  // A window that opens inside a clip reads the clip's sound from that point in, not from its in-point.
+  const syncs = await inParallel(shots, signal, async (shot, each) => mix && shot.clip ? clipSync(store, tools, each, resolve, cut!, shot.clip, mix,
+    shot.startSec - from, shot.endSec - shot.startSec, Math.max(0, shot.startSec - shot.clip.startSec)) : null);
 
   const loud = film.audio ? await loudness(film.path, film.audio, film.startSec, film.endSec, signal) : null;
   const findings: string[] = [];
-  const name = (shot: { label: string | null }, number: number) => `Shot ${number}${shot.label ? ` (${shot.label})` : ""}`;
+  // A finding is at most 300 characters and a label up to 160; the shot table keeps the whole label.
+  const name = (shot: { label: string | null }, number: number) => `Shot ${number}${shot.label ? ` (${shot.label.length > 60 ? `${shot.label.slice(0, 59)}…` : shot.label})` : ""}`;
   const reviewed = shots.map((shot, i) => {
-    const inside = steps.filter((_, k) => stepAt(k) > shot.startSec + .001 && stepAt(k) < shot.endSec - .001);
+    const inside = steps.filter((_, k) => stepTimes[k]! > shot.startSec + .001 && stepTimes[k]! < shot.endSec - .001);
     const cadence = inside.length >= 4 ? cadenceFromSteps(inside, rate, inside.length + 1) : null;
     if (cadence?.repeatPeriod && rate) findings.push(`${name(shot, i + 1)} repeats a frame about every ${cadence.repeatPeriod}: its motion moves at ${cadence.motionFps} fps in a ${round(rate, 2)} fps film, and will look choppy.`);
     const dropped = inside.length >= 8 ? droppedFromSteps(inside) : { jumps: null, jumpPeriod: null };
@@ -272,7 +286,7 @@ export async function reviewInSnapshot(store: WorldStore, tools: AgentMediaTools
       repeatedFrames: cadence?.repeatedFrames ?? null, repeatPeriod: cadence?.repeatPeriod ?? null, motionFps: cadence?.motionFps ?? null,
       jumpedSteps: dropped.jumps, jumpPeriod: dropped.jumpPeriod, sync };
   });
-  const expectedSec = film.whole && cut ? round(cut.endSec) : null, differenceSec = expectedSec === null ? null : round(length - expectedSec);
+  const expectedSec = film.whole && cut && cut.endSec !== null ? round(cut.endSec) : null, differenceSec = expectedSec === null ? null : round(length - expectedSec);
   if (differenceSec !== null && rate && Math.abs(differenceSec) > 1 / rate) findings.unshift(`The film runs ${round(length, 2)} s and its cut ${expectedSec} s: ${Math.abs(differenceSec)} s ${differenceSec > 0 ? "longer" : "shorter"}.`);
   if (!film.audio) findings.unshift("The film has no sound.");
   else {
@@ -304,7 +318,7 @@ async function decodeMono(monoAudio: NonNullable<AgentMediaTools["monoAudio"]>, 
 
 /** One muted clip's own sound against the film's mix over the clip's time; null for a clip whose source has no sound to read here. */
 async function clipSync(store: WorldStore, tools: AgentMediaTools, signal: AbortSignal, resolve: (source: AgentMediaSource) => Promise<InspectionSource>,
-  cut: { productionId: string; rate: number }, clip: CutClip, mix: Float32Array, atSec: number, lengthSec: number) {
+  cut: { productionId: string; rate: number }, clip: CutClip, mix: Float32Array, atSec: number, lengthSec: number, headSec: number) {
   if (clip.audio !== "mute" || clip.speed !== undefined && clip.speed !== 1 || clip.reverse) return null;
   // A clip placed as a shot plays whichever take is accepted at render; only a named take or artifact is a fixed source to read.
   const named: AgentMediaSource | null = clip.source.kind === "artifact" ? { kind: "artifact", id: clip.source.artifactId }
@@ -315,7 +329,7 @@ async function clipSync(store: WorldStore, tools: AgentMediaTools, signal: Abort
   const length = Math.min(lengthSec, 60);
   return withContainedProductionMedia(store.dir, resolved.path, resolved.expectedHash, signal, async snapshot => {
     const inventory = await tools.probe(snapshot.path, signal), sound = inventory.streams.find(stream => stream.kind === "audio");
-    const sourceIn = resolved.startSec + clip.sourceInFrames / rate, end = resolved.endSec ?? inventory.durationSec;
+    const sourceIn = resolved.startSec + clip.sourceInFrames / rate + headSec, end = resolved.endSec ?? inventory.durationSec;
     if (!sound || end === null || sourceIn + length > end + .05) return null;
     const own = await tools.monoAudio!(snapshot.path, sound, sourceIn, Math.min(end, sourceIn + length), 16000, signal);
     const from = Math.round(atSec * 16000), slice = mix.subarray(from, from + own.length);

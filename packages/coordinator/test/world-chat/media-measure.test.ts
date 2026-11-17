@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { newId, productionExportFingerprint, storyTimelineFingerprint, WorldChatCheckReceiptSchema, type AgentMediaInventory, type AgentMediaRegion, type HarnessAdapter } from "@arke-studio/contracts";
+import { newId, productionExportFingerprint, storyTimelineFingerprint, WorldChatCheckReceiptSchema, type AgentMediaInventory, type AgentMediaRegion, type HarnessAdapter, type TimelineClipCommand } from "@arke-studio/contracts";
 import { encodePng, solidImage } from "../../src/references/png.js";
 import { recordCompletedExport } from "../../src/productions/export-receipts.js";
 import { applyHumanTimelineCommand } from "../../src/productions/timeline.js";
@@ -142,7 +142,7 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
             const n = first + k, shown = Math.floor(n * 24 / 30) * 2.5;
             return panFrame(size.width, size.height, shown, kind === "take2" ? 1.5 : 1);
           });
-          return { frames, width: size.width, height: size.height, fps: 30 };
+          return { frames, width: size.width, height: size.height, fps: 30, ...(frameOptions.times ? { times: frames.map((_, k) => k / 30) } : {}) };
         }
         calls.push({ what: "mouth", startSec, endSec, region: frameOptions.region, fps: frameOptions.fps ?? undefined });
         const frames: Uint8Array[] = [];
@@ -290,10 +290,14 @@ test("cut_contact_sheet on a film with no cut behind it: shots found where the p
 });
 
 /** A two-clip cut of the fixture's production, both clips' own sound muted under the mix, and an export stamped with that cut. */
-async function cutAndExport(h: Awaited<ReturnType<typeof harness>>, id: string) {
+async function cutAndExport(h: Awaited<ReturnType<typeof harness>>, id: string, options: { label?: string; bed?: boolean } = {}) {
   const production = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
+  // A bed that runs on past the picture: the export trims sound to the picture's end.
+  const bed: TimelineClipCommand[] = options.bed ? [{ kind: "add-track", trackId: "tr_bed", trackKind: "audio", name: "Bed" },
+    { kind: "place", trackId: "tr_bed", clip: { id: "cl_bed", startFrame: 0, durationFrames: 400, sourceInFrames: 0, source: { kind: "artifact", artifactId: h.song.id, label: "Bed" } } }] : [];
   await applyHumanTimelineCommand(h.store, "saltlight", { kind: "commands", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production), commands: [
-    { kind: "place", trackId: "tr_picture", clip: { id: "cl_open", startFrame: 0, durationFrames: 96, sourceInFrames: 0, audio: "mute", source: { kind: "artifact", artifactId: h.takeId, label: "The opening" } } },
+    { kind: "place", trackId: "tr_picture", clip: { id: "cl_open", startFrame: 0, durationFrames: 96, sourceInFrames: 0, audio: "mute", source: { kind: "artifact", artifactId: h.takeId, label: options.label ?? "The opening" } } },
+    ...bed,
     { kind: "place", trackId: "tr_picture", clip: { id: "cl_close", startFrame: 96, durationFrames: 48, sourceInFrames: 0, audio: "mute", source: { kind: "artifact", artifactId: h.take2Id, label: "The close" } } },
     // A muted upper track puts nothing in the export, so its clip is no shot of the sheet or the review.
     { kind: "add-track", trackId: "tr_hidden", trackKind: "picture", name: "Hidden" },
@@ -339,6 +343,21 @@ test("review_export: length against the cut, format, loudness, the shots that re
   assert.match(outcome.receipt.querySummary!, /^Film reviewed/);
   assert.equal(WorldChatCheckReceiptSchema.safeParse(outcome.receipt).success, true);
   assert.equal(h.store.getBundle().meta.schemaVersion, 144);
+});
+
+test("review_export holds the film to its render plan's length, reads a clip's sound from where the window opens in it, and names a long label short", async () => {
+  const h = await harness(), long = "A long name for the opening shot of the film, ".repeat(4).slice(0, 160);
+  const { rate } = await cutAndExport(h, "ex_window", { label: long, bed: true });
+  const current = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
+  assert.ok((current.timeline as { timeline: { tracks: Array<{ id: string }> } }).timeline.tracks.some(track => track.id === "tr_bed"), "the bed was placed");
+  const whole = (await h.retrieval.call(h.lease.token, "review_export", { source: { kind: "export", exportId: "ex_window" } })).receipt.media!.review!;
+  // The bed runs 400 frames, the picture 144: the film is the picture's length, as the export made it.
+  assert.equal(whole.length.expectedSec, Math.round(144 / rate * 1000) / 1000); assert.equal(whole.length.differenceSec, 0);
+  const named = whole.findings.find(line => line.startsWith("Shot 1 ("))!;
+  assert.ok(named.startsWith(`Shot 1 (${long.slice(0, 59)}…) `), named); assert.equal(whole.shots[0]!.label, long);
+  // A window opening a second into the opening shot: its own sound is read from a second in, and is still 120 ms late.
+  const part = (await h.retrieval.call(h.lease.token, "review_export", { source: { kind: "export", exportId: "ex_window" }, window: { startSec: 1, endSec: 3.5 } })).receipt.media!.review!;
+  assert.equal(part.shots[0]!.startSec, 1); assert.equal(part.shots[0]!.sync!.lagSec, .12); assert.equal(part.shots[0]!.sync!.follows, true);
 });
 
 test("review_export of a film with no cut behind it finds its shots in the picture and measures no sync", async () => {

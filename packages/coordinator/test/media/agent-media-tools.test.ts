@@ -119,6 +119,21 @@ test("native: every decoded frame when no rate is asked, at a forced size; a 24 
   const cadence = measureCadence(read.frames, read.fps);
   assert.equal(cadence.repeatPeriod, 5); assert.ok(Math.abs(cadence.motionFps! - 24) < .5, String(cadence.motionFps));
 });
+test("native: a variable-rate read gives each frame its own decoded time, which its index and average rate do not", { skip: !available }, async () => {
+  const folder = await tempDir("arke-measure-vfr-"), video = join(folder, "vfr.mkv");
+  // A second at 60 then a second at 24: the average, 42, puts frame 60 at 1.43 s; it is at 1 s.
+  await generate(["-f", "lavfi", "-i", "testsrc2=size=160x90:rate=60:duration=1", "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=24:duration=1",
+    "-filter_complex", "[0][1]concat=n=2:v=1", "-fps_mode", "vfr", "-c:v", "ffv1", video]);
+  const stream = (await tools.probe(video, signal())).streams[0]!;
+  const read = await tools.grayFrames!(video, stream, 0, 2, { fps: null, edge: 48, times: true }, signal());
+  assert.equal(read.frames.length, 84); assert.equal(read.times!.length, 84);
+  assert.ok(Math.abs(read.times![59]! - 59 / 60) < .002, String(read.times![59])); assert.ok(Math.abs(read.times![60]! - 1) < .002, String(read.times![60]));
+  assert.ok(Math.abs(read.times![83]! - (1 + 23 / 24)) < .002, String(read.times![83]));
+  // After a seek the times run from the read's own start.
+  const later = await tools.grayFrames!(video, stream, 1, 2, { fps: null, edge: 48, times: true }, signal());
+  assert.equal(later.frames.length, 24); assert.ok(Math.abs(later.times![0]!) < .002 && Math.abs(later.times![1]! - 1 / 24) < .002, later.times!.slice(0, 2).join());
+  assert.equal((await tools.grayFrames!(video, stream, 0, 1, { fps: null, edge: 48 }, signal())).times, undefined);
+});
 test("native: a steady tone's EBU R128 loudness and true peak read from FFmpeg's own meter", { skip: !available }, async () => {
   const folder = await tempDir("arke-measure-loudness-"), tone = join(folder, "tone.wav");
   // FFmpeg's sine source plays at 1/8 amplitude: a 997 Hz tone peaking at -18 dBFS, the same in both channels.
