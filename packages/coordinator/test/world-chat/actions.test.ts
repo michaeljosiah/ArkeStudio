@@ -18,6 +18,7 @@ import { imageGenerationSource } from "../../src/world-chat/image-generation.js"
 import { ProductionTakeFiling } from "../../src/world-chat/production-take-filing.js";
 import { BenchStore, sessionDir, sessionMediaDir } from "../../src/bench/store.js";
 import { createProp, addPropState } from "../../src/references/props.js";
+import { createSheetFromSentence } from "../../src/sheets/authoring.js";
 import { fileArtifact } from "../../src/artifacts/filing.js";
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
@@ -3398,6 +3399,102 @@ describe("saved sibling proposal review (#1740)", () => {
     assert.equal((await acceptDecided(w.gate, card.authority.id, precondition)).status, "stale");
     assert.notEqual((await decide(w.lifecycle, w.log, card)).status, "completed");
     assert.equal(w.store.getBundle().productions.find(p => p.meta.id === w.productionId)!.chapters.length, 0);
+  });
+});
+
+describe("sibling sheet cards (issue 3213)", () => {
+  const location = (name: string, look = `${name} in the fog.`) => ({ operation: "create", sheetType: "location", name, region: "Slackwater",
+    canonRules: [], links: [], sections: [{ heading: "Look", body: look }, { heading: "Sound", body: "A quiet bell." }, { heading: "Customs", body: "Share the warning." }] });
+  async function siblings(changes: readonly Record<string, unknown>[]) {
+    const w = await setup();
+    const receipts = [currentReceipt(w.store, "sheets"), currentReceipt(w.store, "canon")];
+    const checkReceiptIds = receipts.map(receipt => receipt.id);
+    const oneTurn = turn(w.conversationId, w.entryContext, { receipts,
+      actions: changes.map(change => ModelWorldChatActionSchema.parse({ kind: "sheet", checkReceiptIds, change })) });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    return { ...w, cards: (await loaded(w.log)).actions };
+  }
+  const open = async (w: Awaited<ReturnType<typeof siblings>>, card: ConversationActionCard) =>
+    (await w.gate.listOpen()).some(proposal => proposal.id === card.authority.id);
+
+  it("completes every sheet card of one turn when they are approved in turn", async () => {
+    const names = ["Harbour steps", "Quay gate", "Net loft"];
+    const w = await siblings(names.map(name => location(name)));
+    assert.equal(w.cards.length, 3);
+    for (const card of w.cards) {
+      assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+      assert.equal((await loaded(w.log)).actions.find(action => action.actionId === card.actionId)!.status, "completed");
+    }
+    for (const name of names) assert.ok(w.store.getBundle().sheets.some(sheet => sheet.name === name), name);
+  });
+
+  it("still discards the next card when a sheet was created outside the turn", async () => {
+    const w = await siblings([location("Harbour steps"), location("Quay gate")]);
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[0]!)).status, "completed");
+    const elsewhere = await createSheetFromSentence(w.store, w.gate, { sheetType: "location", name: "Rope walk", sentence: "A long shed for laying rope." });
+    assert.equal((await acceptDecided(w.gate, elsewhere.proposal.id)).status, "accepted");
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[1]!)).reason, "stale");
+    assert.equal(await open(w, w.cards[1]!), false);
+    assert.equal(w.store.getBundle().sheets.some(sheet => sheet.name === "Quay gate"), false);
+  });
+
+  it("still discards an edit whose own sheet a sibling edit already changed", async () => {
+    const w = await siblings([
+      location("Harbour steps"),
+      { operation: "edit", sheetType: "location", sheetId: "the-weigh-house", changes: { region: "Upper town" } },
+      { operation: "edit", sheetType: "location", sheetId: "the-weigh-house", changes: { sections: [{ heading: "Sound", body: "Scales clank." }] } },
+    ]);
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[0]!)).status, "completed");
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[1]!)).status, "completed", "a sibling create alone does not stop an edit");
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[2]!)).reason, "stale");
+    assert.equal(await open(w, w.cards[2]!), false);
+    const live = await readFile(join(w.store.dir, "locations", "the-weigh-house.md"), "utf8");
+    assert.match(live, /region: Upper town/);
+    assert.doesNotMatch(live, /Scales clank/);
+  });
+
+  it("still discards a create whose file a same-named sibling already made", async () => {
+    const w = await siblings([location("Harbour steps"), location("Harbour steps", "Other steps, further out.")]);
+    const [first, second] = await Promise.all(w.cards.map(card => w.gate.readManifest(card.authority.id)));
+    assert.equal(first!.targets[0]!.path, second!.targets[0]!.path);
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[0]!)).status, "completed");
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[1]!)).reason, "stale");
+    assert.equal(await open(w, w.cards[1]!), false);
+    assert.doesNotMatch(await readFile(join(w.store.dir, first!.targets[0]!.path), "utf8"), /Other steps/);
+  });
+
+  it("still refuses a card when a sheet from outside the turn lands while it is accepted", async () => {
+    const w = await siblings([location("Harbour steps"), location("Quay gate")]);
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[0]!)).status, "completed");
+    const accept = w.gate.accept.bind(w.gate);
+    // After the sibling check has read the change log, before the gate runs the card's precondition.
+    w.gate.accept = async (proposalId, opts) => {
+      if (proposalId === w.cards[1]!.authority.id) {
+        const elsewhere = await createSheetFromSentence(w.store, w.gate, { sheetType: "location", name: "Rope walk", sentence: "A long shed for laying rope." });
+        assert.equal((await accept(elsewhere.proposal.id)).status, "accepted");
+      }
+      return accept(proposalId, opts);
+    };
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[1]!)).status, "stale");
+    assert.equal(await open(w, w.cards[1]!), false);
+    assert.ok(w.store.getBundle().sheets.some(sheet => sheet.name === "Rope walk"));
+    assert.equal(w.store.getBundle().sheets.some(sheet => sheet.name === "Quay gate"), false);
+  });
+
+  it("still discards a create whose id a sibling of another type took", async () => {
+    const w = await siblings([location("Harbour"), { operation: "create", sheetType: "character", name: "Harbour", role: "Harbour watch",
+      canonRules: [], links: [], sections: [{ heading: "Essence", body: "The watch." }, { heading: "Appearance", body: "Oilskins." }] }]);
+    const [first, second] = await Promise.all(w.cards.map(card => w.gate.readManifest(card.authority.id)));
+    const id = first!.targets[0]!.path.replace(/^locations\/|\.md$/g, "");
+    assert.equal(second!.targets[0]!.path, `characters/${id}.md`);
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[0]!)).status, "completed");
+    const refused = await decide(w.lifecycle, w.log, w.cards[1]!);
+    assert.equal(refused.reason, "stale");
+    assert.equal(refused.detail, "Another sheet now has this name.");
+    assert.equal(await open(w, w.cards[1]!), false);
+    assert.deepEqual(w.store.getBundle().sheets.filter(sheet => sheet.id === id).map(sheet => sheet.type), ["location"]);
   });
 });
 
