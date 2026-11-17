@@ -110,6 +110,9 @@ export const QUALITY_LIMITATIONS = [
   "Faces, anatomy, likeness, where a character looks and whether the picture suits the scene were not judged: those need frames looked at, and a person.",
 ];
 
+/** From nought there is no percentage: null says so, where 0 would read as no change (a still picture against one that flickers). */
+export const percentChange = (from: number, to: number) => from > 0 ? Math.round((to / from - 1) * 1000) / 10 : null;
+
 /**
  * Cadence over the whole interval and detail over its middle, of one clip or of two met at one
  * size. The compared clip is a second contained snapshot, rechecked like the first.
@@ -135,16 +138,17 @@ export async function qualityInSnapshot(worldDir: string, tools: AgentMediaTools
     const candidates = inventory.streams.filter(stream => stream.kind === "video");
     const selected = compare.streamIndex === undefined ? candidates.length === 1 ? candidates[0] : undefined : candidates.find(stream => stream.index === compare.streamIndex);
     if (!selected?.width || !selected.height) throw new RetrievalError("bad-argument", "Select one explicit video stream of the compared clip from inspect_media; ambiguous tracks are never guessed.");
+    // The pictures' shapes, not the crops': one region rounds to even pixels differently at two sizes.
+    const shapeA = clip.stream.width! / clip.stream.height!, shapeB = selected.width / selected.height;
+    if (Math.abs(shapeA - shapeB) > .02 * shapeA) throw new RetrievalError("bad-argument", "Two clips of different shapes are not compared detail for detail.");
     const a = regionGeometry(clip.stream.width!, clip.stream.height!, args.region, 4096), b = regionGeometry(selected.width, selected.height, args.region, 4096);
-    if (Math.abs(a.cropWidth / a.cropHeight - b.cropWidth / b.cropHeight) > .02 * a.cropWidth / a.cropHeight) throw new RetrievalError("bad-argument", "Two clips of different shapes are not compared detail for detail.");
     // The larger of the two, its longer side at most the detail edge: the smaller is enlarged to meet it.
     const larger = a.cropWidth * a.cropHeight >= b.cropWidth * b.cropHeight ? a : b, scale = Math.min(1, limits.detailEdge / Math.max(larger.cropWidth, larger.cropHeight));
     const even = (value: number) => Math.max(8, 2 * Math.round(value / 2)), size = { width: even(larger.cropWidth * scale), height: even(larger.cropHeight * scale) };
     const first = await measure(clip.path, clip.stream, clip.startSec, size), second = await measure(snapshot.path, selected, startSec, size);
-    const change = (from: number, to: number) => from > 0 ? Math.round((to / from - 1) * 1000) / 10 : 0;
     return AgentClipQualitySchema.parse({ ...first, ...(args.region ? { region: args.region } : {}),
       compare: { ...second, source: compare.source, sourceHash: snapshot.sourceHash, range,
-        sharpnessChangePct: change(first.detail.sharpness, second.detail.sharpness), shimmerChangePct: change(first.detail.shimmer, second.detail.shimmer) } });
+        sharpnessChangePct: percentChange(first.detail.sharpness, second.detail.sharpness), shimmerChangePct: percentChange(first.detail.shimmer, second.detail.shimmer) } });
   });
 }
 

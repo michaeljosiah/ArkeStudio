@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AgentClipCadenceSchema, AgentClipQualitySchema } from "@arke-studio/contracts";
 import { measureCadence, measureDetail } from "../../src/media/clip-quality.js";
-import { parseStreamRate } from "../../src/media/agent-media-tools.js";
+import { createAgentMediaTools, parseStreamRate } from "../../src/media/agent-media-tools.js";
+import { percentChange } from "../../src/world-chat/media-measure.js";
 
 const W = 64, H = 36;
 function random(seed: number) {
@@ -25,6 +26,15 @@ test("30 fps motion steps evenly with no repeats; 24 fps motion carried at 30 re
   assert.equal(AgentClipCadenceSchema.safeParse(stutter).success, true);
 });
 
+test("24 fps motion carried at 60 repeats most frames and still reads as moving at 24", () => {
+  const frames = Array.from({ length: 120 }, (_, k) => pan(Math.floor(k * 24 / 60) * 2));
+  const cadence = measureCadence(frames, 60);
+  assert.equal(cadence.still, false); assert.ok(cadence.repeatedFrames! > 60, String(cadence.repeatedFrames));
+  assert.ok(Math.abs(cadence.motionFps! - 24) < .5, String(cadence.motionFps));
+  assert.ok(cadence.medianStep > 1, String(cadence.medianStep));
+  assert.equal(percentChange(0, 2), null); assert.equal(percentChange(2, 3), 50); assert.equal(percentChange(2, 2), 0);
+});
+
 test("a still picture has no cadence to read rather than every frame a repeat", () => {
   const still = measureCadence(Array.from({ length: 30 }, () => pan(0)), 30);
   assert.equal(still.still, true); assert.equal(still.repeatedFrames, null); assert.equal(still.motionFps, null);
@@ -45,6 +55,13 @@ test("a softened copy loses sharpness; added real detail raises sharpness, not s
   assert.equal(held.shimmer, 0); assert.equal(held.motion, 0);
   const next = random(8), flicker = measureDetail(Array.from({ length: 20 }, () => pan(3).map(value => value + Math.round((next() - .5) * 30))), W, H);
   assert.ok(flicker.shimmer > .3, String(flicker.shimmer));
+});
+
+test("every native frame of a variable-rate interval is taken, though it holds more than the file's average rate", async () => {
+  const fake = createAgentMediaTools({ run: async () => ({ code: 0, stdout: Buffer.alloc(60 * 16 * 16), stderr: "", timedOut: false, cancelled: false, outputLimitExceeded: false }) });
+  const stream = { index: 0, kind: "video" as const, codec: "h264", width: 16, height: 16, frameRate: "30/1", durationSec: 10, startTimeSec: 0 };
+  const read = await fake.grayFrames!("clip", stream, 2, 3, { fps: null, edge: 16 }, new AbortController().signal);
+  assert.equal(read.frames.length, 60); assert.equal(read.fps, 30);
 });
 
 test("the quality schema meets two clips at one size", () => {

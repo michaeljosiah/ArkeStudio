@@ -170,8 +170,12 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
       const g = regionGeometry(stream.width, stream.height, options.region, edge), width = size?.width ?? g.outWidth, height = size?.height ?? g.outHeight;
       // A size is two clips met at one scale; bicubic, as the Cut's export enlarges a smaller clip.
       const scale = size ? `scale=${width}:${height}:flags=bicubic` : `scale=${width}:${height}:flags=area`, frameBytes = width * height;
-      const maxFrames = Math.ceil(duration * (fps ?? native ?? 120)) + 2;
-      if (maxFrames * frameBytes > AGENT_MEDIA_LIMITS.pcmBytes) throw new Error("Video exceeds the measurement frame profile");
+      /*
+       * Every native frame has no rate to budget by: a variable-rate file's average says nothing of
+       * one interval, which may hold twice as many frames. So the output is bounded by bytes alone.
+       */
+      const maxFrames = fps === null ? Math.floor(AGENT_MEDIA_LIMITS.pcmBytes / frameBytes) : Math.ceil(duration * fps) + 2;
+      if (maxFrames < 2 || maxFrames * frameBytes > AGENT_MEDIA_LIMITS.pcmBytes) throw new Error("Video exceeds the measurement frame profile");
       const result = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS,
         "-ss", String(startSec), "-t", String(duration), "-i", path, "-map", `0:${stream.index}`, "-an", "-sn", "-map_metadata", "-1",
         "-vf", `crop=${g.cropWidth}:${g.cropHeight}:${g.x}:${g.y},${scale}${fps === null ? "" : `,fps=${fps}`},format=gray`,
@@ -179,9 +183,9 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
       if (!result.stdout.length || result.stdout.length % frameBytes) throw new Error("Invalid measurement frames");
       const frames: Uint8Array[] = [];
       for (let offset = 0; offset < result.stdout.length; offset += frameBytes) frames.push(result.stdout.subarray(offset, offset + frameBytes));
-      const rate = fps ?? native;
-      if (rate !== null && Math.abs(frames.length / rate - duration) > 2 / rate + .05) throw new Error("Decoded video does not cover the requested interval");
-      return { frames, width, height, fps: rate };
+      // Only a resampled read has a known frame count to hold the interval to.
+      if (fps !== null && Math.abs(frames.length / fps - duration) > 2 / fps + .05) throw new Error("Decoded video does not cover the requested interval");
+      return { frames, width, height, fps: fps ?? native };
     },
   };
 }

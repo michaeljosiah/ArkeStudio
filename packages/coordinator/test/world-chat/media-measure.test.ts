@@ -228,8 +228,8 @@ test("clip_quality: the take's 24-in-30 repeats every fifth frame; a sharper 108
   assert.equal(quality.compare!.cadence.repeatPeriod, 5); assert.equal(quality.compare!.sourceHash, hash(TAKE2));
   // Met at the larger clip's size, its longer side 960: the 720p take enlarged to meet the 1080p one.
   assert.equal(quality.detail.width, 960); assert.equal(quality.detail.height, 540); assert.equal(quality.compare!.detail.width, 960);
-  assert.ok(quality.compare!.sharpnessChangePct > 40, String(quality.compare!.sharpnessChangePct));
-  assert.ok(Math.abs(quality.compare!.shimmerChangePct) < 5, String(quality.compare!.shimmerChangePct));
+  assert.ok(quality.compare!.sharpnessChangePct! > 40, String(quality.compare!.sharpnessChangePct));
+  assert.ok(Math.abs(quality.compare!.shimmerChangePct!) < 5, String(quality.compare!.shimmerChangePct));
   // Detail reads the interval's middle two seconds; cadence the whole interval.
   assert.ok(h.calls.some(call => call.what === "take@960x540" && call.startSec === 1 && call.endSec === 3));
   assert.ok(h.calls.some(call => call.what === "take@128x72" && call.startSec === 0 && call.endSec === 4));
@@ -245,6 +245,9 @@ test("clip_quality measures a region alone, and refuses a compared clip of anoth
   assert.deepEqual({ ...quality.region }, region); assert.equal(quality.compare, null);
   assert.equal(quality.detail.width, 384); assert.equal(quality.detail.height, 360);
   await assert.rejects(h.retrieval.call(h.lease.token, "clip_quality", { source: h.take, range: { startSec: 0, endSec: 3 }, compare: { source: h.groove } }), /video stream of the compared clip/);
+  // A small region rounds to 128x44 at 720p and 192x64 at 1080p; the pictures are one shape, so they are compared.
+  const small = await h.retrieval.call(h.lease.token, "clip_quality", { source: h.take, range: { startSec: 0, endSec: 3 }, region: { x: .4, y: .4, width: .1, height: .06 }, compare: { source: h.take2 } });
+  assert.equal(small.receipt.status, "complete"); assert.equal(small.receipt.media!.quality!.compare!.detail.width, 192);
   await assert.rejects(h.retrieval.call(h.lease.token, "clip_quality", { source: h.take, range: { startSec: 0, endSec: 3 }, compare: { source: h.take2, range: { startSec: 0, endSec: 2 } } }), /clip_quality/);
 });
 

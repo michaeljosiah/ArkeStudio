@@ -367,7 +367,8 @@ export function wordReceipt(receipt: WorldChatCheckReceipt): string {
       if (!quality) return "measured a clip";
       const repeats = quality.cadence.repeatedFrames;
       return `measured a clip: sharpness ${quality.detail.sharpness}, ${quality.cadence.still ? "a still picture" : `${repeats ?? 0} repeated frame${repeats === 1 ? "" : "s"}`}`
-        + (quality.compare ? `; the other ${quality.compare.sharpnessChangePct >= 0 ? "+" : ""}${quality.compare.sharpnessChangePct}% sharpness` : "");
+        + (!quality.compare ? "" : quality.compare.sharpnessChangePct === null ? "; the other has detail where this has none"
+          : `; the other ${quality.compare.sharpnessChangePct >= 0 ? "+" : ""}${quality.compare.sharpnessChangePct}% sharpness`);
     }
     case "search-canon":
       return `searched ${receipt.searchedCount ?? 0} canon entries`;

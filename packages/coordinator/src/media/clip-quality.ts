@@ -16,8 +16,14 @@ const percentile = (values: readonly number[], share: number) => {
 };
 
 export function measureCadence(frames: readonly Uint8Array[], frameRate: number | null) {
-  const steps = Array.from(frameMotion(frames)), median = percentile(steps, .5);
-  const still = steps.length < 2 || median < AGENT_QUALITY_LIMITS.stillStep;
+  const steps = Array.from(frameMotion(frames));
+  /*
+   * The baseline is the steps that move. 24 fps footage carried at 60 repeats more than half its
+   * frames, so the median of every step is nought though the picture moves: judged by that median
+   * it read as a still picture with no repeats at all.
+   */
+  const moving = steps.filter(step => step >= AGENT_QUALITY_LIMITS.stillStep / 3), median = percentile(moving, .5);
+  const still = moving.length < 2 || median < AGENT_QUALITY_LIMITS.stillStep;
   let unevenness: number | null = null;
   if (steps.length >= 2) {
     const mean = steps.reduce((a, b) => a + b, 0) / steps.length;

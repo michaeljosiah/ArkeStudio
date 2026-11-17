@@ -171,6 +171,7 @@ export type ClipQualityArgs = z.infer<typeof ClipQualityArgsSchema>;
 const level = z.number().finite().min(0).max(255);
 export const AgentClipCadenceSchema = z.object({
   frameRate: z.number().finite().positive().nullable(), framesDecoded: z.number().int().min(0),
+  /** The median change between frames that move (repeats left out), grey levels of 255. */
   medianStep: level,
   /** Standard deviation of the frame-to-frame steps over their mean: even motion is low. */
   unevenness: z.number().finite().min(0).nullable(),
@@ -198,8 +199,8 @@ const quality = z.object({ streamIndex: AgentMediaStreamIndexSchema, cadence: Ag
 export const AgentClipQualitySchema = quality.extend({
   region: AgentMediaRegionSchema.optional(),
   compare: quality.extend({ source: AgentMediaSourceSchema, sourceHash: FullSha256Schema, range: AgentMediaRangeSchema,
-    /** Percent changes of the compared clip against this one, measured at one size. */
-    sharpnessChangePct: z.number().finite(), shimmerChangePct: z.number().finite() }).strict().nullable(),
+    /** Percent changes of the compared clip against this one, measured at one size; null where this one's is nought and no percentage exists. */
+    sharpnessChangePct: z.number().finite().nullable(), shimmerChangePct: z.number().finite().nullable() }).strict().nullable(),
 }).strict().superRefine((value, context) => {
   if (value.compare && (value.compare.detail.width !== value.detail.width || value.compare.detail.height !== value.detail.height)) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "Two clips' detail is compared at one size" });
