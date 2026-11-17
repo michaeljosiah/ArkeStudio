@@ -2223,6 +2223,19 @@ describe("audiobook action targets (#1675)", () => {
     assert.deepEqual(read.blocks, ["title"]);
     assert.equal(read.confirmationToken, "target-token");
   });
+
+  it("names the chapter as the book calls it: an unnumbered Prologue first leaves the second Chapter 1 (issue 3235)", async () => {
+    const state = inkbound();
+    state.world = { ...state.world!, productions: state.world!.productions.map((p) => (p.meta.id === "inkbound" ? { ...p, chapters: [{ ...CHAPTERS[0]!, title: "Prologue" }, CHAPTERS[1]!] } : p)) };
+    const m = await mount(state);
+    await answerOpen(m);
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 36_000, confirmationToken: "tok", voices: [] }));
+    const sheet = q(m, '[data-testid="read-sheet"]')!;
+    assert.equal(sheet.getAttribute("aria-label"), "Read Chapter 1", "its place is 2, its number 1");
+    assert.equal(sheet.closest("dialog")?.querySelector(".fy-page-sheet__head h2")?.textContent, "Read Chapter 1", "the sheet's heading");
+  });
 });
 
 describe("grouped reads (design turn 185)", () => {
