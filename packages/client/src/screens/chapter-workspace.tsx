@@ -3060,16 +3060,18 @@ export function ChapterWorkspace({
     sub: sheet.type !== "character" ? "Place" : linesHere(sheet.id) > 0 ? `${linesHere(sheet.id)} line${linesHere(sheet.id) === 1 ? "" : "s"} here` : (sheet.role ?? ""),
   }));
   // The chapters each character speaks in, from the book's cast stamps: the card's first and last seen.
+  // Counted by chapter, not by label: two chapters can share a title ("Interlude"), and the card
+  // counts appearances by this list's length.
   const appearances = new Map<string, string[]>();
+  const lastOrder = new Map<string, number>();
   for (const each of [...production.chapters].filter((c) => c.retired !== true).sort((a, b) => a.order - b.order)) {
     const stamp = each.voices;
     if (stamp === undefined || "unreadable" in stamp) continue;
     const name = chapterCalled(production.chapters, each);
     for (const who of stamp.speakers) {
-      if (who.sheet === undefined) continue;
-      const list = appearances.get(who.sheet) ?? [];
-      if (list[list.length - 1] !== name) list.push(name);
-      appearances.set(who.sheet, list);
+      if (who.sheet === undefined || lastOrder.get(who.sheet) === each.order) continue;
+      lastOrder.set(who.sheet, each.order);
+      appearances.set(who.sheet, [...(appearances.get(who.sheet) ?? []), name]);
     }
   }
   const [nameHit, setNameHit] = useState<{ ids: string[]; text: string; rect: DOMRect } | null>(null);
