@@ -257,6 +257,22 @@ describe("the author's corrections to the cast (design turn 155, SPEC-012 R-62..
     const stamp = chapterOf(store, "neap").voices;
     assert.ok(stamp && !("unreadable" in stamp) && stamp.lost === 1);
   });
+
+  it("pins sent together for one chapter all land (issue 3234)", async () => {
+    // Eleven corrections a few seconds apart kept only some: each read the record, added its pin
+    // and wrote its own copy back over the others'.
+    const { store } = await open();
+    const before = await openChapter(store, PRODUCTION, "neap");
+    const body = Array.from({ length: 11 }, (_, i) => `“Line ${i},” she said.`).join("\n\n");
+    await saveChapter(store, PRODUCTION, "01-neap", body, { baseHash: before.hash });
+    const cast = await castLines(store, PRODUCTION, "neap", async () => ({ lines: [] }));
+    const quotes = unassignedQuotes(body, cast.record);
+    assert.equal(quotes.length, 11);
+    await Promise.all(quotes.map((quote) => setVoicePin(store, PRODUCTION, "neap", { ...quote, speaker: "Maren Kest", sheet: "maren-kest" })));
+    const record = await readVoices(store, PRODUCTION, "01-neap");
+    assert.ok(record !== null && record !== "unreadable");
+    assert.deepEqual(record.pins?.map((pin) => pin.quote).sort(), quotes.map((quote) => quote.quote).sort(), "every pin is on disk");
+  });
 });
 
 /**

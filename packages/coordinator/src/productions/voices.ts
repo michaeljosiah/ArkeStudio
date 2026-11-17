@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { ChapterVoicesSchema, castParagraphHashes, chapterParagraphs, occurrencesOf, pinTarget, rebaseCast, reconcileCast, voicedBlocks, type ChapterVoicePin, type ChapterVoices, type HarnessAdapter } from "@arke-studio/contracts";
 import type { SessionInput } from "../harness/session-files.js";
-import { atomicWriteFile } from "../world/atomic.js";
+import { atomicWriteFile, serializeFileMutation } from "../world/atomic.js";
 import { CAST_PARAGRAPHS_SCHEMA_VERSION, VOICE_PINS_SCHEMA_VERSION } from "../world/commit.js";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
@@ -410,6 +410,14 @@ export async function setVoicePin(store: WorldStore, productionId: string, chapt
   if (!production) throw new VoicePinRefusal("that production is gone");
   const summary = production.chapters.find((c) => c.id === chapterId || c.file === chapterId);
   if (!summary) throw new VoicePinRefusal("that chapter is gone");
+  // One pin at a time a chapter (issue 3234): a pin reads the record, adds itself and writes the
+  // whole record back, and coordinator frames run concurrently, so of eleven sent a few seconds
+  // apart only some stayed: two in flight each wrote their own copy, and the later write dropped
+  // the earlier pin. Queued on the record's path, each reads what the one before it wrote.
+  return serializeFileMutation(join(store.dir, fromPortable(voicesPath(productionId, summary.file))), () => pinVoice(store, productionId, summary, input));
+}
+
+async function pinVoice(store: WorldStore, productionId: string, summary: { id: string; file: string }, input: VoicePinInput): Promise<ChapterVoices> {
   const recorded = await readVoices(store, productionId, summary.file);
   if (recorded === null) throw new VoicePinRefusal("not cast · cast the lines first");
   if (recorded === "unreadable") throw new VoicePinRefusal("cast unreadable · cast again");
