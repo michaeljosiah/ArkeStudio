@@ -1854,6 +1854,16 @@ describe("World Chat authority adapters", () => {
       /complete current scenes read.*script/i,
     );
 
+    // The whole scene's read holds the same script and counts too (issue 3230); a production-wide
+    // read above still does not.
+    const whole = currentReceipt(w.store, "scenes", `${PRODUCTION}:${current.id}`);
+    const fromScene = prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, {
+      receipts: [whole],
+      actions: [{ ...action, checkReceiptIds: [whole.id] }],
+    }));
+    assert.equal(fromScene.length, 1);
+    assert.ok(fromScene[0]!.intent.baseObservations.some(observation => observation.target === `${PRODUCTION}:${current.id}`));
+
     const script = currentReceipt(w.store, "scenes", `${PRODUCTION}:${current.id}:script`);
     const oneTurn = turn(w.conversationId, context, {
       receipts: [script],
