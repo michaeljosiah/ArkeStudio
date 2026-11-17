@@ -7,7 +7,7 @@ import {
   describeAction,
   renderActionGuide,
 } from "../../src/world-chat/action-guide.js";
-import { TARGET_READ_TOOL_NAMES } from "../../src/world-chat/target-tool-catalog.js";
+import { TARGET_READ_TOOL_NAMES, TARGET_READ_TOOLS } from "../../src/world-chat/target-tool-catalog.js";
 
 /**
  * The actions the model is told it can prepare (SPEC-050 R-1..R-6, issue 1404).
@@ -118,6 +118,18 @@ describe("what a reply may say about a change (issue 3137)", () => {
     }
     assert.equal(renderActionGuide(actionGuideScopes({ kind: "production-setup" } as WorldChatContext), HUGE).text, "");
   });
+});
+
+// Arke cannot hear the song, and asked the author where each verse and chorus starts (issue 3099).
+it("tells Arke to read the song's sections rather than ask the person to time it", () => {
+  const read = TARGET_READ_TOOLS.find(tool => tool.name === "get_spine")!;
+  assert.match(read.description, /spine-song row gives the song's length, its tempo where it keeps one, and its sections/);
+  assert.match(read.description, /Proposed starts are boundaries without names and are not on the spine/);
+  for (const budget of [HUGE, 1000]) {
+    const guide = renderActionGuide(["world", "production"], budget, { kind: "cut", productionId: "saltlight" }).text;
+    assert.match(guide, /Never ask the person to time the song: get_spine's spine-song row gives its length, its tempo and its sections/);
+    assert.match(guide, /say they are proposed, call them Section 1, Section 2 unless the person or the lyrics name them/);
+  }
 });
 
 // Direct editor commands include human-only effect/protection operations. The model guide

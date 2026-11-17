@@ -87,7 +87,7 @@ export const TARGET_READ_TOOLS: readonly TargetReadToolDefinition[] = [
   tool("list_editor_requests", "Read pending editor requests and their retained decision history.", PRODUCTION, ["productionId"]),
   tool("get_timeline", "Read every timeline track, clip, cue, library item, mix value and available take. Clips cut from a story shot carry their scene, the character sheets in the shot and the scene's location sheet.", PRODUCTION, ["productionId"]),
   tool("get_readiness", "Read the derived scene and production checklist before proposing next steps. Readiness comes from current records, never reply prose.", PRODUCTION, ["productionId"]),
-  tool("get_spine", "Read the complete production spine: track, markers and anchors.", PRODUCTION, ["productionId"]),
+  tool("get_spine", "Read the complete production spine: track, markers and anchors. Its spine-song row gives the song's length, its tempo where it keeps one, and its sections: marked ones are the section markers; until one is marked, the starts the Studio proposes from where the song's level changes. Proposed starts are boundaries without names and are not on the spine.", PRODUCTION, ["productionId"]),
   tool("get_routing", "Read the complete interactive routing graph.", PRODUCTION, ["productionId"]),
   tool("list_plans", "Read complete durable dispatch plans and their current folded state, including cancellation and human gates.", PRODUCTION, ["productionId"]),
   tool("list_jobs", "Read every safe job record for this world, optionally narrowed to a production. Frame jobs include frameRun.runId and zero-based frameRun.stepIndex for pause, resume, cancel and retry actions.", { ...PRODUCTION }),

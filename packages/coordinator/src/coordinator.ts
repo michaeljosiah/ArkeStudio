@@ -486,6 +486,7 @@ const OLLAMA_SHUTDOWN_RELEASE_MS = 2_000;
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 import { runEffectExport } from "./productions/editor-effect-export.js";
 import { EditorEffectAnalysisService } from "./productions/editor-effect-analysis.js";
+import { SongSectionsService } from "./productions/song-sections.js";
 import { EditorEffectDependencies } from "./productions/editor-effect-dependencies.js";
 import { handleTransitionReview } from "./productions/editor-transition-requests.js";
 import { handlePictureReview } from "./productions/editor-picture-requests.js";
@@ -1972,6 +1973,7 @@ export class Coordinator {
         refreshConversations: store => this.refreshConversations(store),
         openWorldChat: (store, conversationId) => this.openWorldChat(store, conversationId),
         stillOpen: store => this.stillOpen(store),
+        songSections: (store, productionId) => this.songSections.read(store, productionId),
         worldChat: () => this.readModel.getState().worldChat,
         setWorldChat: worldChat => this.readModel.setWorldChat(worldChat),
       }),
@@ -4067,6 +4069,8 @@ export class Coordinator {
     return this.runMingBatch(combined => this.opts.ming!.run(command, combined), signal, waiting);
   }
   private readonly effectAnalysis: EditorEffectAnalysisService;
+  /** Where each production's song changes (#3099): measured through the effects' own decode, kept while the Studio runs. */
+  private readonly songSections: SongSectionsService;
   /**
    * Titles drawn while they are typed (SPEC-065 R-32), answered to the window that asked. It holds
    * no world: a failure is logged by its kind alone, never with the words or the look.
@@ -4113,6 +4117,7 @@ export class Coordinator {
       at: this.nowIso(), type: "editor-effect.analysis", ...scope, analysis,
     }));
     this.effectDependencies = new EditorEffectDependencies(this.effectAnalysis);
+    this.songSections = new SongSectionsService(opts.effectAudioAnalysisHost, this.runtimeStop.signal);
     // `opts.manifest` is read in a hundred places and handed to services as they are built; a
     // getter makes each of them read the manifest as the author's plans price it, now, rather
     // than as it was when they were built — so a plan switched mid-session reaches every quote.
@@ -20790,6 +20795,7 @@ export class Coordinator {
       voiceTools: context => { const owner = this.backgroundVoice(); return owner ? voiceBackgroundTools(owner, context) : undefined; },
       shutdownSignal: this.runtimeStop.signal,
       audioStudio: (productionId, chapterFile) => audioStudioSnapshot(store, productionId, chapterFile, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}),
+      songSections: productionId => this.songSections.read(store, productionId),
       ...(this.opts.audioMediaTools ? { audioMediaTools: this.opts.audioMediaTools } : {}),
       generationRoutes: () => this.benchGenerationRoutes(),
       voiceCatalogue: () => this.benchVoiceCatalogue(store),
@@ -21314,6 +21320,7 @@ export class Coordinator {
       await audioStudioStopped;
       this.opts.onShutdownWait?.("audio analysis");
       await this.effectAnalysis.stop();
+      await this.songSections.stop();
       const setupStopped = Promise.allSettled([this.setup?.dispose()]);
       this.opts.onShutdownWait?.("adapter library");
       await this.adapterLibrary?.dispose();
