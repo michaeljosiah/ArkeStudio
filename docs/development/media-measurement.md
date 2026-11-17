@@ -158,3 +158,47 @@ box at the source's own resolution before it is scaled, for eyes, a mouth or a h
 names the region.
 
 Both raise the world to schema 143.
+
+## `review_export`: a finished film checked before it is shared (#3073)
+
+**Input:** a finished film by its export id, with a `window` when it is over 15 minutes.
+
+**What it returns:**
+- **Length:** the film's length, and when its production still holds the cut it was made from, the
+  cut's length and the difference. The cut's length is the export's own render plan's: sound
+  running past the picture is trimmed, and a base track's remembered end stays as black.
+- **Format:** the picture's size, frame rate and codec, and the sound's rate, channels and codec.
+- **Loudness:** FFmpeg's EBU R128 meter (`ebur128=peak=true`): integrated LUFS, loudness range,
+  true peak, and the loudest short-term (3 s) value.
+- **Shots:** from the cut when it is the film's, otherwise found in the picture. Each shot reports:
+  - repeated frames and their period, as `clip_quality` reads them, from every native frame at
+    48 px read in 60 s pieces, keeping only the steps. Each step is placed in its shot by the
+    decoded time of its frame (FFmpeg's `showinfo`), not its index over the average rate, which
+    misplaces frames in a variable-rate film;
+  - jumps: steps of 1.6× the usual or more, every 3 to 6 frames, as rate conversions drop them (30
+    to 24 every fourth);
+  - for each clip whose own sound is muted in the cut, placed from an artifact or a take at normal
+    speed: that sound against the film's mix over the clip's time, by `measure_sync`'s method. A
+    window that opens inside a clip reads its sound from that point in. Each clip source is read
+    from its own contained snapshot and its bytes rechecked.
+- **Findings:** plain sentences, each with its shot number (and its label, cut to 60 characters;
+  the shot table keeps it whole):
+  - the film is longer or shorter than its cut by more than a frame;
+  - no sound, sound under 44.1 kHz, or mono;
+  - a true peak over −1 dBTP;
+  - a shot that repeats or drops frames regularly;
+  - a muted clip off the mix by more than a frame, with the shift that lands it;
+  - how many muted clips' sound does not follow the mix (expected for a film shot's own ambience, a
+    fault for a sung or spoken one).
+
+**Limits:** dropped frames show only where the motion is steady, so some converted shots are not
+caught. Clips placed as shots, which play whichever take is accepted at render, are not synced.
+
+**On the music video:**
+- The 3:47 30 fps film reviews in 29 s: 48 kHz stereo, −13.6 LUFS integrated, 4.2 LU range,
+  −1.2 dBTP. One finding: the deep-water flood shot's 30 fps file carries 27 fps of motion (the
+  tool provider's frame pattern).
+- The earlier 24 fps export, where 30 fps takes were played at 24, shows three shots stepping twice
+  as far every 4 frames.
+
+Receipts raise the world to schema 144.

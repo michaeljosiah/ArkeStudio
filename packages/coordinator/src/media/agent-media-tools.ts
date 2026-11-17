@@ -12,6 +12,9 @@ export interface AgentMediaTools {
   frame(path: string, streamIndex: number, sourceTimeSec: number, endSec: number, signal: AbortSignal, region?: AgentMediaRegion): Promise<{
     bytes: Uint8Array; width: number; height: number; sourceTimeSec: number;
   }>;
+  /** EBU R128 over a window of a sound stream (#3073): integrated loudness, range, true peak and the loudest short-term second. */
+  loudness?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, signal: AbortSignal): Promise<{
+    integratedLufs: number | null; rangeLu: number | null; truePeakDbtp: number | null; shortTermMaxLufs: number | null }>;
   /** One frame fitted, letterboxed, into exactly width x height of RGBA, for a contact sheet's tile. */
   tile?(path: string, stream: AgentMediaInventory["streams"][number], atSec: number, size: { width: number; height: number }, signal: AbortSignal): Promise<Uint8Array>;
   audio(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, signal: AbortSignal): Promise<AudioSignal>;
@@ -28,7 +31,23 @@ export interface AgentMediaTools {
   grayFrames?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number,
     options: { fps: number | null; edge: number; region?: AgentMediaRegion; size?: { width: number; height: number };
       /** Cut finding only: skip the deblocking filter and frames nothing refers to, half the decode, nothing a 64 px picture shows. */
-      fast?: boolean }, signal: AbortSignal): Promise<{ frames: Uint8Array[]; width: number; height: number; fps: number | null }>;
+      fast?: boolean;
+      /** Every decoded frame's own time from `startSec` (native reads only): a variable-rate file's frame count is no clock. */
+      times?: boolean }, signal: AbortSignal): Promise<{ frames: Uint8Array[]; width: number; height: number; fps: number | null; times?: number[] }>;
+}
+/** FFmpeg's ebur128 log: the summary's integrated loudness, range and true peak, and the loudest short-term (3 s) value. */
+export function parseLoudness(stderr: string) {
+  const number = (value: string | undefined) => { if (value === undefined || /inf|nan/i.test(value)) return null; const parsed = Number(value); return Number.isFinite(parsed) ? parsed : null; };
+  const summary = stderr.slice(stderr.lastIndexOf("Summary:"));
+  if (!stderr.includes("Summary:")) throw new Error("No loudness summary");
+  let shortTermMax: number | null = null;
+  for (const match of stderr.matchAll(/\bS:\s*(-?[\d.]+|-inf)/g)) {
+    const value = number(match[1]);
+    // -120.7 is the meter's floor before three seconds of sound exist, not a level.
+    if (value !== null && value > -70 && (shortTermMax === null || value > shortTermMax)) shortTermMax = value;
+  }
+  return { integratedLufs: number(summary.match(/\bI:\s*(-?[\d.]+|-inf)\s*LUFS/)?.[1]), rangeLu: number(summary.match(/\bLRA:\s*(-?[\d.]+)\s*LU\b/)?.[1]),
+    truePeakDbtp: number(summary.match(/\bPeak:\s*(-?[\d.]+|-inf)\s*dBFS/)?.[1]), shortTermMaxLufs: shortTermMax };
 }
 /** A probe's `avg_frame_rate` ("30/1", "30000/1001") as frames a second; null when it says nothing usable. */
 export function parseStreamRate(value: string | undefined): number | null {
@@ -74,9 +93,9 @@ export function parseAgentMediaProbe(stdout: Uint8Array): AgentMediaInventory {
 }
 /** The existing kill-on-abort process boundary owns codecs. Only verified private snapshots enter. */
 export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaTools {
-  const run = async (tool: "ffmpeg" | "ffprobe", args: readonly string[], signal: AbortSignal, maxStdoutBytes: number, timeoutMs = 20_000) => {
+  const run = async (tool: "ffmpeg" | "ffprobe", args: readonly string[], signal: AbortSignal, maxStdoutBytes: number, timeoutMs = 20_000, maxStderrBytes = 65_536) => {
     signal.throwIfAborted();
-    const result = await runner.run(tool, args, { signal, timeoutMs, maxStdoutBytes, maxStderrBytes: 65_536 });
+    const result = await runner.run(tool, args, { signal, timeoutMs, maxStdoutBytes, maxStderrBytes });
     signal.throwIfAborted();
     if (result.cancelled || result.timedOut || result.outputLimitExceeded || result.code !== 0) throw new Error("Bounded media decoder failed or was stopped");
     return result;
@@ -170,6 +189,15 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
     // A plain function, not a method: callers take it off the object.
     monoAudio: (path, stream, startSec, endSec, rate, signal) => pcmAudio(path, stream, startSec, endSec, { rate, channels: 1 }, signal),
     pcmAudio,
+    async loudness(path, stream, startSec, endSec, signal) {
+      const duration = endSec - startSec;
+      if (stream.kind !== "audio" || !Number.isFinite(startSec) || startSec < 0 || !Number.isFinite(duration) || duration <= 0 || duration > 900 + WINDOW_EPSILON) throw new Error("Audio exceeds the loudness profile");
+      // ebur128 logs a line each 100 ms (about 1.8 KB a second of sound) and a summary; nothing goes to stdout.
+      const result = await run("ffmpeg", ["-hide_banner", "-nostats", "-loglevel", "info", "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS,
+        "-i", path, "-ss", String(startSec), "-t", String(duration), "-map", `0:${stream.index}`, "-vn", "-sn", "-af", "ebur128=peak=true", "-f", "null", "-"],
+        signal, 4096, MEASURE_TIMEOUT_MS, Math.ceil(duration * 2400) + 65_536);
+      return parseLoudness(result.stderr);
+    },
     async tile(path, stream, atSec, size, signal) {
       if (stream.kind !== "video" || !Number.isFinite(atSec) || atSec < 0 || !Number.isInteger(size.width) || !Number.isInteger(size.height) ||
         size.width < 16 || size.height < 16 || size.width > 640 || size.height > 640 || size.width % 2 || size.height % 2) throw new Error("Invalid contact sheet tile");
@@ -196,17 +224,27 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
        */
       const maxFrames = fps === null ? Math.floor(AGENT_MEDIA_LIMITS.pcmBytes / frameBytes) : Math.ceil(duration * fps) + 2;
       if (maxFrames < 2 || maxFrames * frameBytes > AGENT_MEDIA_LIMITS.pcmBytes) throw new Error("Video exceeds the measurement frame profile");
-      const result = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS,
+      /*
+       * showinfo logs each frame's decoded time, a line of a few hundred bytes, at info level. Its
+       * log is bounded at 240 frames a second, the most a stream rate may claim; a file holding
+       * more is refused rather than read short.
+       */
+      const times = options.times === true && fps === null;
+      const result = await run("ffmpeg", ["-hide_banner", ...(times ? ["-nostats", "-loglevel", "info"] : ["-loglevel", "error"]), "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS,
         ...(options.fast && fps !== null ? ["-skip_loop_filter", "all", "-skip_frame", "noref"] : []),
         "-ss", String(startSec), "-t", String(duration), "-i", path, "-map", `0:${stream.index}`, "-an", "-sn", "-map_metadata", "-1",
-        "-vf", `crop=${g.cropWidth}:${g.cropHeight}:${g.x}:${g.y},${scale}${fps === null ? "" : `,fps=${fps}`},format=gray`,
-        ...(fps === null ? ["-fps_mode", "passthrough"] : []), "-f", "rawvideo", "pipe:1"], signal, maxFrames * frameBytes, MEASURE_TIMEOUT_MS);
+        "-vf", `crop=${g.cropWidth}:${g.cropHeight}:${g.x}:${g.y},${scale}${fps === null ? "" : `,fps=${fps}`},format=gray${times ? ",showinfo" : ""}`,
+        ...(fps === null ? ["-fps_mode", "passthrough"] : []), "-f", "rawvideo", "pipe:1"], signal, maxFrames * frameBytes, MEASURE_TIMEOUT_MS,
+        times ? Math.ceil(duration * 240) * 640 + 65_536 : undefined);
       if (!result.stdout.length || result.stdout.length % frameBytes) throw new Error("Invalid measurement frames");
       const frames: Uint8Array[] = [];
       for (let offset = 0; offset < result.stdout.length; offset += frameBytes) frames.push(result.stdout.subarray(offset, offset + frameBytes));
       // Only a resampled read has a known frame count to hold the interval to.
       if (fps !== null && Math.abs(frames.length / fps - duration) > 2 / fps + .05) throw new Error("Decoded video does not cover the requested interval");
-      return { frames, width, height, fps: fps ?? native };
+      if (!times) return { frames, width, height, fps: fps ?? native };
+      const frameTimes = Array.from(result.stderr.matchAll(/\bn:\s*\d+\s+pts:\s*-?\d+\s+pts_time:([+-]?[\d.]+(?:e[+-]?\d+)?)/g), match => Number(match[1]));
+      if (frameTimes.length !== frames.length || frameTimes.some((at, i) => !Number.isFinite(at) || i > 0 && at <= frameTimes[i - 1]!)) throw new Error("Decoded frames carry no usable times");
+      return { frames, width, height, fps: native, times: frameTimes };
     },
   };
 }

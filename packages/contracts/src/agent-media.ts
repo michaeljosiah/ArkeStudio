@@ -5,8 +5,8 @@ import { AgentSpeechTranscriptSchema, AgentTranscriptTextSchema, type AgentSpeec
 
 import { AgentAudioListeningSchema, AgentListeningFocusesSchema, type AgentAudioListening } from "./agent-listening.js";
 import { AGENT_MEDIA_LIMITS, AgentMediaRangeSchema, AgentMediaSourceSchema, agentMediaTime as time, type AgentMediaSource } from "./agent-media-source.js";
-import { AgentClipQualitySchema, AgentContactSheetSchema, AgentMediaRegionSchema, AgentSongMapSchema, AgentSyncMeasurementSchema,
-  type AgentClipQuality, type AgentContactSheet, type AgentMediaRegion, type AgentSongMap, type AgentSyncMeasurement } from "./agent-measure.js";
+import { AgentClipQualitySchema, AgentContactSheetSchema, AgentExportReviewSchema, AgentMediaRegionSchema, AgentSongMapSchema, AgentSyncMeasurementSchema,
+  type AgentClipQuality, type AgentContactSheet, type AgentExportReview, type AgentMediaRegion, type AgentSongMap, type AgentSyncMeasurement } from "./agent-measure.js";
 
 export * from "./agent-media-source.js";
 
@@ -52,9 +52,9 @@ export type AgentMediaObservation = { profile: typeof AGENT_MEDIA_PROFILE; sourc
   sourceHash: string; byteLength: number; sourceStartSec: number; sourceEndSec: number | null; inventory: AgentMediaInventory;
   range?: { startSec: number; endSec: number }; frames?: Array<z.infer<typeof AgentMediaFrameSchema>>; audio?: AudioSignal;
   transcript?: AgentSpeechTranscript; listening?: AgentAudioListening; sync?: AgentSyncMeasurement; song?: AgentSongMap; quality?: AgentClipQuality;
-  sheet?: AgentContactSheet; region?: AgentMediaRegion;
+  sheet?: AgentContactSheet; region?: AgentMediaRegion; review?: AgentExportReview;
   coverage: "metadata-only" | "sampled-frames-only" | "decoded-audio-samples" | "recognized-speech" | "model-audio-listening" | "measured-sync" | "measured-song"
-    | "measured-quality" | "contact-sheet"; limitations: string[] };
+    | "measured-quality" | "contact-sheet" | "export-review"; limitations: string[] };
 export const AgentMediaObservationSchema: z.ZodType<AgentMediaObservation> = z.object({ profile: z.literal(AGENT_MEDIA_PROFILE), source: AgentMediaSourceSchema,
   decoderVersion: z.string().min(1).max(200),
   probeVersion: z.string().min(1).max(200),
@@ -63,11 +63,11 @@ export const AgentMediaObservationSchema: z.ZodType<AgentMediaObservation> = z.o
   range: AgentMediaRangeSchema.optional(), frames: z.array(AgentMediaFrameSchema).min(1).max(AGENT_MEDIA_LIMITS.frames).optional(),
   listening: AgentAudioListeningSchema.optional(), audio: AudioSignalSchema.optional(), transcript: AgentSpeechTranscriptSchema.optional(),
   sync: AgentSyncMeasurementSchema.optional(), song: AgentSongMapSchema.optional(), quality: AgentClipQualitySchema.optional(),
-  sheet: AgentContactSheetSchema.optional(),
+  sheet: AgentContactSheetSchema.optional(), review: AgentExportReviewSchema.optional(),
   /** Sampled frames of a box in the picture, when one was asked for. */
   region: AgentMediaRegionSchema.optional(),
   coverage: z.enum(["metadata-only", "sampled-frames-only", "decoded-audio-samples", "recognized-speech", "model-audio-listening", "measured-sync", "measured-song",
-    "measured-quality", "contact-sheet"]),
+    "measured-quality", "contact-sheet", "export-review"]),
   limitations: z.array(z.string().min(1).max(500)).min(1).max(8) }).strict().superRefine((value, context) => {
     if (value.sourceEndSec !== null && value.sourceEndSec < value.sourceStartSec) context.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid source interval" });
     if (value.coverage === "sampled-frames-only" && (!value.range || !value.frames || value.audio) ||
@@ -87,6 +87,8 @@ export const AgentMediaObservationSchema: z.ZodType<AgentMediaObservation> = z.o
       // A sheet runs past the 60 s inspection interval, so like a song map it carries its own window.
       value.coverage === "contact-sheet" && (value.range || !value.sheet || value.frames || value.audio) ||
       value.coverage !== "contact-sheet" && value.sheet ||
+      value.coverage === "export-review" && (value.range || !value.review || value.frames || value.audio) ||
+      value.coverage !== "export-review" && value.review ||
       value.region && value.coverage !== "sampled-frames-only") {
       context.addIssue({ code: z.ZodIssueCode.custom, message: "Evidence must match its declared coverage" });
     }

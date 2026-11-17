@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AgentClipCadenceSchema, AgentClipQualitySchema } from "@arke-studio/contracts";
-import { measureCadence, measureDetail } from "../../src/media/clip-quality.js";
-import { createAgentMediaTools, parseStreamRate } from "../../src/media/agent-media-tools.js";
+import { droppedFromSteps, measureCadence, measureDetail } from "../../src/media/clip-quality.js";
+import { createAgentMediaTools, parseLoudness, parseStreamRate } from "../../src/media/agent-media-tools.js";
 import { percentChange } from "../../src/world-chat/media-measure.js";
 
 const W = 64, H = 36;
@@ -62,6 +62,23 @@ test("every native frame of a variable-rate interval is taken, though it holds m
   const stream = { index: 0, kind: "video" as const, codec: "h264", width: 16, height: 16, frameRate: "30/1", durationSec: 10, startTimeSec: 0 };
   const read = await fake.grayFrames!("clip", stream, 2, 3, { fps: null, edge: 16 }, new AbortController().signal);
   assert.equal(read.frames.length, 60); assert.equal(read.fps, 30);
+});
+
+test("a 30 fps take played at 24 steps twice as far every fourth frame; a strobe every 24 frames and a whip pan are not drops", () => {
+  const conformed = Array.from({ length: 80 }, (_, i) => i % 4 === 3 ? 6 : 3);
+  assert.deepEqual(droppedFromSteps(conformed), { jumps: 20, jumpPeriod: 4 });
+  assert.equal(droppedFromSteps(Array.from({ length: 96 }, (_, i) => i % 24 === 23 ? 7 : 3)).jumpPeriod, null);
+  assert.equal(droppedFromSteps(Array.from({ length: 60 }, (_, i) => i === 30 ? 12 : 3)).jumpPeriod, null);
+  assert.deepEqual(droppedFromSteps([0, 0, 0]), { jumps: null, jumpPeriod: null });
+});
+
+test("FFmpeg's ebur128 log reads as integrated loudness, range, true peak and the loudest short-term second", () => {
+  const log = "[Parsed_ebur128_0 @ 0] t: 0.1 TARGET:-23 LUFS M:-120.7 S:-120.7 I: -70.0 LUFS LRA: 0.0 LU\n[Parsed_ebur128_0 @ 0] t: 3.1 TARGET:-23 LUFS M: -14.2 S: -12.4 I: -13.9 LUFS LRA: 2.0 LU\n"
+    + "[Parsed_ebur128_0 @ 0] t: 3.2 TARGET:-23 LUFS M: -13.0 S: -10.3 I: -13.7 LUFS LRA: 2.1 LU\n"
+    + "[Parsed_ebur128_0 @ 0] Summary:\n\n  Integrated loudness:\n    I:         -13.6 LUFS\n    Threshold: -23.7 LUFS\n\n  Loudness range:\n    LRA:         4.2 LU\n\n  True peak:\n    Peak:       -1.2 dBFS\n";
+  assert.deepEqual(parseLoudness(log), { integratedLufs: -13.6, rangeLu: 4.2, truePeakDbtp: -1.2, shortTermMaxLufs: -10.3 });
+  assert.deepEqual(parseLoudness("Summary:\n I: -inf LUFS\n LRA: 0.0 LU\n Peak: -inf dBFS\n"), { integratedLufs: null, rangeLu: 0, truePeakDbtp: null, shortTermMaxLufs: null });
+  assert.throws(() => parseLoudness("no summary"));
 });
 
 test("the quality schema meets two clips at one size", () => {

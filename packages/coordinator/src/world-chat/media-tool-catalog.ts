@@ -40,4 +40,8 @@ export const AGENT_MEDIA_TOOL_CATALOG = [
     inputSchema: { type: "object", properties: { source,
       window: { type: "object", properties: { startSec: { type: "number", minimum: 0 }, endSec: { type: "number", minimum: 0 } }, required: ["startSec", "endSec"], additionalProperties: false },
       streamIndex }, required: ["source"], additionalProperties: false } },
+  { name: "review_export", description: "Check a finished film before it is shared, with numbers. Name it by its export id (from list_exports); a film over 15 minutes needs a window. Returns its length against its cut, its picture and sound format, its loudness (EBU R128 integrated LUFS, loudness range, true peak, loudest short-term), and a table of its shots with the frames each repeats (a 30 fps take in a 24 fps film stutters) and, for each clip whose own sound is muted in the cut (a sung take under its song), that sound against the film's mix: how far off it is, and whether it follows at all. Findings lists in plain sentences what needs attention, each with its shot number. Shots and clips come from the production's timeline when its cut is unchanged since the export; otherwise cuts are found in the picture and no sync is measured. Then use cut_contact_sheet and sample_video to look at what it found. Local signal measurement; no provider, no listening.",
+    inputSchema: { type: "object", properties: { source,
+      window: { type: "object", properties: { startSec: { type: "number", minimum: 0 }, endSec: { type: "number", minimum: 0 } }, required: ["startSec", "endSec"], additionalProperties: false },
+      streamIndex, audioStreamIndex: streamIndex }, required: ["source"], additionalProperties: false } },
 ] as const;
