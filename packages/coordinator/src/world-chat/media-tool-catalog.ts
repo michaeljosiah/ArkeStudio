@@ -27,4 +27,9 @@ export const AGENT_MEDIA_TOOL_CATALOG = [
       reference: { type: "object", properties: { source, startSec: { type: "number", minimum: 0 }, streamIndex }, required: ["source", "startSec"], additionalProperties: false },
       method: { enum: ["soundtrack", "mouth"], default: "soundtrack" }, region, maxLagSec: { type: "number", minimum: .04, maximum: 2, default: .6 } },
     required: ["source", "range", "reference"], additionalProperties: false } },
+  { name: "song_map", description: "Map a song: its tempo and tracked beat times, the sections where its level and low end change (the same boundaries the Cut proposes), each section's loudness, and, given a vocal stem aligned with the song, where the voice is heard and how much of each section is sung. Name an immutable audio source (the production's song, a stem, a recording); a source longer than 15 minutes needs a window (startSec, endSec, at most 15 minutes). All times are seconds from the source's start. Use it to cut on the beat, to land a title or a shot on a section, or to see where a singer is singing before choosing a performance or a quiet shot. Beats are tracked from onsets, not a fixed grid; sections are boundaries without names (no verse or chorus labels); voice is a level threshold on the stem. Local signal measurement; no provider, listening or word recognition.",
+    inputSchema: { type: "object", properties: { source,
+      window: { type: "object", properties: { startSec: { type: "number", minimum: 0 }, endSec: { type: "number", minimum: 0 } }, required: ["startSec", "endSec"], additionalProperties: false },
+      streamIndex, vocal: { type: "object", properties: { source, streamIndex }, required: ["source"], additionalProperties: false } },
+    required: ["source"], additionalProperties: false } },
 ] as const;

@@ -15,6 +15,8 @@ export interface AgentMediaTools {
   speechAudio?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, signal: AbortSignal): Promise<{ bytes: Uint8Array; durationSec: number }>;
   /** A mono derivative at `rate` for measurement (#3070); like the speech derivative, never original-channel QC. */
   monoAudio?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, rate: number, signal: AbortSignal): Promise<Float32Array>;
+  /** The same derivative with one or two channels interleaved (the effects analysis reads stereo at 48 kHz). */
+  pcmAudio?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, format: { rate: number; channels: 1 | 2 }, signal: AbortSignal): Promise<Float32Array>;
   /** Small greyscale frames at a fixed rate, of the whole picture or a box in it, for motion measurement. */
   grayFrames?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number,
     options: { fps: number; edge: number; region?: AgentMediaRegion }, signal: AbortSignal): Promise<{ frames: Uint8Array[]; width: number; height: number; fps: number }>;
@@ -68,6 +70,26 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
       const first = new TextDecoder().decode(result.stdout).split(/\r?\n/)[0] ?? "";
       if (!first.startsWith(`${tool} version `) || first.length > 200) throw new Error("Media tool version is unavailable");
       return first;
+  };
+  const pcmAudio = async (path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number,
+    format: { rate: number; channels: 1 | 2 }, signal: AbortSignal): Promise<Float32Array> => {
+    const duration = endSec - startSec, { rate, channels } = format;
+    if (!stream.sampleRate || !stream.channels || stream.sampleRate > AGENT_MEDIA_LIMITS.sampleRate || stream.channels > AGENT_MEDIA_LIMITS.channels ||
+      !Number.isInteger(stream.index) || stream.index < 0 || stream.index > 255 || !Number.isInteger(rate) || rate < 4000 || rate > 48000 || (channels !== 1 && channels !== 2) ||
+      !Number.isFinite(startSec) || startSec < 0 || !Number.isFinite(duration) || duration <= 0 || duration > AGENT_MEDIA_LIMITS.intervalSeconds + WINDOW_EPSILON) throw new Error("Audio exceeds the measurement derivative profile");
+    const result = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS,
+      "-i", path, "-ss", String(startSec), "-t", String(duration), "-map", `0:${stream.index}`, "-vn", "-sn", "-map_metadata", "-1",
+      "-ac", String(channels), "-ar", String(rate), "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"], signal, Math.ceil(duration * rate + rate) * 4 * channels, MEASURE_TIMEOUT_MS);
+    if (!result.stdout.length || result.stdout.length % (4 * channels)) throw new Error("Invalid measurement PCM");
+    const samples = new Float32Array(result.stdout.length / 4), view = new DataView(result.stdout.buffer, result.stdout.byteOffset, result.stdout.byteLength);
+    for (let i = 0; i < samples.length; i++) {
+      const value = view.getFloat32(i * 4, true);
+      if (!Number.isFinite(value)) throw new Error("Non-finite measurement PCM");
+      samples[i] = value;
+    }
+    // A file shorter than the interval decodes short; measuring that as the whole interval would misplace every lag.
+    if (Math.abs(samples.length / channels / rate - duration) > .05) throw new Error("Decoded audio does not cover the requested interval");
+    return samples;
   };
   return {
     version: signal => version("ffmpeg", signal),
@@ -125,25 +147,9 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
       if (Math.abs(durationSec - duration) > .025) throw new Error("Speech derivative does not cover the requested interval");
       return { bytes: writeSpeechWav({ rate: 16000, samples }), durationSec };
     },
-    async monoAudio(path, stream, startSec, endSec, rate, signal) {
-      const duration = endSec - startSec;
-      if (!stream.sampleRate || !stream.channels || stream.sampleRate > AGENT_MEDIA_LIMITS.sampleRate || stream.channels > AGENT_MEDIA_LIMITS.channels ||
-        !Number.isInteger(stream.index) || stream.index < 0 || stream.index > 255 || !Number.isInteger(rate) || rate < 4000 || rate > 48000 ||
-        !Number.isFinite(startSec) || startSec < 0 || !Number.isFinite(duration) || duration <= 0 || duration > AGENT_MEDIA_LIMITS.intervalSeconds + WINDOW_EPSILON) throw new Error("Audio exceeds the measurement derivative profile");
-      const result = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS,
-        "-i", path, "-ss", String(startSec), "-t", String(duration), "-map", `0:${stream.index}`, "-vn", "-sn", "-map_metadata", "-1",
-        "-ac", "1", "-ar", String(rate), "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"], signal, Math.ceil(duration * rate + rate) * 4, MEASURE_TIMEOUT_MS);
-      if (!result.stdout.length || result.stdout.length % 4) throw new Error("Invalid measurement PCM");
-      const samples = new Float32Array(result.stdout.length / 4), view = new DataView(result.stdout.buffer, result.stdout.byteOffset, result.stdout.byteLength);
-      for (let i = 0; i < samples.length; i++) {
-        const value = view.getFloat32(i * 4, true);
-        if (!Number.isFinite(value)) throw new Error("Non-finite measurement PCM");
-        samples[i] = value;
-      }
-      // A file shorter than the interval decodes short; measuring that as the whole interval would misplace every lag.
-      if (Math.abs(samples.length / rate - duration) > .05) throw new Error("Decoded audio does not cover the requested interval");
-      return samples;
-    },
+    // A plain function, not a method: callers take it off the object.
+    monoAudio: (path, stream, startSec, endSec, rate, signal) => pcmAudio(path, stream, startSec, endSec, { rate, channels: 1 }, signal),
+    pcmAudio,
     async grayFrames(path, stream, startSec, endSec, options, signal) {
       const duration = endSec - startSec, { fps, edge } = options;
       if (stream.kind !== "video" || !stream.width || !stream.height || Math.max(stream.width, stream.height) > 3840 || stream.width * stream.height > 3840 * 2160 ||

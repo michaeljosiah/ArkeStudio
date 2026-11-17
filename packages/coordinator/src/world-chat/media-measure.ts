@@ -1,7 +1,9 @@
-import { AGENT_SYNC_LIMITS, AgentSyncMeasurementSchema, type AgentMediaInventory, type AgentSyncMeasurement, type MeasureSyncArgs } from "@arke-studio/contracts";
+import { AGENT_SYNC_LIMITS, AgentSongMapSchema, AgentSyncMeasurementSchema, EFFECT_ANALYSIS_PROFILE, SONG_SECTION_PROFILE,
+  createEffectPcmAnalyzer, findSongSections, type AgentMediaInventory, type AgentSongMap, type AgentSyncMeasurement, type MeasureSyncArgs, type SongMapArgs } from "@arke-studio/contracts";
 import { withContainedProductionMedia } from "../world/reference-files.js";
 import type { AgentMediaTools } from "../media/agent-media-tools.js";
 import { measureMouthSync, measureSoundtrackSync } from "../media/measure-sync.js";
+import { SONG_MAP_PROFILE, songBeats, stepLevels, voiceIntervals } from "../media/song-map.js";
 import { RetrievalError } from "./retrieval.js";
 import type { InspectionSource } from "./media-inspection.js";
 
@@ -24,6 +26,80 @@ export const SYNC_LIMITATIONS = {
   soundtrack: "Assumes the take's own soundtrack carries the sound it was made to; a take whose sound was replaced or muted says nothing here about its picture.",
   mouth: "Head and camera movement inside the box count as mouth movement, and a mouth that leaves the box is not measured: a coarse proxy for lip sync.",
 } as const;
+
+export const SONG_LIMITATIONS = [
+  "Signal measurement of the decoded sound. Beats are tracked from where notes start, in 10 ms steps; downbeats and bars are not found, a passage with no steady pulse gets no beats, and where the music is ambiguous the tempo can be read at double or half.",
+  "Sections are where the level and low end change, found as the Cut proposes them: boundaries, never names. A verse turning into a chorus at the same level is not found.",
+  "Voice is where the named stem is louder than its threshold; other instruments bleeding into the stem count as voice. Without a stem nothing is said about singing.",
+  "No listening, word recognition or judgement of the music was made.",
+];
+
+/** Decode a window longer than one bounded read in 60 s pieces, joined end to end at exact sample counts. */
+async function decodeLong(pcm: NonNullable<AgentMediaTools["pcmAudio"]>, path: string, stream: Stream, startSec: number, endSec: number,
+  format: { rate: number; channels: 1 | 2 }, signal: AbortSignal, each?: (chunk: Float32Array) => void): Promise<Float32Array | null> {
+  const total = Math.round((endSec - startSec) * format.rate) * format.channels, out = each ? null : new Float32Array(total);
+  let filled = 0;
+  for (let at = startSec; filled < total; at += 60) {
+    const to = Math.min(endSec, at + 60), chunk = await pcm(path, stream, at, to, format, signal);
+    const want = Math.min(total, Math.round((to - startSec) * format.rate) * format.channels) - filled;
+    // A piece a sample or two short is padded with silence; one that is long is cut at the window.
+    const piece = new Float32Array(want); piece.set(chunk.subarray(0, Math.min(chunk.length, want)));
+    if (each) each(piece); else out!.set(piece, filled);
+    filled += want;
+  }
+  return out;
+}
+
+/**
+ * Beats, sections and voice for a window of a song. Sections are found by the effects analysis
+ * the Cut's proposals use, fed the window as 48 kHz stereo; beats and voice read a 16 kHz mono
+ * derivative of the song and of the stem.
+ */
+export async function songMapInSnapshot(worldDir: string, tools: AgentMediaTools, signal: AbortSignal,
+  song: { path: string; stream: Stream; startSec: number; endSec: number; viewStartSec: number }, args: SongMapArgs, vocal: InspectionSource | null): Promise<AgentSongMap> {
+  const pcm = tools.pcmAudio;
+  if (!pcm) throw new RetrievalError("unavailable", "Local song measurement is unavailable on this host.");
+  const length = song.endSec - song.startSec, rate = SONG_MAP_PROFILE.rate, view = (at: number) => Math.round((song.viewStartSec + at) * 1000) / 1000;
+  const mono = (await decodeLong(pcm, song.path, song.stream, song.startSec, song.endSec, { rate, channels: 1 }, signal))!;
+  const { beatsSec, tempoBpm } = await songBeats(mono, signal);
+  const fps = SONG_SECTION_PROFILE.frameRate, frames = Math.floor(length * fps);
+  let starts = [0];
+  if (frames >= 1) {
+    const analyzer = createEffectPcmAnalyzer({ frameRate: fps, startFrame: 0, endFrame: frames });
+    await decodeLong(pcm, song.path, song.stream, song.startSec, song.startSec + frames / fps,
+      { rate: EFFECT_ANALYSIS_PROFILE.sampleRate, channels: 2 }, signal, chunk => analyzer.push(chunk));
+    starts = findSongSections(analyzer.finish(), fps).startsSec.filter(at => at < length);
+  }
+  let voice: AgentSongMap["vocal"] = null, sung: Array<{ startSec: number; endSec: number }> = [];
+  if (vocal && args.vocal) {
+    voice = await withContainedProductionMedia(worldDir, vocal.path, vocal.expectedHash, signal, async snapshot => {
+      const inventory = await tools.probe(snapshot.path, signal), end = vocal.endSec ?? inventory.durationSec;
+      const startSec = vocal.startSec + song.viewStartSec, endSec = startSec + length;
+      if (end === null || endSec > end + .05) throw new RetrievalError("bad-argument", "The vocal stem does not cover the song's window.");
+      const candidates = inventory.streams.filter(stream => stream.kind === "audio");
+      const selected = args.vocal!.streamIndex === undefined ? candidates.length === 1 ? candidates[0] : undefined
+        : candidates.find(stream => stream.index === args.vocal!.streamIndex);
+      if (!selected) throw new RetrievalError("bad-argument", "Select one explicit audio stream of the vocal stem from inspect_media; ambiguous tracks are never guessed.");
+      const found = voiceIntervals((await decodeLong(pcm, snapshot.path, selected, startSec, Math.min(endSec, end), { rate, channels: 1 }, signal))!, rate);
+      sung = found.intervals;
+      return { source: args.vocal!.source, sourceHash: snapshot.sourceHash, streamIndex: selected.index, thresholdDbfs: found.thresholdDbfs,
+        // Never cut short: the limit holds every phrase a 15-minute window can have, and past it the schema refuses rather than a map going quiet.
+        intervals: found.intervals.map(span => ({ startSec: view(span.startSec), endSec: view(Math.min(length, span.endSec)) })) };
+    });
+  }
+  const levels = stepLevels(mono, rate, .1);
+  const sections = starts.map((at, i) => {
+    const endAt = starts[i + 1] ?? length, from = Math.floor(at * 10), to = Math.max(from + 1, Math.floor(endAt * 10));
+    let power = 0, count = 0;
+    for (let s = from; s < Math.min(to, levels.length); s++) { power += 10 ** (levels[s]! / 10); count++; }
+    const overlap = sung.reduce((sum, span) => sum + Math.max(0, Math.min(endAt, span.endSec) - Math.max(at, span.startSec)), 0);
+    return { startSec: view(at), endSec: view(endAt), loudnessDbfs: count && power > 0 ? Math.round(10 * Math.log10(power / count) * 10) / 10 : null,
+      vocalFraction: voice ? Math.round(Math.min(1, overlap / (endAt - at)) * 1000) / 1000 : null };
+  });
+  const beats = beatsSec.filter(at => at <= length).map(view);
+  return AgentSongMapSchema.parse({ streamIndex: song.stream.index, startSec: view(0), endSec: view(length),
+    tempoBpm: beats.length ? tempoBpm : null, beats, sections, vocal: voice });
+}
 
 export async function measureSyncInSnapshot(worldDir: string, tools: AgentMediaTools, signal: AbortSignal,
   take: { path: string; stream: Stream; startSec: number; endSec: number }, args: MeasureSyncArgs, reference: InspectionSource): Promise<AgentSyncMeasurement> {

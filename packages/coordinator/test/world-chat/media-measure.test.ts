@@ -38,6 +38,14 @@ const SLICE = 2, SOUND_LATE = .12, MOUTH_LATE = .08;
 const songAt = (sec: number) => { const i = Math.round(sec * RATE); return i >= 0 && i < song.samples.length ? song.samples[i]! : 0; };
 const envelopeAt = (sec: number) => { const i = Math.round(sec * RATE); return i >= 0 && i < song.envelope.length ? song.envelope[i]! : 0; };
 
+/** Thirty seconds at 100 bpm from 0.3 s, a kick on each beat; and its stem, sung from 2 to 9 s and from 14 to 20 s. */
+const GROOVE = Buffer.from("GROOVE fixture"), STEM = Buffer.from("STEM fixture"), GROOVE_SEC = 30;
+const grooveAt = (sec: number) => {
+  const sinceBeat = (sec - .3) % .6;
+  if (sec < .3 || sinceBeat > .15) return 0;
+  return .8 * Math.exp(-sinceBeat / .04) * Math.sin(2 * Math.PI * 60 * sinceBeat) + .4 * Math.exp(-sinceBeat / .003) * Math.sin(1e5 * sec * sec);
+};
+const stemAt = (sec: number) => sec >= 2 && sec < 9 || sec >= 14 && sec < 20 ? .3 * Math.sin(2 * Math.PI * 220 * sec) : 0;
 const takeInventory: AgentMediaInventory = { durationSec: 6, streams: [
   { index: 0, kind: "video", codec: "fixture", width: 1280, height: 720, durationSec: 6, startTimeSec: 0 },
   { index: 1, kind: "audio", codec: "fixture", sampleRate: RATE, channels: 1, durationSec: 6, startTimeSec: 0 },
@@ -51,19 +59,35 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
   const artifact = (id: string, kind: string, file: string, bytes: Buffer) => [
     { path: `artifacts/${file}`, action: "create" as const, baseHash: null, encoding: "base64" as const, content: bytes.toString("base64") },
     { path: `artifacts/${file.replace(/\.\w+$/, "")}.json`, action: "create" as const, baseHash: null, content: JSON.stringify({ id, kind, file, hash: hash(bytes), links: [], origin: { by: "user" }, created: "2026-11-17T00:00:00Z" }) }];
-  await store.commit({ kind: "media-fixture", source: "test", files: [...artifact(takeId, "video", "take.mp4", TAKE), ...artifact(songId, "audio", "song.mp3", SONG)] });
+  const grooveId = newId("ar"), stemId = newId("ar");
+  await store.commit({ kind: "media-fixture", source: "test", files: [...artifact(takeId, "video", "take.mp4", TAKE), ...artifact(songId, "audio", "song.mp3", SONG),
+    ...artifact(grooveId, "audio", "groove.mp3", GROOVE), ...artifact(stemId, "audio", "stem.wav", STEM)] });
   const leases = new QueryLeaseRegistry(() => store.worldId), lease = leases.mint({ worldId: store.worldId, conversationId: cv, runId, allowedAttachmentIds: [] });
   const stop = new AbortController();
   const adapter = { imageInput: true, imageInputForSession: () => true, imageDestinationForSession: () => ({ provider: "test-provider", local: true }) } as unknown as HarnessAdapter;
   const images = new ConversationImages(store, leases, { adapter, allowed: async () => true, publish: async () => {} }); images.start(runId, "session", stop.signal);
   const calls: Array<{ what: string; startSec: number; endSec: number; region?: AgentMediaRegion; fps?: number }> = [];
   const isSong = async (path: string) => (await readFile(path)).equals(SONG);
+  const which = async (path: string) => { const bytes = await readFile(path); return bytes.equals(GROOVE) ? "groove" : bytes.equals(STEM) ? "stem" : bytes.equals(SONG) ? "song" : "take"; };
   const tools: AgentMediaTools = {
     version: async () => "ffmpeg version fixture", probeVersion: async () => "ffprobe version fixture",
-    probe: async path => await isSong(path) ? { ...songInventory, streams: options.songStreams ?? songInventory.streams } : takeInventory,
+    probe: async path => {
+      const kind = await which(path);
+      if (kind === "groove" || kind === "stem") return { durationSec: GROOVE_SEC, streams: [{ ...songInventory.streams[0]!, durationSec: GROOVE_SEC }] };
+      return kind === "song" ? { ...songInventory, streams: options.songStreams ?? songInventory.streams } : takeInventory;
+    },
     frame: async () => { throw new Error("no frames in this fixture"); },
     audio: async () => { throw new Error("no channel QC in this fixture"); },
     ...(options.noMeasure ? {} : {
+      pcmAudio: async (path, _stream, startSec, endSec, format) => {
+        const kind = await which(path), frames = Math.round((endSec - startSec) * format.rate), out = new Float32Array(frames * format.channels);
+        calls.push({ what: `${kind}@${format.rate}x${format.channels}`, startSec, endSec });
+        for (let i = 0; i < frames; i++) {
+          const t = startSec + i / format.rate, value = kind === "stem" ? stemAt(t) : grooveAt(t);
+          for (let c = 0; c < format.channels; c++) out[i * format.channels + c] = value;
+        }
+        return out;
+      },
       monoAudio: async (path, _stream, startSec, endSec, rate) => {
         const songSide = await isSong(path); calls.push({ what: songSide ? "song" : "take", startSec, endSec });
         assert.equal(rate, RATE);
@@ -87,6 +111,7 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
   const retrieval = new WorldChatRetrieval({ leases, getBundle: () => store.getBundle(), getIndex: () => null, attachments: new WorldChatAttachmentStore(dir), findAttachment: async () => null,
     readImage: (lease, args) => images.read(lease, args), readMedia: (lease, name, args) => media.read(lease, name, args) });
   return { store, lease, retrieval, calls, take: { kind: "artifact" as const, id: takeId }, song: { kind: "artifact" as const, id: songId },
+    groove: { kind: "artifact" as const, id: grooveId }, stem: { kind: "artifact" as const, id: stemId },
     loaded: () => new WorldChatService(dir).load(cv) };
 }
 
@@ -136,12 +161,43 @@ test("a host without the measurement decoder refuses without a receipt or a sche
   assert.equal(h.store.getBundle().meta.schemaVersion, before); assert.equal((await h.loaded())!.mediaReceipts, undefined);
 });
 
+test("song_map: 100 bpm, beats on the kicks, the Studio's sections, and where the stem sings; the receipt raises schema 141", async () => {
+  const h = await harness();
+  const outcome = await h.retrieval.call(h.lease.token, "song_map", { source: h.groove, vocal: { source: h.stem } });
+  const media = outcome.receipt.media!, song = media.song!;
+  assert.equal(outcome.receipt.status, "complete"); assert.equal(outcome.receipt.tool, "song-map"); assert.equal(media.coverage, "measured-song"); assert.equal(media.range, undefined);
+  assert.equal(song.startSec, 0); assert.equal(song.endSec, GROOVE_SEC); assert.ok(Math.abs(song.tempoBpm! - 100) < .5, String(song.tempoBpm));
+  for (const beat of song.beats) assert.ok(Math.abs(((beat - .3) / .6) - Math.round((beat - .3) / .6)) * .6 < .03, `beat ${beat} off the kicks`);
+  assert.ok(song.beats.length >= 45, String(song.beats.length));
+  assert.equal(song.sections[0]!.startSec, 0); assert.equal(song.sections[song.sections.length - 1]!.endSec, GROOVE_SEC);
+  assert.deepEqual(song.vocal!.intervals, [{ startSec: 2, endSec: 9 }, { startSec: 14, endSec: 20 }]);
+  assert.equal(song.vocal!.sourceHash, hash(STEM));
+  assert.ok(Math.abs(song.sections.reduce((sum, s) => sum + s.vocalFraction! * (s.endSec - s.startSec), 0) - 13) < .2);
+  // Sections come from the effects analysis, fed 48 kHz stereo; beats and voice from 16 kHz mono.
+  assert.ok(h.calls.some(call => call.what === "groove@48000x2") && h.calls.some(call => call.what === "groove@16000x1") && h.calls.some(call => call.what === "stem@16000x1"));
+  assert.match(outcome.receipt.querySummary!, /^Song mapped/);
+  assert.equal(WorldChatCheckReceiptSchema.safeParse(outcome.receipt).success, true);
+  assert.equal(h.store.getBundle().meta.schemaVersion, 141);
+  await assert.rejects(readWorldMeta(h.store.dir, { supports: 140 }), /newer|version|schema/i);
+});
+
+test("song_map reads a window on the source's clock and refuses one past the end", async () => {
+  const h = await harness();
+  const outcome = await h.retrieval.call(h.lease.token, "song_map", { source: h.groove, window: { startSec: 10, endSec: 25 } });
+  const song = outcome.receipt.media!.song!;
+  assert.equal(song.startSec, 10); assert.equal(song.endSec, 25); assert.equal(song.vocal, null);
+  assert.ok(song.beats.every(beat => beat >= 10 && beat <= 25) && song.beats.length >= 20);
+  assert.ok(h.calls.filter(call => call.what.startsWith("groove")).every(call => call.startSec >= 10 && call.endSec <= 25));
+  await assert.rejects(h.retrieval.call(h.lease.token, "song_map", { source: h.groove, window: { startSec: 20, endSec: 40 } }), /past the end/);
+  await assert.rejects(h.retrieval.call(h.lease.token, "song_map", { source: h.groove, window: { startSec: 0, endSec: 1000 } }), /song_map/);
+});
+
 test("the shared leased MCP catalogue lists measure_sync and serves it", async () => {
   const h = await harness(), server = new WorldQueryServer(() => h.store); await server.start(); closeOnCleanup(() => server.stop());
   let served = ""; server.attachLease(h.lease.token, { retrieval: h.retrieval, onReceipt: receipt => { served = receipt.tool; } });
   const rpc = async (method: string, params?: unknown) => (await fetch(server.leasedUrl(h.lease.token)!, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })).json();
   const listed = await rpc("tools/list") as { result: { tools: Array<{ name: string }> } };
-  assert.ok(listed.result.tools.some(tool => tool.name === "measure_sync"));
+  for (const name of ["measure_sync", "song_map"]) assert.ok(listed.result.tools.some(tool => tool.name === name), name);
   await rpc("tools/call", { name: "measure_sync", arguments: { source: h.take, range: { startSec: .5, endSec: 3.5 }, reference: { source: h.song, startSec: 2.5 } } });
   assert.equal(served, "measure-sync");
 });

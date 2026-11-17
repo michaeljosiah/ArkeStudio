@@ -88,3 +88,55 @@ export const AgentSyncMeasurementSchema = z.object({
     !sync.follows && sync.sourceShiftSec !== null) issue("Only a take that follows its reference gets a source shift, and it is the lag");
 });
 export type AgentSyncMeasurement = z.infer<typeof AgentSyncMeasurementSchema>;
+
+/**
+ * A song's beats, sections and voice (#3075, #3099). Measured on the music video: the beats were
+ * worked out by hand and the sections timed in another program, because nothing here could hear
+ * the song. Beats are tracked, not a grid, sections are the Studio's own finder (`findSongSections`)
+ * and the voice comes from a vocal stem when one is named.
+ */
+export const AGENT_SONG_SCHEMA_VERSION = 141;
+/*
+ * The limits hold everything a 15-minute window can produce, so a map is never cut short: beats are
+ * at least half a 200 bpm period apart (0.15 s), and a phrase is at least 0.3 s with 0.6 s between.
+ */
+export const AGENT_SONG_LIMITS = Object.freeze({ maxSeconds: 900, maxBeats: 6001, maxSections: 24, maxVoiceIntervals: 1000 });
+const songTime = agentMediaTime;
+export const AgentSongWindowSchema = z.object({ startSec: songTime, endSec: songTime }).strict().superRefine((window, context) => {
+  if (window.endSec <= window.startSec || window.endSec - window.startSec > AGENT_SONG_LIMITS.maxSeconds) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "A song map covers a positive window of at most 15 minutes" });
+  }
+});
+export const SongMapArgsSchema = z.object({
+  source: AgentMediaSourceSchema,
+  /** Defaults to the whole source when it is at most 15 minutes. */
+  window: AgentSongWindowSchema.optional(),
+  streamIndex: AgentMediaStreamIndexSchema.optional(),
+  /** A stem holding the voice alone, aligned with the source, to map where it sings. */
+  vocal: z.object({ source: AgentMediaSourceSchema, streamIndex: AgentMediaStreamIndexSchema.optional() }).strict().optional(),
+}).strict();
+export type SongMapArgs = z.infer<typeof SongMapArgsSchema>;
+const songSpan = z.object({ startSec: songTime, endSec: songTime }).strict();
+export const AgentSongMapSchema = z.object({
+  streamIndex: AgentMediaStreamIndexSchema,
+  /** The window measured, in seconds from the source's start; every time below is on the same clock. */
+  startSec: songTime, endSec: songTime,
+  tempoBpm: z.number().finite().positive().nullable(),
+  beats: z.array(songTime).max(AGENT_SONG_LIMITS.maxBeats),
+  sections: z.array(songSpan.extend({ loudnessDbfs: z.number().finite().nullable(), vocalFraction: fraction.nullable() }).strict())
+    .min(1).max(AGENT_SONG_LIMITS.maxSections),
+  vocal: z.object({ source: AgentMediaSourceSchema, sourceHash: FullSha256Schema, streamIndex: AgentMediaStreamIndexSchema,
+    thresholdDbfs: z.number().finite(), intervals: z.array(songSpan).max(AGENT_SONG_LIMITS.maxVoiceIntervals) }).strict().nullable(),
+}).strict().superRefine((song, context) => {
+  const issue = (message: string) => context.addIssue({ code: z.ZodIssueCode.custom, message });
+  const inside = (at: number) => at >= song.startSec - .000001 && at <= song.endSec + .000001;
+  if (song.endSec <= song.startSec || song.endSec - song.startSec > AGENT_SONG_LIMITS.maxSeconds + .000001) issue("A song map covers a positive window of at most 15 minutes");
+  if (song.beats.some((beat, i) => !inside(beat) || i > 0 && beat <= song.beats[i - 1]!)) issue("Beats are ascending and inside the window");
+  if ((song.tempoBpm === null) !== (song.beats.length === 0)) issue("A tempo is reported with the beats that keep it");
+  // Sections tile the window: the first starts it, each starts where the last ended, the last ends it.
+  if (Math.abs(song.sections[0]!.startSec - song.startSec) > .001 || Math.abs(song.sections[song.sections.length - 1]!.endSec - song.endSec) > .001 ||
+    song.sections.some((section, i) => section.endSec <= section.startSec || i > 0 && Math.abs(section.startSec - song.sections[i - 1]!.endSec) > .001)) issue("Sections tile the measured window");
+  if (song.sections.some(section => (section.vocalFraction === null) !== (song.vocal === null))) issue("Only a map with a vocal stem says how much of each section is sung");
+  if (song.vocal?.intervals.some((span, i, all) => span.endSec <= span.startSec || !inside(span.startSec) || !inside(span.endSec) || i > 0 && span.startSec < all[i - 1]!.endSec)) issue("Voice intervals are ordered, apart and inside the window");
+});
+export type AgentSongMap = z.infer<typeof AgentSongMapSchema>;
