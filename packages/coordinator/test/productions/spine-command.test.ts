@@ -48,6 +48,7 @@ async function harness(options: { measured: boolean }) {
     scheduleProductionSpend: async () => {}, broadcastSnapshot: () => {}, worldOpensSettled: async () => {},
     worldChatRunner: () => { throw new Error("no World Chat here"); }, refreshConversations: async () => {},
     openWorldChat: async () => {}, stillOpen: () => true, worldChat: () => null, setWorldChat: () => {},
+    songSections: async () => ({ status: "unavailable", reason: "Not measured in this test." }),
   });
   const router = new CommandRouter(ctx, [module]);
   // Parsed as the transport parses it, so the frame itself is what is tested.

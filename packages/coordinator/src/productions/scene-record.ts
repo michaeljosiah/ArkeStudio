@@ -470,8 +470,11 @@ export function carriesStagePlate(raw: string): boolean {
  * refuses the whole setup, and drops the scene on scan. Raised with the first draft update or
  * scene bytes that carry one. `mark-sections-from-scenes` needs no boundary of its own: it is
  * refused until a scene carries a window, and by then the world is past this one.
+ *
+ * 145, not the 135 it was cut with: the measurement reads raised worlds to 140–144 first, and a
+ * build that reads 144 but not this would open a world at 144 holding windows and drop its scenes.
  */
-export const SCENE_SONG_WINDOW_SCHEMA_VERSION = 135;
+export const SCENE_SONG_WINDOW_SCHEMA_VERSION = 145;
 export function carriesSongWindow(raw: string): boolean {
   try { return parseSceneRecord(raw).songWindow !== undefined; }
   catch { return false; }

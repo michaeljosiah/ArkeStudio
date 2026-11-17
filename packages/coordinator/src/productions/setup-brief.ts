@@ -109,6 +109,10 @@ const FORMATS: Record<ProductionSetupDraft["kind"], string> = {
  * A scene's place in the song is its songWindow (issue 3100). The brief used to ask for it at the
  * start of the synopsis, the only place there was, and it reached the production as words in a
  * title: "Verse 1: the phone (0:16–0:44)".
+ *
+ * It asked the author for the sections' times, and the author timed the song in another program
+ * (issue 3099). Setup has no song to measure, so times the author has not given wait for the
+ * production: the Studio measures the master track, and Arke reads where it changes from the spine.
  */
 function musicVideoSection(draft: ProductionSetupDraft): string {
   if (draft.kind !== "music-video") return "";
@@ -116,7 +120,7 @@ function musicVideoSection(draft: ProductionSetupDraft): string {
 This production is a music video (kind "music-video"): a Video production cut to one song.
 Its scenes follow the song's sections, in order. It has no episodes and no Series.
 Give each scene its place in the song as songWindow: {startSec, endSec}, in seconds from the song's start: 0:16–0:44 is {startSec: 16, endSec: 44}. The page shows it beside the title, so keep times out of titles and synopses, and take one out of a title when you give its scene a songWindow. songWindow: null takes a scene's place away.
-If the author has not given the sections' times, ask for them; never guess them.
+If the author has not given the sections' times, give no songWindow and leave them out: never guess them, and never ask the author to time the song. Once the song is the master track the Studio measures where it changes, and get_spine reads it.
 The song is not part of setup: once the production exists, it becomes the master track in the Cut, and the scenes' places can mark its sections there.`;
 }
 

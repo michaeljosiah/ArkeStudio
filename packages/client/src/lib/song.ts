@@ -1,6 +1,6 @@
 import {
-  orderedShots, pinnedInWindowSec, productionShape, sceneSections, songTime,
-  type ArtifactSidecar, type AudioSpineCommand, type ProductionSpine, type SceneRecord, type SongWindow,
+  orderedShots, pinnedInWindowSec, productionShape, proposedSectionLabel, sceneSections, songTime,
+  type ArtifactSidecar, type AudioSpineCommand, type ProductionSpine, type SceneRecord, type SongWindow, type SpineMarker,
 } from "@arke-studio/contracts";
 import { seconds } from "./format.js";
 
@@ -90,4 +90,55 @@ export function sectionsFromScenes(
   if (sections.length === 0) return null;
   if (trackDurationSec !== undefined && sections.some((section) => section.atSec > trackDurationSec)) return null;
   return { count: sections.length, baseRevision: spine.revision, command: { kind: "mark-sections-from-scenes" } };
+}
+
+/**
+ * A song with no sections marked (issue 3099): the Cut asks what the Studio measured of it and
+ * offers that. One marked section, by anyone, ends the offer: nothing is proposed over a person's
+ * own marks.
+ */
+export function wantsSections(spine: ProductionSpine | null): spine is ProductionSpine {
+  return spine !== null && !spine.markers.some((marker) => marker.kind === "section");
+}
+
+/**
+ * The one command that marks proposed sections: the spine's marker import, at the revision shown,
+ * named by their order in the song because where a section starts is all that was measured.
+ *
+ * An import owns sections and lyrics alike and replaces both, so the lyrics already on the spine
+ * are sent back with it: the same ids, words and times, under the import's provenance, which an
+ * import requires of every marker. Leaving them out would trade somebody's lyric sheet for the
+ * sections they pressed for.
+ */
+export function sectionsCommand(
+  spine: ProductionSpine,
+  startsSec: readonly number[],
+  mintId: () => string,
+): { baseRevision: number; command: AudioSpineCommand } {
+  const sections = [...startsSec].sort((a, b) => a - b).map((atSec, index): SpineMarker => ({
+    kind: "section", id: mintId(), label: proposedSectionLabel(index), atSec, source: "json",
+  }));
+  const lyrics = spine.markers.filter((marker) => marker.kind === "lyric").map((marker): SpineMarker => ({ ...marker, source: "json" }));
+  return { baseRevision: spine.revision, command: { kind: "import-markers", format: "json", markers: [...sections, ...lyrics] } };
+}
+
+/**
+ * A place in the song as a field shows it: `0:42`, `1:01.9`, `0:22.424`, exact to the millisecond.
+ *
+ * The notation a spine card reads a time in, contracts' `songTime`, so the Cut, the card and a
+ * scene's window say one time one way.
+ */
+export function songTimeText(sec: number): string {
+  return songTime(sec);
+}
+
+/**
+ * What `songTimeText` prints, read back as seconds; null for anything that is not a time in a song.
+ * Counted in whole milliseconds, so a time printed and read again is the same number: added up in
+ * seconds, 1 and 0.118 come to a hair off 1.118, and a start nobody moved would read as moved.
+ */
+export function parseSongTime(text: string): number | null {
+  const match = /^(\d{1,3}):([0-5]\d)(?:\.(\d{1,3}))?$/.exec(text.trim());
+  if (match === null) return null;
+  return ((Number(match[1]) * 60 + Number(match[2])) * 1000 + (match[3] ? Number(match[3].padEnd(3, "0")) : 0)) / 1000;
 }
