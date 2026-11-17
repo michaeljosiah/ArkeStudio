@@ -15,6 +15,7 @@ import {
   type WorldChatStoredEvent,
   type ArkeTargetReadPage,
   type ArtifactSidecar,
+  chapterCalled,
 } from "@arke-studio/contracts";
 import { WorldIndex } from "../../src/index-db/world-index.js";
 import { WorldQueryServer } from "../../src/harness/world-query.js";
@@ -124,18 +125,34 @@ it("pages authored chapter plans through media progress while full reads and pro
   assert.deepEqual(reread.page.items, plan.page.items, "derived records are never supplied by an authored-only read");
   assert.equal(reread.receipt.observedRevisionOrDigest, plan.receipt.observedRevisionOrDigest);
   assert.notEqual((await read()).receipt.observedRevisionOrDigest, full.receipt.observedRevisionOrDigest);
-  assert.deepEqual((await read()).page.items[0], chapter, "the default still serves the complete summary");
+  assert.deepEqual((await read()).page.items[0], { ...chapter, called: chapterCalled(production.chapters, chapter) }, "the default still serves the complete summary");
   let page = plan.page;
   const items = [...page.items];
   while (page.nextCursor) { page = (await read({ section: "plan", cursor: page.nextCursor })).page; items.push(...page.items); }
   assert.equal(page.complete, true);
   assert.deepEqual(items, [...production.chapters].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
-    .map(({ audiobook: _a, voices: _v, continuity: _c, ...authored }) => authored));
+    .map(({ audiobook: _a, voices: _v, continuity: _c, ...authored }) => ({ ...authored, called: chapterCalled(production.chapters, authored) })));
   await assert.rejects(read({ cursor: full.page.nextCursor }), /changed while it was being read/);
   await assert.rejects(read({ cursor: plan.page.nextCursor }), /different target/);
   await assert.rejects(read({ section: "audio" }), /section must be plan/);
   chapter.hash = "changed-prose";
   await assert.rejects(read({ section: "plan", cursor: plan.page.nextCursor }), /changed while it was being read/);
+});
+
+// Na Love or Juju (issue 3215): its prologue is unnumbered, so Gold on Gold is the book's Chapter 1
+// at place 2. Arke named it by place ("ch. 2"); every chapter summary now says what the book calls it.
+it("says what the book calls each chapter, a prologue by its own title", async () => {
+  const h = await harness({ withIndex: false }), token = h.mint().token;
+  const production = h.bundle.productions.find(p => p.meta.id === "the-ledger-of-nights")!;
+  const ordered = [...production.chapters].sort((a, b) => a.order - b.order);
+  ordered[0]!.title = "Prologue";
+  ordered[1]!.title = "Gold on Gold";
+  for (const section of [undefined, "plan"]) {
+    const read = await h.retrieval.call(token, "list_chapters", { productionId: production.meta.id, limit: 20, ...(section ? { section } : {}) });
+    const items = (read.result as ArkeTargetReadPage).items as Array<{ title: string; called: string }>;
+    assert.deepEqual(items.map(item => [item.title, item.called]), [["Prologue", "Prologue"], ["Gold on Gold", "Chapter 1"],
+      ...ordered.slice(2).map((chapter, n) => [chapter.title, `Chapter ${n + 2}`])]);
+  }
 });
 
 describe("retained proposition reads", () => {
