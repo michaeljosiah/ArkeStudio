@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { newId, type WorldChatCheckReceipt } from "@arke-studio/contracts";
+import { newId, summariseVoices, type ArkeTargetReadPage, type ChapterContinuity, type ChapterVoices, type WorldChatCheckReceipt } from "@arke-studio/contracts";
 import { worldChatSubjectExists } from "../../src/world-chat/context-validation.js";
 import { chapterDraftingBrief } from "../../src/world-chat/chapter-brief.js";
 import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
+import { TARGET_READ_PAGE_CHARS } from "../../src/world-chat/target-reads.js";
 import { QueryLeaseRegistry } from "../../src/world-chat/lease.js";
 import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { fixtureBundle } from "../index-db/helpers.js";
@@ -161,4 +162,54 @@ it("reads where a chapter's audiobook goes quiet, fenced on its takes", async ()
   const without = new WorldChatRetrieval({ leases, getBundle: () => bundle, getIndex: () => null,
     attachments: new WorldChatAttachmentStore(await tempDir("chapter-quiet-none-")), findAttachment: async () => null });
   await assert.rejects(without.call(lease.token, "get_chapter", { productionId: production.meta.id, chapterId: chapter!.id, section: "audiobook" }), /unavailable for this chapter/);
+});
+
+// Iwo Road (issue 3214): a full read puts the metadata, the continuity record and the cast lines
+// ahead of the prose, so twenty rows passed 80 KB and the harness cut the middle of the chapter.
+// Every page stays inside the size budget whatever the limit, and the pages joined hold every row
+// exactly once, in order.
+it("pages a long chapter with a large cast inside the size budget, losing nothing", async () => {
+  const bundle = await fixtureBundle();
+  const production = bundle.productions.find((p) => p.meta.id === "the-ledger-of-nights")!;
+  const chapter = production.chapters[0]!;
+  const body = Array.from({ length: 120 }, (_, n) => `Paragraph ${n}: “Iwo Road never sleeps,” Ade said, and the danfo horns answered him. `.repeat(4).trim()).join("\n\n");
+  const lines = Array.from({ length: 400 }, (_, n) => ({ speaker: n % 2 ? "Ade" : "Ife", sheet: n % 2 ? "ade" : "ife", paragraph: n % 120, occurrence: 0,
+    quote: `Line ${n}: Iwo Road never sleeps, and neither do the people who sell along it until the last bus goes home. `.repeat(2).trim() }));
+  const voices: ChapterVoices = { version: 1, hash: "sha256:cast", derivedAt: "2026-11-17T10:00:00Z", passes: 1, dropped: 0, omitted: 0, lines };
+  const continuity: ChapterContinuity = { version: 1, hash: "sha256:continuity", derivedAt: "2026-11-17T10:00:00Z", passes: 1, dropped: 0, omitted: 0, cut: 0,
+    characters: Array.from({ length: 12 }, (_, n) => ({ character: `Trader ${n}`, present: true, where: "Iwo Road", placed: "She was still at her stall.",
+      knows: Array.from({ length: 6 }, (_, k) => `Fact ${k} about the road. `.repeat(12).trim()) })) };
+  const leases = new QueryLeaseRegistry(() => bundle.meta.worldId);
+  const lease = leases.mint({ worldId: bundle.meta.worldId, conversationId: newId("cv"), runId: newId("run"), allowedAttachmentIds: [] });
+  const retrieval = new WorldChatRetrieval({
+    leases, getBundle: () => bundle, getIndex: () => null,
+    attachments: new WorldChatAttachmentStore(await tempDir("chapter-pages-")), findAttachment: async () => null,
+    getChapterBody: async () => body, getChapterVoices: async () => voices, getChapterContinuity: async () => continuity,
+  });
+  const pages: ArkeTargetReadPage[] = [];
+  let cursor: string | null = null;
+  do {
+    const read = await retrieval.call(lease.token, "get_chapter", { productionId: production.meta.id, chapterId: chapter.id, limit: 20, ...(cursor ? { cursor } : {}) });
+    const page = read.result as ArkeTargetReadPage;
+    const size = JSON.stringify({ items: page.items }, null, 2).length;
+    assert.ok(size <= TARGET_READ_PAGE_CHARS, `page ${pages.length + 1} was ${size} characters`);
+    assert.ok(page.items.length >= 1, "a page always takes a row");
+    assert.equal(page.complete, page.nextCursor === null);
+    assert.equal(read.receipt.complete, page.complete);
+    assert.equal(read.receipt.nextCursor, page.nextCursor);
+    pages.push(page);
+    cursor = page.nextCursor;
+  } while (cursor);
+  assert.ok(pages.some((page) => page.items.length < 20 && page.nextCursor !== null), "the budget, not the limit, ended a page");
+  const items = pages.flatMap((page) => page.items);
+  assert.equal(items.length, pages[0]!.total);
+  const [metadata, record, stamp, ...rest] = items;
+  assert.deepEqual(metadata, chapter);
+  assert.deepEqual(record, continuity);
+  assert.deepEqual(stamp, summariseVoices(voices));
+  const cast = rest.filter((row): row is { offset: number; lines: ChapterVoices["lines"] } => typeof row === "object" && row !== null && "lines" in row);
+  const prose = rest.filter((row): row is { offset: number; text: string } => typeof row === "object" && row !== null && "text" in row);
+  assert.equal(cast.length + prose.length, rest.length);
+  assert.deepEqual(cast.flatMap((row) => row.lines), lines, "every cast line once, in order");
+  assert.equal(prose.map((row) => row.text).join(""), body, "every word of the prose once, in order");
 });

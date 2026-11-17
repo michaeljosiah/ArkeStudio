@@ -24,7 +24,7 @@ import { RetrievalError, WorldChatRetrieval, type RetrievalDeps } from "../../sr
 import { WorldChatService } from "../../src/world-chat/service.js";
 import { assembleContext } from "../../src/world-chat/context.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
-import { buildItemsFence, exportsFence, timelineFence, type ArkeBuildItemRead, type ArkeExportReadRecord } from "../../src/world-chat/target-reads.js";
+import { buildItemsFence, exportsFence, timelineFence, TARGET_READ_PAGE_CHARS, type ArkeBuildItemRead, type ArkeExportReadRecord } from "../../src/world-chat/target-reads.js";
 import { fixtureBundle } from "../index-db/helpers.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { tempDir } from "../tmp.js";
@@ -224,6 +224,35 @@ describe("bounded inventory reads", () => {
     } while (cursor);
     assert.ok(pages > artifacts.length);
     assert.deepEqual([...chunks.values()].map(chunk => JSON.parse(chunk.text)), [...artifacts].sort((a, b) => a.id.localeCompare(b.id)));
+  });
+
+  // Na Love or Juju's sheets (issue 3214): list_sheets paged by rows alone sent 82 KB in one page,
+  // and the harness saved it to a file and showed the model a preview. Every page stays inside the
+  // budget; sheets come whole, and only one too large for a page of its own is split.
+  it("pages many large sheets inside the size budget, splitting only a sheet no page could hold", async () => {
+    const h = await harness({ withIndex: false }), token = h.mint().token;
+    const base = h.bundle.sheets.find(sheet => sheet.type === "character")!;
+    const sheet = (n: number, words: number) => ({ ...structuredClone(base), id: `trader-${String(n).padStart(2, "0")}`, name: `Trader ${n}`,
+      sections: [{ heading: "Essence", body: `Trader ${n} has sold along Iwo Road since the flyover went up. `.repeat(words) }] });
+    const sheets = [...Array.from({ length: 33 }, (_, n) => sheet(n, 80)), sheet(33, 1_200)];
+    h.bundle.sheets = sheets;
+    const whole: unknown[] = [], chunks = new Map<string, string>();
+    let cursor: string | null = null, pages = 0;
+    do {
+      const read = await h.retrieval.call(token, "list_sheets", { limit: 20, ...(cursor ? { cursor } : {}) });
+      const page = read.result as ArkeTargetReadPage;
+      const size = JSON.stringify({ items: page.items }, null, 2).length;
+      assert.ok(size <= TARGET_READ_PAGE_CHARS, `page ${pages + 1} was ${size} characters`);
+      assert.equal(read.receipt.complete, page.nextCursor === null);
+      for (const row of page.items as Array<{ kind?: string; recordKey?: string; text?: string }>) {
+        if (row.kind === "record-chunk") chunks.set(row.recordKey!, (chunks.get(row.recordKey!) ?? "") + row.text);
+        else whole.push(row);
+      }
+      cursor = page.nextCursor; pages++;
+    } while (cursor);
+    assert.ok(pages > 3);
+    assert.deepEqual([...chunks.keys()], ["trader-33"], "only the sheet too large for a page is split");
+    assert.deepEqual([...whole, ...[...chunks.values()].map(text => JSON.parse(text))], sheets, "every sheet once, in order");
   });
 
   it("reads just the named prop or artifact, rejects foreign cursors and fences changes to that record", async () => {
