@@ -100,6 +100,17 @@ test("native measurement frames are the box at the asked rate and size", { skip:
   assert.equal(read.width, 96); assert.equal(read.height, 40); assert.equal(read.fps, 25);
   assert.ok(Math.abs(read.frames.length - 25) <= 1, String(read.frames.length)); assert.equal(read.frames[0]!.length, 96 * 40);
 });
+test("native: every decoded frame when no rate is asked, at a forced size; a 24 fps clip conformed to 30 repeats every fifth frame", { skip: !available }, async () => {
+  const folder = await tempDir("arke-measure-cadence-"), source = join(folder, "24.mkv"), conformed = join(folder, "30.mkv");
+  await generate(["-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24:duration=3", "-c:v", "ffv1", source]);
+  await generate(["-i", source, "-vf", "fps=30", "-c:v", "ffv1", conformed]);
+  const stream = (await tools.probe(conformed, signal())).streams[0]!;
+  const read = await tools.grayFrames!(conformed, stream, 0, 2, { fps: null, edge: 128, size: { width: 160, height: 90 } }, signal());
+  assert.equal(read.fps, 30); assert.equal(read.width, 160); assert.equal(read.frames.length, 60);
+  const { measureCadence } = await import("../../src/media/clip-quality.js");
+  const cadence = measureCadence(read.frames, read.fps);
+  assert.equal(cadence.repeatPeriod, 5); assert.ok(Math.abs(cadence.motionFps! - 24) < .5, String(cadence.motionFps));
+});
 test("native: a take that carries the reference 120 ms late measures 120 ms late", { skip: !available }, async () => {
   const folder = await tempDir("arke-measure-sync-"), reference = join(folder, "reference.wav"), take = join(folder, "take.mkv");
   // Bursts on two incommensurate periods, so no lag but the true one lines every burst up.

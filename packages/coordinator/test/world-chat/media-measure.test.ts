@@ -13,7 +13,7 @@ import { QueryLeaseRegistry } from "../../src/world-chat/lease.js";
 import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
 import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { WorldQueryServer } from "../../src/harness/world-query.js";
-import type { AgentMediaTools } from "../../src/media/agent-media-tools.js";
+import { regionGeometry, type AgentMediaTools } from "../../src/media/agent-media-tools.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
@@ -46,8 +46,23 @@ const grooveAt = (sec: number) => {
   return .8 * Math.exp(-sinceBeat / .04) * Math.sin(2 * Math.PI * 60 * sinceBeat) + .4 * Math.exp(-sinceBeat / .003) * Math.sin(1e5 * sec * sec);
 };
 const stemAt = (sec: number) => sec >= 2 && sec < 9 || sec >= 14 && sec < 20 ? .3 * Math.sin(2 * Math.PI * 220 * sec) : 0;
+/** A second, sharper 1080p version of the take for clip_quality's comparison. */
+const TAKE2 = Buffer.from("TAKE2 fixture");
+const take2Inventory: AgentMediaInventory = { durationSec: 6, streams: [{ index: 0, kind: "video", codec: "fixture", width: 1920, height: 1080, frameRate: "30/1", durationSec: 6, startTimeSec: 0 }] };
+/**
+ * A pattern panned about two pixels a frame, 24 fps motion carried at 30 (every fifth frame
+ * repeats). The sharper copy is the same clip with its detail strengthened, as an upscale gives.
+ */
+const panFrame = (width: number, height: number, shift: number, contrast: number) => {
+  const frame = new Uint8Array(width * height);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const u = (x + shift) * 1280 / width, v = y * 720 / height;
+    frame[y * width + x] = Math.max(0, Math.min(255, Math.round(128 + contrast * (40 * Math.sin(u * .37) * Math.cos(v * .23) + 20 * Math.sin(u * .9 + v * .7)))));
+  }
+  return frame;
+};
 const takeInventory: AgentMediaInventory = { durationSec: 6, streams: [
-  { index: 0, kind: "video", codec: "fixture", width: 1280, height: 720, durationSec: 6, startTimeSec: 0 },
+  { index: 0, kind: "video", codec: "fixture", width: 1280, height: 720, frameRate: "30/1", durationSec: 6, startTimeSec: 0 },
   { index: 1, kind: "audio", codec: "fixture", sampleRate: RATE, channels: 1, durationSec: 6, startTimeSec: 0 },
 ] };
 const songInventory: AgentMediaInventory = { durationSec: 10, streams: [{ index: 0, kind: "audio", codec: "fixture", sampleRate: RATE, channels: 1, durationSec: 10, startTimeSec: 0 }] };
@@ -59,21 +74,22 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
   const artifact = (id: string, kind: string, file: string, bytes: Buffer) => [
     { path: `artifacts/${file}`, action: "create" as const, baseHash: null, encoding: "base64" as const, content: bytes.toString("base64") },
     { path: `artifacts/${file.replace(/\.\w+$/, "")}.json`, action: "create" as const, baseHash: null, content: JSON.stringify({ id, kind, file, hash: hash(bytes), links: [], origin: { by: "user" }, created: "2026-11-17T00:00:00Z" }) }];
-  const grooveId = newId("ar"), stemId = newId("ar");
+  const grooveId = newId("ar"), stemId = newId("ar"), take2Id = newId("ar");
   await store.commit({ kind: "media-fixture", source: "test", files: [...artifact(takeId, "video", "take.mp4", TAKE), ...artifact(songId, "audio", "song.mp3", SONG),
-    ...artifact(grooveId, "audio", "groove.mp3", GROOVE), ...artifact(stemId, "audio", "stem.wav", STEM)] });
+    ...artifact(grooveId, "audio", "groove.mp3", GROOVE), ...artifact(stemId, "audio", "stem.wav", STEM), ...artifact(take2Id, "video", "take2.mp4", TAKE2)] });
   const leases = new QueryLeaseRegistry(() => store.worldId), lease = leases.mint({ worldId: store.worldId, conversationId: cv, runId, allowedAttachmentIds: [] });
   const stop = new AbortController();
   const adapter = { imageInput: true, imageInputForSession: () => true, imageDestinationForSession: () => ({ provider: "test-provider", local: true }) } as unknown as HarnessAdapter;
   const images = new ConversationImages(store, leases, { adapter, allowed: async () => true, publish: async () => {} }); images.start(runId, "session", stop.signal);
   const calls: Array<{ what: string; startSec: number; endSec: number; region?: AgentMediaRegion; fps?: number }> = [];
   const isSong = async (path: string) => (await readFile(path)).equals(SONG);
-  const which = async (path: string) => { const bytes = await readFile(path); return bytes.equals(GROOVE) ? "groove" : bytes.equals(STEM) ? "stem" : bytes.equals(SONG) ? "song" : "take"; };
+  const which = async (path: string) => { const bytes = await readFile(path); return bytes.equals(GROOVE) ? "groove" : bytes.equals(STEM) ? "stem" : bytes.equals(SONG) ? "song" : bytes.equals(TAKE2) ? "take2" : "take"; };
   const tools: AgentMediaTools = {
     version: async () => "ffmpeg version fixture", probeVersion: async () => "ffprobe version fixture",
     probe: async path => {
       const kind = await which(path);
       if (kind === "groove" || kind === "stem") return { durationSec: GROOVE_SEC, streams: [{ ...songInventory.streams[0]!, durationSec: GROOVE_SEC }] };
+      if (kind === "take2") return take2Inventory;
       return kind === "song" ? { ...songInventory, streams: options.songStreams ?? songInventory.streams } : takeInventory;
     },
     frame: async () => { throw new Error("no frames in this fixture"); },
@@ -95,15 +111,26 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
         for (let i = 0; i < out.length; i++) { const t = startSec + i / rate; out[i] = songSide ? songAt(t) : songAt(SLICE + t - SOUND_LATE); }
         return out;
       },
-      grayFrames: async (_path, _stream, startSec, endSec, frameOptions) => {
-        calls.push({ what: "mouth", startSec, endSec, region: frameOptions.region, fps: frameOptions.fps });
+      grayFrames: async (path, stream, startSec, endSec, frameOptions) => {
+        if (frameOptions.fps === null) {
+          const kind = await which(path), size = frameOptions.size ?? (() => { const g = regionGeometry(stream.width!, stream.height!, frameOptions.region, frameOptions.edge); return { width: g.outWidth, height: g.outHeight }; })();
+          calls.push({ what: `${kind}@${size.width}x${size.height}`, startSec, endSec, region: frameOptions.region });
+          const count = Math.round((endSec - startSec) * 30), first = Math.round(startSec * 30);
+          const frames = Array.from({ length: count }, (_, k) => {
+            const n = first + k, shown = Math.floor(n * 24 / 30) * 2.5;
+            return panFrame(size.width, size.height, shown, kind === "take2" ? 1.5 : 1);
+          });
+          return { frames, width: size.width, height: size.height, fps: 30 };
+        }
+        calls.push({ what: "mouth", startSec, endSec, region: frameOptions.region, fps: frameOptions.fps ?? undefined });
         const frames: Uint8Array[] = [];
-        for (let k = 0; k < Math.round((endSec - startSec) * frameOptions.fps); k++) {
-          const from = SLICE + startSec + k / frameOptions.fps - MOUTH_LATE; let sum = 0;
+        const fps = frameOptions.fps;
+        for (let k = 0; k < Math.round((endSec - startSec) * fps); k++) {
+          const from = SLICE + startSec + k / fps - MOUTH_LATE; let sum = 0;
           for (let s = 0; s < 40; s++) sum += envelopeAt(from + s / 1000);
           frames.push(new Uint8Array(96 * 40).fill(Math.round(40 + 200 * sum / 40)));
         }
-        return { frames, width: 96, height: 40, fps: frameOptions.fps };
+        return { frames, width: 96, height: 40, fps };
       },
     }),
   };
@@ -111,7 +138,7 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
   const retrieval = new WorldChatRetrieval({ leases, getBundle: () => store.getBundle(), getIndex: () => null, attachments: new WorldChatAttachmentStore(dir), findAttachment: async () => null,
     readImage: (lease, args) => images.read(lease, args), readMedia: (lease, name, args) => media.read(lease, name, args) });
   return { store, lease, retrieval, calls, take: { kind: "artifact" as const, id: takeId }, song: { kind: "artifact" as const, id: songId },
-    groove: { kind: "artifact" as const, id: grooveId }, stem: { kind: "artifact" as const, id: stemId },
+    groove: { kind: "artifact" as const, id: grooveId }, stem: { kind: "artifact" as const, id: stemId }, take2: { kind: "artifact" as const, id: take2Id },
     loaded: () => new WorldChatService(dir).load(cv) };
 }
 
@@ -192,12 +219,41 @@ test("song_map reads a window on the source's clock and refuses one past the end
   await assert.rejects(h.retrieval.call(h.lease.token, "song_map", { source: h.groove, window: { startSec: 0, endSec: 1000 } }), /song_map/);
 });
 
+test("clip_quality: the take's 24-in-30 repeats every fifth frame; a sharper 1080p copy, met at one size, is sharper without shimmer; schema 142", async () => {
+  const h = await harness();
+  const outcome = await h.retrieval.call(h.lease.token, "clip_quality", { source: h.take, range: { startSec: 0, endSec: 4 }, compare: { source: h.take2 } });
+  const quality = outcome.receipt.media!.quality!;
+  assert.equal(outcome.receipt.tool, "clip-quality"); assert.equal(outcome.receipt.media!.coverage, "measured-quality");
+  assert.equal(quality.streamIndex, 0); assert.equal(quality.cadence.repeatPeriod, 5); assert.ok(Math.abs(quality.cadence.motionFps! - 24) < .2, String(quality.cadence.motionFps));
+  assert.equal(quality.compare!.cadence.repeatPeriod, 5); assert.equal(quality.compare!.sourceHash, hash(TAKE2));
+  // Met at the larger clip's size, its longer side 960: the 720p take enlarged to meet the 1080p one.
+  assert.equal(quality.detail.width, 960); assert.equal(quality.detail.height, 540); assert.equal(quality.compare!.detail.width, 960);
+  assert.ok(quality.compare!.sharpnessChangePct > 40, String(quality.compare!.sharpnessChangePct));
+  assert.ok(Math.abs(quality.compare!.shimmerChangePct) < 5, String(quality.compare!.shimmerChangePct));
+  // Detail reads the interval's middle two seconds; cadence the whole interval.
+  assert.ok(h.calls.some(call => call.what === "take@960x540" && call.startSec === 1 && call.endSec === 3));
+  assert.ok(h.calls.some(call => call.what === "take@128x72" && call.startSec === 0 && call.endSec === 4));
+  assert.match(outcome.receipt.querySummary!, /^Clip quality measured/);
+  assert.equal(WorldChatCheckReceiptSchema.safeParse(outcome.receipt).success, true);
+  assert.equal(h.store.getBundle().meta.schemaVersion, 142);
+});
+
+test("clip_quality measures a region alone, and refuses a compared clip of another shape", async () => {
+  const h = await harness(), region = { x: .4, y: .1, width: .3, height: .5 };
+  const one = await h.retrieval.call(h.lease.token, "clip_quality", { source: h.take, range: { startSec: 0, endSec: 3 }, region });
+  const quality = one.receipt.media!.quality!;
+  assert.deepEqual({ ...quality.region }, region); assert.equal(quality.compare, null);
+  assert.equal(quality.detail.width, 384); assert.equal(quality.detail.height, 360);
+  await assert.rejects(h.retrieval.call(h.lease.token, "clip_quality", { source: h.take, range: { startSec: 0, endSec: 3 }, compare: { source: h.groove } }), /video stream of the compared clip/);
+  await assert.rejects(h.retrieval.call(h.lease.token, "clip_quality", { source: h.take, range: { startSec: 0, endSec: 3 }, compare: { source: h.take2, range: { startSec: 0, endSec: 2 } } }), /clip_quality/);
+});
+
 test("the shared leased MCP catalogue lists measure_sync and serves it", async () => {
   const h = await harness(), server = new WorldQueryServer(() => h.store); await server.start(); closeOnCleanup(() => server.stop());
   let served = ""; server.attachLease(h.lease.token, { retrieval: h.retrieval, onReceipt: receipt => { served = receipt.tool; } });
   const rpc = async (method: string, params?: unknown) => (await fetch(server.leasedUrl(h.lease.token)!, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })).json();
   const listed = await rpc("tools/list") as { result: { tools: Array<{ name: string }> } };
-  for (const name of ["measure_sync", "song_map"]) assert.ok(listed.result.tools.some(tool => tool.name === name), name);
+  for (const name of ["measure_sync", "song_map", "clip_quality"]) assert.ok(listed.result.tools.some(tool => tool.name === name), name);
   await rpc("tools/call", { name: "measure_sync", arguments: { source: h.take, range: { startSec: .5, endSec: 3.5 }, reference: { source: h.song, startSec: 2.5 } } });
   assert.equal(served, "measure-sync");
 });

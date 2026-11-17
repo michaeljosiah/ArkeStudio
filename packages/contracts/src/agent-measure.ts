@@ -136,3 +136,69 @@ export const AgentSongMapSchema = z.object({
   if (song.vocal?.intervals.some((span, i, all) => span.endSec <= span.startSec || !inside(span.startSec) || !inside(span.endSec) || i > 0 && span.startSec < all[i - 1]!.endSec)) issue("Voice intervals are ordered, apart and inside the window");
 });
 export type AgentSongMap = z.infer<typeof AgentSongMapSchema>;
+
+/**
+ * The quality of a generated clip (#3076). Measured on the music video: viewers called shots
+ * "choppy" because 30 fps takes were played in a 24 fps cut that dropped a frame in five, and an
+ * upscale was judged by its fine detail and whether that detail shimmered. Cadence reads every
+ * decoded frame of the interval, small; detail reads a box at full resolution over at most two
+ * seconds from the interval's middle.
+ */
+export const AGENT_QUALITY_SCHEMA_VERSION = 142;
+export const AGENT_QUALITY_LIMITS = Object.freeze({
+  cadenceEdge: 128, detailSeconds: 2, detailEdge: 960,
+  /** A step under this share of the median step is a repeated (or blended) frame. */
+  repeatShare: .15,
+  /** Under this median step (grey levels of 255) the picture is still and cadence cannot be read. */
+  stillStep: .3,
+});
+export const ClipQualityArgsSchema = z.object({
+  source: AgentMediaSourceSchema, range: AgentMediaRangeSchema, streamIndex: AgentMediaStreamIndexSchema.optional(),
+  /** Where detail is measured (a face, a texture); the whole picture when absent. */
+  region: AgentMediaRegionSchema.optional(),
+  /** A second clip (another take, or an upscale of this one) measured the same way, at the same size. */
+  compare: z.object({ source: AgentMediaSourceSchema, range: AgentMediaRangeSchema.optional(), streamIndex: AgentMediaStreamIndexSchema.optional() }).strict().optional(),
+}).strict().superRefine((args, context) => {
+  if (args.compare?.range && Math.abs((args.compare.range.endSec - args.compare.range.startSec) - (args.range.endSec - args.range.startSec)) > .001) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "A compared range runs as long as the clip's" });
+  }
+});
+export type ClipQualityArgs = z.infer<typeof ClipQualityArgsSchema>;
+const level = z.number().finite().min(0).max(255);
+export const AgentClipCadenceSchema = z.object({
+  frameRate: z.number().finite().positive().nullable(), framesDecoded: z.number().int().min(0),
+  medianStep: level,
+  /** Standard deviation of the frame-to-frame steps over their mean: even motion is low. */
+  unevenness: z.number().finite().min(0).nullable(),
+  still: z.boolean(),
+  repeatedFrames: z.number().int().min(0).nullable(),
+  /** The mean spacing of repeats when it is regular, within a frame (5: 24 fps motion in a 30 fps file). */
+  repeatPeriod: z.number().int().min(2).nullable(),
+  /** The frame rate the motion really moves at: the container's less its repeats. */
+  motionFps: z.number().finite().positive().nullable(),
+}).strict().superRefine((cadence, context) => {
+  if (cadence.still && (cadence.repeatedFrames !== null || cadence.repeatPeriod !== null || cadence.motionFps !== null)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "A still picture has no cadence to read" });
+  }
+});
+export const AgentClipDetailSchema = z.object({
+  width: z.number().int().positive(), height: z.number().int().positive(), frames: z.number().int().min(2),
+  /** Mean absolute Laplacian, grey levels: fine detail. */
+  sharpness: z.number().finite().min(0), sharpnessLow: z.number().finite().min(0), sharpnessHigh: z.number().finite().min(0),
+  /** How much that detail changes from frame to frame, over the detail itself. */
+  shimmer: z.number().finite().min(0),
+  /** Frame-to-frame change of the blurred picture: movement, not detail. */
+  motion: z.number().finite().min(0),
+}).strict();
+const quality = z.object({ streamIndex: AgentMediaStreamIndexSchema, cadence: AgentClipCadenceSchema, detail: AgentClipDetailSchema }).strict();
+export const AgentClipQualitySchema = quality.extend({
+  region: AgentMediaRegionSchema.optional(),
+  compare: quality.extend({ source: AgentMediaSourceSchema, sourceHash: FullSha256Schema, range: AgentMediaRangeSchema,
+    /** Percent changes of the compared clip against this one, measured at one size. */
+    sharpnessChangePct: z.number().finite(), shimmerChangePct: z.number().finite() }).strict().nullable(),
+}).strict().superRefine((value, context) => {
+  if (value.compare && (value.compare.detail.width !== value.detail.width || value.compare.detail.height !== value.detail.height)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Two clips' detail is compared at one size" });
+  }
+});
+export type AgentClipQuality = z.infer<typeof AgentClipQualitySchema>;

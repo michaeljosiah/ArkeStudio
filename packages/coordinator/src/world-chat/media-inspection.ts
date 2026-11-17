@@ -1,8 +1,8 @@
 import { AGENT_EXPORT_MEDIA_SCHEMA_VERSION, AGENT_PERFORMANCE_MEDIA_SCHEMA_VERSION, PerformanceRecordBaseSchema, AGENT_LISTENING_SCHEMA_VERSION, AGENT_LISTENING_LIMITS, ListenAudioArgsSchema, AGENT_AUDIO_SCHEMA_VERSION, AGENT_TRANSCRIPT_LIMITS, AGENT_MEDIA_LIMITS, AGENT_MEDIA_PROFILE, AGENT_MEDIA_SCHEMA_VERSION, AgentMediaObservationSchema, AnalyzeAudioArgsSchema,
   InspectMediaArgsSchema, SampleVideoArgsSchema, ReviewAudioContentArgsSchema, MeasureSyncArgsSchema, AGENT_SYNC_SCHEMA_VERSION, newId,
-  SongMapArgsSchema, AGENT_SONG_SCHEMA_VERSION, AGENT_SONG_LIMITS,
-  type AgentListeningFocus, type AgentMediaObservation, type AgentMediaSource, type MeasureSyncArgs, type SongMapArgs, type WorldChatCheckReceipt } from "@arke-studio/contracts";
-import { measureSyncInSnapshot, songMapInSnapshot, SONG_LIMITATIONS, SYNC_LIMITATIONS } from "./media-measure.js";
+  SongMapArgsSchema, AGENT_SONG_SCHEMA_VERSION, AGENT_SONG_LIMITS, ClipQualityArgsSchema, AGENT_QUALITY_SCHEMA_VERSION,
+  type AgentListeningFocus, type AgentMediaObservation, type AgentMediaSource, type ClipQualityArgs, type MeasureSyncArgs, type SongMapArgs, type WorldChatCheckReceipt } from "@arke-studio/contracts";
+import { measureSyncInSnapshot, qualityInSnapshot, songMapInSnapshot, QUALITY_LIMITATIONS, SONG_LIMITATIONS, SYNC_LIMITATIONS } from "./media-measure.js";
 import { readBenchSession } from "../bench/chat-reads.js";
 import { resolveTakeSource } from "../bench/service.js";
 import { hashContainedProductionMedia, withContainedProductionMedia } from "../world/reference-files.js";
@@ -18,11 +18,11 @@ import { listenToAgentAudio, type AgentAudioListener } from "../media/agent-list
 import { VoxaCancelledError, VoxaTimeoutError, wordTimingRefusalReason } from "@arke-studio/voice";
 
 export const MEDIA_INSPECTION_NAMES = ["inspect_media", "sample_video", "analyze_audio_signal", "transcribe_audio", "review_audio_content", "listen_audio",
-  "measure_sync", "song_map"] as const;
+  "measure_sync", "song_map", "clip_quality"] as const;
 export type MediaInspectionName = typeof MEDIA_INSPECTION_NAMES[number];
 const TOOLS = { inspect_media: "inspect-media", sample_video: "sample-video", analyze_audio_signal: "analyze-audio-signal",
   transcribe_audio: "transcribe-audio", review_audio_content: "review-audio-content", listen_audio: "listen-audio", measure_sync: "measure-sync",
-  song_map: "song-map" } as const;
+  song_map: "song-map", clip_quality: "clip-quality" } as const;
 export type InspectionSource = { id: string; path: string; expectedHash: string; startSec: number; endSec: number | null };
 /** Catalogue identities are the authority. There is no path-shaped or mutable-selection input. */
 export async function agentMediaSource(store: WorldStore, source: AgentMediaSource): Promise<InspectionSource> {
@@ -122,14 +122,17 @@ export class ConversationMediaInspection {
     const listeningRead = name === "listen_audio";
     if (listeningRead && (!tools.speechAudio || !this.deps.listener)) throw new RetrievalError("unavailable", "Local audio listening is not configured; no cloud fallback was used.");
     if (speechRead && (!tools.speechAudio || !this.deps.speech)) throw new RetrievalError("unavailable", "Local Voxa measured speech recognition is unavailable on this host; no cloud fallback was used.");
-    const syncRead = name === "measure_sync", songRead = name === "song_map";
+    const syncRead = name === "measure_sync", songRead = name === "song_map", qualityRead = name === "clip_quality";
     if (syncRead && !tools.monoAudio) throw new RetrievalError("unavailable", "Local sync measurement is unavailable on this host.");
     if (songRead && !tools.pcmAudio) throw new RetrievalError("unavailable", "Local song measurement is unavailable on this host.");
+    if (qualityRead && !tools.grayFrames) throw new RetrievalError("unavailable", "Local clip measurement is unavailable on this host.");
     const parsed = (listeningRead ? ListenAudioArgsSchema : name === "inspect_media" ? InspectMediaArgsSchema : name === "sample_video" ? SampleVideoArgsSchema
-      : name === "review_audio_content" ? ReviewAudioContentArgsSchema : syncRead ? MeasureSyncArgsSchema : songRead ? SongMapArgsSchema : AnalyzeAudioArgsSchema).safeParse(input);
+      : name === "review_audio_content" ? ReviewAudioContentArgsSchema : syncRead ? MeasureSyncArgsSchema : songRead ? SongMapArgsSchema
+      : qualityRead ? ClipQualityArgsSchema : AnalyzeAudioArgsSchema).safeParse(input);
     if (!parsed.success) throw new RetrievalError("bad-argument", syncRead
       ? "measure_sync: name an immutable take and a bounded interval, a reference source with its start, and a region round the mouth for the mouth method."
       : songRead ? "song_map: name an immutable audio source, and a window of at most 15 minutes when it is longer."
+      : qualityRead ? "clip_quality: name an immutable clip and a bounded interval; a compared clip's range runs as long."
       : `${name}: name an immutable source and a bounded, valid interval.`);
     const count = this.counts.get(lease.runId) ?? 0;
     if (count >= AGENT_MEDIA_LIMITS.calls) throw new RetrievalError("budget-exhausted", "This run has reached its media inspection call budget.");
@@ -146,8 +149,9 @@ export class ConversationMediaInspection {
     const args = parsed.data as { source: AgentMediaSource; range?: { startSec: number; endSec: number }; streamIndex?: number; count?: number; expectedText?: string; focuses?: AgentListeningFocus[] };
     const source = await agentMediaSource(this.store, args.source);
     const syncArgs = syncRead ? parsed.data as MeasureSyncArgs : null, songArgs = songRead ? parsed.data as SongMapArgs : null;
-    // A measurement's second source (the sync reference, a song's vocal stem) is resolved and rechecked like the first.
-    const secondSource = syncArgs?.reference.source ?? songArgs?.vocal?.source ?? null;
+    const qualityArgs = qualityRead ? parsed.data as ClipQualityArgs : null;
+    // A measurement's second source (the sync reference, a song's vocal stem, a compared clip) is resolved and rechecked like the first.
+    const secondSource = syncArgs?.reference.source ?? songArgs?.vocal?.source ?? qualityArgs?.compare?.source ?? null;
     const reference = secondSource ? await agentMediaSource(this.store, secondSource) : null;
     if (name === "sample_video") await this.deps.images.validate(lease);
     const decoderVersion = await tools.version(signal);
@@ -174,10 +178,16 @@ export class ConversationMediaInspection {
         return { observation: AgentMediaObservationSchema.parse({ ...base, song, coverage: "measured-song", limitations: SONG_LIMITATIONS }), frames: [] };
       }
       if (!args.range || end === null || args.range.endSec > end - source.startSec + 0.000001) throw new RetrievalError("bad-argument", "The interval exceeds this immutable media source.");
-      const kind = name === "sample_video" || syncArgs?.method === "mouth" ? "video" : "audio", candidates = inventory.streams.filter(stream => stream.kind === kind);
+      const kind = name === "sample_video" || qualityRead || syncArgs?.method === "mouth" ? "video" : "audio", candidates = inventory.streams.filter(stream => stream.kind === kind);
       const selected = args.streamIndex === undefined ? candidates.length === 1 ? candidates[0] : undefined : candidates.find(stream => stream.index === args.streamIndex);
       if (!selected) throw new RetrievalError("bad-argument", `Select one explicit ${kind} stream from inspect_media; ambiguous tracks are never guessed.`);
       const startSec = source.startSec + args.range.startSec, endSec = source.startSec + args.range.endSec;
+      if (qualityArgs) {
+        if (!selected.width || !selected.height) throw new RetrievalError("unavailable", "That video stream reports no picture size to measure.");
+        const quality = await qualityInSnapshot(this.store.dir, tools, signal, { path: snapshot.path, stream: selected, startSec, endSec }, qualityArgs, reference);
+        this.access(lease, name);
+        return { observation: AgentMediaObservationSchema.parse({ ...base, range: args.range, quality, coverage: "measured-quality", limitations: QUALITY_LIMITATIONS }), frames: [] };
+      }
       if (syncArgs && reference) {
         const sync = await measureSyncInSnapshot(this.store.dir, tools, signal, { path: snapshot.path, stream: selected, startSec, endSec }, syncArgs, reference);
         this.access(lease, name);
@@ -245,10 +255,10 @@ export class ConversationMediaInspection {
       limitations: ["Only these decoded, timestamped still frames were inspected; intervals between samples remain unreviewed.",
         "No continuous motion, flicker, audio performance or audiovisual sync assessment was made."] }) : prepared.observation as AgentMediaObservation;
     const receipt: WorldChatCheckReceipt = { id: newId("check"), runId: lease.runId, tool: TOOLS[name], status: "complete", consulted: [],
-      media: observation, querySummary: `${listeningRead ? "Local audio-model listening" : speechRead ? "Recognized speech content" : name === "inspect_media" ? "Media metadata" : name === "sample_video" ? "Sampled video frames" : syncRead ? "Lip sync measured" : songRead ? "Song mapped" : "Audio sample measurements"}: ${source.id}`.slice(0, 300), at: new Date().toISOString() };
+      media: observation, querySummary: `${listeningRead ? "Local audio-model listening" : speechRead ? "Recognized speech content" : name === "inspect_media" ? "Media metadata" : name === "sample_video" ? "Sampled video frames" : syncRead ? "Lip sync measured" : songRead ? "Song mapped" : qualityRead ? "Clip quality measured" : "Audio sample measurements"}: ${source.id}`.slice(0, 300), at: new Date().toISOString() };
     this.access(lease, name);
     // A measurement is newer than every source kind it can name, so its own boundary covers them.
-    await this.store.raiseSchemaBoundary(syncRead ? AGENT_SYNC_SCHEMA_VERSION : songRead ? AGENT_SONG_SCHEMA_VERSION : args.source.kind === "export" ? AGENT_EXPORT_MEDIA_SCHEMA_VERSION
+    await this.store.raiseSchemaBoundary(syncRead ? AGENT_SYNC_SCHEMA_VERSION : songRead ? AGENT_SONG_SCHEMA_VERSION : qualityRead ? AGENT_QUALITY_SCHEMA_VERSION : args.source.kind === "export" ? AGENT_EXPORT_MEDIA_SCHEMA_VERSION
       : args.source.kind === "performance" ? AGENT_PERFORMANCE_MEDIA_SCHEMA_VERSION
       : listeningRead ? AGENT_LISTENING_SCHEMA_VERSION : speechRead ? AGENT_AUDIO_SCHEMA_VERSION : AGENT_MEDIA_SCHEMA_VERSION, "agent-media-evidence");
     await this.store.ownedWrite(async () => {

@@ -1,7 +1,9 @@
-import { AGENT_SONG_LIMITS, AGENT_SYNC_LIMITS, AgentSongMapSchema, AgentSyncMeasurementSchema, EFFECT_ANALYSIS_PROFILE, SONG_SECTION_PROFILE,
-  createEffectPcmAnalyzer, findSongSections, type AgentMediaInventory, type AgentSongMap, type AgentSyncMeasurement, type MeasureSyncArgs, type SongMapArgs } from "@arke-studio/contracts";
+import { AGENT_QUALITY_LIMITS, AGENT_SONG_LIMITS, AGENT_SYNC_LIMITS, AgentClipQualitySchema, AgentSongMapSchema, AgentSyncMeasurementSchema, EFFECT_ANALYSIS_PROFILE, SONG_SECTION_PROFILE,
+  createEffectPcmAnalyzer, findSongSections, type AgentClipQuality, type AgentMediaInventory, type AgentSongMap, type AgentSyncMeasurement, type ClipQualityArgs,
+  type MeasureSyncArgs, type SongMapArgs } from "@arke-studio/contracts";
 import { withContainedProductionMedia } from "../world/reference-files.js";
-import type { AgentMediaTools } from "../media/agent-media-tools.js";
+import { parseStreamRate, regionGeometry, type AgentMediaTools } from "../media/agent-media-tools.js";
+import { measureCadence, measureDetail } from "../media/clip-quality.js";
 import { measureMouthSync, measureSoundtrackSync } from "../media/measure-sync.js";
 import { SONG_MAP_PROFILE, songBeats, stepLevels, voiceIntervals } from "../media/song-map.js";
 import { RetrievalError } from "./retrieval.js";
@@ -100,6 +102,51 @@ export async function songMapInSnapshot(worldDir: string, tools: AgentMediaTools
     tempoBpm: beats.length ? tempoBpm : null, beats, sections, vocal: voice });
 }
 
+export const QUALITY_LIMITATIONS = [
+  "Signal measurement of decoded frames. Cadence reads every frame of the interval at 128 px; detail reads the region at up to 960 px over at most 2 s from the interval's middle.",
+  "Sharpness is fine detail (mean absolute Laplacian), not whether the right thing is in focus. Shimmer is how much that detail changes from frame to frame over the detail itself, so fast motion raises it too: compare like with like.",
+  "A compared clip is met at one size, the smaller enlarged bicubic as the Cut's export would; clips of different shapes are not compared.",
+  "Faces, anatomy, likeness, where a character looks and whether the picture suits the scene were not judged: those need frames looked at, and a person.",
+];
+
+/**
+ * Cadence over the whole interval and detail over its middle, of one clip or of two met at one
+ * size. The compared clip is a second contained snapshot, rechecked like the first.
+ */
+export async function qualityInSnapshot(worldDir: string, tools: AgentMediaTools, signal: AbortSignal,
+  clip: { path: string; stream: Stream; startSec: number; endSec: number }, args: ClipQualityArgs, compareSource: InspectionSource | null): Promise<AgentClipQuality> {
+  const grayFrames = tools.grayFrames;
+  if (!grayFrames) throw new RetrievalError("unavailable", "Local clip measurement is unavailable on this host.");
+  const limits = AGENT_QUALITY_LIMITS, length = clip.endSec - clip.startSec, detailLength = Math.min(limits.detailSeconds, length);
+  const measure = async (path: string, stream: Stream, startSec: number, size?: { width: number; height: number }) => {
+    const all = await grayFrames(path, stream, startSec, startSec + length, { fps: null, edge: limits.cadenceEdge }, signal);
+    const from = startSec + (length - detailLength) / 2;
+    const middle = await grayFrames(path, stream, from, from + detailLength, { fps: null, edge: limits.detailEdge, region: args.region, ...(size ? { size } : {}) }, signal);
+    if (middle.frames.length < 2) throw new RetrievalError("unavailable", "The interval holds too few frames to measure detail.");
+    return { streamIndex: stream.index, cadence: measureCadence(all.frames, parseStreamRate(stream.frameRate)), detail: measureDetail(middle.frames, middle.width, middle.height) };
+  };
+  if (!compareSource || !args.compare) return AgentClipQualitySchema.parse({ ...await measure(clip.path, clip.stream, clip.startSec), ...(args.region ? { region: args.region } : {}), compare: null });
+  const compare = args.compare;
+  return withContainedProductionMedia(worldDir, compareSource.path, compareSource.expectedHash, signal, async snapshot => {
+    const inventory = await tools.probe(snapshot.path, signal), end = compareSource.endSec ?? inventory.durationSec;
+    const range = compare.range ?? args.range, startSec = compareSource.startSec + range.startSec;
+    if (end === null || startSec + length > end + .000001) throw new RetrievalError("bad-argument", "The compared interval runs past the end of the compared clip.");
+    const candidates = inventory.streams.filter(stream => stream.kind === "video");
+    const selected = compare.streamIndex === undefined ? candidates.length === 1 ? candidates[0] : undefined : candidates.find(stream => stream.index === compare.streamIndex);
+    if (!selected?.width || !selected.height) throw new RetrievalError("bad-argument", "Select one explicit video stream of the compared clip from inspect_media; ambiguous tracks are never guessed.");
+    const a = regionGeometry(clip.stream.width!, clip.stream.height!, args.region, 4096), b = regionGeometry(selected.width, selected.height, args.region, 4096);
+    if (Math.abs(a.cropWidth / a.cropHeight - b.cropWidth / b.cropHeight) > .02 * a.cropWidth / a.cropHeight) throw new RetrievalError("bad-argument", "Two clips of different shapes are not compared detail for detail.");
+    // The larger of the two, its longer side at most the detail edge: the smaller is enlarged to meet it.
+    const larger = a.cropWidth * a.cropHeight >= b.cropWidth * b.cropHeight ? a : b, scale = Math.min(1, limits.detailEdge / Math.max(larger.cropWidth, larger.cropHeight));
+    const even = (value: number) => Math.max(8, 2 * Math.round(value / 2)), size = { width: even(larger.cropWidth * scale), height: even(larger.cropHeight * scale) };
+    const first = await measure(clip.path, clip.stream, clip.startSec, size), second = await measure(snapshot.path, selected, startSec, size);
+    const change = (from: number, to: number) => from > 0 ? Math.round((to / from - 1) * 1000) / 10 : 0;
+    return AgentClipQualitySchema.parse({ ...first, ...(args.region ? { region: args.region } : {}),
+      compare: { ...second, source: compare.source, sourceHash: snapshot.sourceHash, range,
+        sharpnessChangePct: change(first.detail.sharpness, second.detail.sharpness), shimmerChangePct: change(first.detail.shimmer, second.detail.shimmer) } });
+  });
+}
+
 export async function measureSyncInSnapshot(worldDir: string, tools: AgentMediaTools, signal: AbortSignal,
   take: { path: string; stream: Stream; startSec: number; endSec: number }, args: MeasureSyncArgs, reference: InspectionSource): Promise<AgentSyncMeasurement> {
   const monoAudio = tools.monoAudio, grayFrames = tools.grayFrames;
@@ -118,7 +165,7 @@ export async function measureSyncInSnapshot(worldDir: string, tools: AgentMediaT
     if (args.method === "mouth") {
       const video = await grayFrames!(take.path, take.stream, take.startSec, take.endSec,
         { fps: AGENT_SYNC_LIMITS.mouthFps, edge: AGENT_SYNC_LIMITS.mouthEdge, region: args.region }, signal);
-      measured = measureMouthSync(video.frames, video.fps, referencePcm, MEASURE_RATE, args.maxLagSec);
+      measured = measureMouthSync(video.frames, video.fps ?? AGENT_SYNC_LIMITS.mouthFps, referencePcm, MEASURE_RATE, args.maxLagSec);
     } else {
       measured = measureSoundtrackSync(await monoAudio(take.path, take.stream, take.startSec, take.endSec, MEASURE_RATE, signal), referencePcm, MEASURE_RATE, args.maxLagSec);
     }

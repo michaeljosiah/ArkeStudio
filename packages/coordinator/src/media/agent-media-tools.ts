@@ -17,9 +17,20 @@ export interface AgentMediaTools {
   monoAudio?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, rate: number, signal: AbortSignal): Promise<Float32Array>;
   /** The same derivative with one or two channels interleaved (the effects analysis reads stereo at 48 kHz). */
   pcmAudio?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, format: { rate: number; channels: 1 | 2 }, signal: AbortSignal): Promise<Float32Array>;
-  /** Small greyscale frames at a fixed rate, of the whole picture or a box in it, for motion measurement. */
+  /**
+   * Greyscale frames of the whole picture or a box in it, for measurement: resampled to `fps`, or
+   * every decoded frame when `fps` is null (cadence must see the repeats a resample would hide);
+   * scaled so the longer side is at most `edge`, or to exactly `size` when two clips are compared.
+   */
   grayFrames?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number,
-    options: { fps: number; edge: number; region?: AgentMediaRegion }, signal: AbortSignal): Promise<{ frames: Uint8Array[]; width: number; height: number; fps: number }>;
+    options: { fps: number | null; edge: number; region?: AgentMediaRegion; size?: { width: number; height: number } }, signal: AbortSignal): Promise<{ frames: Uint8Array[]; width: number; height: number; fps: number | null }>;
+}
+/** A probe's `avg_frame_rate` ("30/1", "30000/1001") as frames a second; null when it says nothing usable. */
+export function parseStreamRate(value: string | undefined): number | null {
+  const match = value?.match(/^(\d+)(?:\/(\d+))?$/);
+  if (!match) return null;
+  const rate = Number(match[1]) / Number(match[2] ?? 1);
+  return Number.isFinite(rate) && rate > 0 && rate <= 240 ? rate : null;
 }
 /** A whole 60 s window of 1080p decodes on one thread in well under this; the 20 s default suits single frames. */
 const MEASURE_TIMEOUT_MS = 90_000;
@@ -149,22 +160,26 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
     monoAudio: (path, stream, startSec, endSec, rate, signal) => pcmAudio(path, stream, startSec, endSec, { rate, channels: 1 }, signal),
     pcmAudio,
     async grayFrames(path, stream, startSec, endSec, options, signal) {
-      const duration = endSec - startSec, { fps, edge } = options;
+      const duration = endSec - startSec, { fps, edge, size } = options, native = parseStreamRate(stream.frameRate);
       if (stream.kind !== "video" || !stream.width || !stream.height || Math.max(stream.width, stream.height) > 3840 || stream.width * stream.height > 3840 * 2160 ||
-        !Number.isInteger(fps) || fps < 1 || fps > 60 || !Number.isInteger(edge) || edge < 16 || edge > 1280 ||
+        fps !== null && (!Number.isInteger(fps) || fps < 1 || fps > 60) || !Number.isInteger(edge) || edge < 16 || edge > 1280 ||
+        size && (!Number.isInteger(size.width) || !Number.isInteger(size.height) || size.width < 8 || size.height < 8 || size.width % 2 || size.height % 2 || Math.max(size.width, size.height) > 1280) ||
         !Number.isFinite(startSec) || startSec < 0 || !Number.isFinite(duration) || duration <= 0 || duration > AGENT_MEDIA_LIMITS.intervalSeconds) throw new Error("Video exceeds the measurement frame profile");
-      const g = regionGeometry(stream.width, stream.height, options.region, edge), frameBytes = g.outWidth * g.outHeight;
-      const maxFrames = Math.ceil(duration * fps) + 2;
+      const g = regionGeometry(stream.width, stream.height, options.region, edge), width = size?.width ?? g.outWidth, height = size?.height ?? g.outHeight;
+      // A size is two clips met at one scale; bicubic, as the Cut's export enlarges a smaller clip.
+      const scale = size ? `scale=${width}:${height}:flags=bicubic` : `scale=${width}:${height}:flags=area`, frameBytes = width * height;
+      const maxFrames = Math.ceil(duration * (fps ?? native ?? 120)) + 2;
       if (maxFrames * frameBytes > AGENT_MEDIA_LIMITS.pcmBytes) throw new Error("Video exceeds the measurement frame profile");
       const result = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS,
         "-ss", String(startSec), "-t", String(duration), "-i", path, "-map", `0:${stream.index}`, "-an", "-sn", "-map_metadata", "-1",
-        "-vf", `crop=${g.cropWidth}:${g.cropHeight}:${g.x}:${g.y},scale=${g.outWidth}:${g.outHeight}:flags=area,fps=${fps},format=gray`,
-        "-f", "rawvideo", "pipe:1"], signal, maxFrames * frameBytes, MEASURE_TIMEOUT_MS);
+        "-vf", `crop=${g.cropWidth}:${g.cropHeight}:${g.x}:${g.y},${scale}${fps === null ? "" : `,fps=${fps}`},format=gray`,
+        ...(fps === null ? ["-fps_mode", "passthrough"] : []), "-f", "rawvideo", "pipe:1"], signal, maxFrames * frameBytes, MEASURE_TIMEOUT_MS);
       if (!result.stdout.length || result.stdout.length % frameBytes) throw new Error("Invalid measurement frames");
       const frames: Uint8Array[] = [];
       for (let offset = 0; offset < result.stdout.length; offset += frameBytes) frames.push(result.stdout.subarray(offset, offset + frameBytes));
-      if (Math.abs(frames.length / fps - duration) > 2 / fps + .05) throw new Error("Decoded video does not cover the requested interval");
-      return { frames, width: g.outWidth, height: g.outHeight, fps };
+      const rate = fps ?? native;
+      if (rate !== null && Math.abs(frames.length / rate - duration) > 2 / rate + .05) throw new Error("Decoded video does not cover the requested interval");
+      return { frames, width, height, fps: rate };
     },
   };
 }

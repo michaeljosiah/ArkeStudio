@@ -5,7 +5,7 @@ import { AgentSpeechTranscriptSchema, AgentTranscriptTextSchema, type AgentSpeec
 
 import { AgentAudioListeningSchema, AgentListeningFocusesSchema, type AgentAudioListening } from "./agent-listening.js";
 import { AGENT_MEDIA_LIMITS, AgentMediaRangeSchema, AgentMediaSourceSchema, agentMediaTime as time, type AgentMediaSource } from "./agent-media-source.js";
-import { AgentSongMapSchema, AgentSyncMeasurementSchema, type AgentSongMap, type AgentSyncMeasurement } from "./agent-measure.js";
+import { AgentClipQualitySchema, AgentSongMapSchema, AgentSyncMeasurementSchema, type AgentClipQuality, type AgentSongMap, type AgentSyncMeasurement } from "./agent-measure.js";
 
 export * from "./agent-media-source.js";
 
@@ -48,8 +48,9 @@ export const AgentMediaFrameSchema = z.object({ requestedSourceTimeSec: time, so
 export type AgentMediaObservation = { profile: typeof AGENT_MEDIA_PROFILE; source: AgentMediaSource; decoderVersion: string; probeVersion: string;
   sourceHash: string; byteLength: number; sourceStartSec: number; sourceEndSec: number | null; inventory: AgentMediaInventory;
   range?: { startSec: number; endSec: number }; frames?: Array<z.infer<typeof AgentMediaFrameSchema>>; audio?: AudioSignal;
-  transcript?: AgentSpeechTranscript; listening?: AgentAudioListening; sync?: AgentSyncMeasurement; song?: AgentSongMap;
-  coverage: "metadata-only" | "sampled-frames-only" | "decoded-audio-samples" | "recognized-speech" | "model-audio-listening" | "measured-sync" | "measured-song"; limitations: string[] };
+  transcript?: AgentSpeechTranscript; listening?: AgentAudioListening; sync?: AgentSyncMeasurement; song?: AgentSongMap; quality?: AgentClipQuality;
+  coverage: "metadata-only" | "sampled-frames-only" | "decoded-audio-samples" | "recognized-speech" | "model-audio-listening" | "measured-sync" | "measured-song"
+    | "measured-quality"; limitations: string[] };
 export const AgentMediaObservationSchema: z.ZodType<AgentMediaObservation> = z.object({ profile: z.literal(AGENT_MEDIA_PROFILE), source: AgentMediaSourceSchema,
   decoderVersion: z.string().min(1).max(200),
   probeVersion: z.string().min(1).max(200),
@@ -57,8 +58,9 @@ export const AgentMediaObservationSchema: z.ZodType<AgentMediaObservation> = z.o
   sourceStartSec: time, sourceEndSec: time.nullable(), inventory: AgentMediaInventorySchema,
   range: AgentMediaRangeSchema.optional(), frames: z.array(AgentMediaFrameSchema).min(1).max(AGENT_MEDIA_LIMITS.frames).optional(),
   listening: AgentAudioListeningSchema.optional(), audio: AudioSignalSchema.optional(), transcript: AgentSpeechTranscriptSchema.optional(),
-  sync: AgentSyncMeasurementSchema.optional(), song: AgentSongMapSchema.optional(),
-  coverage: z.enum(["metadata-only", "sampled-frames-only", "decoded-audio-samples", "recognized-speech", "model-audio-listening", "measured-sync", "measured-song"]),
+  sync: AgentSyncMeasurementSchema.optional(), song: AgentSongMapSchema.optional(), quality: AgentClipQualitySchema.optional(),
+  coverage: z.enum(["metadata-only", "sampled-frames-only", "decoded-audio-samples", "recognized-speech", "model-audio-listening", "measured-sync", "measured-song",
+    "measured-quality"]),
   limitations: z.array(z.string().min(1).max(500)).min(1).max(8) }).strict().superRefine((value, context) => {
     if (value.sourceEndSec !== null && value.sourceEndSec < value.sourceStartSec) context.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid source interval" });
     if (value.coverage === "sampled-frames-only" && (!value.range || !value.frames || value.audio) ||
@@ -72,12 +74,17 @@ export const AgentMediaObservationSchema: z.ZodType<AgentMediaObservation> = z.o
       value.coverage !== "measured-sync" && value.sync ||
       // A song map can run past the 60 s inspection interval, so it carries its own window instead of a range.
       value.coverage === "measured-song" && (value.range || !value.song || value.frames || value.audio) ||
-      value.coverage !== "measured-song" && value.song) {
+      value.coverage !== "measured-song" && value.song ||
+      value.coverage === "measured-quality" && (!value.range || !value.quality || value.frames || value.audio) ||
+      value.coverage !== "measured-quality" && value.quality) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: "Evidence must match its declared coverage" });
     }
     if (value.song && (value.sourceEndSec === null || value.sourceStartSec + value.song.endSec > value.sourceEndSec + .000001 ||
       !value.inventory.streams.some(stream => stream.kind === "audio" && stream.index === value.song!.streamIndex))) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: "A song map must retain its audio stream and lie inside its source" });
+    }
+    if (value.quality && !value.inventory.streams.some(stream => stream.kind === "video" && stream.index === value.quality!.streamIndex)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "A quality measurement must retain its video stream" });
     }
     if (value.sync) {
       const sync = value.sync, kind = sync.method === "mouth" ? "video" : "audio";

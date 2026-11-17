@@ -91,3 +91,39 @@ loudness. They are boundaries, never names.
   0:15.
 
 Receipts raise the world to schema 141.
+
+## `clip_quality`: cadence and detail (#3076)
+
+**Input:** a clip and an interval (at most 60 s), an optional `region` (a face, a texture), and an
+optional second clip in `compare`.
+
+**Cadence** reads every decoded frame of the interval at 128 px, with no resample, so repeats are
+not hidden:
+- it measures the mean change from one frame to the next;
+- a step under 15% of the median is a repeated or blended frame;
+- the repeat period is the mean spacing of repeats, given only when it is regular (spacings within
+  a frame of it): FFmpeg's fps filter takes 24 to 30 with repeats 4, 5, 6 frames apart, mean 5;
+- the motion rate is the container's rate less its repeats;
+- unevenness is the steps' standard deviation over their mean;
+- a still picture (median step under 0.3) reports no cadence rather than every frame a repeat.
+
+**Detail** reads the region at full resolution (longer side at most 960) over at most 2 s from the
+interval's middle:
+- **Sharpness:** mean absolute Laplacian, with its 10th and 90th percentile frames.
+- **Shimmer:** the mean change of the Laplacian from frame to frame over its mean. Detail that is
+  real moves with the picture and leaves shimmer where it was; detail that flickers raises it.
+  Fast motion raises it too, so compare like with like.
+- **Motion:** the frame-to-frame change of a 4×4-block-averaged picture.
+
+**Compare** meets the two clips at one size: the larger crop, its longer side at most 960, the
+smaller enlarged bicubic as the Cut's export would. It reports both clips' cadence and detail and
+the change in sharpness and shimmer. Clips of different shapes are refused rather than stretched.
+
+**On the music video's clips:**
+- The Seedance police take, conformed to 30 fps the way the Cut does, shows 30 repeats in 150
+  frames, period 5, motion 23.96 fps, unevenness 0.555. The smooth copy shows none (0.232); the
+  native 24 fps take shows none.
+- Topaz Proteus against bicubic, at 1080p, is 17–30% sharper (whole frame and face) with shimmer
+  −5% to +6%: added detail, not flicker.
+
+Receipts raise the world to schema 142.

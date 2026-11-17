@@ -1,0 +1,58 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { AgentClipCadenceSchema, AgentClipQualitySchema } from "@arke-studio/contracts";
+import { measureCadence, measureDetail } from "../../src/media/clip-quality.js";
+import { parseStreamRate } from "../../src/media/agent-media-tools.js";
+
+const W = 64, H = 36;
+function random(seed: number) {
+  let state = seed >>> 0;
+  return () => { state = (state + 0x6d2b79f5) >>> 0; let t = state; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+/** A textured picture panned `shift` pixels a frame: real motion, detail that moves with it. */
+const texture = (() => { const next = random(5), wide = new Uint8Array((W + 400) * H); for (let i = 0; i < wide.length; i++) wide[i] = 60 + Math.round(next() * 120); return wide; })();
+const pan = (at: number) => { const frame = new Uint8Array(W * H), x0 = Math.round(at); for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) frame[y * W + x] = texture[y * (W + 400) + x + x0]!; return frame; };
+
+test("30 fps motion steps evenly with no repeats; 24 fps motion carried at 30 repeats every fifth frame", () => {
+  const smooth = Array.from({ length: 60 }, (_, i) => pan(i * 2));
+  const even = measureCadence(smooth, 30);
+  assert.equal(even.repeatedFrames, 0); assert.equal(even.repeatPeriod, null); assert.equal(even.motionFps, 30); assert.equal(even.still, false);
+  // The Cut's fps conform: frame k of 30 shows source frame floor(k * 24 / 30).
+  const conformed = Array.from({ length: 60 }, (_, k) => pan(Math.floor(k * 24 / 30) * 2.5));
+  const stutter = measureCadence(conformed, 30);
+  assert.equal(stutter.repeatPeriod, 5); assert.equal(stutter.repeatedFrames, 12); assert.equal(stutter.motionFps, 23.9);
+  assert.ok(stutter.unevenness! > even.unevenness! + .3, `${stutter.unevenness} against ${even.unevenness}`);
+  assert.equal(AgentClipCadenceSchema.safeParse(stutter).success, true);
+});
+
+test("a still picture has no cadence to read rather than every frame a repeat", () => {
+  const still = measureCadence(Array.from({ length: 30 }, () => pan(0)), 30);
+  assert.equal(still.still, true); assert.equal(still.repeatedFrames, null); assert.equal(still.motionFps, null);
+  assert.equal(AgentClipCadenceSchema.safeParse({ ...still, repeatedFrames: 3 }).success, false);
+  assert.equal(parseStreamRate("30000/1001")! .toFixed(3), "29.970"); assert.equal(parseStreamRate("0/0"), null); assert.equal(parseStreamRate(undefined), null);
+});
+
+test("a softened copy loses sharpness; added real detail raises sharpness, not shimmer; flicker on a still picture is all shimmer", () => {
+  const frames = Array.from({ length: 20 }, (_, i) => pan(i));
+  const blur = (frame: Uint8Array) => frame.map((_, i) => { const x = i % W; return Math.round(((frame[i - 1] ?? frame[i]!) + frame[i]! + (x < W - 1 ? frame[i + 1]! : frame[i]!)) / 3); });
+  const sharp = measureDetail(frames, W, H), soft = measureDetail(frames.map(blur), W, H);
+  assert.ok(soft.sharpness < sharp.sharpness * .8, `${soft.sharpness} against ${sharp.sharpness}`);
+  // The same pan with its detail strengthened, as a good upscale gives: sharper, and the detail moves with the picture.
+  const stronger = measureDetail(frames.map(frame => frame.map(value => Math.round(150 + (value - 120) * 1.5))), W, H);
+  assert.ok(stronger.sharpness > sharp.sharpness * 1.4, `${stronger.sharpness} against ${sharp.sharpness}`);
+  assert.ok(Math.abs(stronger.shimmer / sharp.shimmer - 1) < .05, `${stronger.shimmer} against ${sharp.shimmer}`);
+  const held = measureDetail(Array.from({ length: 20 }, () => pan(3)), W, H);
+  assert.equal(held.shimmer, 0); assert.equal(held.motion, 0);
+  const next = random(8), flicker = measureDetail(Array.from({ length: 20 }, () => pan(3).map(value => value + Math.round((next() - .5) * 30))), W, H);
+  assert.ok(flicker.shimmer > .3, String(flicker.shimmer));
+});
+
+test("the quality schema meets two clips at one size", () => {
+  const cadence = { frameRate: 30, framesDecoded: 60, medianStep: 3, unevenness: .2, still: false, repeatedFrames: 0, repeatPeriod: null, motionFps: 30 };
+  const detail = { width: 960, height: 540, frames: 60, sharpness: 5, sharpnessLow: 4, sharpnessHigh: 6, shimmer: 1, motion: 5 };
+  const base = { streamIndex: 0, cadence, detail, compare: null };
+  assert.equal(AgentClipQualitySchema.safeParse(base).success, true);
+  const compare = { streamIndex: 0, cadence, detail, source: { kind: "artifact", id: "ar_b" }, sourceHash: `sha256:${"c".repeat(64)}`, range: { startSec: 0, endSec: 2 }, sharpnessChangePct: 16.6, shimmerChangePct: .3 };
+  assert.equal(AgentClipQualitySchema.safeParse({ ...base, compare }).success, true);
+  assert.equal(AgentClipQualitySchema.safeParse({ ...base, compare: { ...compare, detail: { ...detail, width: 1920 } } }).success, false);
+});
