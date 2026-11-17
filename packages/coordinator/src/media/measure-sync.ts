@@ -13,6 +13,8 @@ export interface SyncResult {
 }
 
 const round = (value: number, places: number) => Math.round(value * 10 ** places) / 10 ** places;
+/** Whole steps inside the window: rounding up would search, and report, a lag past `maxLagSec` (0.1 s of 40 ms steps is two, not three). */
+const lagSteps = (maxLagSec: number, step: number) => Math.floor(maxLagSec / step + 1e-9);
 
 /** RMS of a mono signal in steps of `stepSec`; a partial last step is dropped. */
 export function rmsEnvelope(samples: Float32Array, rate: number, stepSec: number): Float64Array {
@@ -75,7 +77,7 @@ export function measureSoundtrackSync(take: Float32Array, reference: Float32Arra
   const takeActive = activeFraction(a, AGENT_SYNC_LIMITS.activeDbfs), referenceActive = activeFraction(b, AGENT_SYNC_LIMITS.activeDbfs);
   // A silent side has no shape to line up: say so rather than report the best of noise.
   const found = takeActive < .02 || referenceActive < .02 ? null
-    : bestLag(a, b, Math.round(maxLagSec / step), Math.ceil(AGENT_SYNC_LIMITS.minOverlapSec / step));
+    : bestLag(a, b, lagSteps(maxLagSec, step), Math.ceil(AGENT_SYNC_LIMITS.minOverlapSec / step));
   return result(found, step, takeActive, referenceActive);
 }
 
@@ -108,6 +110,6 @@ export function measureMouthSync(frames: readonly Uint8Array[], fps: number, ref
   const step = 1 / fps, hopsPerStep = Math.max(1, Math.round(step / AGENT_SYNC_LIMITS.hopSec));
   const envelope = rmsEnvelope(reference, rate, AGENT_SYNC_LIMITS.hopSec), referenceActive = activeFraction(envelope, AGENT_SYNC_LIMITS.activeDbfs);
   const found = referenceActive < .02 ? null
-    : bestLag(frameMotion(frames), loudnessChange(envelope, hopsPerStep), Math.round(maxLagSec / step), Math.ceil(AGENT_SYNC_LIMITS.minOverlapSec / step));
+    : bestLag(frameMotion(frames), loudnessChange(envelope, hopsPerStep), lagSteps(maxLagSec, step), Math.ceil(AGENT_SYNC_LIMITS.minOverlapSec / step));
   return result(found, round(step, 6), null, referenceActive);
 }
