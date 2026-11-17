@@ -983,7 +983,12 @@ function worldActionObservations(
       (observation.target === required.target ||
         ((action.kind === "production-chapter" || action.kind === "production-chapter-order") && required.requirement === "chapters" &&
           required.target === action.productionId && observation.target === `${required.target}::plan`) ||
-        (action.kind === "production-chapter" && required.requirement === "story" && observation.target === `${required.target}:overview`))));
+        (action.kind === "production-chapter" && required.requirement === "story" && observation.target === `${required.target}:overview`) ||
+        // get_scene returns the whole script, block ids and all, so its read covers a script
+        // replacement; fenced on the whole scene, it is the stricter of the two. Arke reached for
+        // it five turns running and the script-only target refused each (issue 3230).
+        (action.kind === "production-scene" && required.requirement === "scenes" && required.target.endsWith(":script") &&
+          observation.target === required.target.slice(0, -":script".length)))));
   // One corrective turn should discover every prerequisite, not spend a full draft learning
   // about sheets and then another learning about canon. Invalid receipts never count as reads.
   const problems = [
