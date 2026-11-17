@@ -2030,14 +2030,36 @@ function siblingScope(action: Pick<ConversationActionCard, "actionKind" | "produ
 }
 
 /**
- * The reads a card still has to hold once its siblings are known to be what moved it. A sheet card
- * gives up the collection read alone: canon still fences it, and the gate's own target check and
- * the preview digest still refuse a card whose file a sibling wrote or whose name one took.
+ * The reads a sheet card holds once its own turn's siblings are what moved the sheets read, or
+ * undefined when they are not. The collection is fenced again rather than dropped, and the fence is
+ * read before the change log: a write before it shows in the log and fails the sibling check, and
+ * a write after it, even one queued ahead of this acceptance, fails the gate's precondition (codex
+ * on PR 3222). Canon and every other read stay as they were prepared.
  */
-function siblingObservations(action: Pick<ConversationActionCard, "actionKind" | "productionId" | "baseObservations">) {
-  return SHEET_PROPOSAL_KINDS.includes(action.actionKind)
-    ? { baseObservations: action.baseObservations.filter((observation) => observation.requirement !== "sheets") }
-    : savedStoryReviewObservations(action);
+async function siblingSheetObservations(store: WorldStore, action: ConversationActionCard) {
+  const fence = sheetsFence(store.getBundle());
+  if (!await siblingAccepted(store, action)) return undefined;
+  return { baseObservations: action.baseObservations.map((observation) =>
+    observation.requirement === "sheets" ? { ...observation, revisionOrDigest: fence } : observation) };
+}
+
+const SHEET_ID_TAKEN = "Another sheet now has this name.";
+
+/**
+ * Whether a sheet this proposal creates takes the id of another sheet. Ids are global across the
+ * three folders, and a create allocates its id against the sheets there were when it was staged,
+ * not its siblings: a character and a location of one name, offered in one turn, both become
+ * `harbour` in different folders, so the gate's target check passes both. The collection read used
+ * to refuse the second, and a relaxed one must too (codex on PR 3222).
+ */
+function sheetIdTaken(store: WorldStore, proposal: Proposal): boolean {
+  // Lowercased as `uniqueSlug` compares them.
+  const taken = new Map(store.getBundle().sheets.map((sheet) => [sheet.id.toLowerCase(), `${sheetDir(sheet.type)}/${sheet.id}.md`]));
+  return proposal.targets.some((target) => {
+    if (target.baseHash !== null || !SHEET_PREFIXES.some((prefix) => target.path.startsWith(prefix))) return false;
+    const path = taken.get(target.path.slice(target.path.indexOf("/") + 1).replace(/\.md$/, "").toLowerCase());
+    return path !== undefined && path !== target.path;
+  });
 }
 
 /**
@@ -5250,8 +5272,8 @@ export function worldChatActionAdapters(
       // A sheet card has no saved review to fall back on, so its siblings are asked first: their
       // landing is the one move of the sheets read that keeps it, and anything else discards it as
       // before (issue 3213).
-      const sheetSiblings = !current.ok && SHEET_PROPOSAL_KINDS.includes(action.actionKind)
-        && observationsCurrent(store, siblingObservations(action)).ok && await siblingAccepted(store, action);
+      const relaxedSheets = !current.ok && SHEET_PROPOSAL_KINDS.includes(action.actionKind) ? await siblingSheetObservations(store, action) : undefined;
+      const sheetSiblings = relaxedSheets !== undefined && observationsCurrent(store, relaxedSheets).ok;
       if (!current.ok && !canReviewSaved && !sheetSiblings) {
         await gate.discard(action.authority.id);
         return current;
@@ -5268,6 +5290,10 @@ export function worldChatActionAdapters(
         await gate.discard(action.authority.id);
         return { ok: false, reason: "stale", detail: "The proposal preview changed after this card was prepared." };
       }
+      if (sheetSiblings && sheetIdTaken(store, await gate.readManifest(action.authority.id))) {
+        await gate.discard(action.authority.id);
+        return { ok: false, reason: "stale", detail: SHEET_ID_TAKEN };
+      }
       // ...unless the move was its own turn's: a card Arke offered beside this one, approved first, is
       // no reason to send the author to a full review (turn 270e, round 95).
       if (!current.ok && !sheetSiblings && !await siblingAccepted(store, action)) return { ok: false, reason: "blocked", detail: "Story context changed. Review the saved proposal before accepting. No regeneration is needed." };
@@ -5277,9 +5303,16 @@ export function worldChatActionAdapters(
       if (!gate) return { status: "failed", detail: "The proposal authority is unavailable." };
       const proposal = await gate.readManifest(action.authority.id);
       // Only story and sheet cards have siblings; every other kind keeps its full precondition.
-      const relaxed = await siblingAccepted(store, action);
+      const relaxed = SHEET_PROPOSAL_KINDS.includes(action.actionKind)
+        ? await siblingSheetObservations(store, action)
+        : STORY_PROPOSAL_KINDS.includes(action.actionKind) && await siblingAccepted(store, action) ? savedStoryReviewObservations(action) : undefined;
+      // Read after the fence, so a sibling landing later fails the precondition instead.
+      if (relaxed && SHEET_PROPOSAL_KINDS.includes(action.actionKind) && sheetIdTaken(store, proposal)) {
+        await gate.discard(proposal.id);
+        return { status: "stale", detail: SHEET_ID_TAKEN };
+      }
       const outcome = await gate.accept(proposal.id, {
-        precondition: observationPrecondition(store, relaxed ? siblingObservations(action) : action),
+        precondition: observationPrecondition(store, relaxed ?? action),
       }).catch((error): AcceptOutcome => {
         if (error instanceof WorldStateStaleError) {
           return { status: "stale", stalePaths: [], detail: error.detail };

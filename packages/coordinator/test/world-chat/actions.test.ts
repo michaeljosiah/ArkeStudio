@@ -3454,6 +3454,38 @@ describe("sibling sheet cards (issue 3213)", () => {
     assert.equal(await open(w, w.cards[1]!), false);
     assert.doesNotMatch(await readFile(join(w.store.dir, first!.targets[0]!.path), "utf8"), /Other steps/);
   });
+
+  it("still refuses a card when a sheet from outside the turn lands while it is accepted", async () => {
+    const w = await siblings([location("Harbour steps"), location("Quay gate")]);
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[0]!)).status, "completed");
+    const accept = w.gate.accept.bind(w.gate);
+    // After the sibling check has read the change log, before the gate runs the card's precondition.
+    w.gate.accept = async (proposalId, opts) => {
+      if (proposalId === w.cards[1]!.authority.id) {
+        const elsewhere = await createSheetFromSentence(w.store, w.gate, { sheetType: "location", name: "Rope walk", sentence: "A long shed for laying rope." });
+        assert.equal((await accept(elsewhere.proposal.id)).status, "accepted");
+      }
+      return accept(proposalId, opts);
+    };
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[1]!)).status, "stale");
+    assert.equal(await open(w, w.cards[1]!), false);
+    assert.ok(w.store.getBundle().sheets.some(sheet => sheet.name === "Rope walk"));
+    assert.equal(w.store.getBundle().sheets.some(sheet => sheet.name === "Quay gate"), false);
+  });
+
+  it("still discards a create whose id a sibling of another type took", async () => {
+    const w = await siblings([location("Harbour"), { operation: "create", sheetType: "character", name: "Harbour", role: "Harbour watch",
+      canonRules: [], links: [], sections: [{ heading: "Essence", body: "The watch." }, { heading: "Appearance", body: "Oilskins." }] }]);
+    const [first, second] = await Promise.all(w.cards.map(card => w.gate.readManifest(card.authority.id)));
+    const id = first!.targets[0]!.path.replace(/^locations\/|\.md$/g, "");
+    assert.equal(second!.targets[0]!.path, `characters/${id}.md`);
+    assert.equal((await decide(w.lifecycle, w.log, w.cards[0]!)).status, "completed");
+    const refused = await decide(w.lifecycle, w.log, w.cards[1]!);
+    assert.equal(refused.reason, "stale");
+    assert.equal(refused.detail, "Another sheet now has this name.");
+    assert.equal(await open(w, w.cards[1]!), false);
+    assert.deepEqual(w.store.getBundle().sheets.filter(sheet => sheet.id === id).map(sheet => sheet.type), ["location"]);
+  });
 });
 
 it("reports sheets and canon together for a chapter with draws (#1911, #1741)", async () => {
