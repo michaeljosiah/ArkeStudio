@@ -1,8 +1,10 @@
 import { AGENT_EXPORT_MEDIA_SCHEMA_VERSION, AGENT_PERFORMANCE_MEDIA_SCHEMA_VERSION, PerformanceRecordBaseSchema, AGENT_LISTENING_SCHEMA_VERSION, AGENT_LISTENING_LIMITS, ListenAudioArgsSchema, AGENT_AUDIO_SCHEMA_VERSION, AGENT_TRANSCRIPT_LIMITS, AGENT_MEDIA_LIMITS, AGENT_MEDIA_PROFILE, AGENT_MEDIA_SCHEMA_VERSION, AgentMediaObservationSchema, AnalyzeAudioArgsSchema,
   InspectMediaArgsSchema, SampleVideoArgsSchema, ReviewAudioContentArgsSchema, MeasureSyncArgsSchema, AGENT_SYNC_SCHEMA_VERSION, newId,
   SongMapArgsSchema, AGENT_SONG_SCHEMA_VERSION, AGENT_SONG_LIMITS, ClipQualityArgsSchema, AGENT_QUALITY_SCHEMA_VERSION,
-  type AgentListeningFocus, type AgentMediaObservation, type AgentMediaSource, type ClipQualityArgs, type MeasureSyncArgs, type SongMapArgs, type WorldChatCheckReceipt } from "@arke-studio/contracts";
-import { measureSyncInSnapshot, qualityInSnapshot, songMapInSnapshot, QUALITY_LIMITATIONS, SONG_LIMITATIONS, SYNC_LIMITATIONS } from "./media-measure.js";
+  CutContactSheetArgsSchema, AGENT_SHEET_SCHEMA_VERSION, AGENT_SHEET_LIMITS,
+  type AgentListeningFocus, type AgentMediaObservation, type AgentMediaSource, type ClipQualityArgs, type CutContactSheetArgs, type MeasureSyncArgs, type AgentMediaRegion,
+  type SongMapArgs, type WorldChatCheckReceipt } from "@arke-studio/contracts";
+import { contactSheetInSnapshot, measureSyncInSnapshot, qualityInSnapshot, songMapInSnapshot, QUALITY_LIMITATIONS, SHEET_LIMITATIONS, SONG_LIMITATIONS, SYNC_LIMITATIONS } from "./media-measure.js";
 import { readBenchSession } from "../bench/chat-reads.js";
 import { resolveTakeSource } from "../bench/service.js";
 import { hashContainedProductionMedia, withContainedProductionMedia } from "../world/reference-files.js";
@@ -18,11 +20,11 @@ import { listenToAgentAudio, type AgentAudioListener } from "../media/agent-list
 import { VoxaCancelledError, VoxaTimeoutError, wordTimingRefusalReason } from "@arke-studio/voice";
 
 export const MEDIA_INSPECTION_NAMES = ["inspect_media", "sample_video", "analyze_audio_signal", "transcribe_audio", "review_audio_content", "listen_audio",
-  "measure_sync", "song_map", "clip_quality"] as const;
+  "measure_sync", "song_map", "clip_quality", "cut_contact_sheet"] as const;
 export type MediaInspectionName = typeof MEDIA_INSPECTION_NAMES[number];
 const TOOLS = { inspect_media: "inspect-media", sample_video: "sample-video", analyze_audio_signal: "analyze-audio-signal",
   transcribe_audio: "transcribe-audio", review_audio_content: "review-audio-content", listen_audio: "listen-audio", measure_sync: "measure-sync",
-  song_map: "song-map", clip_quality: "clip-quality" } as const;
+  song_map: "song-map", clip_quality: "clip-quality", cut_contact_sheet: "cut-contact-sheet" } as const;
 export type InspectionSource = { id: string; path: string; expectedHash: string; startSec: number; endSec: number | null };
 /** Catalogue identities are the authority. There is no path-shaped or mutable-selection input. */
 export async function agentMediaSource(store: WorldStore, source: AgentMediaSource): Promise<InspectionSource> {
@@ -122,17 +124,19 @@ export class ConversationMediaInspection {
     const listeningRead = name === "listen_audio";
     if (listeningRead && (!tools.speechAudio || !this.deps.listener)) throw new RetrievalError("unavailable", "Local audio listening is not configured; no cloud fallback was used.");
     if (speechRead && (!tools.speechAudio || !this.deps.speech)) throw new RetrievalError("unavailable", "Local Voxa measured speech recognition is unavailable on this host; no cloud fallback was used.");
-    const syncRead = name === "measure_sync", songRead = name === "song_map", qualityRead = name === "clip_quality";
+    const syncRead = name === "measure_sync", songRead = name === "song_map", qualityRead = name === "clip_quality", sheetRead = name === "cut_contact_sheet";
     if (syncRead && !tools.monoAudio) throw new RetrievalError("unavailable", "Local sync measurement is unavailable on this host.");
     if (songRead && !tools.pcmAudio) throw new RetrievalError("unavailable", "Local song measurement is unavailable on this host.");
     if (qualityRead && !tools.grayFrames) throw new RetrievalError("unavailable", "Local clip measurement is unavailable on this host.");
+    if (sheetRead && (!tools.tile || !tools.grayFrames)) throw new RetrievalError("unavailable", "Local contact sheets are unavailable on this host.");
     const parsed = (listeningRead ? ListenAudioArgsSchema : name === "inspect_media" ? InspectMediaArgsSchema : name === "sample_video" ? SampleVideoArgsSchema
       : name === "review_audio_content" ? ReviewAudioContentArgsSchema : syncRead ? MeasureSyncArgsSchema : songRead ? SongMapArgsSchema
-      : qualityRead ? ClipQualityArgsSchema : AnalyzeAudioArgsSchema).safeParse(input);
+      : qualityRead ? ClipQualityArgsSchema : sheetRead ? CutContactSheetArgsSchema : AnalyzeAudioArgsSchema).safeParse(input);
     if (!parsed.success) throw new RetrievalError("bad-argument", syncRead
       ? "measure_sync: name an immutable take and a bounded interval, a reference source with its start, and a region round the mouth for the mouth method."
       : songRead ? "song_map: name an immutable audio source, and a window of at most 15 minutes when it is longer."
       : qualityRead ? "clip_quality: name an immutable clip and a bounded interval; a compared clip's range runs as long."
+      : sheetRead ? "cut_contact_sheet: name an immutable film (an export by its id), and a window of at most 15 minutes when it is longer."
       : `${name}: name an immutable source and a bounded, valid interval.`);
     const count = this.counts.get(lease.runId) ?? 0;
     if (count >= AGENT_MEDIA_LIMITS.calls) throw new RetrievalError("budget-exhausted", "This run has reached its media inspection call budget.");
@@ -153,7 +157,8 @@ export class ConversationMediaInspection {
     // A measurement's second source (the sync reference, a song's vocal stem, a compared clip) is resolved and rechecked like the first.
     const secondSource = syncArgs?.reference.source ?? songArgs?.vocal?.source ?? qualityArgs?.compare?.source ?? null;
     const reference = secondSource ? await agentMediaSource(this.store, secondSource) : null;
-    if (name === "sample_video") await this.deps.images.validate(lease);
+    const sheetArgs = sheetRead ? parsed.data as CutContactSheetArgs : null, frameRegion = name === "sample_video" ? (parsed.data as { region?: AgentMediaRegion }).region : undefined;
+    if (name === "sample_video" || sheetRead) await this.deps.images.validate(lease);
     const decoderVersion = await tools.version(signal);
     const probeVersion = await tools.probeVersion(signal);
     const prepared = await withContainedProductionMedia(this.store.dir, source.path, source.expectedHash, signal, async snapshot => {
@@ -164,6 +169,19 @@ export class ConversationMediaInspection {
         sourceStartSec: source.startSec, sourceEndSec: end, inventory };
       if (name === "inspect_media") return { observation: AgentMediaObservationSchema.parse({ ...base, coverage: "metadata-only",
         limitations: ["Stream metadata only; no pixels, motion, audio performance or transcript was reviewed."] }), frames: [] };
+      if (sheetArgs) {
+        if (end === null) throw new RetrievalError("unavailable", "That film has no known length.");
+        const length = end - source.startSec, window = sheetArgs.window ?? { startSec: 0, endSec: length };
+        if (window.endSec > length + .000001) throw new RetrievalError("bad-argument", "The window runs past the end of the film.");
+        if (window.endSec - window.startSec > AGENT_SHEET_LIMITS.maxSeconds + .000001) throw new RetrievalError("bad-argument", "A contact sheet covers at most 15 minutes; name a window.");
+        const candidates = inventory.streams.filter(stream => stream.kind === "video");
+        const selected = args.streamIndex === undefined ? candidates.length === 1 ? candidates[0] : undefined : candidates.find(stream => stream.index === args.streamIndex);
+        if (!selected) throw new RetrievalError("bad-argument", "Select one explicit video stream from inspect_media; ambiguous tracks are never guessed.");
+        const sheet = await contactSheetInSnapshot(this.store, tools, signal, { path: snapshot.path, stream: selected,
+          startSec: source.startSec + window.startSec, endSec: source.startSec + window.endSec, viewStartSec: window.startSec }, args.source);
+        this.access(lease, name);
+        return { observation: base, frames: [], sheet };
+      }
       if (songArgs) {
         if (end === null) throw new RetrievalError("unavailable", "That source has no known length to map.");
         const length = end - source.startSec, window = songArgs.window ?? { startSec: 0, endSec: length };
@@ -230,7 +248,7 @@ export class ConversationMediaInspection {
       for (let i = 0; i < samples; i++) {
         this.access(lease, name);
         const requestedSourceTimeSec = startSec + (endSec - startSec) * i / samples;
-        const frame = await tools.frame(snapshot.path, selected.index, requestedSourceTimeSec, endSec, signal);
+        const frame = await tools.frame(snapshot.path, selected.index, requestedSourceTimeSec, endSec, signal, frameRegion);
         frames.push({ ...frame, requestedSourceTimeSec, streamIndex: selected.index });
       }
       return { observation: base, range: args.range, frames };
@@ -242,23 +260,36 @@ export class ConversationMediaInspection {
       if (identity(await agentMediaSource(this.store, secondSource)) !== identity(reference)) throw new RetrievalError("unavailable", "Media identity changed while inspection was running.");
       await hashContainedProductionMedia(this.store.dir, reference.path, reference.expectedHash, signal);
     }
-    const pixels: Array<{ frame: { requestedSourceTimeSec: number; sourceTimeSec: number; streamIndex: number }; image: Awaited<ReturnType<ConversationImages["prepareFrame"]>>["image"]; content: NonNullable<RetrievalOutcome["imageContent"]>[number] }> = [];
+    type Prepared = Awaited<ReturnType<ConversationImages["prepareFrame"]>>;
+    const pixels: Array<{ frame: { requestedSourceTimeSec: number; sourceTimeSec: number; streamIndex: number }; image: Prepared["image"]; content: NonNullable<RetrievalOutcome["imageContent"]>[number] }> = [];
     for (const frame of prepared.frames) {
       const value = await this.deps.images.prepareFrame(lease, { id: `${source.id}:frame:${frame.streamIndex}:${frame.sourceTimeSec}`,
         label: `Frame at source ${frame.sourceTimeSec}s for ${source.id}`, sourceHash: prepared.observation.sourceHash, bytes: frame.bytes });
       pixels.push({ frame, ...value });
     }
-    const observation: AgentMediaObservation = prepared.frames.length ? AgentMediaObservationSchema.parse({ ...prepared.observation,
-      range: "range" in prepared ? prepared.range : undefined, coverage: "sampled-frames-only",
+    // A sheet's pages are images like sampled frames: the same budget, privacy check and disclosure.
+    const pages: Prepared[] = [];
+    const sheetPrepared = "sheet" in prepared ? prepared.sheet : undefined;
+    if (sheetPrepared) for (const page of sheetPrepared.pages) {
+      pages.push(await this.deps.images.prepareFrame(lease, { id: `${source.id}:sheet:${page.firstShot}-${page.lastShot}`,
+        label: `Contact sheet, shots ${page.firstShot} to ${page.lastShot}, of ${source.id}`, sourceHash: prepared.observation.sourceHash, bytes: page.bytes }));
+    }
+    const images = [...pixels.map(value => value.image), ...pages.map(value => value.image)], contents = [...pixels.map(value => value.content), ...pages.map(value => value.content)];
+    const observation: AgentMediaObservation = sheetPrepared ? AgentMediaObservationSchema.parse({ ...prepared.observation, coverage: "contact-sheet",
+      sheet: { ...sheetPrepared.sheet, pages: sheetPrepared.pages.map((page, i) => ({ image: pages[i]!.image, firstShot: page.firstShot, lastShot: page.lastShot })) },
+      limitations: SHEET_LIMITATIONS })
+      : prepared.frames.length ? AgentMediaObservationSchema.parse({ ...prepared.observation,
+      range: "range" in prepared ? prepared.range : undefined, coverage: "sampled-frames-only", ...(frameRegion ? { region: frameRegion } : {}),
       frames: pixels.map(value => ({ requestedSourceTimeSec: value.frame.requestedSourceTimeSec, sourceTimeSec: value.frame.sourceTimeSec,
         viewTimeSec: value.frame.sourceTimeSec - source.startSec, streamIndex: value.frame.streamIndex, image: value.image })),
       limitations: ["Only these decoded, timestamped still frames were inspected; intervals between samples remain unreviewed.",
         "No continuous motion, flicker, audio performance or audiovisual sync assessment was made."] }) : prepared.observation as AgentMediaObservation;
     const receipt: WorldChatCheckReceipt = { id: newId("check"), runId: lease.runId, tool: TOOLS[name], status: "complete", consulted: [],
-      media: observation, querySummary: `${listeningRead ? "Local audio-model listening" : speechRead ? "Recognized speech content" : name === "inspect_media" ? "Media metadata" : name === "sample_video" ? "Sampled video frames" : syncRead ? "Lip sync measured" : songRead ? "Song mapped" : qualityRead ? "Clip quality measured" : "Audio sample measurements"}: ${source.id}`.slice(0, 300), at: new Date().toISOString() };
+      media: observation, querySummary: `${listeningRead ? "Local audio-model listening" : speechRead ? "Recognized speech content" : name === "inspect_media" ? "Media metadata" : name === "sample_video" ? "Sampled video frames" : syncRead ? "Lip sync measured" : songRead ? "Song mapped" : qualityRead ? "Clip quality measured" : sheetRead ? "Contact sheet" : "Audio sample measurements"}: ${source.id}`.slice(0, 300), at: new Date().toISOString() };
     this.access(lease, name);
-    // A measurement is newer than every source kind it can name, so its own boundary covers them.
-    await this.store.raiseSchemaBoundary(syncRead ? AGENT_SYNC_SCHEMA_VERSION : songRead ? AGENT_SONG_SCHEMA_VERSION : qualityRead ? AGENT_QUALITY_SCHEMA_VERSION : args.source.kind === "export" ? AGENT_EXPORT_MEDIA_SCHEMA_VERSION
+    // A measurement is newer than every source kind it can name, so its own boundary covers them; so is a sampled frame's box.
+    await this.store.raiseSchemaBoundary(syncRead ? AGENT_SYNC_SCHEMA_VERSION : songRead ? AGENT_SONG_SCHEMA_VERSION : qualityRead ? AGENT_QUALITY_SCHEMA_VERSION
+      : sheetRead || frameRegion ? AGENT_SHEET_SCHEMA_VERSION : args.source.kind === "export" ? AGENT_EXPORT_MEDIA_SCHEMA_VERSION
       : args.source.kind === "performance" ? AGENT_PERFORMANCE_MEDIA_SCHEMA_VERSION
       : listeningRead ? AGENT_LISTENING_SCHEMA_VERSION : speechRead ? AGENT_AUDIO_SCHEMA_VERSION : AGENT_MEDIA_SCHEMA_VERSION, "agent-media-evidence");
     await this.store.ownedWrite(async () => {
@@ -270,13 +301,13 @@ export class ConversationMediaInspection {
         await hashContainedProductionMedia(this.store.dir, reference.path, reference.expectedHash, signal);
       }
       const chat = new WorldChatStore(conversationDir(this.store.dir, lease.conversationId));
-      const disclosure = pixels.length ? await this.deps.images.frameDisclosure(lease, pixels.map(value => value.image), receipt.at) : null;
+      const disclosure = images.length ? await this.deps.images.frameDisclosure(lease, images, receipt.at) : null;
       this.access(lease, name);
       if (disclosure) await chat.append({ type: "image.disclosed", disclosure });
       await chat.append({ type: "media.receipt", receipt });
     });
     await this.deps.publish?.(lease.conversationId); this.access(lease, name);
-    if (pixels.length) await this.deps.images.validate(lease);
-    return { result: observation, receipt, ...(pixels.length ? { imageContent: pixels.map(value => value.content) } : {}) };
+    if (images.length) await this.deps.images.validate(lease);
+    return { result: observation, receipt, ...(contents.length ? { imageContent: contents } : {}) };
   }
 }

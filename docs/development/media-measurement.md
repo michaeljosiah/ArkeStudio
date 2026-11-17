@@ -127,3 +127,34 @@ the change in sharpness and shimmer. Clips of different shapes are refused rathe
   −5% to +6%: added detail, not flicker.
 
 Receipts raise the world to schema 142.
+
+## `cut_contact_sheet`: the whole film at once (#3072)
+
+**Input:** a finished film by its export id (any immutable video works), with a `window` when it
+is over 15 minutes.
+
+**Output:**
+- **Pages:** one frame from the middle of each shot, five to a row and up to 30 a page (at most 240
+  shots on 8 pages). Each tile is labelled with its number and start (`12  2:56.6`) in a small
+  built-in digit font.
+- **A table of shots:** number, start, end, the frame's time, and the clip's name and id.
+
+**Where the shots come from:**
+- When the export's production still holds the cut it was made from (the current
+  `productionExportFingerprint` equals the export's stamp; episode exports excepted), the shots are
+  its picture clips, named.
+- Otherwise cuts are found in the picture. Frames are decoded at 10 a second and 64 px, skipping the
+  deblocking filter and frames nothing refers to. A cut is a step of at least 14 grey levels and 3
+  times the median of the 30 steps around it, with shots at least 0.5 s long. Dissolves are missed.
+
+Pages go through `view_image`'s pipeline, so they share its budget, privacy check and disclosure.
+Decodes run three at a time.
+
+**On the music video:** the 3:47 export's sheet takes 21 s (66 s one decode at a time). It finds
+78 shots against the cut's 76 clips; the two extra are cuts inside generated takes.
+
+**`sample_video` regions.** `sample_video` takes an optional `region`. The frame is cropped to that
+box at the source's own resolution before it is scaled, for eyes, a mouth or a hand. Its receipt
+names the region.
+
+Both raise the world to schema 143.

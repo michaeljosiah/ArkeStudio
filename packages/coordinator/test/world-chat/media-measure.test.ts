@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { newId, WorldChatCheckReceiptSchema, type AgentMediaInventory, type AgentMediaRegion, type HarnessAdapter } from "@arke-studio/contracts";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { newId, productionExportFingerprint, storyTimelineFingerprint, WorldChatCheckReceiptSchema, type AgentMediaInventory, type AgentMediaRegion, type HarnessAdapter } from "@arke-studio/contracts";
+import { encodePng, solidImage } from "../../src/references/png.js";
+import { recordCompletedExport } from "../../src/productions/export-receipts.js";
+import { applyHumanTimelineCommand } from "../../src/productions/timeline.js";
 import { WorldStore } from "../../src/world/store.js";
 import { WorldChatStore, conversationDir } from "../../src/world-chat/store.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
@@ -18,6 +22,7 @@ import { makeTempWorld } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
 const hash = (bytes: Uint8Array) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+const FRAME_PNG = encodePng(solidImage(3, 2, [22, 33, 44, 255]));
 const RATE = 16000, TAKE = Buffer.from("TAKE fixture"), SONG = Buffer.from("SONG fixture");
 
 /** Ten seconds of syllables of noise: the song. */
@@ -46,6 +51,9 @@ const grooveAt = (sec: number) => {
   return .8 * Math.exp(-sinceBeat / .04) * Math.sin(2 * Math.PI * 60 * sinceBeat) + .4 * Math.exp(-sinceBeat / .003) * Math.sin(1e5 * sec * sec);
 };
 const stemAt = (sec: number) => sec >= 2 && sec < 9 || sec >= 14 && sec < 20 ? .3 * Math.sin(2 * Math.PI * 220 * sec) : 0;
+/** A 20 s film cut at 3.2, 7.5 and 12.1 s, for a contact sheet found in the picture; and a 6 s export of a two-clip timeline. */
+const FILM = Buffer.from("FILM fixture"), EXPORT = Buffer.from("EXPORT fixture"), FILM_CUTS = [3.2, 7.5, 12.1];
+const filmInventory = (durationSec: number): AgentMediaInventory => ({ durationSec, streams: [{ index: 0, kind: "video", codec: "fixture", width: 1280, height: 720, frameRate: "30/1", durationSec, startTimeSec: 0 }] });
 /** A second, sharper 1080p version of the take for clip_quality's comparison. */
 const TAKE2 = Buffer.from("TAKE2 fixture");
 const take2Inventory: AgentMediaInventory = { durationSec: 6, streams: [{ index: 0, kind: "video", codec: "fixture", width: 1920, height: 1080, frameRate: "30/1", durationSec: 6, startTimeSec: 0 }] };
@@ -74,25 +82,29 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
   const artifact = (id: string, kind: string, file: string, bytes: Buffer) => [
     { path: `artifacts/${file}`, action: "create" as const, baseHash: null, encoding: "base64" as const, content: bytes.toString("base64") },
     { path: `artifacts/${file.replace(/\.\w+$/, "")}.json`, action: "create" as const, baseHash: null, content: JSON.stringify({ id, kind, file, hash: hash(bytes), links: [], origin: { by: "user" }, created: "2026-11-17T00:00:00Z" }) }];
-  const grooveId = newId("ar"), stemId = newId("ar"), take2Id = newId("ar");
+  const grooveId = newId("ar"), stemId = newId("ar"), take2Id = newId("ar"), filmId = newId("ar");
   await store.commit({ kind: "media-fixture", source: "test", files: [...artifact(takeId, "video", "take.mp4", TAKE), ...artifact(songId, "audio", "song.mp3", SONG),
-    ...artifact(grooveId, "audio", "groove.mp3", GROOVE), ...artifact(stemId, "audio", "stem.wav", STEM), ...artifact(take2Id, "video", "take2.mp4", TAKE2)] });
+    ...artifact(grooveId, "audio", "groove.mp3", GROOVE), ...artifact(stemId, "audio", "stem.wav", STEM), ...artifact(take2Id, "video", "take2.mp4", TAKE2),
+    ...artifact(filmId, "video", "film.mp4", FILM)] });
   const leases = new QueryLeaseRegistry(() => store.worldId), lease = leases.mint({ worldId: store.worldId, conversationId: cv, runId, allowedAttachmentIds: [] });
   const stop = new AbortController();
   const adapter = { imageInput: true, imageInputForSession: () => true, imageDestinationForSession: () => ({ provider: "test-provider", local: true }) } as unknown as HarnessAdapter;
   const images = new ConversationImages(store, leases, { adapter, allowed: async () => true, publish: async () => {} }); images.start(runId, "session", stop.signal);
   const calls: Array<{ what: string; startSec: number; endSec: number; region?: AgentMediaRegion; fps?: number }> = [];
   const isSong = async (path: string) => (await readFile(path)).equals(SONG);
-  const which = async (path: string) => { const bytes = await readFile(path); return bytes.equals(GROOVE) ? "groove" : bytes.equals(STEM) ? "stem" : bytes.equals(SONG) ? "song" : bytes.equals(TAKE2) ? "take2" : "take"; };
+  const which = async (path: string) => { const bytes = await readFile(path); return bytes.equals(GROOVE) ? "groove" : bytes.equals(STEM) ? "stem" : bytes.equals(SONG) ? "song" : bytes.equals(TAKE2) ? "take2"
+    : bytes.equals(FILM) ? "film" : bytes.equals(EXPORT) ? "export" : "take"; };
   const tools: AgentMediaTools = {
     version: async () => "ffmpeg version fixture", probeVersion: async () => "ffprobe version fixture",
     probe: async path => {
       const kind = await which(path);
       if (kind === "groove" || kind === "stem") return { durationSec: GROOVE_SEC, streams: [{ ...songInventory.streams[0]!, durationSec: GROOVE_SEC }] };
       if (kind === "take2") return take2Inventory;
+      if (kind === "film") return filmInventory(20);
+      if (kind === "export") return filmInventory(6);
       return kind === "song" ? { ...songInventory, streams: options.songStreams ?? songInventory.streams } : takeInventory;
     },
-    frame: async () => { throw new Error("no frames in this fixture"); },
+    frame: async (_path, _stream, at, end, _signal, region) => { calls.push({ what: "frame", startSec: at, endSec: end, region }); return { bytes: FRAME_PNG, width: 3, height: 2, sourceTimeSec: at }; },
     audio: async () => { throw new Error("no channel QC in this fixture"); },
     ...(options.noMeasure ? {} : {
       pcmAudio: async (path, _stream, startSec, endSec, format) => {
@@ -111,7 +123,16 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
         for (let i = 0; i < out.length; i++) { const t = startSec + i / rate; out[i] = songSide ? songAt(t) : songAt(SLICE + t - SOUND_LATE); }
         return out;
       },
+      tile: async (_path, _stream, atSec, size) => { calls.push({ what: "tile", startSec: atSec, endSec: atSec }); return new Uint8Array(size.width * size.height * 4).fill(Math.round(atSec * 10) % 256); },
       grayFrames: async (path, stream, startSec, endSec, frameOptions) => {
+        if (frameOptions.fps === 10 && await which(path) === "film") {
+          // Each shot a flat grey of its own, with a little movement inside it.
+          calls.push({ what: "film@10", startSec, endSec });
+          return { frames: Array.from({ length: Math.round((endSec - startSec) * 10) }, (_, k) => {
+            const t = startSec + k / 10, shot = FILM_CUTS.filter(cut => cut <= t + 1e-9).length;
+            return new Uint8Array(64 * 36).fill(40 + 50 * shot + (k % 3));
+          }), width: 64, height: 36, fps: 10 };
+        }
         if (frameOptions.fps === null) {
           const kind = await which(path), size = frameOptions.size ?? (() => { const g = regionGeometry(stream.width!, stream.height!, frameOptions.region, frameOptions.edge); return { width: g.outWidth, height: g.outHeight }; })();
           calls.push({ what: `${kind}@${size.width}x${size.height}`, startSec, endSec, region: frameOptions.region });
@@ -139,6 +160,7 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
     readImage: (lease, args) => images.read(lease, args), readMedia: (lease, name, args) => media.read(lease, name, args) });
   return { store, lease, retrieval, calls, take: { kind: "artifact" as const, id: takeId }, song: { kind: "artifact" as const, id: songId },
     groove: { kind: "artifact" as const, id: grooveId }, stem: { kind: "artifact" as const, id: stemId }, take2: { kind: "artifact" as const, id: take2Id },
+    film: { kind: "artifact" as const, id: filmId }, takeId, take2Id,
     loaded: () => new WorldChatService(dir).load(cv) };
 }
 
@@ -251,12 +273,60 @@ test("clip_quality measures a region alone, and refuses a compared clip of anoth
   await assert.rejects(h.retrieval.call(h.lease.token, "clip_quality", { source: h.take, range: { startSec: 0, endSec: 3 }, compare: { source: h.take2, range: { startSec: 0, endSec: 2 } } }), /clip_quality/);
 });
 
+test("cut_contact_sheet on a film with no cut behind it: shots found where the picture jumps, a tile from each one's middle, one page; schema 143", async () => {
+  const h = await harness();
+  const outcome = await h.retrieval.call(h.lease.token, "cut_contact_sheet", { source: h.film });
+  const sheet = outcome.receipt.media!.sheet!;
+  assert.equal(outcome.receipt.tool, "cut-contact-sheet"); assert.equal(outcome.receipt.media!.coverage, "contact-sheet");
+  assert.equal(sheet.shotsFrom, "picture"); assert.equal(sheet.productionId, null);
+  assert.deepEqual(sheet.shots.map(shot => [shot.startSec, shot.endSec, shot.label]), [[0, 3.2, null], [3.2, 7.5, null], [7.5, 12.1, null], [12.1, 20, null]]);
+  assert.deepEqual(h.calls.filter(call => call.what === "tile").map(call => call.startSec), [1.6, 5.35, 9.8, 16.05]);
+  assert.equal(sheet.pages.length, 1); assert.equal(outcome.imageContent!.length, 1);
+  assert.equal(sheet.pages[0]!.image.width, 1488); assert.equal(sheet.pages[0]!.image.sourceHash, hash(FILM));
+  assert.match(outcome.receipt.querySummary!, /^Contact sheet/);
+  assert.equal(WorldChatCheckReceiptSchema.safeParse(outcome.receipt).success, true);
+  assert.equal(h.store.getBundle().meta.schemaVersion, 143);
+});
+
+test("cut_contact_sheet on an export whose production still holds its cut: the timeline's clips, named", async () => {
+  const h = await harness(), production = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
+  await applyHumanTimelineCommand(h.store, "saltlight", { kind: "commands", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production), commands: [
+    { kind: "place", trackId: "tr_picture", clip: { id: "cl_open", startFrame: 0, durationFrames: 96, sourceInFrames: 0, source: { kind: "artifact", artifactId: h.takeId, label: "The opening" } } },
+    { kind: "place", trackId: "tr_picture", clip: { id: "cl_close", startFrame: 96, durationFrames: 48, sourceInFrames: 0, source: { kind: "artifact", artifactId: h.take2Id, label: "The close" } } }] });
+  const current = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
+  assert.equal(current.timeline?.status, "ready");
+  await mkdir(join(h.store.dir, "exports"), { recursive: true }); await writeFile(join(h.store.dir, "exports", "ex_sheet.mp4"), EXPORT);
+  const stamp = { worldId: h.store.worldId, productionId: "saltlight", status: "done" as const, createdAt: "2026-11-17T00:00:00Z", deliveryKind: "video" as const };
+  await recordCompletedExport(h.store, { ...stamp, id: "ex_sheet", output: "exports/ex_sheet.mp4", sourceFingerprint: productionExportFingerprint(h.store.getBundle(), current) });
+  const outcome = await h.retrieval.call(h.lease.token, "cut_contact_sheet", { source: { kind: "export", exportId: "ex_sheet" } });
+  const sheet = outcome.receipt.media!.sheet!, rate = (current.timeline as { timeline: { frameRate: number } }).timeline.frameRate;
+  assert.equal(sheet.shotsFrom, "timeline"); assert.equal(sheet.productionId, "saltlight");
+  assert.deepEqual(sheet.shots.map(shot => [shot.label, shot.clipId, shot.startSec, shot.endSec]), [["The opening", "cl_open", 0, 96 / rate], ["The close", "cl_close", 96 / rate, 144 / rate]]);
+  // A changed fingerprint (the cut moved on since) falls back to the picture.
+  await writeFile(join(h.store.dir, "exports", "ex_old.mp4"), EXPORT);
+  await recordCompletedExport(h.store, { ...stamp, id: "ex_old", output: "exports/ex_old.mp4", sourceFingerprint: "production-export-v1:an-older-cut" });
+  const old = await h.retrieval.call(h.lease.token, "cut_contact_sheet", { source: { kind: "export", exportId: "ex_old" } });
+  assert.equal(old.receipt.media!.sheet!.shotsFrom, "picture");
+});
+
+test("sample_video looks closely at a box: the region reaches the decoder and the receipt, and raises schema 143", async () => {
+  const h = await harness(), region = { x: .4, y: .5, width: .2, height: .15 };
+  const outcome = await h.retrieval.call(h.lease.token, "sample_video", { source: h.take, range: { startSec: 0, endSec: 1 }, count: 1, region });
+  assert.equal(outcome.receipt.media!.coverage, "sampled-frames-only"); assert.deepEqual({ ...outcome.receipt.media!.region }, region);
+  assert.deepEqual({ ...h.calls.find(call => call.what === "frame")!.region }, region);
+  assert.equal(h.store.getBundle().meta.schemaVersion, 143);
+  // Without a box nothing changes: no region on the receipt, and no new boundary.
+  const plain = await harness(), whole = await plain.retrieval.call(plain.lease.token, "sample_video", { source: plain.take, range: { startSec: 0, endSec: 1 }, count: 1 });
+  assert.equal(whole.receipt.media!.region, undefined); assert.ok(plain.store.getBundle().meta.schemaVersion < 140);
+  await assert.rejects(h.retrieval.call(h.lease.token, "sample_video", { source: h.take, range: { startSec: 0, endSec: 1 }, region: { x: .9, y: .5, width: .2, height: .15 } }), /sample_video/);
+});
+
 test("the shared leased MCP catalogue lists measure_sync and serves it", async () => {
   const h = await harness(), server = new WorldQueryServer(() => h.store); await server.start(); closeOnCleanup(() => server.stop());
   let served = ""; server.attachLease(h.lease.token, { retrieval: h.retrieval, onReceipt: receipt => { served = receipt.tool; } });
   const rpc = async (method: string, params?: unknown) => (await fetch(server.leasedUrl(h.lease.token)!, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })).json();
   const listed = await rpc("tools/list") as { result: { tools: Array<{ name: string }> } };
-  for (const name of ["measure_sync", "song_map", "clip_quality"]) assert.ok(listed.result.tools.some(tool => tool.name === name), name);
+  for (const name of ["measure_sync", "song_map", "clip_quality", "cut_contact_sheet"]) assert.ok(listed.result.tools.some(tool => tool.name === name), name);
   await rpc("tools/call", { name: "measure_sync", arguments: { source: h.take, range: { startSec: .5, endSec: 3.5 }, reference: { source: h.song, startSec: 2.5 } } });
   assert.equal(served, "measure-sync");
 });

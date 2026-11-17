@@ -8,9 +8,12 @@ export interface AgentMediaTools {
   version(signal: AbortSignal): Promise<string>;
   probeVersion(signal: AbortSignal): Promise<string>;
   probe(path: string, signal: AbortSignal): Promise<AgentMediaInventory>;
-  frame(path: string, streamIndex: number, sourceTimeSec: number, endSec: number, signal: AbortSignal): Promise<{
+  /** One frame as a PNG; of a box in the picture when `region` is given (#3072). */
+  frame(path: string, streamIndex: number, sourceTimeSec: number, endSec: number, signal: AbortSignal, region?: AgentMediaRegion): Promise<{
     bytes: Uint8Array; width: number; height: number; sourceTimeSec: number;
   }>;
+  /** One frame fitted, letterboxed, into exactly width x height of RGBA, for a contact sheet's tile. */
+  tile?(path: string, stream: AgentMediaInventory["streams"][number], atSec: number, size: { width: number; height: number }, signal: AbortSignal): Promise<Uint8Array>;
   audio(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, signal: AbortSignal): Promise<AudioSignal>;
   speechAudio?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, signal: AbortSignal): Promise<{ bytes: Uint8Array; durationSec: number }>;
   /** A mono derivative at `rate` for measurement (#3070); like the speech derivative, never original-channel QC. */
@@ -23,7 +26,9 @@ export interface AgentMediaTools {
    * scaled so the longer side is at most `edge`, or to exactly `size` when two clips are compared.
    */
   grayFrames?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number,
-    options: { fps: number | null; edge: number; region?: AgentMediaRegion; size?: { width: number; height: number } }, signal: AbortSignal): Promise<{ frames: Uint8Array[]; width: number; height: number; fps: number | null }>;
+    options: { fps: number | null; edge: number; region?: AgentMediaRegion; size?: { width: number; height: number };
+      /** Cut finding only: skip the deblocking filter and frames nothing refers to, half the decode, nothing a 64 px picture shows. */
+      fast?: boolean }, signal: AbortSignal): Promise<{ frames: Uint8Array[]; width: number; height: number; fps: number | null }>;
 }
 /** A probe's `avg_frame_rate` ("30/1", "30000/1001") as frames a second; null when it says nothing usable. */
 export function parseStreamRate(value: string | undefined): number | null {
@@ -111,14 +116,18 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
         "-of", "json", path], signal, 65_536);
       return parseAgentMediaProbe(result.stdout);
     },
-    async frame(path, streamIndex, atSec, endSec, signal) {
+    async frame(path, streamIndex, atSec, endSec, signal, region) {
       if (!Number.isInteger(streamIndex) || streamIndex < 0 || streamIndex > 255 || !Number.isFinite(atSec) || atSec < 0 || !Number.isFinite(endSec) || endSec <= atSec) throw new Error("Invalid video sample interval");
+      if (region && ![region.x, region.y, region.width, region.height].every(value => Number.isFinite(value) && value >= 0 && value <= 1) ||
+        region && (region.width < .02 || region.height < .02 || region.x + region.width > 1.000001 || region.y + region.height > 1.000001)) throw new Error("Invalid video sample region");
+      // A box in the picture at the source's own resolution, cut before the scale so its detail survives.
+      const crop = region ? `crop=iw*${region.width.toFixed(6)}:ih*${region.height.toFixed(6)}:iw*${region.x.toFixed(6)}:ih*${region.y.toFixed(6)},` : "";
       // copyts + start_at_zero preserves media-relative PTS through input seeking:
       // https://ffmpeg.org/ffmpeg.html#Advanced-options ; showinfo reports the decoded PTS.
       const result = await run("ffmpeg", ["-hide_banner", "-loglevel", "info", "-threads", "1", "-copyts", "-start_at_zero",
         "-ss", String(atSec), "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS, "-i", path,
         "-map", `0:${streamIndex}`, "-an", "-sn", "-frames:v", "1", "-vf",
-        `select=gte(t\\,${atSec}),scale=${AGENT_MEDIA_LIMITS.edge}:${AGENT_MEDIA_LIMITS.edge}:force_original_aspect_ratio=decrease,showinfo`,
+        `select=gte(t\\,${atSec}),${crop}scale=${AGENT_MEDIA_LIMITS.edge}:${AGENT_MEDIA_LIMITS.edge}:force_original_aspect_ratio=decrease,showinfo`,
         "-fps_mode", "passthrough", "-map_metadata", "-1", "-pix_fmt", "rgba", "-threads", "1", "-c:v", "png", "-f", "image2pipe", "pipe:1"], signal, 5 * 1024 * 1024);
       const value = result.stderr.match(/\bpts_time:([+-]?[\d.]+(?:e[+-]?\d+)?)/i)?.[1], actual = value === undefined ? null : finite(value);
       if (actual === null || actual < atSec - 0.000001 || actual >= endSec) throw new Error("No timestamped frame exists inside the requested interval");
@@ -161,6 +170,17 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
     // A plain function, not a method: callers take it off the object.
     monoAudio: (path, stream, startSec, endSec, rate, signal) => pcmAudio(path, stream, startSec, endSec, { rate, channels: 1 }, signal),
     pcmAudio,
+    async tile(path, stream, atSec, size, signal) {
+      if (stream.kind !== "video" || !Number.isFinite(atSec) || atSec < 0 || !Number.isInteger(size.width) || !Number.isInteger(size.height) ||
+        size.width < 16 || size.height < 16 || size.width > 640 || size.height > 640 || size.width % 2 || size.height % 2) throw new Error("Invalid contact sheet tile");
+      const bytes = size.width * size.height * 4;
+      const result = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-threads", "1", "-ss", String(atSec), "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS,
+        "-i", path, "-map", `0:${stream.index}`, "-an", "-sn", "-frames:v", "1", "-map_metadata", "-1",
+        "-vf", `scale=${size.width}:${size.height}:force_original_aspect_ratio=decrease:flags=area,pad=${size.width}:${size.height}:(ow-iw)/2:(oh-ih)/2:color=black,format=rgba`,
+        "-f", "rawvideo", "pipe:1"], signal, bytes);
+      if (result.stdout.length !== bytes) throw new Error("No frame exists at that time");
+      return result.stdout;
+    },
     async grayFrames(path, stream, startSec, endSec, options, signal) {
       const duration = endSec - startSec, { fps, edge, size } = options, native = parseStreamRate(stream.frameRate);
       if (stream.kind !== "video" || !stream.width || !stream.height || Math.max(stream.width, stream.height) > 3840 || stream.width * stream.height > 3840 * 2160 ||
@@ -177,6 +197,7 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
       const maxFrames = fps === null ? Math.floor(AGENT_MEDIA_LIMITS.pcmBytes / frameBytes) : Math.ceil(duration * fps) + 2;
       if (maxFrames < 2 || maxFrames * frameBytes > AGENT_MEDIA_LIMITS.pcmBytes) throw new Error("Video exceeds the measurement frame profile");
       const result = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS,
+        ...(options.fast && fps !== null ? ["-skip_loop_filter", "all", "-skip_frame", "noref"] : []),
         "-ss", String(startSec), "-t", String(duration), "-i", path, "-map", `0:${stream.index}`, "-an", "-sn", "-map_metadata", "-1",
         "-vf", `crop=${g.cropWidth}:${g.cropHeight}:${g.x}:${g.y},${scale}${fps === null ? "" : `,fps=${fps}`},format=gray`,
         ...(fps === null ? ["-fps_mode", "passthrough"] : []), "-f", "rawvideo", "pipe:1"], signal, maxFrames * frameBytes, MEASURE_TIMEOUT_MS);

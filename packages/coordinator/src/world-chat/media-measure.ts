@@ -1,10 +1,14 @@
-import { AGENT_QUALITY_LIMITS, AGENT_SYNC_LIMITS, AgentClipQualitySchema, AgentSongMapSchema, AgentSyncMeasurementSchema, EFFECT_ANALYSIS_PROFILE, SONG_SECTION_PROFILE,
-  createEffectPcmAnalyzer, findSongSections, type AgentClipQuality, type AgentMediaInventory, type AgentSongMap, type AgentSyncMeasurement, type ClipQualityArgs,
-  type MeasureSyncArgs, type SongMapArgs } from "@arke-studio/contracts";
+import { AGENT_QUALITY_LIMITS, AGENT_SHEET_LIMITS, AGENT_SYNC_LIMITS, AgentClipQualitySchema, AgentSongMapSchema, AgentSyncMeasurementSchema, EFFECT_ANALYSIS_PROFILE, SONG_SECTION_PROFILE,
+  createEffectPcmAnalyzer, findSongSections, productionExportFingerprint, type AgentClipQuality, type AgentContactSheet, type AgentMediaInventory, type AgentMediaSource,
+  type AgentSongMap, type AgentSyncMeasurement, type ClipQualityArgs, type MeasureSyncArgs, type SongMapArgs } from "@arke-studio/contracts";
 import { withContainedProductionMedia } from "../world/reference-files.js";
 import { parseStreamRate, regionGeometry, type AgentMediaTools } from "../media/agent-media-tools.js";
 import { measureCadence, measureDetail } from "../media/clip-quality.js";
-import { measureMouthSync, measureSoundtrackSync } from "../media/measure-sync.js";
+import { composeSheetPage, findCuts, tileLabel } from "../media/contact-sheet.js";
+import { encodePngAsync } from "../references/png-runner.js";
+import { readCompletedExports } from "../productions/export-receipts.js";
+import type { WorldStore } from "../world/store.js";
+import { frameMotion, measureMouthSync, measureSoundtrackSync } from "../media/measure-sync.js";
 import { SONG_MAP_PROFILE, songBeats, stepLevels, voiceIntervals } from "../media/song-map.js";
 import { RetrievalError } from "./retrieval.js";
 import type { InspectionSource } from "./media-inspection.js";
@@ -109,6 +113,85 @@ export const QUALITY_LIMITATIONS = [
   "A compared clip is met at one size, the smaller enlarged bicubic as the Cut's export would; clips of different shapes are not compared.",
   "Faces, anatomy, likeness, where a character looks and whether the picture suits the scene were not judged: those need frames looked at, and a person.",
 ];
+
+export const SHEET_LIMITATIONS = [
+  "Still frames only, one from the middle of each shot: no motion, sound or sync between them was reviewed.",
+  "Shots are the production's picture clips when its cut is unchanged since this export; otherwise cuts found where the picture jumps, which misses dissolves and slow fades.",
+  "Each tile is labelled with its shot number and start time; clip names are in the shot table.",
+];
+type SheetShot = { startSec: number; endSec: number; label: string | null; clipId: string | null };
+
+/**
+ * Run `work` over `items` three at a time, results in order. A sheet of a 4-minute film is about
+ * 80 decodes; one at a time that was over a minute. Three bounded single-thread decoders at once
+ * keep it near twenty seconds without taking the machine.
+ */
+async function inParallel<T, R>(items: readonly T[], work: (item: T) => Promise<R>, width = 3): Promise<R[]> {
+  const results: R[] = [];
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(width, items.length) }, async () => {
+    while (next < items.length) { const index = next++; results[index] = await work(items[index]!); }
+  }));
+  return results;
+}
+
+/** The export's own picture clips, when its production still holds the cut it was made from; else null. */
+async function timelineShots(store: WorldStore, source: AgentMediaSource, from: number, to: number): Promise<{ productionId: string; shots: SheetShot[] } | null> {
+  if (source.kind !== "export") return null;
+  const record = (await readCompletedExports(store)).find(row => row.id === source.exportId), bundle = store.getBundle();
+  const production = bundle.productions.find(row => row.meta.id === record?.productionId);
+  // An episode's export starts at its own range, and an unstamped or changed cut cannot vouch for the film's frames.
+  if (!record || record.episodeId || !record.sourceFingerprint || !production || production.timeline?.status !== "ready" ||
+    productionExportFingerprint(bundle, production) !== record.sourceFingerprint) return null;
+  const timeline = production.timeline.timeline, rate = timeline.frameRate;
+  const shots = timeline.tracks.filter(track => track.kind === "picture").sort((a, b) => a.order - b.order)
+    .flatMap(track => track.clips.map(clip => ({ startSec: clip.startFrame / rate, endSec: (clip.startFrame + clip.durationFrames) / rate, label: clip.source.label.slice(0, 160), clipId: clip.id })))
+    .filter(shot => shot.endSec > from && shot.startSec < to)
+    .map(shot => ({ ...shot, startSec: Math.max(from, shot.startSec), endSec: Math.min(to, shot.endSec) }))
+    .sort((a, b) => a.startSec - b.startSec || a.endSec - b.endSec);
+  return shots.length ? { productionId: production.meta.id, shots } : null;
+}
+
+/**
+ * The shots of a window of a film and a sheet of their frames. `film` times are the decoder's;
+ * shots are on the source's own clock (its view), as every receipt's times are.
+ */
+export async function contactSheetInSnapshot(store: WorldStore, tools: AgentMediaTools, signal: AbortSignal,
+  film: { path: string; stream: Stream; startSec: number; endSec: number; viewStartSec: number }, source: AgentMediaSource):
+  Promise<{ sheet: Omit<AgentContactSheet, "pages">; pages: Array<{ bytes: Uint8Array; firstShot: number; lastShot: number }> }> {
+  const { tile, grayFrames } = tools;
+  if (!tile || !grayFrames) throw new RetrievalError("unavailable", "Local contact sheets are unavailable on this host.");
+  const from = film.viewStartSec, to = film.viewStartSec + (film.endSec - film.startSec), decodeAt = (view: number) => film.startSec + (view - film.viewStartSec);
+  const fromTimeline = await timelineShots(store, source, from, to);
+  let shots: SheetShot[];
+  if (fromTimeline) shots = fromTimeline.shots;
+  else {
+    // Cuts in the picture: small frames ten a second, in 60 s reads three at a time, each read's last frame carried into the next.
+    const starts: number[] = [];
+    for (let at = film.startSec; at < film.endSec - .05; at += 60) starts.push(at);
+    const reads = await inParallel(starts, at => grayFrames(film.path, film.stream, at, Math.min(film.endSec, at + 60), { fps: 10, edge: 64, fast: true }, signal));
+    const steps: number[] = [];
+    let previous: Uint8Array | null = null;
+    for (const read of reads) {
+      steps.push(...frameMotion(previous ? [previous, ...read.frames] : read.frames));
+      previous = read.frames[read.frames.length - 1] ?? previous;
+    }
+    const bounds = [from, ...findCuts(steps, 10).map(at => from + at).filter(at => at < to - .2), to];
+    shots = bounds.slice(1).map((end, i) => ({ startSec: bounds[i]!, endSec: end, label: null, clipId: null }));
+  }
+  if (shots.length > AGENT_SHEET_LIMITS.maxShots) throw new RetrievalError("bad-argument", `This window holds ${shots.length} shots, more than a sheet shows (${AGENT_SHEET_LIMITS.maxShots}); name a shorter window.`);
+  const round = (value: number) => Math.round(value * 1000) / 1000;
+  const numbered = shots.map((shot, i) => ({ number: i + 1, startSec: round(shot.startSec), endSec: round(shot.endSec),
+    frameSec: round(Math.min(shot.endSec - .001, (shot.startSec + shot.endSec) / 2)), label: shot.label, clipId: shot.clipId }));
+  const size = { width: AGENT_SHEET_LIMITS.tileWidth, height: AGENT_SHEET_LIMITS.tileHeight }, pages = [];
+  for (let first = 0; first < numbered.length; first += AGENT_SHEET_LIMITS.perPage) {
+    const group = numbered.slice(first, first + AGENT_SHEET_LIMITS.perPage);
+    const tiles = await inParallel(group, async shot => ({ rgba: await tile(film.path, film.stream, decodeAt(shot.frameSec), size, signal), label: tileLabel(shot.number, shot.startSec) }));
+    pages.push({ bytes: await encodePngAsync(composeSheetPage(tiles), {}, signal), firstShot: group[0]!.number, lastShot: group[group.length - 1]!.number });
+  }
+  return { sheet: { streamIndex: film.stream.index, startSec: round(from), endSec: round(to), shotsFrom: fromTimeline ? "timeline" : "picture",
+    productionId: fromTimeline?.productionId ?? null, shots: numbered }, pages };
+}
 
 /** From nought there is no percentage: null says so, where 0 would read as no change (a still picture against one that flickers). */
 export const percentChange = (from: number, to: number) => from > 0 ? Math.round((to / from - 1) * 1000) / 10 : null;
