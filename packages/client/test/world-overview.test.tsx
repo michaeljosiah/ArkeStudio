@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToString } from "react-dom/server";
 import { MemoryRouter } from "react-router";
-import { CHARACTER_ROLE_MAX, migrateLegacyScene, type Sheet } from "@arke-studio/contracts";
+import { applyTimelineCommands, CHARACTER_ROLE_MAX, migrateLegacyScene, seedEmptyPictureTimeline, type Sheet, type TimelineClipCommand } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
 import { __applyEventForTest, __setStateForTest } from "../src/lib/store.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
@@ -153,6 +153,38 @@ describe("format-aware world overview progress (#1951)", () => {
       assert.doesNotMatch(summary, /ready|0 of 0/);
       assert.match(summary, production.meta.medium === "story" ? /0 chapters/ : /No shots yet/);
     }
+  });
+
+  it("states the cut of a production made in the Cut, with no story shots (issue 3219)", () => {
+    const world = structuredClone(WORLD);
+    const production = world.productions[0]!;
+    production.scenes = []; production.takes = []; production.reviews = []; production.selections = {};
+    const footage = { id: "ar_01J9M000000000000000000601", kind: "video" as const, file: "footage.mp4", hash: "sha256:3333333333333333",
+      origin: { by: "user" as const }, links: [], created: "2026-11-17T10:00:00Z" };
+    world.artifacts.push(footage);
+    // 75 clips from the Library laid end to end: 74 of three seconds and one of five, 3:47 at 24 fps.
+    const lengths = [...Array.from({ length: 74 }, () => 72), 120];
+    const place = (frames: number[]) => {
+      let at = 0;
+      return { status: "ready" as const, timeline: applyTimelineCommands(seedEmptyPictureTimeline(production), frames.map((durationFrames, i): TimelineClipCommand => {
+        const clip = { id: `cl_${i}` as const, startFrame: at, durationFrames, sourceInFrames: 0, source: { kind: "artifact" as const, artifactId: footage.id, label: `clip ${i}` } };
+        at += durationFrames;
+        return { kind: "place", trackId: "tr_picture", clip };
+      })) };
+    };
+    const summary = () => parseHTML(renderHub(world)).document.querySelector(".fy-ctas .fy-cta__sub")!.textContent!;
+
+    production.timeline = place(lengths);
+    assert.equal(summary(), "3:47 cut");
+    // A music video cut to its song reads the same record.
+    production.meta.kind = "music-video";
+    production.spine = { schemaVersion: 1, revision: 1, trackArtifactId: world.artifacts[0]!.id, markers: [], anchors: {}, updatedAt: "2026-11-17T10:00:00.000Z" };
+    assert.equal(summary(), "3:47 cut");
+    // Under a minute it is the rail's measurement; with nothing placed, nothing is claimed.
+    production.timeline = place([1008]);
+    assert.equal(summary(), "42s cut");
+    production.timeline = { status: "ready", timeline: seedEmptyPictureTimeline(production) };
+    assert.equal(summary(), "No shots yet.");
   });
 });
 
