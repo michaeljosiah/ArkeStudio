@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { AGENT_MEDIA_LIMITS, AgentMediaInventorySchema, measureAudioSignal, type AgentMediaInventory, type AudioSignal } from "@arke-studio/contracts";
+import { AGENT_MEDIA_LIMITS, AgentMediaInventorySchema, measureAudioSignal, type AgentMediaInventory, type AgentMediaRegion, type AudioSignal } from "@arke-studio/contracts";
 import type { MediaProcessRunner } from "../audio/media-tools.js";
 import { decodePngAsync as decodePng } from "../references/png-runner.js";
 import { writeSpeechWav } from "../audio/speech-wav.js";
@@ -13,6 +13,22 @@ export interface AgentMediaTools {
   }>;
   audio(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, signal: AbortSignal): Promise<AudioSignal>;
   speechAudio?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, signal: AbortSignal): Promise<{ bytes: Uint8Array; durationSec: number }>;
+  /** A mono derivative at `rate` for measurement (#3070); like the speech derivative, never original-channel QC. */
+  monoAudio?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, rate: number, signal: AbortSignal): Promise<Float32Array>;
+  /** Small greyscale frames at a fixed rate, of the whole picture or a box in it, for motion measurement. */
+  grayFrames?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number,
+    options: { fps: number; edge: number; region?: AgentMediaRegion }, signal: AbortSignal): Promise<{ frames: Uint8Array[]; width: number; height: number; fps: number }>;
+}
+/** A whole 60 s window of 1080p decodes on one thread in well under this; the 20 s default suits single frames. */
+const MEASURE_TIMEOUT_MS = 90_000;
+const even = (value: number) => Math.max(2, 2 * Math.round(value / 2));
+/** The crop and output size for a region of a `width` x `height` picture, its longer side at most `edge`. */
+export function regionGeometry(width: number, height: number, region: AgentMediaRegion | undefined, edge: number) {
+  const box = region ?? { x: 0, y: 0, width: 1, height: 1 };
+  const cropWidth = Math.min(width, even(width * box.width)), cropHeight = Math.min(height, even(height * box.height));
+  const x = Math.min(width - cropWidth, Math.max(0, Math.round(width * box.x))), y = Math.min(height - cropHeight, Math.max(0, Math.round(height * box.y)));
+  const scale = Math.min(1, edge / Math.max(cropWidth, cropHeight));
+  return { cropWidth, cropHeight, x, y, outWidth: even(cropWidth * scale), outHeight: even(cropHeight * scale) };
 }
 const FORMATS = "mov,matroska,webm,wav,mp3,ogg,flac,aac,gif,image2,png_pipe,jpeg_pipe,webp_pipe";
 const finite = (value: unknown): number | null => {
@@ -38,9 +54,9 @@ export function parseAgentMediaProbe(stdout: Uint8Array): AgentMediaInventory {
 }
 /** The existing kill-on-abort process boundary owns codecs. Only verified private snapshots enter. */
 export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaTools {
-  const run = async (tool: "ffmpeg" | "ffprobe", args: readonly string[], signal: AbortSignal, maxStdoutBytes: number) => {
+  const run = async (tool: "ffmpeg" | "ffprobe", args: readonly string[], signal: AbortSignal, maxStdoutBytes: number, timeoutMs = 20_000) => {
     signal.throwIfAborted();
-    const result = await runner.run(tool, args, { signal, timeoutMs: 20_000, maxStdoutBytes, maxStderrBytes: 65_536 });
+    const result = await runner.run(tool, args, { signal, timeoutMs, maxStdoutBytes, maxStderrBytes: 65_536 });
     signal.throwIfAborted();
     if (result.cancelled || result.timedOut || result.outputLimitExceeded || result.code !== 0) throw new Error("Bounded media decoder failed or was stopped");
     return result;
@@ -106,6 +122,43 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
       const durationSec = samples.length / 16000;
       if (Math.abs(durationSec - duration) > .025) throw new Error("Speech derivative does not cover the requested interval");
       return { bytes: writeSpeechWav({ rate: 16000, samples }), durationSec };
+    },
+    async monoAudio(path, stream, startSec, endSec, rate, signal) {
+      const duration = endSec - startSec;
+      if (!stream.sampleRate || !stream.channels || stream.sampleRate > AGENT_MEDIA_LIMITS.sampleRate || stream.channels > AGENT_MEDIA_LIMITS.channels ||
+        !Number.isInteger(stream.index) || stream.index < 0 || stream.index > 255 || !Number.isInteger(rate) || rate < 4000 || rate > 48000 ||
+        !Number.isFinite(startSec) || startSec < 0 || !Number.isFinite(duration) || duration <= 0 || duration > AGENT_MEDIA_LIMITS.intervalSeconds) throw new Error("Audio exceeds the measurement derivative profile");
+      const result = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS,
+        "-i", path, "-ss", String(startSec), "-t", String(duration), "-map", `0:${stream.index}`, "-vn", "-sn", "-map_metadata", "-1",
+        "-ac", "1", "-ar", String(rate), "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"], signal, Math.ceil(duration * rate + rate) * 4, MEASURE_TIMEOUT_MS);
+      if (!result.stdout.length || result.stdout.length % 4) throw new Error("Invalid measurement PCM");
+      const samples = new Float32Array(result.stdout.length / 4), view = new DataView(result.stdout.buffer, result.stdout.byteOffset, result.stdout.byteLength);
+      for (let i = 0; i < samples.length; i++) {
+        const value = view.getFloat32(i * 4, true);
+        if (!Number.isFinite(value)) throw new Error("Non-finite measurement PCM");
+        samples[i] = value;
+      }
+      // A file shorter than the interval decodes short; measuring that as the whole interval would misplace every lag.
+      if (Math.abs(samples.length / rate - duration) > .05) throw new Error("Decoded audio does not cover the requested interval");
+      return samples;
+    },
+    async grayFrames(path, stream, startSec, endSec, options, signal) {
+      const duration = endSec - startSec, { fps, edge } = options;
+      if (stream.kind !== "video" || !stream.width || !stream.height || Math.max(stream.width, stream.height) > 3840 || stream.width * stream.height > 3840 * 2160 ||
+        !Number.isInteger(fps) || fps < 1 || fps > 60 || !Number.isInteger(edge) || edge < 16 || edge > 1280 ||
+        !Number.isFinite(startSec) || startSec < 0 || !Number.isFinite(duration) || duration <= 0 || duration > AGENT_MEDIA_LIMITS.intervalSeconds) throw new Error("Video exceeds the measurement frame profile");
+      const g = regionGeometry(stream.width, stream.height, options.region, edge), frameBytes = g.outWidth * g.outHeight;
+      const maxFrames = Math.ceil(duration * fps) + 2;
+      if (maxFrames * frameBytes > AGENT_MEDIA_LIMITS.pcmBytes) throw new Error("Video exceeds the measurement frame profile");
+      const result = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS,
+        "-ss", String(startSec), "-t", String(duration), "-i", path, "-map", `0:${stream.index}`, "-an", "-sn", "-map_metadata", "-1",
+        "-vf", `crop=${g.cropWidth}:${g.cropHeight}:${g.x}:${g.y},scale=${g.outWidth}:${g.outHeight}:flags=area,fps=${fps},format=gray`,
+        "-f", "rawvideo", "pipe:1"], signal, maxFrames * frameBytes, MEASURE_TIMEOUT_MS);
+      if (!result.stdout.length || result.stdout.length % frameBytes) throw new Error("Invalid measurement frames");
+      const frames: Uint8Array[] = [];
+      for (let offset = 0; offset < result.stdout.length; offset += frameBytes) frames.push(result.stdout.subarray(offset, offset + frameBytes));
+      if (Math.abs(frames.length / fps - duration) > 2 / fps + .05) throw new Error("Decoded video does not cover the requested interval");
+      return { frames, width: g.outWidth, height: g.outHeight, fps };
     },
   };
 }

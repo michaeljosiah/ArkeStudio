@@ -244,6 +244,7 @@ export * from "./editor-text-draft.js";
 
 export * from "./editor-picture-proposal.js";
 export * from "./agent-media.js";
+export * from "./agent-measure.js";
 export * from "./agent-audio.js";
 export * from "./agent-listening.js";
 export * from "./story-publication.js";

@@ -352,6 +352,11 @@ export function wordReceipt(receipt: WorldChatCheckReceipt): string {
     case "analyze-audio-signal": return "measured original audio channels; no listening judgment";
     case "transcribe-audio": return "recognized speech locally; automatic words may be wrong";
     case "review-audio-content": return "compared recognized speech with the supplied script; delivery unreviewed";
+    case "measure-sync": {
+      const sync = receipt.media?.sync;
+      if (!sync || sync.lagSec === null) return "measured lip sync; no signal to line up";
+      return sync.follows ? `measured lip sync: ${Math.round(sync.lagSec * 1000)} ms off its reference` : "measured lip sync: does not follow its reference";
+    }
     case "search-canon":
       return `searched ${receipt.searchedCount ?? 0} canon entries`;
     case "search-sheets":

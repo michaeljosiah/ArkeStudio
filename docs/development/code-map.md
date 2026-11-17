@@ -1614,6 +1614,11 @@ ffprobe/FFmpeg decoding through `MediaProcessRunner`. Desktop `src/media-tools.t
 `src/media/node-media-host.ts` wire the same tools. `fold.ts`/`project.ts` replay media receipts;
 `take-review-inspection.ts` requires current, completed-turn evidence for review coverage.
 See [media evidence boundaries](../issues/shared-agent-media-evidence.md).
+Measurements of a cut (epic #3070) sit on the same reads: contracts `src/agent-measure.ts` owns
+their arguments and results, each with its own schema boundary (`measure_sync`, lip sync against a
+reference, schema 140); `src/agent-media-source.ts` holds the source and interval types both files
+share. Coordinator `src/media/measure-sync.ts` is the arithmetic, `src/world-chat/media-measure.ts`
+opens the second (reference) source. See [media measurement](media-measurement.md).
 Contracts `src/agent-listening.ts` owns subjective listening evidence (schema 81). Coordinator
 `media/agent-listening.ts` validates canonical audio and deadlines; `local-audio-listener.ts`
 owns bounded offline native execution; `local-audio-listener.py` passes actual PCM to Qwen2-Audio.
