@@ -10,7 +10,19 @@
  * beat near one period from the last while landing it on an onset (Ellis, "Beat Tracking by Dynamic
  * Programming", 2007). Sections come from the Studio's own finder (`findSongSections`), so Arke
  * and the Cut never disagree about where a song changes.
+ *
+ * A 15-minute window is about five seconds of arithmetic, so the loops yield every few thousand
+ * steps, as the effects analysis yields per chunk: the coordinator keeps answering, and a stop
+ * lands, while a song is measured.
  */
+import { setImmediate as yieldToHost } from "node:timers/promises";
+
+/** Let the coordinator run, and stop if asked, every `every` steps of a long loop. */
+async function breathe(step: number, every: number, signal: AbortSignal | undefined) {
+  if (step % every !== 0) return;
+  await yieldToHost();
+  signal?.throwIfAborted();
+}
 
 export const SONG_MAP_PROFILE = Object.freeze({
   /** Mono decode rate for beats and voice: an onset curve needs no more. */
@@ -63,7 +75,7 @@ function melBands(count: number): Array<[number, number]> {
  * Bands are mel-spaced, as listeners hear pitch: on plain FFT bins everything above 1 kHz, where
  * the hi-hats are, fills most of the bins and outvotes the kick and bass that carry the beat.
  */
-export function onsetCurve(samples: Float32Array): Float64Array {
+export async function onsetCurve(samples: Float32Array, signal?: AbortSignal): Promise<Float64Array> {
   const { fftSize, hop } = SONG_MAP_PROFILE, bands = melBands(40);
   const frames = Math.max(0, Math.floor(samples.length / hop));
   const window = new Float64Array(fftSize);
@@ -72,6 +84,7 @@ export function onsetCurve(samples: Float32Array): Float64Array {
   let previous = new Float64Array(bands.length), current = new Float64Array(bands.length);
   const curve = new Float64Array(frames);
   for (let t = 0; t < frames; t++) {
+    await breathe(t, 500, signal);
     const centre = t * hop;
     for (let i = 0; i < fftSize; i++) {
       const at = centre - fftSize / 2 + i;
@@ -118,7 +131,7 @@ export function estimatePeriod(curve: Float64Array): number | null {
 }
 
 /** Beats in hops: each near one period from the last and on an onset, by dynamic programming. */
-export function trackBeats(curve: Float64Array, period: number): number[] {
+export async function trackBeats(curve: Float64Array, period: number, signal?: AbortSignal): Promise<number[]> {
   const n = curve.length;
   if (!n || !(period > 1)) return [];
   let mean = 0, squares = 0;
@@ -138,6 +151,7 @@ export function trackBeats(curve: Float64Array, period: number): number[] {
   const score = new Float64Array(n), back = new Int32Array(n).fill(-1);
   const near = Math.round(period / 2), far = Math.round(period * 2), { tightness } = SONG_MAP_PROFILE;
   for (let t = 0; t < n; t++) {
+    await breathe(t, 2000, signal);
     let best = 0, from = -1;
     for (let tau = t - far; tau <= t - near; tau++) {
       if (tau < 0) continue;
@@ -194,9 +208,9 @@ export function voiceIntervals(samples: Float32Array, rate: number): { intervals
 }
 
 /** Beats in seconds and the tempo they keep, from mono samples at the profile rate. */
-export function songBeats(samples: Float32Array): { beatsSec: number[]; tempoBpm: number | null } {
-  const { rate, hop } = SONG_MAP_PROFILE, curve = onsetCurve(samples), period = estimatePeriod(curve);
+export async function songBeats(samples: Float32Array, signal?: AbortSignal): Promise<{ beatsSec: number[]; tempoBpm: number | null }> {
+  const { rate, hop } = SONG_MAP_PROFILE, curve = await onsetCurve(samples, signal), period = estimatePeriod(curve);
   if (period === null) return { beatsSec: [], tempoBpm: null };
   // The tempo from the fractional period, not from the beats' whole-step gaps, which hide a 0.3 bpm difference.
-  return { beatsSec: trackBeats(curve, period).map(beat => Math.round(beat * hop / rate * 1000) / 1000), tempoBpm: Math.round(600 * rate / hop / period) / 10 };
+  return { beatsSec: (await trackBeats(curve, period, signal)).map(beat => Math.round(beat * hop / rate * 1000) / 1000), tempoBpm: Math.round(600 * rate / hop / period) / 10 };
 }

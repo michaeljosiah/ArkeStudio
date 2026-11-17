@@ -96,7 +96,11 @@ export type AgentSyncMeasurement = z.infer<typeof AgentSyncMeasurementSchema>;
  * and the voice comes from a vocal stem when one is named.
  */
 export const AGENT_SONG_SCHEMA_VERSION = 141;
-export const AGENT_SONG_LIMITS = Object.freeze({ maxSeconds: 900, maxBeats: 3000, maxSections: 24, maxVoiceIntervals: 600 });
+/*
+ * The limits hold everything a 15-minute window can produce, so a map is never cut short: beats are
+ * at least half a 200 bpm period apart (0.15 s), and a phrase is at least 0.3 s with 0.6 s between.
+ */
+export const AGENT_SONG_LIMITS = Object.freeze({ maxSeconds: 900, maxBeats: 6001, maxSections: 24, maxVoiceIntervals: 1000 });
 const songTime = agentMediaTime;
 export const AgentSongWindowSchema = z.object({ startSec: songTime, endSec: songTime }).strict().superRefine((window, context) => {
   if (window.endSec <= window.startSec || window.endSec - window.startSec > AGENT_SONG_LIMITS.maxSeconds) {
