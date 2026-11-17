@@ -292,7 +292,11 @@ test("cut_contact_sheet on an export whose production still holds its cut: the t
   const h = await harness(), production = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
   await applyHumanTimelineCommand(h.store, "saltlight", { kind: "commands", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production), commands: [
     { kind: "place", trackId: "tr_picture", clip: { id: "cl_open", startFrame: 0, durationFrames: 96, sourceInFrames: 0, source: { kind: "artifact", artifactId: h.takeId, label: "The opening" } } },
-    { kind: "place", trackId: "tr_picture", clip: { id: "cl_close", startFrame: 96, durationFrames: 48, sourceInFrames: 0, source: { kind: "artifact", artifactId: h.take2Id, label: "The close" } } }] });
+    { kind: "place", trackId: "tr_picture", clip: { id: "cl_close", startFrame: 96, durationFrames: 48, sourceInFrames: 0, source: { kind: "artifact", artifactId: h.take2Id, label: "The close" } } },
+    // A muted upper track puts nothing in the export, so its clip is no shot.
+    { kind: "add-track", trackId: "tr_hidden", trackKind: "picture", name: "Hidden" },
+    { kind: "place", trackId: "tr_hidden", clip: { id: "cl_hidden", startFrame: 24, durationFrames: 24, sourceInFrames: 0, source: { kind: "artifact", artifactId: h.take2Id, label: "Not shown" } } },
+    { kind: "set-track", trackId: "tr_hidden", muted: true }] });
   const current = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
   assert.equal(current.timeline?.status, "ready");
   await mkdir(join(h.store.dir, "exports"), { recursive: true }); await writeFile(join(h.store.dir, "exports", "ex_sheet.mp4"), EXPORT);
