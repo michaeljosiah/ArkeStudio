@@ -245,6 +245,8 @@ describe("production setup interaction (issue #976)", () => {
     const m = await mount(FIXTURE_STATE, true);
     const film = [...m.container.querySelectorAll("button")].find(button => button.textContent?.includes("Make a film"));
     assert.ok(film);
+    // A feature is made here too, so the card does not say short (issue 3216).
+    assert.match(film.textContent!, /Film, music video or micro-drama/);
     await act(async () => film.dispatchEvent(new dom.Event("click", { bubbles: true })));
     assert.equal(m.commands().at(-1)?.action.operation, "start");
     assert.equal(m.sent.some(message => message.kind === "create-production"), false);
@@ -339,6 +341,28 @@ describe("production setup interaction (issue #976)", () => {
     assert.match(card, /Music video · 9:16 · 24 fps/);
     assert.doesNotMatch(card, /music-video|\b0 (episode|scene|script|open)/);
     assert.doesNotMatch(card, /open question/);
+  });
+
+  // A 55-minute feature had to be made under "Film · short", and nothing about the kind is short (issue 3216).
+  it("names a film Film in Format and in its review", async () => {
+    const m = await mount();
+    await answer(m.commands()[0]!, draft());
+    const format = [...m.container.querySelectorAll("label")].find(label => label.textContent?.startsWith("Format"))!.querySelector("select")!;
+    assert.deepEqual([...format.querySelectorAll("option")].map(option => option.textContent),
+      ["Micro drama", "Film", "Music video", "Story · audio drama", "Story · graphic novel", "Other"]);
+    await click(m.container, "Review production");
+    await answer(m.commands().at(-1)!, { ...draft(), status: "reviewed", review: {
+      id: REVIEW_ID, sourceDigest: `sha256:${"a".repeat(64)}`,
+      plan: {
+        production: { id: "the-crossing-2", title: "The crossing", format: "video", kind: "film", status: "in-progress",
+          created: AT, updated: AT, aspect: "16:9", frameRate: 24, failureModes: [] },
+        initialSeason: null, series: { operation: "none" },
+        initialContent: { worldId: FIXTURE_WORLD_ID, setupId: ID, revision: 3, narrative: null, scenes: [], episodes: [] },
+      },
+    } });
+    const card = m.container.querySelector('[aria-label="Review production"]')!.textContent!;
+    assert.match(card, /Film · 16:9 · 24 fps/);
+    assert.doesNotMatch(card, /short/);
   });
 
   it("switches narrow-panel tabs without losing the composer or outline", async () => {

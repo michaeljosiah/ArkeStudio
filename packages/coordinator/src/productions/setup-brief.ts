@@ -96,9 +96,11 @@ Once they are settled, in that same reply set fields.comicAsk to null and propos
  * never what it takes: asked for a music video, Arke wrote "a vertical music-video outline" into a
  * draft that stayed Film · short, then told the author the only formats it could see were film,
  * micro drama, audio drama and graphic novel. Keyed by the kind so a new one cannot go unnamed.
+ * A film is just Film (issue 3216): nothing about the kind is short, and a feature-length
+ * adaptation was being made under a format that said it was.
  */
 const FORMATS: Record<ProductionSetupDraft["kind"], string> = {
-  microdrama: "Micro drama", film: "Film · short", "music-video": "Music video",
+  microdrama: "Micro drama", film: "Film", "music-video": "Music video",
   [AUDIO_DRAMA_KIND]: "Story · audio drama", [GRAPHIC_NOVEL_KIND]: "Story · graphic novel", other: "Other",
 };
 
