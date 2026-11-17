@@ -320,7 +320,7 @@ describe("setup turns share conversation durability but no world-mutation author
     } }) as never;
     const draft = (await h.service.resume(h.id)).draft;
     const film = await productionSetupBrief(bundle, { ...draft, kind: "film" }, read, 400_000);
-    assert.ok(film.includes('fields.kind is the Format the page shows, one of "microdrama" (Micro drama), "film" (Film · short), "music-video" (Music video), "audio-drama" (Story · audio drama), "graphic-novel" (Story · graphic novel), "other" (Other).'));
+    assert.ok(film.includes('fields.kind is the Format the page shows, one of "microdrama" (Micro drama), "film" (Film), "music-video" (Music video), "audio-drama" (Story · audio drama), "graphic-novel" (Story · graphic novel), "other" (Other).'));
     assert.match(film, /Set it from what the author says they are making, in the same reply/);
     assert.doesNotMatch(film, /This production is a music video/, "a film's brief is unchanged");
     const video = await productionSetupBrief(bundle, { ...draft, kind: "music-video" }, read, 400_000);

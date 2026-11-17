@@ -31,9 +31,13 @@ import { ComicAskCards, ComicPlanCard, GraphicNovelReview, comicPilotAsk } from 
 
 type SetupSeed = NonNullable<Extract<ProductionSetupCommand["action"], { operation: "start" }>["seed"]>;
 
-/** Each format as Format's select names it, in its order; anything that repeats the format says it the same way (issue 3091). */
+/**
+ * Each format as Format's select names it, in its order; anything that repeats the format says it
+ * the same way (issue 3091). A film is just Film: nothing about the kind is short, and a feature
+ * had to be made under "Film · short" (issue 3216). The coordinator's setup brief names them alike.
+ */
 const FORMAT_LABEL: Record<ProductionSetupDraft["kind"], string> = {
-  microdrama: "Micro drama", film: "Film · short", "music-video": "Music video",
+  microdrama: "Micro drama", film: "Film", "music-video": "Music video",
   [AUDIO_DRAMA_KIND]: "Story · audio drama", [GRAPHIC_NOVEL_KIND]: "Story · graphic novel", other: "Other",
 };
 
