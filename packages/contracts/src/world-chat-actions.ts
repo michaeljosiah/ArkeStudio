@@ -55,6 +55,7 @@ import {
   SheetStatusSchema,
   WorldAuthoredFieldChangesSchema,
   ChapterImpliesWriteSchema,
+  ChapterVoicePinSchema,
 } from "./world.js";
 
 const CandidateRevisionSchema = z
@@ -863,6 +864,10 @@ const ProductionEpisodeOrderModelActionSchema = z
   .strict();
 const ChapterReviewModelActionSchema = z.object({ kind: z.literal("chapter-review"), productionId: SlugSchema,
   chapterId: SlugSchema, checkReceiptIds: CompleteReadIdsSchema }).strict();
+// Who speaks a chapter's lines (issue 3233): the speaker menu's own pins (SPEC-012 R-62..R-64),
+// one chapter's list in one card, written one after another on approval.
+const ProductionVoicePinsModelActionSchema = z.object({ kind: z.literal("production-voice-pins"), productionId: SlugSchema,
+  chapterId: SlugSchema, pins: z.array(ChapterVoicePinSchema).min(1).max(400), checkReceiptIds: CompleteReadIdsSchema }).strict();
 const ProductionChapterOrderModelActionSchema = z
   .object({ kind: z.literal("production-chapter-order"), productionId: SlugSchema, orderedIds: z.array(SlugSchema).min(1), checkReceiptIds: CompleteReadIdsSchema })
   .strict();
@@ -1569,6 +1574,7 @@ export const ModelWorldChatActionSchema = z.discriminatedUnion("kind", [
   ProductionAudioCueModelActionSchema.extend(ActionSequencingShape),
   ProductionTimelineModelActionSchema.extend(ActionSequencingShape),
   ChapterReviewModelActionSchema.extend(ActionSequencingShape),
+  ProductionVoicePinsModelActionSchema.extend(ActionSequencingShape),
   ProductionMusicModelActionSchema.extend(ActionSequencingShape),
 ]);
 export type ModelWorldChatAction = z.infer<typeof ModelWorldChatActionSchema>;
@@ -1652,6 +1658,7 @@ export const WorldChatProductionChapterActionSchema = preparedAction("world-chat
 export const WorldChatProductionSceneActionSchema = preparedAction("world-chat-production-scene", ProductionSceneModelActionSchema);
 export const WorldChatProductionEpisodeOrderActionSchema = preparedAction("world-chat-production-episode-order", ProductionEpisodeOrderModelActionSchema);
 export const WorldChatChapterReviewActionSchema = preparedAction("world-chat-chapter-review", ChapterReviewModelActionSchema);
+export const WorldChatProductionVoicePinsActionSchema = preparedAction("world-chat-production-voice-pins", ProductionVoicePinsModelActionSchema);
 export const WorldChatProductionChapterOrderActionSchema = preparedAction("world-chat-production-chapter-order", ProductionChapterOrderModelActionSchema);
 export const WorldChatProductionSceneOrderActionSchema = preparedAction("world-chat-production-scene-order", ProductionSceneOrderModelActionSchema);
 export const WorldChatProductionSceneDeleteActionSchema = preparedAction("world-chat-production-scene-delete", ProductionSceneDeleteModelActionSchema);
@@ -1914,6 +1921,7 @@ export const WorldChatPreparedActionSchema = z.discriminatedUnion("kind", [
   WorldChatProductionSceneActionSchema,
   WorldChatProductionEpisodeOrderActionSchema,
   WorldChatChapterReviewActionSchema,
+  WorldChatProductionVoicePinsActionSchema,
   WorldChatProductionChapterOrderActionSchema,
   WorldChatProductionSceneOrderActionSchema,
   WorldChatProductionSceneDeleteActionSchema,
