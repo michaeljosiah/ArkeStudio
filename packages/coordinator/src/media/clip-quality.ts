@@ -16,7 +16,11 @@ const percentile = (values: readonly number[], share: number) => {
 };
 
 export function measureCadence(frames: readonly Uint8Array[], frameRate: number | null) {
-  const steps = Array.from(frameMotion(frames));
+  return cadenceFromSteps(Array.from(frameMotion(frames)), frameRate, frames.length);
+}
+
+/** Cadence from frame-to-frame steps already measured (a long film is read in pieces and keeps only its steps). */
+export function cadenceFromSteps(steps: readonly number[], frameRate: number | null, framesDecoded: number) {
   /*
    * The baseline is the steps that move. 24 fps footage carried at 60 repeats more than half its
    * frames, so the median of every step is nought though the picture moves: judged by that median
@@ -30,7 +34,7 @@ export function measureCadence(frames: readonly Uint8Array[], frameRate: number 
     const deviation = Math.sqrt(steps.reduce((sum, step) => sum + (step - mean) ** 2, 0) / steps.length);
     unevenness = mean > 0 ? round(deviation / mean) : null;
   }
-  if (still) return { frameRate: frameRate && round(frameRate), framesDecoded: frames.length, medianStep: round(median), unevenness, still: true,
+  if (still) return { frameRate: frameRate && round(frameRate), framesDecoded, medianStep: round(median), unevenness, still: true,
     repeatedFrames: null, repeatPeriod: null, motionFps: null };
   const repeats = steps.flatMap((step, i) => step < AGENT_QUALITY_LIMITS.repeatShare * median ? [i] : []);
   /*
@@ -40,9 +44,27 @@ export function measureCadence(frames: readonly Uint8Array[], frameRate: number 
    */
   const gaps = repeats.slice(1).map((at, i) => at - repeats[i]!), meanGap = gaps.reduce((a, b) => a + b, 0) / Math.max(1, gaps.length);
   const regular = gaps.length >= 2 && Math.sqrt(gaps.reduce((sum, gap) => sum + (gap - meanGap) ** 2, 0) / gaps.length) <= 1 && Math.round(meanGap) >= 2;
-  return { frameRate: frameRate && round(frameRate), framesDecoded: frames.length, medianStep: round(median), unevenness, still: false,
+  return { frameRate: frameRate && round(frameRate), framesDecoded, medianStep: round(median), unevenness, still: false,
     repeatedFrames: repeats.length, repeatPeriod: regular ? Math.round(meanGap) : null,
     motionFps: frameRate ? round(frameRate * (1 - repeats.length / steps.length), 2) : null };
+}
+
+/**
+ * Dropped frames: steps about twice the usual one, at a regular spacing. A 30 fps take played in a
+ * 24 fps cut loses one frame in five, so every fourth step jumps twice as far; that, not a repeat,
+ * was the music video's "choppy". Scattered big steps (a whip pan, a flash) are not a pattern.
+ */
+export function droppedFromSteps(steps: readonly number[]) {
+  const moving = steps.filter(step => step >= AGENT_QUALITY_LIMITS.stillStep / 3), median = percentile(moving, .5);
+  if (moving.length < 8 || median < AGENT_QUALITY_LIMITS.stillStep) return { jumps: null, jumpPeriod: null };
+  const jumps = steps.flatMap((step, i) => step >= 1.6 * median ? [i] : []);
+  const gaps = jumps.slice(1).map((at, i) => at - jumps[i]!), meanGap = gaps.reduce((a, b) => a + b, 0) / Math.max(1, gaps.length);
+  /*
+   * Rate conversions drop a frame every 3 to 6 (30 to 24 every 4, 30 to 25 every 5). Measured on the music video's two exports,
+   * other regular spacings were not drops: a strobe every 24 frames, an animated logo's alternate frames.
+   */
+  const regular = gaps.length >= 3 && Math.sqrt(gaps.reduce((sum, gap) => sum + (gap - meanGap) ** 2, 0) / gaps.length) <= 1 && Math.round(meanGap) >= 3 && Math.round(meanGap) <= 6;
+  return { jumps: jumps.length, jumpPeriod: regular ? Math.round(meanGap) : null };
 }
 
 /** Absolute 4-neighbour Laplacian of a greyscale frame's interior. */

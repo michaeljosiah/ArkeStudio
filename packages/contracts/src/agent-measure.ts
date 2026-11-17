@@ -250,3 +250,49 @@ export const AgentContactSheetSchema = z.object({
     sheet.pages.some((page, i) => page.lastShot < page.firstShot || page.lastShot - page.firstShot >= AGENT_SHEET_LIMITS.perPage || i > 0 && page.firstShot !== sheet.pages[i - 1]!.lastShot + 1)) issue("Pages lay out every shot once, in order");
 });
 export type AgentContactSheet = z.infer<typeof AgentContactSheetSchema>;
+
+/**
+ * A finished film checked before it is shared (#3073). Every round of the music video was checked
+ * by hand: the length against the cut, the sound's format and loudness, the shots that stutter
+ * (30 fps takes played at 24 dropped a frame in five) and the singing shots off their song. This
+ * puts those measurements in one read, with plain findings for what needs attention.
+ */
+export const AGENT_REVIEW_SCHEMA_VERSION = 144;
+export const AGENT_REVIEW_LIMITS = Object.freeze({ maxSeconds: 900, maxShots: 240, maxFindings: 60,
+  /** EBU R128 / ITU-R BS.1770: a true peak over -1 dBTP can clip once the film is encoded for delivery. */
+  truePeakCeilingDbtp: -1 });
+export const ReviewExportArgsSchema = z.object({
+  source: AgentMediaSourceSchema,
+  window: AgentSongWindowSchema.optional(),
+  streamIndex: AgentMediaStreamIndexSchema.optional(), audioStreamIndex: AgentMediaStreamIndexSchema.optional(),
+}).strict();
+export type ReviewExportArgs = z.infer<typeof ReviewExportArgsSchema>;
+const dbOrNull = z.number().finite().nullable();
+export const AgentExportReviewSchema = z.object({
+  startSec: agentMediaTime, endSec: agentMediaTime,
+  shotsFrom: z.enum(["timeline", "picture"]), productionId: SlugSchema.nullable(),
+  length: z.object({ durationSec: agentMediaTime, expectedSec: agentMediaTime.nullable(), differenceSec: z.number().finite().nullable() }).strict(),
+  format: z.object({ videoStreamIndex: AgentMediaStreamIndexSchema, width: z.number().int().positive(), height: z.number().int().positive(),
+    frameRate: z.number().finite().positive().nullable(), videoCodec: z.string().max(80),
+    audioStreamIndex: AgentMediaStreamIndexSchema.nullable(), sampleRate: z.number().int().positive().nullable(), channels: z.number().int().positive().nullable(),
+    audioCodec: z.string().max(80).nullable() }).strict(),
+  /** EBU R128 over the window; null when the film has no sound. */
+  loudness: z.object({ integratedLufs: dbOrNull, rangeLu: dbOrNull, truePeakDbtp: dbOrNull, shortTermMaxLufs: dbOrNull }).strict().nullable(),
+  shots: z.array(z.object({ number: z.number().int().min(1), startSec: agentMediaTime, endSec: agentMediaTime,
+    label: z.string().min(1).max(160).nullable(), clipId: z.string().min(1).max(200).nullable(),
+    repeatedFrames: z.number().int().min(0).nullable(), repeatPeriod: z.number().int().min(2).nullable(), motionFps: z.number().finite().positive().nullable(),
+    /** Steps about twice the usual, and their regular spacing: frames dropped (a 30 fps take in a 24 fps film jumps every fourth step). */
+    jumpedSteps: z.number().int().min(0).nullable(), jumpPeriod: z.number().int().min(2).nullable(),
+    /** A clip whose own sound is muted in the cut, set against the film's mix; null where there was nothing to measure. */
+    sync: z.object({ source: AgentMediaSourceSchema, sourceHash: FullSha256Schema, lagSec: z.number().finite().nullable(), correlation: correlation.nullable(), follows: z.boolean() }).strict().nullable(),
+  }).strict()).min(1).max(AGENT_REVIEW_LIMITS.maxShots),
+  findings: z.array(z.string().min(1).max(300)).max(AGENT_REVIEW_LIMITS.maxFindings),
+}).strict().superRefine((review, context) => {
+  if (review.endSec <= review.startSec || review.shots.some((shot, i) => shot.number !== i + 1 || shot.endSec <= shot.startSec)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "A review covers a positive window with its shots numbered in order" });
+  }
+  if ((review.shotsFrom === "timeline") !== (review.productionId !== null) || review.shotsFrom === "picture" && review.shots.some(shot => shot.sync !== null)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "Only a film whose cut is known names its production or measures its clips' sync" });
+  }
+});
+export type AgentExportReview = z.infer<typeof AgentExportReviewSchema>;

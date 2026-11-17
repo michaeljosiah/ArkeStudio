@@ -362,6 +362,11 @@ export function wordReceipt(receipt: WorldChatCheckReceipt): string {
       if (!song) return "mapped a song";
       return `mapped a song: ${song.tempoBpm === null ? "no steady beat" : `${song.tempoBpm} bpm`}, ${song.sections.length} section${song.sections.length === 1 ? "" : "s"}`;
     }
+    case "review-export": {
+      const review = receipt.media?.review;
+      if (!review) return "reviewed a film";
+      return `reviewed a film: ${review.shots.length} shot${review.shots.length === 1 ? "" : "s"}, ${review.findings.length ? `${review.findings.length} finding${review.findings.length === 1 ? "" : "s"}` : "nothing found"}`;
+    }
     case "cut-contact-sheet": {
       const sheet = receipt.media?.sheet;
       if (!sheet) return "made a contact sheet";

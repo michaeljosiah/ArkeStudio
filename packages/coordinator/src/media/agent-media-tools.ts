@@ -12,6 +12,9 @@ export interface AgentMediaTools {
   frame(path: string, streamIndex: number, sourceTimeSec: number, endSec: number, signal: AbortSignal, region?: AgentMediaRegion): Promise<{
     bytes: Uint8Array; width: number; height: number; sourceTimeSec: number;
   }>;
+  /** EBU R128 over a window of a sound stream (#3073): integrated loudness, range, true peak and the loudest short-term second. */
+  loudness?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, signal: AbortSignal): Promise<{
+    integratedLufs: number | null; rangeLu: number | null; truePeakDbtp: number | null; shortTermMaxLufs: number | null }>;
   /** One frame fitted, letterboxed, into exactly width x height of RGBA, for a contact sheet's tile. */
   tile?(path: string, stream: AgentMediaInventory["streams"][number], atSec: number, size: { width: number; height: number }, signal: AbortSignal): Promise<Uint8Array>;
   audio(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, signal: AbortSignal): Promise<AudioSignal>;
@@ -29,6 +32,20 @@ export interface AgentMediaTools {
     options: { fps: number | null; edge: number; region?: AgentMediaRegion; size?: { width: number; height: number };
       /** Cut finding only: skip the deblocking filter and frames nothing refers to, half the decode, nothing a 64 px picture shows. */
       fast?: boolean }, signal: AbortSignal): Promise<{ frames: Uint8Array[]; width: number; height: number; fps: number | null }>;
+}
+/** FFmpeg's ebur128 log: the summary's integrated loudness, range and true peak, and the loudest short-term (3 s) value. */
+export function parseLoudness(stderr: string) {
+  const number = (value: string | undefined) => { if (value === undefined || /inf|nan/i.test(value)) return null; const parsed = Number(value); return Number.isFinite(parsed) ? parsed : null; };
+  const summary = stderr.slice(stderr.lastIndexOf("Summary:"));
+  if (!stderr.includes("Summary:")) throw new Error("No loudness summary");
+  let shortTermMax: number | null = null;
+  for (const match of stderr.matchAll(/\bS:\s*(-?[\d.]+|-inf)/g)) {
+    const value = number(match[1]);
+    // -120.7 is the meter's floor before three seconds of sound exist, not a level.
+    if (value !== null && value > -70 && (shortTermMax === null || value > shortTermMax)) shortTermMax = value;
+  }
+  return { integratedLufs: number(summary.match(/\bI:\s*(-?[\d.]+|-inf)\s*LUFS/)?.[1]), rangeLu: number(summary.match(/\bLRA:\s*(-?[\d.]+)\s*LU\b/)?.[1]),
+    truePeakDbtp: number(summary.match(/\bPeak:\s*(-?[\d.]+|-inf)\s*dBFS/)?.[1]), shortTermMaxLufs: shortTermMax };
 }
 /** A probe's `avg_frame_rate` ("30/1", "30000/1001") as frames a second; null when it says nothing usable. */
 export function parseStreamRate(value: string | undefined): number | null {
@@ -74,9 +91,9 @@ export function parseAgentMediaProbe(stdout: Uint8Array): AgentMediaInventory {
 }
 /** The existing kill-on-abort process boundary owns codecs. Only verified private snapshots enter. */
 export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaTools {
-  const run = async (tool: "ffmpeg" | "ffprobe", args: readonly string[], signal: AbortSignal, maxStdoutBytes: number, timeoutMs = 20_000) => {
+  const run = async (tool: "ffmpeg" | "ffprobe", args: readonly string[], signal: AbortSignal, maxStdoutBytes: number, timeoutMs = 20_000, maxStderrBytes = 65_536) => {
     signal.throwIfAborted();
-    const result = await runner.run(tool, args, { signal, timeoutMs, maxStdoutBytes, maxStderrBytes: 65_536 });
+    const result = await runner.run(tool, args, { signal, timeoutMs, maxStdoutBytes, maxStderrBytes });
     signal.throwIfAborted();
     if (result.cancelled || result.timedOut || result.outputLimitExceeded || result.code !== 0) throw new Error("Bounded media decoder failed or was stopped");
     return result;
@@ -170,6 +187,15 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
     // A plain function, not a method: callers take it off the object.
     monoAudio: (path, stream, startSec, endSec, rate, signal) => pcmAudio(path, stream, startSec, endSec, { rate, channels: 1 }, signal),
     pcmAudio,
+    async loudness(path, stream, startSec, endSec, signal) {
+      const duration = endSec - startSec;
+      if (stream.kind !== "audio" || !Number.isFinite(startSec) || startSec < 0 || !Number.isFinite(duration) || duration <= 0 || duration > 900 + WINDOW_EPSILON) throw new Error("Audio exceeds the loudness profile");
+      // ebur128 logs a line each 100 ms (about 1.8 KB a second of sound) and a summary; nothing goes to stdout.
+      const result = await run("ffmpeg", ["-hide_banner", "-nostats", "-loglevel", "info", "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS,
+        "-i", path, "-ss", String(startSec), "-t", String(duration), "-map", `0:${stream.index}`, "-vn", "-sn", "-af", "ebur128=peak=true", "-f", "null", "-"],
+        signal, 4096, MEASURE_TIMEOUT_MS, Math.ceil(duration * 2400) + 65_536);
+      return parseLoudness(result.stderr);
+    },
     async tile(path, stream, atSec, size, signal) {
       if (stream.kind !== "video" || !Number.isFinite(atSec) || atSec < 0 || !Number.isInteger(size.width) || !Number.isInteger(size.height) ||
         size.width < 16 || size.height < 16 || size.width > 640 || size.height > 640 || size.width % 2 || size.height % 2) throw new Error("Invalid contact sheet tile");

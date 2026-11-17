@@ -119,6 +119,15 @@ test("native: every decoded frame when no rate is asked, at a forced size; a 24 
   const cadence = measureCadence(read.frames, read.fps);
   assert.equal(cadence.repeatPeriod, 5); assert.ok(Math.abs(cadence.motionFps! - 24) < .5, String(cadence.motionFps));
 });
+test("native: a steady tone's EBU R128 loudness and true peak read from FFmpeg's own meter", { skip: !available }, async () => {
+  const folder = await tempDir("arke-measure-loudness-"), tone = join(folder, "tone.wav");
+  // FFmpeg's sine source plays at 1/8 amplitude: a 997 Hz tone peaking at -18 dBFS, the same in both channels.
+  await generate(["-f", "lavfi", "-i", "sine=frequency=997:sample_rate=48000:duration=8", "-af", "pan=stereo|c0=c0|c1=c0", "-c:a", "pcm_f32le", tone]);
+  const stream = (await tools.probe(tone, signal())).streams[0]!, loud = await tools.loudness!(tone, stream, 0, 8, signal());
+  assert.ok(Math.abs(loud.truePeakDbtp! + 18.1) < 1, JSON.stringify(loud));
+  assert.ok(loud.integratedLufs! < -14 && loud.integratedLufs! > -24, JSON.stringify(loud));
+  assert.ok(Math.abs(loud.shortTermMaxLufs! - loud.integratedLufs!) < 1, JSON.stringify(loud));
+});
 test("native: a take that carries the reference 120 ms late measures 120 ms late", { skip: !available }, async () => {
   const folder = await tempDir("arke-measure-sync-"), reference = join(folder, "reference.wav"), take = join(folder, "take.mkv");
   // Bursts on two incommensurate periods, so no lag but the true one lines every burst up.

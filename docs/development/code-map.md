@@ -1617,7 +1617,8 @@ See [media evidence boundaries](../issues/shared-agent-media-evidence.md).
 Measurements of a cut (epic #3070) sit on the same reads: contracts `src/agent-measure.ts` owns
 their arguments and results, each with its own schema boundary (`measure_sync`, lip sync against a
 reference, schema 140; `song_map`, beats, sections and voice, schema 141; `clip_quality`, cadence
-and detail, schema 142; `cut_contact_sheet` and `sample_video`'s `region`, schema 143);
+and detail, schema 142; `cut_contact_sheet` and `sample_video`'s `region`, schema 143; `review_export`,
+a finished film checked before it is shared, schema 144);
 `src/agent-media-source.ts` holds the source and interval types both files share. Coordinator
 `src/media/measure-sync.ts`, `src/media/song-map.ts` (beat tracker, voice map), `src/media/clip-quality.ts`
 and `src/media/contact-sheet.ts` (cut finder, tile font, page layout) are the arithmetic;

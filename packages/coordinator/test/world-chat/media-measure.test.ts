@@ -91,7 +91,6 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
   const adapter = { imageInput: true, imageInputForSession: () => true, imageDestinationForSession: () => ({ provider: "test-provider", local: true }) } as unknown as HarnessAdapter;
   const images = new ConversationImages(store, leases, { adapter, allowed: async () => true, publish: async () => {} }); images.start(runId, "session", stop.signal);
   const calls: Array<{ what: string; startSec: number; endSec: number; region?: AgentMediaRegion; fps?: number }> = [];
-  const isSong = async (path: string) => (await readFile(path)).equals(SONG);
   const which = async (path: string) => { const bytes = await readFile(path); return bytes.equals(GROOVE) ? "groove" : bytes.equals(STEM) ? "stem" : bytes.equals(SONG) ? "song" : bytes.equals(TAKE2) ? "take2"
     : bytes.equals(FILM) ? "film" : bytes.equals(EXPORT) ? "export" : "take"; };
   const tools: AgentMediaTools = {
@@ -101,7 +100,7 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
       if (kind === "groove" || kind === "stem") return { durationSec: GROOVE_SEC, streams: [{ ...songInventory.streams[0]!, durationSec: GROOVE_SEC }] };
       if (kind === "take2") return take2Inventory;
       if (kind === "film") return filmInventory(20);
-      if (kind === "export") return filmInventory(6);
+      if (kind === "export") return { durationSec: 6, streams: [...filmInventory(6).streams, { index: 1, kind: "audio", codec: "fixture", sampleRate: 48000, channels: 2, durationSec: 6, startTimeSec: 0 }] };
       return kind === "song" ? { ...songInventory, streams: options.songStreams ?? songInventory.streams } : takeInventory;
     },
     frame: async (_path, _stream, at, end, _signal, region) => { calls.push({ what: "frame", startSec: at, endSec: end, region }); return { bytes: FRAME_PNG, width: 3, height: 2, sourceTimeSec: at }; },
@@ -117,12 +116,14 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
         return out;
       },
       monoAudio: async (path, _stream, startSec, endSec, rate) => {
-        const songSide = await isSong(path); calls.push({ what: songSide ? "song" : "take", startSec, endSec });
+        const kind = await which(path), songSide = kind === "song"; calls.push({ what: kind, startSec, endSec });
         assert.equal(rate, RATE);
         const out = new Float32Array(Math.round((endSec - startSec) * rate));
-        for (let i = 0; i < out.length; i++) { const t = startSec + i / rate; out[i] = songSide ? songAt(t) : songAt(SLICE + t - SOUND_LATE); }
+        // The export's mix is the song from the slice; a take carries that same sound 120 ms late.
+        for (let i = 0; i < out.length; i++) { const t = startSec + i / rate; out[i] = songSide ? songAt(t) : kind === "export" ? songAt(SLICE + t) : songAt(SLICE + t - SOUND_LATE); }
         return out;
       },
+      loudness: async () => ({ integratedLufs: -14, rangeLu: 5, truePeakDbtp: -.4, shortTermMaxLufs: -11 }),
       tile: async (_path, _stream, atSec, size) => { calls.push({ what: "tile", startSec: atSec, endSec: atSec }); return new Uint8Array(size.width * size.height * 4).fill(Math.round(atSec * 10) % 256); },
       grayFrames: async (path, stream, startSec, endSec, frameOptions) => {
         if (frameOptions.fps === 10 && await which(path) === "film") {
@@ -288,18 +289,24 @@ test("cut_contact_sheet on a film with no cut behind it: shots found where the p
   assert.equal(h.store.getBundle().meta.schemaVersion, 143);
 });
 
-test("cut_contact_sheet on an export whose production still holds its cut: the timeline's clips, named", async () => {
-  const h = await harness(), production = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
+/** A two-clip cut of the fixture's production, both clips' own sound muted under the mix, and an export stamped with that cut. */
+async function cutAndExport(h: Awaited<ReturnType<typeof harness>>, id: string) {
+  const production = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
   await applyHumanTimelineCommand(h.store, "saltlight", { kind: "commands", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production), commands: [
-    { kind: "place", trackId: "tr_picture", clip: { id: "cl_open", startFrame: 0, durationFrames: 96, sourceInFrames: 0, source: { kind: "artifact", artifactId: h.takeId, label: "The opening" } } },
-    { kind: "place", trackId: "tr_picture", clip: { id: "cl_close", startFrame: 96, durationFrames: 48, sourceInFrames: 0, source: { kind: "artifact", artifactId: h.take2Id, label: "The close" } } }] });
+    { kind: "place", trackId: "tr_picture", clip: { id: "cl_open", startFrame: 0, durationFrames: 96, sourceInFrames: 0, audio: "mute", source: { kind: "artifact", artifactId: h.takeId, label: "The opening" } } },
+    { kind: "place", trackId: "tr_picture", clip: { id: "cl_close", startFrame: 96, durationFrames: 48, sourceInFrames: 0, audio: "mute", source: { kind: "artifact", artifactId: h.take2Id, label: "The close" } } }] });
   const current = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
   assert.equal(current.timeline?.status, "ready");
-  await mkdir(join(h.store.dir, "exports"), { recursive: true }); await writeFile(join(h.store.dir, "exports", "ex_sheet.mp4"), EXPORT);
+  await mkdir(join(h.store.dir, "exports"), { recursive: true }); await writeFile(join(h.store.dir, "exports", `${id}.mp4`), EXPORT);
   const stamp = { worldId: h.store.worldId, productionId: "saltlight", status: "done" as const, createdAt: "2026-11-17T00:00:00Z", deliveryKind: "video" as const };
-  await recordCompletedExport(h.store, { ...stamp, id: "ex_sheet", output: "exports/ex_sheet.mp4", sourceFingerprint: productionExportFingerprint(h.store.getBundle(), current) });
+  await recordCompletedExport(h.store, { ...stamp, id, output: `exports/${id}.mp4`, sourceFingerprint: productionExportFingerprint(h.store.getBundle(), current) });
+  return { stamp, rate: (current.timeline as { timeline: { frameRate: number } }).timeline.frameRate };
+}
+
+test("cut_contact_sheet on an export whose production still holds its cut: the timeline's clips, named", async () => {
+  const h = await harness(), { stamp, rate } = await cutAndExport(h, "ex_sheet");
   const outcome = await h.retrieval.call(h.lease.token, "cut_contact_sheet", { source: { kind: "export", exportId: "ex_sheet" } });
-  const sheet = outcome.receipt.media!.sheet!, rate = (current.timeline as { timeline: { frameRate: number } }).timeline.frameRate;
+  const sheet = outcome.receipt.media!.sheet!;
   assert.equal(sheet.shotsFrom, "timeline"); assert.equal(sheet.productionId, "saltlight");
   assert.deepEqual(sheet.shots.map(shot => [shot.label, shot.clipId, shot.startSec, shot.endSec]), [["The opening", "cl_open", 0, 96 / rate], ["The close", "cl_close", 96 / rate, 144 / rate]]);
   // A changed fingerprint (the cut moved on since) falls back to the picture.
@@ -307,6 +314,35 @@ test("cut_contact_sheet on an export whose production still holds its cut: the t
   await recordCompletedExport(h.store, { ...stamp, id: "ex_old", output: "exports/ex_old.mp4", sourceFingerprint: "production-export-v1:an-older-cut" });
   const old = await h.retrieval.call(h.lease.token, "cut_contact_sheet", { source: { kind: "export", exportId: "ex_old" } });
   assert.equal(old.receipt.media!.sheet!.shotsFrom, "picture");
+});
+
+test("review_export: length against the cut, format, loudness, the shots that repeat frames and the clip 120 ms late, in findings; schema 144", async () => {
+  const h = await harness(), { rate } = await cutAndExport(h, "ex_review");
+  const outcome = await h.retrieval.call(h.lease.token, "review_export", { source: { kind: "export", exportId: "ex_review" } });
+  const review = outcome.receipt.media!.review!;
+  assert.equal(outcome.receipt.tool, "review-export"); assert.equal(outcome.receipt.media!.coverage, "export-review");
+  assert.equal(review.shotsFrom, "timeline"); assert.equal(review.productionId, "saltlight");
+  assert.equal(review.length.expectedSec, Math.round(144 / rate * 1000) / 1000); assert.equal(review.length.durationSec, 6);
+  assert.deepEqual({ ...review.format, videoCodec: undefined }, { videoStreamIndex: 0, width: 1280, height: 720, frameRate: 30, videoCodec: undefined, audioStreamIndex: 1, sampleRate: 48000, channels: 2, audioCodec: "fixture" });
+  assert.deepEqual(review.loudness, { integratedLufs: -14, rangeLu: 5, truePeakDbtp: -.4, shortTermMaxLufs: -11 });
+  // The opening's own sound is the mix 120 ms late; the close has no sound of its own to set against it.
+  const [open, close] = review.shots;
+  assert.equal(open!.sync!.lagSec, .12); assert.equal(open!.sync!.follows, true); assert.equal(open!.sync!.sourceHash, hash(TAKE)); assert.equal(close!.sync, null);
+  assert.equal(open!.repeatPeriod, 5);
+  assert.ok(review.findings.some(line => line.startsWith("Shot 1 (The opening) is 120 ms late against the mix: start it 0.12 s later")), review.findings.join(" | "));
+  assert.ok(review.findings.some(line => line.startsWith("Shot 1 (The opening) repeats a frame about every 5")));
+  assert.ok(review.findings.some(line => /true peak is -0\.4 dBTP/.test(line)));
+  assert.match(outcome.receipt.querySummary!, /^Film reviewed/);
+  assert.equal(WorldChatCheckReceiptSchema.safeParse(outcome.receipt).success, true);
+  assert.equal(h.store.getBundle().meta.schemaVersion, 144);
+});
+
+test("review_export of a film with no cut behind it finds its shots in the picture and measures no sync", async () => {
+  const h = await harness();
+  const outcome = await h.retrieval.call(h.lease.token, "review_export", { source: h.film });
+  const review = outcome.receipt.media!.review!;
+  assert.equal(review.shotsFrom, "picture"); assert.equal(review.length.expectedSec, null); assert.equal(review.shots.length, 4);
+  assert.ok(review.shots.every(shot => shot.sync === null)); assert.equal(review.loudness, null); assert.ok(review.findings.includes("The film has no sound."));
 });
 
 test("sample_video looks closely at a box: the region reaches the decoder and the receipt, and raises schema 143", async () => {
@@ -326,7 +362,7 @@ test("the shared leased MCP catalogue lists measure_sync and serves it", async (
   let served = ""; server.attachLease(h.lease.token, { retrieval: h.retrieval, onReceipt: receipt => { served = receipt.tool; } });
   const rpc = async (method: string, params?: unknown) => (await fetch(server.leasedUrl(h.lease.token)!, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })).json();
   const listed = await rpc("tools/list") as { result: { tools: Array<{ name: string }> } };
-  for (const name of ["measure_sync", "song_map", "clip_quality", "cut_contact_sheet"]) assert.ok(listed.result.tools.some(tool => tool.name === name), name);
+  for (const name of ["measure_sync", "song_map", "clip_quality", "cut_contact_sheet", "review_export"]) assert.ok(listed.result.tools.some(tool => tool.name === name), name);
   await rpc("tools/call", { name: "measure_sync", arguments: { source: h.take, range: { startSec: .5, endSec: 3.5 }, reference: { source: h.song, startSec: 2.5 } } });
   assert.equal(served, "measure-sync");
 });
