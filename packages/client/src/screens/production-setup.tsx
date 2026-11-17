@@ -124,6 +124,15 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
   // A review refused lets the press go (it is pressed again). Only a refusal: the request can settle
   // before the review reaches this page, and on that order the press was dropped and needed a second (0.5.104).
   useEffect(() => { if (failure) startingPilot.current = false; }, [failure]);
+  /*
+   * The revision this page last saw reviewed (issue 3217). Any change to the draft, the author's or
+   * Arke's, drops the review, and Create went back to Review with nothing saying why: retitling a
+   * reviewed film read as Create vanishing. A later revision with no review is a changed one. Kept
+   * with its setup's id, because a route to another setup reuses this page's state.
+   */
+  const [reviewed, setReviewed] = useConversationState<{ setupId: string; revision: number } | null>("reviewedRevision", null);
+  useEffect(() => { if (setup?.review && setupId) setReviewed({ setupId, revision: setup.draft.revision }); }, [setup?.review?.id, setup?.draft.revision, setupId]);
+  const changedSinceReview = setup?.status === "draft" && !setup.review && reviewed?.setupId === setupId && setup.draft.revision > reviewed.revision;
 
   useEffect(() => {
     if (state?.app.health.harness.status === "healthy") listHarnessModels();
@@ -370,9 +379,11 @@ export function ProductionSetupView({ embedded }: { embedded?: { worldId: string
                 Keep scenes without episodes
               </Button>}
             </div>}
-            {setup.review && (audioDrama ? <AudioDramaReview setup={setup} sourceTitle={stories.find(story => story.id === draft.source?.productionId)?.title} />
+            {setup.review ? (audioDrama ? <AudioDramaReview setup={setup} sourceTitle={stories.find(story => story.id === draft.source?.productionId)?.title} />
               : graphicNovel ? <GraphicNovelReview setup={setup} sourceTitle={stories.find(story => story.id === draft.source?.productionId)?.title} />
-              : <SetupReview setup={setup} />)}
+              : <SetupReview setup={setup} />)
+              // What it said is no longer what Create would write, so only its state stays; Review production stands where Create was.
+              : changedSinceReview && <section className="fy-production-setup__review" aria-label="Review production"><h3>Changed since review</h3></section>}
             {setup.problem && <p role="status">{setup.problem}</p>}
             {locked ? <p role="status">Resolving creation… This draft is saved. Reopen the world if recovery is needed.</p> :
               <div className="fy-production-setup__actions">

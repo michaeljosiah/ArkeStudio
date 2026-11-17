@@ -292,6 +292,46 @@ describe("production setup interaction (issue #976)", () => {
     assert.match(m.container.textContent!, /Created production workspace/);
   });
 
+  // Retitling a reviewed film dropped the review, and Create went back to Review with nothing said (issue 3217).
+  it("says a draft changed since its review and reviews it again from where Create was", async () => {
+    const reviewedAt = (setup: ProductionSetupState): ProductionSetupState => ({ ...setup, status: "reviewed", review: {
+      id: REVIEW_ID, sourceDigest: `sha256:${"a".repeat(64)}`,
+      plan: {
+        production: { id: "the-crossing-2", title: setup.draft.title, format: "video", kind: "film", status: "in-progress",
+          created: AT, updated: AT, aspect: "16:9", frameRate: 24, failureModes: [] },
+        initialSeason: null, series: { operation: "none" },
+        initialContent: { worldId: FIXTURE_WORLD_ID, setupId: ID, revision: setup.draft.revision, narrative: null, scenes: [], episodes: [] },
+      },
+    } });
+    const buttons = (m: { container: HTMLElement }) => [...m.container.querySelectorAll("button")].map(button => button.textContent);
+    const m = await mount();
+    await answer(m.commands()[0]!, draft());
+    assert.equal(m.container.querySelector('[aria-label="Review production"]'), null, "nothing to say before a review");
+    await click(m.container, "Review production");
+    await answer(m.commands().at(-1)!, reviewedAt(draft()));
+    assert.match(m.container.querySelector('[aria-label="Review production"]')!.textContent!, /Ready to create · The crossing/);
+    assert.ok(buttons(m).includes("Create production"));
+
+    const title = [...m.container.querySelectorAll("label")].find(label => label.textContent?.startsWith("Working title"))!.querySelector("input")!;
+    title.value = "The far crossing";
+    await act(async () => title.dispatchEvent(new dom.Event("focusout", { bubbles: true })));
+    const retitle = m.commands().at(-1)!;
+    assert.deepEqual(retitle.action, { operation: "update", update: { expectedRevision: 3, fields: { title: "The far crossing" } } });
+    const changed = draft();
+    changed.draft.title = "The far crossing"; changed.draft.revision = 4;
+    await answer(retitle, changed);
+    assert.equal(m.container.querySelector('[aria-label="Review production"]')!.textContent, "Changed since review");
+    assert.ok(!buttons(m).includes("Create production"));
+    const again = [...m.container.querySelectorAll("button")].find(button => button.textContent === "Review production")!;
+    assert.equal(again.disabled, false);
+    await click(m.container, "Review production");
+    assert.deepEqual(m.commands().at(-1)!.action, { operation: "review", expectedRevision: 4 }, "one press reviews the changed draft");
+    await answer(m.commands().at(-1)!, reviewedAt(changed));
+    assert.match(m.container.querySelector('[aria-label="Review production"]')!.textContent!, /Ready to create · The far crossing/);
+    assert.doesNotMatch(m.container.textContent!, /Changed since review/);
+    assert.ok(buttons(m).includes("Create production"));
+  });
+
   it("attaches a file to setup and sends it with the line (issue 3089)", async () => {
     const SONG = "wca_01J8F3K2QW9VZX4N7M0RTYB6HE";
     const withSong = (setup: ProductionSetupState) => {
