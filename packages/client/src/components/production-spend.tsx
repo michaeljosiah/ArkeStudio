@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from "react";
 import { Link } from "react-router";
-import { chapterNumber, formatMicroUsd, orderedShots, productionShape, type ProductionBundle, type ProductionSpendSummary,
+import { chapterCalled, formatMicroUsd, orderedShots, productionShape, type ProductionBundle, type ProductionSpendSummary,
   type ProductionSpendReceipt, type ProductionSpendRollup } from "@arke-studio/contracts";
 import { refreshProductionSpend, useStore } from "../lib/store.js";
 import { PageSheet } from "./page-sheet.js";
@@ -87,7 +87,7 @@ export function ProductionSpend({ production, sceneId, shotId, compact = false, 
   const refresh = () => { if (worldId) { setRefreshing(true); refreshProductionSpend(worldId); } };
   const shots = production.scenes.flatMap(scene => orderedShots(scene));
   const shotName = (id: string) => { const shot = shots.find(shot => shot.id === id); return shot ? `Shot ${shot.number}` : "Removed shot"; };
-  const chapterName = (id: string) => { const chapter = production.chapters.find(chapter => chapter.id === id && !chapter.retired); return chapter ? `Chapter ${chapterNumber(production.chapters, chapter)}` : "Removed chapter"; };
+  const chapterName = (id: string) => { const chapter = production.chapters.find(chapter => chapter.id === id && !chapter.retired); return chapter ? chapterCalled(production.chapters, chapter) : "Removed chapter"; };
   const title = scope.kind === "production" ? production.meta.title : scope.kind === "scene" ? `Scene ${production.scenes.find(scene => scene.id === scope.id)?.number ?? ""}` : shotName(scope.id);
   const rows = rollup?.receipts.filter(row => scope.kind === "production" || (scope.kind === "scene" ? row.sceneId === scope.id : row.shots.some(shot => shot.shotId === scope.id))) ?? [];
   const description = "Narration and illustration jobs recorded on this device. Writing costs are not included.";

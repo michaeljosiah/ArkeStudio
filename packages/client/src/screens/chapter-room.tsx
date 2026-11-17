@@ -80,11 +80,14 @@ export function WritingBar({
   );
 }
 
-/** The top of the document (R-8): the chapter's number, then its title, edited where it reads. */
-export function DocHead({ order, title, locked, fresh = false, onTitle, children }: { order: number; title: string; locked: boolean; fresh?: boolean; onTitle: (title: string) => void; children?: ReactNode }) {
+/**
+ * The top of the document (R-8): the chapter as the book calls it (`Chapter N`, or a prologue's
+ * own title; SPEC-047 R-2), then its title, edited where it reads.
+ */
+export function DocHead({ called, title, locked, fresh = false, onTitle, children }: { called: string; title: string; locked: boolean; fresh?: boolean; onTitle: (title: string) => void; children?: ReactNode }) {
   return (
     <div className="fy-ch__dochead">
-      <p className="fy-ch__kick">Chapter {order}</p>
+      <p className="fy-ch__kick">{called}</p>
       <h1 className="fy-ch__doctitle">
         <SceneTitle title={title} label="Chapter title" locked={locked} startEditing={fresh} onCommit={onTitle} />
       </h1>

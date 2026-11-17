@@ -11,6 +11,7 @@ import {
   takeCostCopy,
   type ModelChoices,
   publishedChapterTitle,
+  chapterCalled,
   chapterNumber,
 } from "@arke-studio/contracts";
 import { useEffect, useRef, useState } from "react";
@@ -148,7 +149,7 @@ export function ProductionDashboardScreen() {
               : totalWords === 0
                 ? `${chapters.length} chapter${chapters.length === 1 ? "" : "s"} planned${target === null ? "" : ` · ${target.toLocaleString()} words to write`}`
                 : `${drafted.length} chapter${drafted.length === 1 ? "" : "s"} drafted${
-                  inHand ? ` · chapter ${String(inHand.order).padStart(2, "0")} in hand` : ""
+                  inHand ? ` · ${chapterCalled(production.chapters, inHand)} in hand` : ""
                 } · ${totalWords.toLocaleString()} words`}
           </span>
           {/* Adapt… (SPEC-057 R-4): a book with chapters is something to make a drama from. */}

@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react";
-import { productionShape, ulid, type ClientState } from "@arke-studio/contracts";
+import { chapterCalled, productionShape, ulid, type ClientState } from "@arke-studio/contracts";
 import {
   send,
   subscribeAudiobookWordTiming,
@@ -74,7 +74,7 @@ export function WordTimingActivityRow({
       <span className="fy-ap__dot fy-ap__dot--live" aria-hidden />
       <div className="fy-ap__main">
         <div className="fy-ap__rowtitle">
-          Preparing word timings{chapter === undefined ? "" : ` · Chapter ${chapter.order}`}
+          Preparing word timings{chapter === undefined ? "" : ` · ${chapterCalled(production?.chapters ?? [], chapter)}`}
         </div>
         <div className="fy-ap__rowsub">{production?.meta.title ?? entry.productionId}</div>
         <p role="status">

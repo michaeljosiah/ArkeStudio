@@ -17,6 +17,7 @@ import {
   narratorLabelFor,
   providerName,
   readerPlace,
+  chapterCalled,
   chapterNumber,
   speechPricePrefix,
   type AudiobookCastMember,
@@ -498,7 +499,7 @@ export function AudiobookScreen() {
       <PlaySolid size={16} />
       {placeRow !== undefined && place !== null ? (
         <>
-          Continue <em>· Chapter {placeRow.order} · {formatRunningTime(place.at)}</em>
+          Continue <em>· {chapterCalled(production.chapters, placeRow)} · {formatRunningTime(place.at)}</em>
         </>
       ) : (
         "Listen"
@@ -668,7 +669,7 @@ export function AudiobookScreen() {
           <section className="fy-abshow__chapters" aria-label="Chapters">
             <div className="fy-abshow__chapter-head">
               <h2 className="fy-abshow__h">Chapters</h2>
-              {nextWork !== undefined && <button type="button" className="fy-abshow__next" onClick={() => openChapter(nextWork.chapterId)} data-testid="audiobook-next-work">Continue work · Chapter {nextWork.order}<ChevronRight size={16} /></button>}
+              {nextWork !== undefined && <button type="button" className="fy-abshow__next" onClick={() => openChapter(nextWork.chapterId)} data-testid="audiobook-next-work">Continue work · {chapterCalled(production.chapters, nextWork)}<ChevronRight size={16} /></button>}
             </div>
             {rows.length > 0 ? (
               <div data-testid="audiobook-rows">
