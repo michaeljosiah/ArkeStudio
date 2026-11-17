@@ -356,6 +356,28 @@ function locateTurnResultJson(raw: string): { json: unknown; prose: string } | u
 }
 
 /**
+ * Where a reply stopped being JSON (issue 3223): the parser's own words and the text just before
+ * the place. Told only "not valid JSON", a model sent back the same 7,355 characters twice, one
+ * bracket wrong in the last line each time, and the turn failed; the place lets it mend that one.
+ */
+function jsonBreak(raw: string): string {
+  const text = raw.replace(/^﻿/, "").trim();
+  const start = text.indexOf("{");
+  if (start < 0) return " It held no JSON object.";
+  try {
+    JSON.parse(text.slice(start));
+    return "";
+  } catch (error) {
+    const said = (error instanceof Error ? error.message : "").replace(/\s*\(line \d+ column \d+\)$/, "");
+    const at = /\s*in JSON at position (\d+)/.exec(said);
+    if (!at) return said ? ` The parser said: ${said.slice(0, 160)}.` : "";
+    // The parser counts from the object it was given; the model counts from its whole message.
+    const position = start + Number(at[1]);
+    return ` It broke at character ${position} of ${text.length} (${said.replace(at[0], "").slice(0, 120)}), just after: …${text.slice(Math.max(start, position - 80), position)}`;
+  }
+}
+
+/**
  * A reply over the bound, said in terms a model can actually aim at.
  *
  * The bound alone ("reply allows at most 8000 characters") was the corrective line, and it failed
@@ -403,7 +425,7 @@ export function parseTurnResult(raw: string, productionThread = false, allowActi
       problems: [
         problem(
           "not-json",
-          "The reply was not valid JSON. Return the complete result again as one JSON object — no prose around it, no markdown fences.",
+          `The reply was not valid JSON.${jsonBreak(raw)} Return the complete result again as one JSON object — no prose around it, no markdown fences — with every { and [ closed exactly once.`,
         ),
       ],
     };
