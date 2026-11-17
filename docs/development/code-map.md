@@ -1616,10 +1616,11 @@ ffprobe/FFmpeg decoding through `MediaProcessRunner`. Desktop `src/media-tools.t
 See [media evidence boundaries](../issues/shared-agent-media-evidence.md).
 Measurements of a cut (epic #3070) sit on the same reads: contracts `src/agent-measure.ts` owns
 their arguments and results, each with its own schema boundary (`measure_sync`, lip sync against a
-reference, schema 140; `song_map`, beats, sections and voice, schema 141); `src/agent-media-source.ts`
-holds the source and interval types both files share. Coordinator `src/media/measure-sync.ts` and
-`src/media/song-map.ts` (beat tracker, voice map) are the arithmetic; `src/world-chat/media-measure.ts`
-opens a second source (a sync reference, a vocal stem) and feeds a song to `findSongSections`.
+reference, schema 140; `song_map`, beats, sections and voice, schema 141; `clip_quality`, cadence
+and detail, schema 142); `src/agent-media-source.ts` holds the source and interval types both files
+share. Coordinator `src/media/measure-sync.ts`, `src/media/song-map.ts` (beat tracker, voice map) and
+`src/media/clip-quality.ts` are the arithmetic; `src/world-chat/media-measure.ts` opens a second
+source (a sync reference, a vocal stem, a compared clip) and feeds a song to `findSongSections`.
 See [media measurement](media-measurement.md).
 Contracts `src/agent-listening.ts` owns subjective listening evidence (schema 81). Coordinator
 `media/agent-listening.ts` validates canonical audio and deadlines; `local-audio-listener.ts`

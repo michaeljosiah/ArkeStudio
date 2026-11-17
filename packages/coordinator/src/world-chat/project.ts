@@ -362,6 +362,14 @@ export function wordReceipt(receipt: WorldChatCheckReceipt): string {
       if (!song) return "mapped a song";
       return `mapped a song: ${song.tempoBpm === null ? "no steady beat" : `${song.tempoBpm} bpm`}, ${song.sections.length} section${song.sections.length === 1 ? "" : "s"}`;
     }
+    case "clip-quality": {
+      const quality = receipt.media?.quality;
+      if (!quality) return "measured a clip";
+      const repeats = quality.cadence.repeatedFrames;
+      return `measured a clip: sharpness ${quality.detail.sharpness}, ${quality.cadence.still ? "a still picture" : `${repeats ?? 0} repeated frame${repeats === 1 ? "" : "s"}`}`
+        + (!quality.compare ? "" : quality.compare.sharpnessChangePct === null ? "; the other has detail where this has none"
+          : `; the other ${quality.compare.sharpnessChangePct >= 0 ? "+" : ""}${quality.compare.sharpnessChangePct}% sharpness`);
+    }
     case "search-canon":
       return `searched ${receipt.searchedCount ?? 0} canon entries`;
     case "search-sheets":
