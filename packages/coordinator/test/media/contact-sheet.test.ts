@@ -1,7 +1,28 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AGENT_SHEET_LIMITS, AgentContactSheetSchema } from "@arke-studio/contracts";
+import { setTimeout as delay } from "node:timers/promises";
 import { composeSheetPage, findCuts, tileLabel } from "../../src/media/contact-sheet.js";
+import { inParallel } from "../../src/world-chat/media-measure.js";
+
+test("the decode pool stops at the first failure, tells the decodes in flight to stop, and answers only once they have", async () => {
+  const started: number[] = [], finished: number[] = [];
+  const work = async (item: number, signal: AbortSignal) => {
+    started.push(item);
+    if (item === 1) { await delay(5); throw new Error("refused"); }
+    // A decoder that stops when told, but takes a moment to.
+    await new Promise(resolve => signal.addEventListener("abort", resolve, { once: true }));
+    await delay(20); finished.push(item); return item;
+  };
+  await assert.rejects(inParallel([0, 1, 2, 3, 4, 5], new AbortController().signal, work), /refused/);
+  assert.deepEqual(started, [0, 1, 2]); assert.deepEqual(finished.sort(), [0, 2]);
+  // Results keep the items' order however the work finishes, and a cancelled caller starts nothing.
+  assert.deepEqual(await inParallel([3, 1, 2, 5], new AbortController().signal, async item => { await delay(item); return item * 2; }), [6, 2, 4, 10]);
+  const cancelled = new AbortController(); cancelled.abort();
+  let ran = 0;
+  await assert.rejects(inParallel([1, 2], cancelled.signal, async item => { ran++; return item; }));
+  assert.equal(ran, 0);
+});
 
 test("cuts are the steps that jump far above the steps around them; a busy shot and a flash are not cut on", () => {
   // Ten frames a second: shots change at 3.2 s and 7.5 s; a fast pan in between steps 8 a frame.

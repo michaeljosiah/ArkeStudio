@@ -125,13 +125,24 @@ type SheetShot = { startSec: number; endSec: number; label: string | null; clipI
  * Run `work` over `items` three at a time, results in order. A sheet of a 4-minute film is about
  * 80 decodes; one at a time that was over a minute. Three bounded single-thread decoders at once
  * keep it near twenty seconds without taking the machine.
+ *
+ * The first failure stops the pool: nothing new starts, the decodes in flight are told to stop
+ * through the signal each is given, and every one has finished before the failure goes on. A
+ * bare `Promise.all` answered while its siblings still ran, so a refused read left FFmpeg
+ * holding the snapshot the caller was about to release.
  */
-async function inParallel<T, R>(items: readonly T[], work: (item: T) => Promise<R>, width = 3): Promise<R[]> {
-  const results: R[] = [];
+export async function inParallel<T, R>(items: readonly T[], signal: AbortSignal, work: (item: T, signal: AbortSignal) => Promise<R>, width = 3): Promise<R[]> {
+  const results: R[] = [], failures: unknown[] = [], stop = new AbortController(), either = AbortSignal.any([signal, stop.signal]);
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(width, items.length) }, async () => {
-    while (next < items.length) { const index = next++; results[index] = await work(items[index]!); }
+    while (!either.aborted && next < items.length) {
+      const index = next++;
+      try { results[index] = await work(items[index]!, either); }
+      catch (error) { failures.push(error); stop.abort(); }
+    }
   }));
+  if (failures.length) throw failures[0];
+  signal.throwIfAborted();
   return results;
 }
 
@@ -146,7 +157,8 @@ async function exportCut(store: WorldStore, source: AgentMediaSource): Promise<{
     productionExportFingerprint(bundle, production) !== record.sourceFingerprint) return null;
   const timeline = production.timeline.timeline, rate = timeline.frameRate;
   const endFrame = Math.max(0, ...timeline.tracks.flatMap(track => track.clips.map(clip => clip.startFrame + clip.durationFrames)));
-  const clips = timeline.tracks.filter(track => track.kind === "picture").sort((a, b) => a.order - b.order)
+  // A muted Picture track puts nothing in the export (render-plan's overlaysFromTimeline): above the base it is left out, and a muted base is black.
+  const clips = timeline.tracks.filter(track => track.kind === "picture" && !track.muted).sort((a, b) => a.order - b.order)
     .flatMap(track => track.clips.map(clip => ({ ...clip, startSec: clip.startFrame / rate, endSec: (clip.startFrame + clip.durationFrames) / rate })))
     .sort((a, b) => a.startSec - b.startSec || a.endSec - b.endSec);
   return { productionId: production.meta.id, rate, endSec: endFrame / rate, clips };
@@ -164,7 +176,7 @@ async function timelineShots(store: WorldStore, source: AgentMediaSource, from: 
 async function pictureShots(tools: AgentMediaTools, film: { path: string; stream: Stream; startSec: number; endSec: number }, from: number, to: number, signal: AbortSignal): Promise<SheetShot[]> {
   const starts: number[] = [];
   for (let at = film.startSec; at < film.endSec - .05; at += 60) starts.push(at);
-  const reads = await inParallel(starts, at => tools.grayFrames!(film.path, film.stream, at, Math.min(film.endSec, at + 60), { fps: 10, edge: 64, fast: true }, signal));
+  const reads = await inParallel(starts, signal, (at, each) => tools.grayFrames!(film.path, film.stream, at, Math.min(film.endSec, at + 60), { fps: 10, edge: 64, fast: true }, each));
   const steps: number[] = [];
   let previous: Uint8Array | null = null;
   for (const read of reads) {
@@ -194,7 +206,7 @@ export async function contactSheetInSnapshot(store: WorldStore, tools: AgentMedi
   const size = { width: AGENT_SHEET_LIMITS.tileWidth, height: AGENT_SHEET_LIMITS.tileHeight }, pages = [];
   for (let first = 0; first < numbered.length; first += AGENT_SHEET_LIMITS.perPage) {
     const group = numbered.slice(first, first + AGENT_SHEET_LIMITS.perPage);
-    const tiles = await inParallel(group, async shot => ({ rgba: await tile(film.path, film.stream, decodeAt(shot.frameSec), size, signal), label: tileLabel(shot.number, shot.startSec) }));
+    const tiles = await inParallel(group, signal, async (shot, each) => ({ rgba: await tile(film.path, film.stream, decodeAt(shot.frameSec), size, each), label: tileLabel(shot.number, shot.startSec) }));
     pages.push({ bytes: await encodePngAsync(composeSheetPage(tiles), {}, signal), firstShot: group[0]!.number, lastShot: group[group.length - 1]!.number });
   }
   return { sheet: { streamIndex: film.stream.index, startSec: round(from), endSec: round(to), shotsFrom: fromTimeline ? "timeline" : "picture",
@@ -228,7 +240,7 @@ export async function reviewInSnapshot(store: WorldStore, tools: AgentMediaTools
   // Every native frame, small, in 60 s reads three at a time; only the steps between them are kept.
   const starts: number[] = [];
   for (let at = film.startSec; at < film.endSec - .05; at += 60) starts.push(at);
-  const reads = await inParallel(starts, at => grayFrames(film.path, film.video, at, Math.min(film.endSec, at + 60), { fps: null, edge: 48 }, signal)
+  const reads = await inParallel(starts, signal, (at, each) => grayFrames(film.path, film.video, at, Math.min(film.endSec, at + 60), { fps: null, edge: 48 }, each)
     .then(read => ({ steps: Array.from(frameMotion(read.frames)), first: read.frames[0], last: read.frames[read.frames.length - 1] })));
   const steps: number[] = [];
   for (const [i, read] of reads.entries()) {
@@ -241,7 +253,7 @@ export async function reviewInSnapshot(store: WorldStore, tools: AgentMediaTools
 
   // The film's own mix, once, for the clips' sync; each clip's source read from its own snapshot.
   const mix = film.audio && cut ? await decodeMono(monoAudio, film.path, film.audio, film.startSec, film.endSec, signal) : null;
-  const syncs = await inParallel(shots, async shot => mix && shot.clip ? clipSync(store, tools, signal, resolve, cut!, shot.clip, mix, shot.startSec - from, shot.endSec - shot.startSec) : null);
+  const syncs = await inParallel(shots, signal, async (shot, each) => mix && shot.clip ? clipSync(store, tools, each, resolve, cut!, shot.clip, mix, shot.startSec - from, shot.endSec - shot.startSec) : null);
 
   const loud = film.audio ? await loudness(film.path, film.audio, film.startSec, film.endSec, signal) : null;
   const findings: string[] = [];
