@@ -11,7 +11,6 @@ import {
   pickableSheets,
   productionShape,
   proposalDecisionOf,
-  resolvePictureTimeline,
   sortScenes,
   type ProductionBundle,
 } from "@arke-studio/contracts";
@@ -56,7 +55,7 @@ import { cx } from "../components/ui.js";
 import { useWorldOpenRefusal, WorldOpenRefusal } from "../components/world-open-refusal.js";
 import { WorldOpening } from "../components/world-opening.js";
 import { productionShelf } from "../lib/artifact-view.js";
-import { editorTimeline } from "../lib/editor-timeline.js";
+import { editorPictureCut, editorTimeline } from "../lib/editor-timeline.js";
 import { runtimeSeconds } from "../lib/format.js";
 import { defaultEpisodeFor, productionPages } from "../lib/production-navigation.js";
 import { useRailCollapsed } from "../lib/rail-collapsed.js";
@@ -287,12 +286,7 @@ export function ProductionLayout() {
     let record: ReturnType<typeof editorTimeline>["timeline"] = null;
     if (production) {
       try {
-        const timeline = production.timeline ?? { status: "absent" as const };
-        if (timeline.status === "invalid") throw new Error(timeline.message);
-        record = editorTimeline(production, timeline, world?.artifacts ?? []).timeline;
-        cut = record === null
-          ? deriveCut(production)
-          : resolvePictureTimeline(production, { status: "ready", timeline: record }, world?.artifacts ?? []);
+        ({ record, cut } = editorPictureCut(production, world?.artifacts ?? []));
       } catch {
         // Invalid timeline state is stated in the editor and Exports; the rail must not substitute
         // the legacy runtime while those screens correctly block it.

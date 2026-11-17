@@ -1,10 +1,13 @@
 import {
+  deriveCut,
   migrateLegacyCut,
+  resolvePictureTimeline,
   seedFirstPictureTimeline,
   type MigrationArtifact,
   type MigrationResult,
   type ProductionBundle,
   type ProductionTimeline,
+  type ResolvedPictureCut,
   type TimelineState,
 } from "@arke-studio/contracts";
 
@@ -48,4 +51,23 @@ export function editorTimeline(
   if (timelineState.status === "ready") return migrateLegacyCut(timelineState.timeline, production, artifacts);
   if (production.spine !== null) return { timeline: null, dropped: [] };
   return migrateLegacyCut(seedFirstPictureTimeline(production), production, artifacts);
+}
+
+/**
+ * The picture that record plays, resolved as the Cut resolves it, with the story's derivation
+ * while there is nothing to edit. The rail and the world's Continue card both state its length, and
+ * read it here so the two cannot disagree (issue 3219). Throws on an invalid record, which the
+ * editor and Exports state; a caller that only measures says nothing rather than a stand-in.
+ */
+export function editorPictureCut(
+  production: ProductionBundle,
+  artifacts: readonly MigrationArtifact[],
+): { record: ProductionTimeline | null; cut: ResolvedPictureCut } {
+  const state = production.timeline ?? { status: "absent" as const };
+  if (state.status === "invalid") throw new Error(state.message);
+  const record = editorTimeline(production, state, artifacts).timeline;
+  return {
+    record,
+    cut: record === null ? deriveCut(production) : resolvePictureTimeline(production, { status: "ready", timeline: record }, artifacts),
+  };
 }
