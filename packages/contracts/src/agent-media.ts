@@ -5,7 +5,8 @@ import { AgentSpeechTranscriptSchema, AgentTranscriptTextSchema, type AgentSpeec
 
 import { AgentAudioListeningSchema, AgentListeningFocusesSchema, type AgentAudioListening } from "./agent-listening.js";
 import { AGENT_MEDIA_LIMITS, AgentMediaRangeSchema, AgentMediaSourceSchema, agentMediaTime as time, type AgentMediaSource } from "./agent-media-source.js";
-import { AgentClipQualitySchema, AgentSongMapSchema, AgentSyncMeasurementSchema, type AgentClipQuality, type AgentSongMap, type AgentSyncMeasurement } from "./agent-measure.js";
+import { AgentClipQualitySchema, AgentContactSheetSchema, AgentMediaRegionSchema, AgentSongMapSchema, AgentSyncMeasurementSchema,
+  type AgentClipQuality, type AgentContactSheet, type AgentMediaRegion, type AgentSongMap, type AgentSyncMeasurement } from "./agent-measure.js";
 
 export * from "./agent-media-source.js";
 
@@ -17,7 +18,9 @@ export const AGENT_MEDIA_PROFILE = "arke-media-evidence-v1";
 export const InspectMediaArgsSchema = z.object({ source: AgentMediaSourceSchema }).strict();
 export const SampleVideoArgsSchema = z.object({ source: AgentMediaSourceSchema, range: AgentMediaRangeSchema,
   count: z.number().int().min(1).max(AGENT_MEDIA_LIMITS.frames).default(3),
-  streamIndex: z.number().int().min(0).max(255).optional() }).strict();
+  streamIndex: z.number().int().min(0).max(255).optional(),
+  /** A box to look at closely (eyes, a mouth, a hand), at the source's own resolution (#3072). */
+  region: AgentMediaRegionSchema.optional() }).strict();
 export const AnalyzeAudioArgsSchema = z.object({ source: AgentMediaSourceSchema, range: AgentMediaRangeSchema,
   streamIndex: z.number().int().min(0).max(255).optional() }).strict();
 export const ListenAudioArgsSchema = z.object({ source: AgentMediaSourceSchema, range: AgentMediaRangeSchema.refine(range => range.endSec - range.startSec <= 30, "Listening clips are at most 30 seconds"),
@@ -49,8 +52,9 @@ export type AgentMediaObservation = { profile: typeof AGENT_MEDIA_PROFILE; sourc
   sourceHash: string; byteLength: number; sourceStartSec: number; sourceEndSec: number | null; inventory: AgentMediaInventory;
   range?: { startSec: number; endSec: number }; frames?: Array<z.infer<typeof AgentMediaFrameSchema>>; audio?: AudioSignal;
   transcript?: AgentSpeechTranscript; listening?: AgentAudioListening; sync?: AgentSyncMeasurement; song?: AgentSongMap; quality?: AgentClipQuality;
+  sheet?: AgentContactSheet; region?: AgentMediaRegion;
   coverage: "metadata-only" | "sampled-frames-only" | "decoded-audio-samples" | "recognized-speech" | "model-audio-listening" | "measured-sync" | "measured-song"
-    | "measured-quality"; limitations: string[] };
+    | "measured-quality" | "contact-sheet"; limitations: string[] };
 export const AgentMediaObservationSchema: z.ZodType<AgentMediaObservation> = z.object({ profile: z.literal(AGENT_MEDIA_PROFILE), source: AgentMediaSourceSchema,
   decoderVersion: z.string().min(1).max(200),
   probeVersion: z.string().min(1).max(200),
@@ -59,8 +63,11 @@ export const AgentMediaObservationSchema: z.ZodType<AgentMediaObservation> = z.o
   range: AgentMediaRangeSchema.optional(), frames: z.array(AgentMediaFrameSchema).min(1).max(AGENT_MEDIA_LIMITS.frames).optional(),
   listening: AgentAudioListeningSchema.optional(), audio: AudioSignalSchema.optional(), transcript: AgentSpeechTranscriptSchema.optional(),
   sync: AgentSyncMeasurementSchema.optional(), song: AgentSongMapSchema.optional(), quality: AgentClipQualitySchema.optional(),
+  sheet: AgentContactSheetSchema.optional(),
+  /** Sampled frames of a box in the picture, when one was asked for. */
+  region: AgentMediaRegionSchema.optional(),
   coverage: z.enum(["metadata-only", "sampled-frames-only", "decoded-audio-samples", "recognized-speech", "model-audio-listening", "measured-sync", "measured-song",
-    "measured-quality"]),
+    "measured-quality", "contact-sheet"]),
   limitations: z.array(z.string().min(1).max(500)).min(1).max(8) }).strict().superRefine((value, context) => {
     if (value.sourceEndSec !== null && value.sourceEndSec < value.sourceStartSec) context.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid source interval" });
     if (value.coverage === "sampled-frames-only" && (!value.range || !value.frames || value.audio) ||
@@ -76,7 +83,11 @@ export const AgentMediaObservationSchema: z.ZodType<AgentMediaObservation> = z.o
       value.coverage === "measured-song" && (value.range || !value.song || value.frames || value.audio) ||
       value.coverage !== "measured-song" && value.song ||
       value.coverage === "measured-quality" && (!value.range || !value.quality || value.frames || value.audio) ||
-      value.coverage !== "measured-quality" && value.quality) {
+      value.coverage !== "measured-quality" && value.quality ||
+      // A sheet runs past the 60 s inspection interval, so like a song map it carries its own window.
+      value.coverage === "contact-sheet" && (value.range || !value.sheet || value.frames || value.audio) ||
+      value.coverage !== "contact-sheet" && value.sheet ||
+      value.region && value.coverage !== "sampled-frames-only") {
       context.addIssue({ code: z.ZodIssueCode.custom, message: "Evidence must match its declared coverage" });
     }
     if (value.song && (value.sourceEndSec === null || value.sourceStartSec + value.song.endSec > value.sourceEndSec + .000001 ||
@@ -85,6 +96,11 @@ export const AgentMediaObservationSchema: z.ZodType<AgentMediaObservation> = z.o
     }
     if (value.quality && !value.inventory.streams.some(stream => stream.kind === "video" && stream.index === value.quality!.streamIndex)) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: "A quality measurement must retain its video stream" });
+    }
+    if (value.sheet && (value.sourceEndSec === null || value.sourceStartSec + value.sheet.endSec > value.sourceEndSec + .001 ||
+      !value.inventory.streams.some(stream => stream.kind === "video" && stream.index === value.sheet!.streamIndex) ||
+      value.sheet.pages.some(page => page.image.sourceHash !== value.sourceHash || !page.image.posterOnly))) {
+      context.addIssue({ code: z.ZodIssueCode.custom, message: "A contact sheet must retain its video stream, lie inside its source and show only that source" });
     }
     if (value.sync) {
       const sync = value.sync, kind = sync.method === "mouth" ? "video" : "audio";

@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { FullSha256Schema } from "./audio.js";
+import { SlugSchema } from "./ids.js";
+import { ImageObservationSchema } from "./world-chat-images.js";
 import { AgentMediaRangeSchema, AgentMediaSourceSchema, AgentMediaStreamIndexSchema, agentMediaTime } from "./agent-media-source.js";
 
 /*
@@ -207,3 +209,44 @@ export const AgentClipQualitySchema = quality.extend({
   }
 });
 export type AgentClipQuality = z.infer<typeof AgentClipQualitySchema>;
+
+/**
+ * A contact sheet of a cut (#3072): one labelled frame per shot, so Arke can see a whole film at
+ * once and point at "shot 21". `sample_video` gives at most eight frames in 60 s; the music video's
+ * every review round began from a sheet like this, made outside the Studio. Shots are the export's
+ * own timeline clips when the production still holds the cut that export was made from, and
+ * otherwise found in the picture.
+ */
+export const AGENT_SHEET_SCHEMA_VERSION = 143;
+export const AGENT_SHEET_LIMITS = Object.freeze({ maxSeconds: 900, maxShots: 240, perPage: 30, columns: 5, maxPages: 8, tileWidth: 288, tileHeight: 162 });
+export const CutContactSheetArgsSchema = z.object({
+  source: AgentMediaSourceSchema,
+  /** Defaults to the whole source when it is at most 15 minutes. */
+  window: AgentSongWindowSchema.optional(),
+  streamIndex: AgentMediaStreamIndexSchema.optional(),
+}).strict();
+export type CutContactSheetArgs = z.infer<typeof CutContactSheetArgsSchema>;
+export const AgentSheetShotSchema = z.object({
+  number: z.number().int().min(1), startSec: agentMediaTime, endSec: agentMediaTime, frameSec: agentMediaTime,
+  /** The clip's name in the cut; null for a shot found in the picture. */
+  label: z.string().min(1).max(160).nullable(), clipId: z.string().min(1).max(200).nullable(),
+}).strict();
+export const AgentContactSheetSchema = z.object({
+  streamIndex: AgentMediaStreamIndexSchema, startSec: agentMediaTime, endSec: agentMediaTime,
+  /** "timeline": the production's picture clips, its cut unchanged since this export; "picture": cuts found in the frames. */
+  shotsFrom: z.enum(["timeline", "picture"]),
+  productionId: SlugSchema.nullable(),
+  shots: z.array(AgentSheetShotSchema).min(1).max(AGENT_SHEET_LIMITS.maxShots),
+  pages: z.array(z.object({ image: ImageObservationSchema, firstShot: z.number().int().min(1), lastShot: z.number().int().min(1) }).strict())
+    .min(1).max(AGENT_SHEET_LIMITS.maxPages),
+}).strict().superRefine((sheet, context) => {
+  const issue = (message: string) => context.addIssue({ code: z.ZodIssueCode.custom, message });
+  if (sheet.endSec <= sheet.startSec) issue("A sheet covers a positive window");
+  if ((sheet.shotsFrom === "timeline") !== (sheet.productionId !== null)) issue("Only shots from a timeline name its production");
+  if (sheet.shots.some((shot, i) => shot.number !== i + 1 || shot.endSec <= shot.startSec || shot.frameSec < shot.startSec || shot.frameSec >= shot.endSec ||
+    shot.startSec < sheet.startSec - .001 || shot.endSec > sheet.endSec + .001 || (sheet.shotsFrom === "picture") !== (shot.label === null))) issue("Shots are numbered in order, each with its frame inside it and the window");
+  // The pages lay the shots out in order, each shot on exactly one page.
+  if (sheet.pages[0]!.firstShot !== 1 || sheet.pages[sheet.pages.length - 1]!.lastShot !== sheet.shots.length ||
+    sheet.pages.some((page, i) => page.lastShot < page.firstShot || page.lastShot - page.firstShot >= AGENT_SHEET_LIMITS.perPage || i > 0 && page.firstShot !== sheet.pages[i - 1]!.lastShot + 1)) issue("Pages lay out every shot once, in order");
+});
+export type AgentContactSheet = z.infer<typeof AgentContactSheetSchema>;
