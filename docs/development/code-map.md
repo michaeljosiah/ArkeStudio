@@ -1858,6 +1858,25 @@ Tests: contracts `test/production-audio-design.test.ts`; coordinator
 `test/productions/music-video-policy.test.ts`, existing take
 and Bench subject suites. Client `screens/editor-media-measurement.tsx` resolves the selected physical source and exposes recovery only for absent metadata or failure. `lib/store.ts` correlates and releases transient measurement requests; authoritative metadata arrives through the normal world snapshot. The existing Cut inspector and phone sheet host approved turn 258, with no new route or setting. Client `test/media-measurement.test.tsx` and root `scripts/smoke-media-measurement.mjs` cover controls, source/world invalidation, local-only commands, both themes and native sheet behavior.
 
+### A song's sections, proposed (#3099)
+
+Contracts `song-sections.ts` finds where a song changes from the effects analysis of it
+(`findSongSections` over `createEffectPcmAnalyzer`'s energy and bass): its tempo where it keeps a
+pulse, and section starts on beats. It finds boundaries, never names, and misses a change that
+moves neither level nor low end. Coordinator `productions/song-sections.ts` measures a
+production's master track through the effects' own decode (`EffectAudioAnalysisHost`, the song
+alone as a one-sound plan), one song at a time, and keeps the result in memory per file; nothing
+is written. The Cut asks with `song-sections` and is answered by `song.sections`
+(`commands/productions.ts`); Arke reads the same in `get_spine`'s `spine-song` row
+(`world-chat/target-reads.ts`), which is given by the read and left out of the spine's fence.
+Client `screens/song-sections-notice.tsx` offers the starts for a song with no sections marked
+and sends them as one `spine-command` (`lib/song.ts` `sectionsCommand`), so a section is authored
+only by the person's press.
+
+Tests: contracts `test/song-sections.test.ts` (songs synthesised in the test); coordinator
+`test/productions/song-sections.test.ts`, whose last case runs the installed FFmpeg where there
+is one; client `test/song-sections.test.tsx`.
+
 ## Interactive stories
 
 ### Remembered interactive story state (SPEC-063, approved turn 240)

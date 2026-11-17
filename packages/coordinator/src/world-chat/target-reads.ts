@@ -39,6 +39,8 @@ import {
   type VoiceCandidate,
   type WorldChangeCandidate,
   type CandidateGroup,
+  proposedSectionLabel,
+  type SongSectionsResult,
 } from "@arke-studio/contracts";
 import { conversationActionDigest } from "../arke-actions/digest.js";
 import type { QueryLease } from "./lease.js";
@@ -104,6 +106,8 @@ export interface TargetReadDeps {
   readonly getChapterBeats?: (productionId: string, chapterFile: string) => Promise<readonly import("@arke-studio/contracts").AudiobookBeat[] | null>;
   /** Where the chapter's audiobook reading goes quiet and breathy, beside its direction (SPEC-047 R-196). */
   readonly getChapterQuiet?: (productionId: string, chapterFile: string) => Promise<import("../productions/audiobook-quiet.js").AudiobookQuietRead>;
+  /** The production's song as the Studio measures it (issue 3099): its tempo and where it changes, for get_spine. */
+  readonly getSongSections?: (productionId: string) => Promise<SongSectionsResult>;
 }
 export interface ArkeBuildItemRead { readonly key: string; readonly kind: string; readonly subject: string; readonly state: string; readonly detail: string | null }
 export const buildItemsFence = (items: readonly ArkeBuildItemRead[]) => conversationActionDigest(items);
@@ -480,6 +484,51 @@ function spineRows(production: ProductionBundle | undefined, artifacts: WorldBun
     rows.push({ key: `40:track:${artifact.id}`, value: { kind: "available-spine-track", artifact } });
   }
   return rows.sort((a, b) => a.key.localeCompare(b.key));
+}
+
+const SONG_MEASURE_WAIT_MS = 20_000;
+
+/** `work`, or `late` once `ms` have passed; the timer never outlives the answer. */
+async function within<T>(work: Promise<T>, ms: number, late: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([work, new Promise<T>((resolve) => { timer = setTimeout(() => resolve(late), ms); })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * The song itself, beside the spine (issue 3099): its length, its tempo where it keeps one, and
+ * its sections. Arke cannot hear the song, and asked the author to time its verses; this is what
+ * the Studio measured instead. Marked sections are the spine's own marker rows. Until one is
+ * marked, the starts the Studio proposes are listed here and said to be proposals: places the
+ * sound changes, with no names, on nobody's spine.
+ *
+ * Given by the read alone, never by the fence: a measure that arrives between a card's read and
+ * its approval changes nothing that card would write.
+ */
+function spineSongRow(production: ProductionBundle | undefined, artifacts: WorldBundle["artifacts"], measured: SongSectionsResult | undefined): Row | null {
+  const spine = production?.spine ?? null;
+  if (spine === null) return null;
+  const song = measured?.status === "measured" && measured.song.trackArtifactId === spine.trackArtifactId ? measured.song : null;
+  const marked = spine.markers.filter((marker) => marker.kind === "section").length;
+  return {
+    key: "02:song",
+    value: {
+      kind: "spine-song",
+      trackArtifactId: spine.trackArtifactId,
+      durationSec: song?.durationSec ?? artifacts.find((artifact) => artifact.id === spine.trackArtifactId)?.mediaInfo?.durationSec ?? null,
+      tempoBpm: song?.tempoBpm ?? null,
+      sections: marked > 0
+        ? { status: "marked", count: marked }
+        : song === null
+          ? { status: "not-measured", reason: measured?.status === "unavailable" ? measured.reason : "The song could not be measured here." }
+          : song.startsSec.length < 2
+            ? { status: "none-found" }
+            : { status: "proposed", starts: song.startsSec.map((atSec, index) => ({ label: proposedSectionLabel(index), atSec })) },
+    },
+  };
 }
 
 export function spineFence(production: ProductionBundle | undefined, artifacts: WorldBundle["artifacts"] = []): string {
@@ -1127,6 +1176,12 @@ export class WorldChatTargetReads {
         const production = productionOf(bundle, productionId);
         readTarget = target("spine", productionId);
         rows = spineRows(production, bundle.artifacts);
+        // A song is measured in a second or two and then kept. A read never waits out a long
+        // one: it says the song is still being measured, and the next read has it.
+        const measuring = production?.spine ? this.deps.getSongSections?.(productionId) : undefined;
+        const song = spineSongRow(production, bundle.artifacts, measuring === undefined ? undefined
+          : await within(measuring, SONG_MEASURE_WAIT_MS, { status: "unavailable", reason: "The song is still being measured. Read get_spine again shortly." }));
+        if (song !== null) rows = [...rows, song].sort((a, b) => a.key.localeCompare(b.key));
         revisionOrDigest = spineFence(production, bundle.artifacts);
         break;
       }

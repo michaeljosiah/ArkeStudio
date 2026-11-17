@@ -5,7 +5,7 @@ import {
   pendingQueueRequests, forgetGuideDrafting, commandFailureListeners, queueResultListeners,
   voiceUploadConfirmationListeners, audiobookActivityListeners, jobReadyListeners,
   seenRecoveryNotices, recoveryNoticeListeners, chapterCreateListeners, promptToolsListeners,
-  mediaMeasurementListeners, chapterVersionListeners, dramaSourceListeners, dramaEditionListeners,
+  mediaMeasurementListeners, songSectionsListeners, chapterVersionListeners, dramaSourceListeners, dramaEditionListeners,
   sceneCreateListeners, frameRunQuoteListeners, frameRunStartKey, frameRunStartResultListeners,
   lastTallProgress, audiobookTallProgressListeners, audiobookVideoExportedListeners,
   noteGuideDrafting, takeReviewPreparedListeners,
@@ -72,6 +72,7 @@ export function foldResultEvent(slices: FrameSlices, event: DomainEvent): void {
   }
   if (event.type === "prompt-tools.result") for (const listener of promptToolsListeners) listener(event);
   if (event.type === "media.measured") for (const listener of mediaMeasurementListeners) listener(event);
+  if (event.type === "song.sections") for (const listener of songSectionsListeners) listener(event);
   if (event.type === "chapter.version-result") {
     for (const listener of chapterVersionListeners) listener(event);
   }

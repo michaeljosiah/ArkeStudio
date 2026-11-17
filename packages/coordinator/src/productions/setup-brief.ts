@@ -105,6 +105,10 @@ const FORMATS: Record<ProductionSetupDraft["kind"], string> = {
 /**
  * A music video's setup (issue 3083): one song is its clock, and setup cannot hold the song. Told
  * only to a setup that is one, as the audio drama's and graphic novel's sections are.
+ *
+ * It asked the author for the sections' times, and the author timed the song in another program
+ * (issue 3099). Setup has no song to measure, so the times wait for the production: the Studio
+ * measures the master track, and Arke reads where it changes from the spine.
  */
 function musicVideoSection(draft: ProductionSetupDraft): string {
   if (draft.kind !== "music-video") return "";
@@ -112,7 +116,7 @@ function musicVideoSection(draft: ProductionSetupDraft): string {
 This production is a music video (kind "music-video"): a Video production cut to one song.
 Its scenes follow the song's sections, in order. It has no episodes and no Series.
 Start each scene's synopsis with its place in the song, start–end ("0:16–0:44"), then what is seen.
-If the author has not given the sections' times, ask for them; never guess them.
+If the author has not given the sections' times, leave them out: never guess them, and never ask the author to time the song. Once the song is the master track the Studio measures where it changes, and get_spine reads it.
 The song is not part of setup: once the production exists, it becomes the master track in the Cut.`;
 }
 

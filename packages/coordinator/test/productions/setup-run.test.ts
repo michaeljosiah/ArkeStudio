@@ -330,6 +330,20 @@ describe("setup turns share conversation durability but no world-mutation author
     assert.match(video, /once the production exists, it becomes the master track in the Cut/);
   });
 
+  // Setup has no song to measure, so it asked the author for the sections' times and the author
+  // timed the song elsewhere (issue 3099). The times now wait for the song to be the master track.
+  it("does not ask the author of a music video to time the song", async () => {
+    const h = await setup(() => reply());
+    const read = async (tool: string, args: Record<string, unknown>) => ({ result: { id: args.id }, receipt: {
+      id: newId("check"), runId: newId("run"), tool: tool === "get_sheet" ? "get-sheet" : "get-entry", status: "complete", consulted: [], at: AT,
+    } }) as never;
+    const draft = (await h.service.resume(h.id)).draft;
+    const video = await productionSetupBrief(h.world.getBundle(), { ...draft, kind: "music-video" }, read, 400_000);
+    assert.match(video, /leave them out: never guess them, and never ask the author to time the song/);
+    assert.match(video, /Once the song is the master track the Studio measures where it changes, and get_spine reads it/);
+    assert.doesNotMatch(video, /ask for them/);
+  });
+
   // Adapt from (design turn 205, SPEC-052 R-14): the story's chapters in order, built from the world,
   // with the beats its audiobook named read through the lease for the chapters that have a record.
   it("carries the story a setup adapts as a digest of its chapters and their named beats", async () => {

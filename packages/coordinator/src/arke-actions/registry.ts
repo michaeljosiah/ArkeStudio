@@ -540,6 +540,7 @@ const CLIENT_COMMAND_METADATA = {
   "read-music-takes": readOnly(QUERY),
   "read-music-waveform": readOnly(QUERY),
   "measure-production-media": humanOnly("Measure a selected source locally without generating or uploading media."),
+  "song-sections": readOnly("Measures where the production's song changes for the Cut's offer and changes nothing; Arke reads the same from get_spine."),
   "list-guide-voice-lines": readOnly(QUERY),
   "reorder-chapters": action("production", "command", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   "reorder-scenes": action("production", "command", "production-store", "authored-change", ["scenes", "episodes"]),
