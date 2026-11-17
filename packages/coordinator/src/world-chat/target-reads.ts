@@ -55,6 +55,19 @@ import { versionTargetId, type VersionRow } from "./version-history.js";
 const DEFAULT_LIMIT = 8;
 const MAX_LIMIT = 20;
 const TEXT_CHUNK_CHARS = 4_000;
+/**
+ * How much of a page's items, as the pretty-printed JSON the agent is handed, a read returns before
+ * it stops at a cursor (issue 3214). The row limit alone let a full chapter read put metadata, the
+ * continuity record and the cast lines ahead of 4,000-character prose chunks: a 20-row page of Iwo
+ * Road passed 80 KB, the harness did not pass it on whole (Claude Code takes an MCP result of up to
+ * about 25,000 tokens), and Arke was left to say part of the narration had gone missing. Pretty JSON
+ * of prose and records runs at three to four characters a token, so 32,000 characters is roughly
+ * 8,000 to 11,000 tokens: under half the cap even for text that tokenises at two characters a token,
+ * with room left for the citation block, and close to the eight prose chunks a default page held.
+ */
+export const TARGET_READ_PAGE_CHARS = 32_000;
+/** Inventory pages stay tighter: their records were split for exactly this before every read had a budget. */
+const INVENTORY_PAGE_CHARS = 12_000;
 
 interface Row {
   readonly key: string;
@@ -189,16 +202,30 @@ export function artifactsFence(bundle: WorldBundle, artifactId?: string): string
   return fence(artifactId ? bundle.artifacts.find(artifact => artifact.id === artifactId) ?? null : bundle.artifacts);
 }
 
-/** Large sidecars remain exact, but cannot bury the next cursor beyond a tool output limit. */
-function inventoryRows(rows: readonly Row[]): Row[] {
+/** What a page's items come to in the pretty-printed JSON the agent is handed. */
+const pageChars = (rows: readonly Row[]): number => JSON.stringify({ items: rows.map(row => row.value) }, null, 2).length;
+
+/** Large records remain exact, but cannot bury the next cursor beyond a tool output limit. */
+function splitRows(rows: readonly Row[], tooLarge: (row: Row) => boolean): Row[] {
   return rows.flatMap(row => {
+    if (!tooLarge(row)) return [row];
     const text = JSON.stringify(row.value);
-    if (JSON.stringify(row.value, null, 2).length <= TEXT_CHUNK_CHARS) return [row];
     const parts = Math.ceil(text.length / TEXT_CHUNK_CHARS);
     return Array.from({ length: parts }, (_, part) => ({ key: `${row.key}:part:${padded(part)}`,
       value: { kind: "record-chunk", recordKey: row.key, part: part + 1, parts, text: text.slice(part * TEXT_CHUNK_CHARS, (part + 1) * TEXT_CHUNK_CHARS) } }));
   });
 }
+
+/** Inventory sidecars are split whenever they pass a text chunk, as they always were. */
+const inventoryRows = (rows: readonly Row[]): Row[] => splitRows(rows, row => JSON.stringify(row.value, null, 2).length > TEXT_CHUNK_CHARS);
+
+/**
+ * Any other read keeps its records whole, and splits only one that could not fit a page on its own
+ * (issue 3214): a page always takes its first row, so without this one long character sheet would
+ * still be a page past the budget. Paged by rows alone, list_sheets sent 82 KB in one page, and
+ * OpenCode saved it to a file and showed the model only a preview.
+ */
+const pageableRows = (rows: readonly Row[]): Row[] => splitRows(rows, row => pageChars([row]) > TARGET_READ_PAGE_CHARS);
 
 export function voicesFence(bundle: WorldBundle): string {
   return fence({
@@ -1247,7 +1274,7 @@ export class WorldChatTargetReads {
     }
 
     const inventory = tool === "list_references" || tool === "list_artifacts";
-    return this.page(lease, args, readTarget, revisionOrDigest, inventory ? inventoryRows(rows) : rows, cursorFence, inventory);
+    return this.page(lease, args, readTarget, revisionOrDigest, inventory ? inventoryRows(rows) : pageableRows(rows), cursorFence, inventory);
   }
 
   private page(
@@ -1279,11 +1306,13 @@ export class WorldChatTargetReads {
     }
 
     const limit = boundedLimit(args["limit"]);
+    const budget = inventory ? INVENTORY_PAGE_CHARS : TARGET_READ_PAGE_CHARS;
     const selected: Row[] = [];
     for (const row of rows.slice(start, start + limit)) {
-      // Reserve room for the target, digest, cursor and separate citation block. Large inventory
-      // records were split above, so even a single row cannot exceed the read's output budget.
-      if (inventory && selected.length && JSON.stringify({ items: [...selected, row].map(item => item.value) }, null, 2).length > 12_000) break;
+      // Reserve room for the target, digest, cursor and separate citation block. A page always
+      // takes its first row, so a read never stalls on a cursor; records too large for a page were
+      // split above, so even a single row cannot exceed the read's output budget.
+      if (selected.length && pageChars([...selected, row]) > budget) break;
       selected.push(row);
     }
     const hasMore = start + selected.length < rows.length;
