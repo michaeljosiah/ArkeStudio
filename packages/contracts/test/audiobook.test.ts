@@ -17,6 +17,7 @@ import {
   audiobookDoorLine,
   audiobookHeading,
   chapterNumber,
+  chapterCalled,
   publishedChapterTitle,
   audiobookRowLabel,
   audiobookTextHash,
@@ -77,6 +78,8 @@ describe("audiobook blocks (R-2)", () => {
     const book = [{ order: 1, title: "Prologue — The Lagoon" }, { order: 2, title: "Gold on Gold" }, { order: 3, title: "Suya at Midnight" },
       { order: 4, title: "Interlude" }, { order: 5, title: "Untitled" }, { order: 6, title: "Epilogue" }];
     assert.deepEqual(book.map((chapter) => chapterNumber(book, chapter)), [null, 1, 2, null, 3, null]);
+    // What Arke is told the book calls each one (issue 3215).
+    assert.deepEqual(book.map((chapter) => chapterCalled(book, chapter)), ["Prologue — The Lagoon", "Chapter 1", "Chapter 2", "Interlude", "Chapter 3", "Epilogue"]);
     assert.equal(audiobookHeading(chapterNumber(book, book[0]!), book[0]!.title), "Prologue — The Lagoon");
     assert.equal(audiobookHeading(chapterNumber(book, book[1]!), book[1]!.title), "Chapter 1 · Gold on Gold");
     assert.equal(audiobookHeading(chapterNumber(book, book[4]!), book[4]!.title), "Chapter 3");

@@ -12,6 +12,7 @@ import {
   orderedShots,
   canonicalSceneFlow,
   chapterParagraphs,
+  chapterCalled,
   isGraphScene,
   productionFrameRate,
   seedFirstPictureTimeline,
@@ -921,7 +922,11 @@ export class WorldChatTargetReads {
         const production = productionOf(bundle, productionId);
         const chapters = section === "plan" ? chapterPlans(production?.chapters ?? []) : production?.chapters ?? [];
         readTarget = target("chapters", section === "plan" ? `${productionId}::plan` : productionId);
-        rows = [...chapters].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)).map((chapter) => ({ key: `${padded(chapter.order)}:${chapter.id}`, value: chapter }));
+        // Each summary says what the book calls the chapter (issue 3215): order counts an unnumbered
+        // prologue, and Arke cited the book's Chapter 1 as chapter 2. It is derived from the titles
+        // and order the fence already covers.
+        rows = [...chapters].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
+          .map((chapter) => ({ key: `${padded(chapter.order)}:${chapter.id}`, value: { ...chapter, called: chapterCalled(production?.chapters ?? [], chapter) } }));
         revisionOrDigest = chaptersFence(production, section);
         break;
       }
