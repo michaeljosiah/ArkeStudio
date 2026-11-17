@@ -21,6 +21,8 @@ export interface AgentMediaTools {
 }
 /** A whole 60 s window of 1080p decodes on one thread in well under this; the 20 s default suits single frames. */
 const MEASURE_TIMEOUT_MS = 90_000;
+/** A 60 s window moved to a fractional offset (4.4 to 64.4) subtracts to 60.00000000000001; that is still the 60 s window. */
+const WINDOW_EPSILON = 1e-6;
 const even = (value: number) => Math.max(2, 2 * Math.round(value / 2));
 /** The crop and output size for a region of a `width` x `height` picture, its longer side at most `edge`. */
 export function regionGeometry(width: number, height: number, region: AgentMediaRegion | undefined, edge: number) {
@@ -127,7 +129,7 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
       const duration = endSec - startSec;
       if (!stream.sampleRate || !stream.channels || stream.sampleRate > AGENT_MEDIA_LIMITS.sampleRate || stream.channels > AGENT_MEDIA_LIMITS.channels ||
         !Number.isInteger(stream.index) || stream.index < 0 || stream.index > 255 || !Number.isInteger(rate) || rate < 4000 || rate > 48000 ||
-        !Number.isFinite(startSec) || startSec < 0 || !Number.isFinite(duration) || duration <= 0 || duration > AGENT_MEDIA_LIMITS.intervalSeconds) throw new Error("Audio exceeds the measurement derivative profile");
+        !Number.isFinite(startSec) || startSec < 0 || !Number.isFinite(duration) || duration <= 0 || duration > AGENT_MEDIA_LIMITS.intervalSeconds + WINDOW_EPSILON) throw new Error("Audio exceeds the measurement derivative profile");
       const result = await run("ffmpeg", ["-hide_banner", "-loglevel", "error", "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS,
         "-i", path, "-ss", String(startSec), "-t", String(duration), "-map", `0:${stream.index}`, "-vn", "-sn", "-map_metadata", "-1",
         "-ac", "1", "-ar", String(rate), "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"], signal, Math.ceil(duration * rate + rate) * 4, MEASURE_TIMEOUT_MS);
@@ -146,7 +148,7 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
       const duration = endSec - startSec, { fps, edge } = options;
       if (stream.kind !== "video" || !stream.width || !stream.height || Math.max(stream.width, stream.height) > 3840 || stream.width * stream.height > 3840 * 2160 ||
         !Number.isInteger(fps) || fps < 1 || fps > 60 || !Number.isInteger(edge) || edge < 16 || edge > 1280 ||
-        !Number.isFinite(startSec) || startSec < 0 || !Number.isFinite(duration) || duration <= 0 || duration > AGENT_MEDIA_LIMITS.intervalSeconds) throw new Error("Video exceeds the measurement frame profile");
+        !Number.isFinite(startSec) || startSec < 0 || !Number.isFinite(duration) || duration <= 0 || duration > AGENT_MEDIA_LIMITS.intervalSeconds + WINDOW_EPSILON) throw new Error("Video exceeds the measurement frame profile");
       const g = regionGeometry(stream.width, stream.height, options.region, edge), frameBytes = g.outWidth * g.outHeight;
       const maxFrames = Math.ceil(duration * fps) + 2;
       if (maxFrames * frameBytes > AGENT_MEDIA_LIMITS.pcmBytes) throw new Error("Video exceeds the measurement frame profile");

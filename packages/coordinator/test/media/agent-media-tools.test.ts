@@ -45,6 +45,14 @@ test("decoder bounds, aborts and raw diagnostics fail without leaking their cont
   await assert.rejects(fail.probe("private", signal()), error => error instanceof Error && !error.message.includes("PRIVATE"));
   const stop = new AbortController(); stop.abort(); await assert.rejects(tools.version(stop.signal));
 });
+test("a full 60 s measurement window at a fractional offset is still the 60 s window", async () => {
+  let asked: readonly string[] = [];
+  const fake = createAgentMediaTools({ run: async (_tool, args) => { asked = args; return { code: 0, stdout: Buffer.alloc(60 * 8000 * 4), stderr: "", timedOut: false, cancelled: false, outputLimitExceeded: false }; } });
+  const stream = { index: 0, kind: "audio" as const, codec: "pcm", sampleRate: 8000, channels: 1, durationSec: 100, startTimeSec: 0 };
+  assert.equal((await fake.monoAudio!("source", stream, 4.4, 4.4 + 60, 8000, signal())).length, 60 * 8000);
+  assert.ok(asked.includes("-ss") && asked[asked.indexOf("-ss") + 1] === "4.4");
+  await assert.rejects(fake.monoAudio!("source", stream, 4.4, 4.4 + 60.01, 8000, signal()), /profile/);
+});
 test("separately configured decoder and probe versions remain distinct", async () => {
   const versions = createAgentMediaTools({ run: async tool => ({ code: 0, stdout: Buffer.from(`${tool} version ${tool === "ffmpeg" ? "8-fixture" : "7-fixture"}\n`), stderr: "", timedOut: false, cancelled: false, outputLimitExceeded: false }) });
   assert.equal(await versions.version(signal()), "ffmpeg version 8-fixture"); assert.equal(await versions.probeVersion(signal()), "ffprobe version 7-fixture");

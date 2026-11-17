@@ -77,6 +77,21 @@ test("a mouth that moves when the voice starts and stops, two frames late, is fo
   assert.deepEqual(Array.from(loudnessChange(new Float64Array([1, 1, 3, 3]), 2)), [2]);
 });
 
+test("a window that is not whole steps is searched only inside itself (0.1 s of 40 ms steps is two)", () => {
+  const { samples, envelope } = syllables(6, 13), fps = 25, frames: Uint8Array[] = [];
+  for (let k = 0; k < 6 * fps; k++) {
+    const from = Math.round((k / fps - .12) * RATE), to = Math.round(((k + 1) / fps - .12) * RATE); let sum = 0;
+    for (let i = from; i < to; i++) sum += i >= 0 && i < envelope.length ? envelope[i]! : 0;
+    frames.push(new Uint8Array(64).fill(Math.round(40 + 200 * sum / (to - from))));
+  }
+  const result = measureMouthSync(frames, fps, samples, RATE, .1);
+  assert.ok(Math.abs(result.lagSec!) <= .1, String(result.lagSec));
+  const sound = measureSoundtrackSync(shifted(samples, .09), samples, RATE, .066);
+  assert.ok(Math.abs(sound.lagSec!) <= .066, String(sound.lagSec));
+  const reference = { source: { kind: "artifact", id: "ar_song" }, sourceHash: `sha256:${"a".repeat(64)}`, streamIndex: 0, startSec: 0, endSec: 6 };
+  assert.equal(AgentSyncMeasurementSchema.safeParse({ method: "mouth", streamIndex: 0, region: { x: .4, y: .5, width: .2, height: .15 }, reference, maxLagSec: .1, threshold: .5, ...result }).success, true);
+});
+
 test("the measurement schema holds a found lag to its window and a shift to a take that follows", () => {
   const base = { method: "soundtrack", streamIndex: 1, reference: { source: { kind: "artifact", id: "ar_song" }, sourceHash: `sha256:${"a".repeat(64)}`, streamIndex: 0, startSec: 2, endSec: 5 },
     stepSec: .01, maxLagSec: .6, lagSec: .12, correlation: .93, zeroLagCorrelation: .2, threshold: .5, follows: true, sourceShiftSec: .12, takeActiveFraction: .8, referenceActiveFraction: .8 };
