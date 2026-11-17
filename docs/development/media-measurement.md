@@ -53,3 +53,41 @@ It is signal measurement. A high correlation says the take's sound rises and fal
 reference, not that the words are the same; `transcribe_audio` reads words.
 
 Receipts raise the world to schema 140.
+
+## `song_map`: beats, sections and voice (#3075, #3099)
+
+**Input:** an audio source: the production's song, a stem or a recording. A source over 15 minutes
+needs a `window` (at most 15 minutes). Every time it returns is in seconds from the source's start.
+
+**Beats are tracked, not gridded.** The music video's hand grid was 2 ms a beat short of the song's
+0.600 s, and away from where it was fitted it drifted up to half a beat. The song's overall pulse,
+held as one grid, sat a quarter of a second off. So the tracker:
+- decodes 16 kHz mono;
+- takes spectral flux of log magnitudes in 40 mel bands, 10 ms steps (mel bands, so the hi-hats
+  filling the upper FFT bins do not outvote the kick);
+- finds the tempo from the onset curve's autocorrelation under a prior around 120 bpm, refined
+  between lags;
+- tracks beats by dynamic programming (Ellis 2007, tightness 100), each about one period from the
+  last and on an onset;
+- drops weak beats at either end, so a quiet intro or fade gets none.
+
+Where the music repeats every half-beat as well (a hi-hat on every off-beat), the tempo can read
+at double; the result says so.
+
+**Sections are the Studio's own.** `findSongSections` (#3134), fed the window as 48 kHz stereo
+through the effects analysis, returns the same boundaries the Cut proposes, with each section's
+loudness. They are boundaries, never names.
+
+**Voice, given a vocal stem aligned with the song:**
+- the stem's level in 100 ms steps;
+- a step counts as voice above the louder of −50 dBFS and 30 dB under the stem's usual loud level
+  (its 95th percentile);
+- gaps under 0.6 s are one phrase, and runs under 0.3 s are dropped as breaths;
+- each section reports how much of it is sung.
+
+**On the music video's song:**
+- 3:47 maps in 5.6 s: 100 bpm, 376 beats, one on the riff at 3:04 (183.98 s), and eight sections.
+- The lead stem shows no voice in the intro or the lull (0%), and 90–95% where he sings, from
+  0:15.
+
+Receipts raise the world to schema 141.

@@ -82,7 +82,7 @@ export const LEASED_OPERATIONS = [
   "view_image",
   "inspect_media", "sample_video", "analyze_audio_signal", "transcribe_audio", "review_audio_content", "listen_audio",
   // Local measurements of a cut (epic #3070), read-only like the inspections above.
-  "measure_sync",
+  "measure_sync", "song_map",
   // Reading a page the person named, kept as an attachment (2026-08-22).
   "fetch_url",
   // The production read (round 3, 2026-08-22): a read like the others — no write it could reach.
