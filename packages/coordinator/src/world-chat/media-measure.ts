@@ -1,4 +1,4 @@
-import { AGENT_SONG_LIMITS, AGENT_SYNC_LIMITS, AgentSongMapSchema, AgentSyncMeasurementSchema, EFFECT_ANALYSIS_PROFILE, SONG_SECTION_PROFILE,
+import { AGENT_SYNC_LIMITS, AgentSongMapSchema, AgentSyncMeasurementSchema, EFFECT_ANALYSIS_PROFILE, SONG_SECTION_PROFILE,
   createEffectPcmAnalyzer, findSongSections, type AgentMediaInventory, type AgentSongMap, type AgentSyncMeasurement, type MeasureSyncArgs, type SongMapArgs } from "@arke-studio/contracts";
 import { withContainedProductionMedia } from "../world/reference-files.js";
 import type { AgentMediaTools } from "../media/agent-media-tools.js";
@@ -61,7 +61,7 @@ export async function songMapInSnapshot(worldDir: string, tools: AgentMediaTools
   if (!pcm) throw new RetrievalError("unavailable", "Local song measurement is unavailable on this host.");
   const length = song.endSec - song.startSec, rate = SONG_MAP_PROFILE.rate, view = (at: number) => Math.round((song.viewStartSec + at) * 1000) / 1000;
   const mono = (await decodeLong(pcm, song.path, song.stream, song.startSec, song.endSec, { rate, channels: 1 }, signal))!;
-  const { beatsSec, tempoBpm } = songBeats(mono);
+  const { beatsSec, tempoBpm } = await songBeats(mono, signal);
   const fps = SONG_SECTION_PROFILE.frameRate, frames = Math.floor(length * fps);
   let starts = [0];
   if (frames >= 1) {
@@ -83,7 +83,8 @@ export async function songMapInSnapshot(worldDir: string, tools: AgentMediaTools
       const found = voiceIntervals((await decodeLong(pcm, snapshot.path, selected, startSec, Math.min(endSec, end), { rate, channels: 1 }, signal))!, rate);
       sung = found.intervals;
       return { source: args.vocal!.source, sourceHash: snapshot.sourceHash, streamIndex: selected.index, thresholdDbfs: found.thresholdDbfs,
-        intervals: found.intervals.slice(0, AGENT_SONG_LIMITS.maxVoiceIntervals).map(span => ({ startSec: view(span.startSec), endSec: view(Math.min(length, span.endSec)) })) };
+        // Never cut short: the limit holds every phrase a 15-minute window can have, and past it the schema refuses rather than a map going quiet.
+        intervals: found.intervals.map(span => ({ startSec: view(span.startSec), endSec: view(Math.min(length, span.endSec)) })) };
     });
   }
   const levels = stepLevels(mono, rate, .1);
@@ -95,7 +96,7 @@ export async function songMapInSnapshot(worldDir: string, tools: AgentMediaTools
     return { startSec: view(at), endSec: view(endAt), loudnessDbfs: count && power > 0 ? Math.round(10 * Math.log10(power / count) * 10) / 10 : null,
       vocalFraction: voice ? Math.round(Math.min(1, overlap / (endAt - at)) * 1000) / 1000 : null };
   });
-  const beats = beatsSec.filter(at => at <= length).slice(0, AGENT_SONG_LIMITS.maxBeats).map(view);
+  const beats = beatsSec.filter(at => at <= length).map(view);
   return AgentSongMapSchema.parse({ streamIndex: song.stream.index, startSec: view(0), endSec: view(length),
     tempoBpm: beats.length ? tempoBpm : null, beats, sections, vocal: voice });
 }

@@ -28,8 +28,8 @@ function groove(seconds: number, bpm: number, firstBeat: number, seed = 1, hats 
   return { samples, beats };
 }
 
-test("a steady 100 bpm groove: tempo 100, every tracked beat on a kick, not on the hi-hat between", () => {
-  const { samples, beats } = groove(40, 100, .3), found = songBeats(samples);
+test("a steady 100 bpm groove: tempo 100, every tracked beat on a kick, not on the hi-hat between", async () => {
+  const { samples, beats } = groove(40, 100, .3), found = await songBeats(samples);
   assert.ok(Math.abs(found.tempoBpm! - 100) < .5, String(found.tempoBpm));
   assert.ok(found.beatsSec.length >= beats.length - 3, `${found.beatsSec.length} of ${beats.length}`);
   for (const beat of found.beatsSec) {
@@ -38,21 +38,21 @@ test("a steady 100 bpm groove: tempo 100, every tracked beat on a kick, not on t
   }
 });
 
-test("a 128 bpm groove and a slow 72 bpm kick keep their own tempo; hats on every off-beat of the slow one read it at double", () => {
+test("a 128 bpm groove and a slow 72 bpm kick keep their own tempo; hats on every off-beat of the slow one read it at double", async () => {
   for (const bpm of [128, 72]) {
-    const found = songBeats(groove(40, bpm, .1, bpm, bpm !== 72).samples);
+    const found = await songBeats(groove(40, bpm, .1, bpm, bpm !== 72).samples);
     assert.ok(Math.abs(found.tempoBpm! - bpm) < 1, `${bpm}: ${found.tempoBpm}`);
   }
   // The music then repeats every half-beat as well, and the 120 bpm prior hears 144: the tool's limitations say so.
-  assert.ok(Math.abs(songBeats(groove(40, 72, .1, 72).samples).tempoBpm! - 144) < 2);
+  assert.ok(Math.abs((await songBeats(groove(40, 72, .1, 72).samples)).tempoBpm! - 144) < 2);
 });
 
-test("noise with no pulse gets no beats rather than a guessed grid", () => {
+test("noise with no pulse gets no beats rather than a guessed grid", async () => {
   const next = random(9), samples = new Float32Array(20 * RATE).map(() => .2 * (next() * 2 - 1));
-  const found = songBeats(samples);
+  const found = await songBeats(samples);
   assert.ok(found.tempoBpm === null || found.beatsSec.length < 10, JSON.stringify({ tempo: found.tempoBpm, beats: found.beatsSec.length }));
-  assert.deepEqual(trackBeats(new Float64Array(0), 60), []);
-  assert.equal(estimatePeriod(onsetCurve(new Float32Array(RATE))), null);
+  assert.deepEqual(await trackBeats(new Float64Array(0), 60), []);
+  assert.equal(estimatePeriod(await onsetCurve(new Float32Array(RATE))), null);
 });
 
 test("a vocal stem's phrases come back as intervals; a breath inside a phrase does not split it, a long rest does", () => {
@@ -63,6 +63,26 @@ test("a vocal stem's phrases come back as intervals; a breath inside a phrase do
   const { intervals, thresholdDbfs } = voiceIntervals(samples, RATE);
   assert.deepEqual(intervals, [{ startSec: 2, endSec: 7 }, { startSec: 12, endSec: 15.5 }]);
   assert.ok(thresholdDbfs > -50 && thresholdDbfs < -20, String(thresholdDbfs));
+});
+
+test("a long song is measured without holding the coordinator: a timer runs before the beats are done, and a stop stops it", async () => {
+  const { samples } = groove(60, 100, .3), order: string[] = [];
+  setTimeout(() => order.push("timer"), 0);
+  await songBeats(samples);
+  order.push("done");
+  assert.deepEqual(order, ["timer", "done"]);
+  const stop = new AbortController(); stop.abort();
+  await assert.rejects(songBeats(samples, stop.signal));
+});
+
+test("a 15-minute stem with a phrase every second keeps every phrase, inside the map's limit", () => {
+  const rate = 4000, samples = new Float32Array(900 * rate);
+  for (let s = 0; s < 900; s++) for (let i = 0; i < .4 * rate; i++) samples[s * rate + i] = .3 * Math.sin(2 * Math.PI * 220 * i / rate);
+  const { intervals } = voiceIntervals(samples, rate);
+  assert.equal(intervals.length, 900); assert.equal(intervals[899]!.startSec, 899);
+  const map = { streamIndex: 0, startSec: 0, endSec: 900, tempoBpm: null, beats: [], sections: [{ startSec: 0, endSec: 900, loudnessDbfs: -20, vocalFraction: .4 }],
+    vocal: { source: { kind: "artifact", id: "ar_stem" }, sourceHash: `sha256:${"b".repeat(64)}`, streamIndex: 0, thresholdDbfs: -40, intervals } };
+  assert.equal(AgentSongMapSchema.safeParse(map).success, true);
 });
 
 test("the song map schema holds beats, sections and the voice to the measured window", () => {
