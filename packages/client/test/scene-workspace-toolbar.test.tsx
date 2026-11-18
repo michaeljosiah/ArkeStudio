@@ -344,6 +344,29 @@ describe("the generate dialog (SPEC-036 R-15, R-16)", () => {
     assert.match(dialog.querySelector(".fy-swgen__estimate")?.textContent ?? "", /2 frames · \$0\.08/);
   });
 
+  // Issue 3247: twenty frames of a film went out with no light named on the scene or on any
+  // shot and came back lit like a studio still. This line is the last look before they are drawn.
+  it("says the scene's light in the context line, and says when a film has none", async () => {
+    const bare = await mount(stateWith());
+    await click(named(bare, "Generate frames"));
+    assert.match(one(bare, ".fy-swgen__context")?.textContent ?? "", /, no light set, 16:9$/);
+
+    const state = stateWith();
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")!;
+    scene.defaults = { lighting: "Practical lantern" };
+    const lit = await mount(state);
+    await click(named(lit, "Generate frames"));
+    const context = one(lit, ".fy-swgen__context")?.textContent ?? "";
+    assert.match(context, /, Practical lantern, 16:9$/);
+    assert.doesNotMatch(context, /no light set/);
+
+    const graded = stateWith();
+    graded.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")!.defaults = { grade: "35mm film, a little underexposed" };
+    const looked = await mount(graded);
+    await click(named(looked, "Generate frames"));
+    assert.doesNotMatch(one(looked, ".fy-swgen__context")?.textContent ?? "", /no light set/, "a grade is a look said; the line stays quiet");
+  });
+
   it("swaps the primary for the sentence when the scope resolves to nothing", async () => {
     const item = await mount(stateWith({ allFramed: true }));
     await click(named(item, "Generate frames"));

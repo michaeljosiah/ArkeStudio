@@ -417,3 +417,23 @@ describe("edit-scene carries the inherited context and the cast (SPEC-044 R-7, R
     assert.equal(SceneCommandSchema.safeParse({ kind: "edit-scene", inherits: { location: "counting-room", weather: "rain" } }).success, false);
   });
 });
+
+describe("edit-scene carries the camera every shot inherits (issue 3247)", () => {
+  it("merges the defaults per field: a value sets, null clears, an emptied camera is dropped whole", () => {
+    const before: GraphScene = { ...graph(["sh_1"]), defaults: { lens: "35mm" } };
+    const lit = editScene(before, { defaults: { lighting: "Practical lantern", grade: "35mm film, a little underexposed" } });
+    assert.deepEqual(lit.defaults, { lens: "35mm", lighting: "Practical lantern", grade: "35mm film, a little underexposed" });
+    assert.deepEqual(editScene(lit, { defaults: { lens: null } }).defaults, { lighting: "Practical lantern", grade: "35mm film, a little underexposed" });
+    const cleared = editScene(lit, { defaults: { lens: null, lighting: null, grade: null } });
+    assert.equal("defaults" in cleared, false, "an emptied camera leaves no key for a shot's 'from scene' to read");
+    assert.deepEqual(editScene(before, {}).defaults, { lens: "35mm" }, "an absent patch leaves the camera alone");
+    assert.deepEqual(lit.flow, before.flow, "the scene's camera is not a shot edit");
+  });
+
+  it("the command schema takes the nine fields, and bounds a line that would drown the shot", () => {
+    assert.ok(SceneCommandSchema.safeParse({ kind: "edit-scene", defaults: { lens: "50mm", focus: "Shallow", lighting: "Practical lantern", grade: null } }).success);
+    assert.equal(SceneCommandSchema.safeParse({ kind: "edit-scene", defaults: { mood: "tense" } }).success, false, "not a camera field");
+    assert.equal(SceneCommandSchema.safeParse({ kind: "edit-scene", defaults: { grade: "" } }).success, false, "null clears; an empty line is not a value");
+    assert.equal(SceneCommandSchema.safeParse({ kind: "edit-scene", defaults: { grade: "x".repeat(401) } }).success, false, "issue 942: the look must not outweigh the shot");
+  });
+});

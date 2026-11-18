@@ -2023,6 +2023,27 @@ describe("the shot's cinematic intent, timing, structured camera, negatives and 
     await store.close();
   });
 
+  // Issue 3247: a film's frames came back lit like a studio still because nothing told the
+  // picture model how the scene is photographed. The scene's camera is the one place that says
+  // it for every shot, so it has to reach a still as well as a clip.
+  it("says the scene's light and look to a still, and leaves the move to the clip", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const bare: Shot = shot(1, 6, "@maren-kest grips the rail");
+    const lit = {
+      ...scene([bare]),
+      defaults: { lens: "50mm", focus: "Shallow", lighting: "Practical lantern", grade: "35mm film, a little underexposed", movement: "Handheld" },
+    };
+    const still = assemblePrompt(bundle.meta, bundle.sheets, lit, bare, undefined, undefined, "image");
+    for (const value of ["50mm", "Shallow", "Practical lantern", "35mm film, a little underexposed"]) {
+      assert.ok(still.includes(value), `a shot that set nothing still tells the picture model ${value}`);
+    }
+    assert.ok(!still.includes("Handheld"), "a still has no camera move to make");
+    const clip = assemblePrompt(bundle.meta, bundle.sheets, lit, bare, undefined, undefined, "video");
+    assert.ok(clip.includes("Practical lantern") && clip.includes("Handheld"), "the clip is told the light and the move");
+    await store.close();
+  });
+
   it("says nothing about a camera nobody set, rather than a default", async () => {
     const { store } = await open();
     const bundle = store.getBundle();

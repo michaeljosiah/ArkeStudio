@@ -30,6 +30,20 @@
 :where([data-screen="scene-detail"]) .fy-sw__details > summary:hover, :where([data-screen="scene-detail"]) .fy-sw__details[open] > summary { background: var(--accent); color: var(--foreground); }
 :where([data-screen="scene-detail"]) .fy-sw__detailspanel { position: absolute; z-index: 3; top: calc(100% + 8px); right: 0; width: min(100%, 420px); padding: 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--popover); box-shadow: var(--shadow-lg); }
 :where([data-screen="scene-detail"]) .fy-sw__detailspanel > span:not(:first-child) { display: inline-block; margin: 8px 12px 0 0; color: var(--muted-foreground); font-size: 13px; }
+/* The scene's camera (issue 3247): the shot card's fields, here where every shot inherits them.
+   Unscoped, because the phone raises the same group in a sheet outside the scene's own element. */
+.fy-sw__camera { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px; margin-top: 12px; }
+.fy-sw__camerafield { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.fy-sw__camerafield--wide { grid-column: 1 / -1; }
+.fy-sw__camerafield > span:first-child { color: var(--muted-foreground); font: 400 var(--text-xs)/1.4 var(--font-sans); }
+.fy-sw__cameraselectwrap { width: 100%; }
+.fy-sw__cameraselect { width: 100%; height: 28px; padding: 0 28px 0 10px; border-color: var(--border); border-radius: 8px; font: 400 var(--text-sm)/1.4 var(--font-sans); }
+.fy-sw__camerafield > input { width: 100%; height: 28px; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: 400 var(--text-sm)/1.4 var(--font-sans); }
+.fy-sw__camerafield > input:disabled { opacity: .6; }
+@media (max-width: 599px) {
+  .fy-sw__camera { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fy-sw__cameraselect, .fy-sw__camerafield > input { height: 44px; }
+}
 :where([data-screen="scene-detail"]) .fy-sw__toolbar { max-width: none; gap: 12px; padding-bottom: 12px; flex-wrap: wrap; }
 :where([data-screen="scene-detail"]) .fy-sw__tabs { border-radius: 10px; padding: 3px; background: color-mix(in srgb, var(--secondary) 38%, var(--background)); }
 :where([data-screen="scene-detail"]) .fy-sw__tab[data-on="true"] { background: var(--secondary); font-weight: 500; }
