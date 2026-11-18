@@ -20,9 +20,12 @@ import {
   setBoardOverride,
   setBoardPrompt,
   clearBoardPrompt,
+  sceneCommandCandidate,
+  stageFrameKey,
   type GraphScene,
   type Scene,
   type SceneRecord,
+  type WorldBundle,
 } from "../src/index.js";
 
 /**
@@ -435,5 +438,24 @@ describe("edit-scene carries the camera every shot inherits (issue 3247)", () =>
     assert.equal(SceneCommandSchema.safeParse({ kind: "edit-scene", defaults: { mood: "tense" } }).success, false, "not a camera field");
     assert.equal(SceneCommandSchema.safeParse({ kind: "edit-scene", defaults: { grade: "" } }).success, false, "null clears; an empty line is not a value");
     assert.equal(SceneCommandSchema.safeParse({ kind: "edit-scene", defaults: { grade: "x".repeat(401) } }).success, false, "issue 942: the look must not outweigh the shot");
+  });
+
+  // A camera written in words stands where its lens puts it (issue 1820). The scene's lens is
+  // the lens of every shot that has not set its own, so moving it moves those cameras and no others.
+  it("solves a staged camera again when the scene's lens moves, for the shots that inherit it", () => {
+    const cast = [{ sheetId: "ade", x: 1, z: 0, facing: 0 }];
+    const key = stageFrameKey({ version: 1, sets: [], keys: [], cast }, { subject: "ade", size: "medium", angle: "eye", side: "front" }, 0, 4, "16:9", "35mm")!;
+    const staging = { version: 1, cast, sets: [], keys: [key] };
+    let scene: GraphScene = { ...graph(["sh_1", "sh_2"]), defaults: { lens: "35mm" } };
+    scene = editShot(scene, { shotId: "sh_1", change: { staging } });
+    scene = editShot(scene, { shotId: "sh_2", change: { staging, framing: { lens: "35mm" } } });
+    const moved = sceneCommandCandidate({} as WorldBundle, "saltlight", scene, { kind: "edit-scene", defaults: { lens: "85mm" } });
+    const [inherits, own] = orderedShots(moved);
+    assert.deepEqual(inherits!.staging!.keys[0]!.frame, key.frame, "the words stay");
+    assert.notDeepEqual(inherits!.staging!.keys[0]!.p, key.p, "a longer lens stands further back to hold the same size");
+    assert.equal(inherits!.staging!.version, 2, "and the staging says it moved, so a playblast filed from the old one is stale");
+    assert.deepEqual(own!.staging, staging, "a shot on its own lens is not the scene's to move");
+    const relit = sceneCommandCandidate({} as WorldBundle, "saltlight", scene, { kind: "edit-scene", defaults: { lighting: "Practical lantern" } });
+    assert.deepEqual(orderedShots(relit)[0]!.staging, staging, "the light is not the lens: nothing is solved again");
   });
 });
