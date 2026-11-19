@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   ModelWorldChatActionSchema,
   SceneCommandSchema,
+  WORLD_ACTION_DESCRIPTIONS,
   WorldChatProductionSceneCommandActionSchema,
   WorldAuthoredFieldChangesSchema,
   WorldAuthoredFieldsSchema,
@@ -312,6 +313,29 @@ describe("World Chat authored action contracts", () => {
       },
       checkReceiptIds: [CHECK],
     }), /script block ids must be unique/i);
+  });
+
+  it("lets a scene edit clear its location with null, never with an empty slug (issue 3153)", () => {
+    const edit = (inherits: unknown) => ({
+      kind: "production-scene",
+      productionId: "saltlight",
+      change: { operation: "edit", sceneId: "sc_04", changes: { inherits } },
+      checkReceiptIds: [CHECK],
+    });
+    const cleared = ModelWorldChatActionSchema.parse(edit({ location: null }));
+    assert.ok(cleared.kind === "production-scene" && cleared.change.operation === "edit");
+    assert.deepEqual(cleared.change.changes.inherits, { location: null });
+    assert.doesNotThrow(() => ModelWorldChatActionSchema.parse(edit({ location: null, timeOfDay: null, tone: null })));
+    assert.doesNotThrow(() => ModelWorldChatActionSchema.parse(edit(null)));
+    assert.throws(() => ModelWorldChatActionSchema.parse(edit({ location: "" })));
+    // A new scene has nothing to clear: its context is only what it names.
+    assert.throws(() => ModelWorldChatActionSchema.parse({
+      kind: "production-scene",
+      productionId: "saltlight",
+      change: { operation: "create", title: "The ledger", inherits: { location: null } },
+      checkReceiptIds: [CHECK],
+    }));
+    assert.match(WORLD_ACTION_DESCRIPTIONS["production-scene"], /\{"location":null\}/, "the guide says how to clear it");
   });
 
   it("admits every scene, board, and take action without admitting host paths or generic scene payloads", () => {

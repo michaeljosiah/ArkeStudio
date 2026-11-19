@@ -3691,7 +3691,20 @@ describe("the header's cast row and place chip (SPEC-044 R-1, R-2, R-4; T-1, T-2
     await click([...q(mounted, ".fy-chardialog")!.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Change location") as HTMLElement);
     assert.equal(q(mounted, ".fy-chardialog"), null, "the dialog steps aside for the picker");
     assert.equal(q(mounted, ".fy-castpicker")?.getAttribute("aria-label"), "Change location");
-    assert.deepEqual([...q(mounted, ".fy-castpicker")!.querySelectorAll(".fy-castpicker__card")].map((card) => card.getAttribute("aria-label")), ["The Vigil · in the scene"]);
+    assert.deepEqual([...q(mounted, ".fy-castpicker")!.querySelectorAll(".fy-castpicker__card")].map((card) => card.getAttribute("aria-label")), ["No location", "The Vigil · in the scene"]);
+  });
+
+  it("No location under Change location takes the place away (issue 3153)", async () => {
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(FIXTURE_STATE);
+    await click(q(mounted, ".fy-sw__place")!);
+    await click([...q(mounted, ".fy-chardialog")!.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Change location") as HTMLElement);
+    await click(q(mounted, '.fy-castpicker [aria-label="No location"]') as HTMLElement);
+    const command = sent.find((message) => message.kind === "scene-command");
+    assert.ok(command && command.kind === "scene-command");
+    assert.deepEqual(command.command, { kind: "edit-scene", inherits: { location: null } });
+    assert.equal(q(mounted, ".fy-castpicker"), null, "a press clears and closes");
   });
 
   it("names a place the world has no sheet for in words, not by its slug (issue 3001)", async () => {

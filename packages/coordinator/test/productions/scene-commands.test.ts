@@ -1062,6 +1062,21 @@ describe("edit-scene writes the place and the cast, and refuses a place the worl
     assert.deepEqual((await readKit(store, "the-vigil"))!.kit.looks?.map((look) => [look.id, look.attachedTo]), [["door", undefined]], "the old place holds no claim on this scene");
   });
 
+  it("No location writes the scene without its place and releases the old plate (issue 3153)", async () => {
+    const { store } = await open();
+    await acceptCharacterLook(store, "the-vigil", { id: "door", file: "looks/door.png", kind: "view", prompt: "From the door",
+      takeId: "tk_01J8E0000000000000000000T4", artDirectionVersion: 3 });
+    await attachCharacterLook(store, "the-vigil", "door", { kind: "scene", productionId: PRODUCTION, sceneId: SCENE_ID });
+    const before = await sceneOnDisk(store);
+    await applySceneCommand(store, { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version,
+      command: { kind: "edit-scene", inherits: { location: null } } });
+    const after = await sceneOnDisk(store);
+    assert.equal(after.version, before.version + 1);
+    assert.equal("location" in (after.inherits ?? {}), false, "no key, not an empty one");
+    assert.deepEqual(after.inherits, { timeOfDay: "night", tone: "quiet dread" });
+    assert.deepEqual((await readKit(store, "the-vigil"))!.kit.looks?.map((look) => [look.id, look.attachedTo]), [["door", undefined]]);
+  });
+
   it("refuses a read the production does not hold, or a member who is no character, writing nothing (codex rounds 1 and 2)", async () => {
     const { store } = await open();
     const before = await sceneOnDisk(store);

@@ -220,6 +220,28 @@ export function replacePassage(
   return body.slice(0, first) + passage.with + body.slice(first + passage.find.length);
 }
 
+/**
+ * A scene edit's inherited context, merged per field as the header's edit-scene merges it
+ * (SPEC-044 R-19): a value sets, null clears, a field left out stays, and a context emptied goes
+ * from the record whole, as one that never had one reads. Replaced whole, an edit could not clear
+ * a place without restating the rest (issue 3153), and one naming only the time of day dropped a
+ * place it never named. Null for the whole context still clears all of it.
+ */
+function inheritsEdit(
+  current: Record<string, string> | undefined,
+  edit: Record<string, string | null | undefined> | null | undefined,
+): { inherits?: Record<string, string> | null } {
+  if (edit === undefined) return {};
+  if (edit === null) return { inherits: null };
+  const merged: Record<string, string> = { ...current };
+  for (const [field, value] of Object.entries(edit)) {
+    if (value === undefined) continue;
+    if (value === null) delete merged[field];
+    else merged[field] = value;
+  }
+  return { inherits: Object.keys(merged).length === 0 ? null : merged };
+}
+
 function withoutCleared<T extends Record<string, unknown>>(
   current: T,
   changes: Record<string, unknown>,
@@ -308,8 +330,9 @@ export function resolveChapterViewpointEdit(store: WorldStore, productionId: str
   return pov;
 }
 
-function requireSceneLocation(store: WorldStore, locationId: string | undefined): void {
-  if (locationId === undefined) return;
+function requireSceneLocation(store: WorldStore, locationId: string | null | undefined): void {
+  // Null is an edit clearing the place (issue 3153): there is no sheet to find.
+  if (locationId === undefined || locationId === null) return;
   const location = store.getBundle().sheets.find((sheet) => sheet.id === locationId && sheet.type === "location");
   if (!location) throw refuse(`location ${locationId} is not in this world`);
 }
@@ -909,7 +932,7 @@ export async function stageWorldChatProductionAuthoredAction(
   }
   const record = change.operation === "replace-script"
     ? SceneRecordSchema.parse({ ...graph, script: { blocks: change.blocks } })
-    : SceneRecordSchema.parse(withoutCleared(graph, change.changes));
+    : SceneRecordSchema.parse(withoutCleared(graph, { ...change.changes, ...inheritsEdit(graph.inherits, change.changes.inherits) }));
   return gate.stage({
     kind: "scene-edit",
     summary: change.operation === "replace-script" ? `Scene script: ${current.title}` : `Edit scene: ${current.title}`,

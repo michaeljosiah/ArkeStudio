@@ -543,6 +543,20 @@ const SceneInheritsSchema = z
   })
   .strict();
 
+/**
+ * A scene edit's inherited context, per field, as the header's edit-scene and the setup update
+ * take it (SPEC-044 R-19): a value sets, null clears, a field left out stays. With no way to say
+ * none, Arke asked twice to clear a place with an empty slug and both turns failed (issue 3153).
+ * The guide's field list does not show null, so the action's description says it.
+ */
+const SceneInheritsEditSchema = z
+  .object({
+    location: SlugSchema.nullable().optional(),
+    timeOfDay: z.string().nullable().optional(),
+    tone: z.string().nullable().optional(),
+  })
+  .strict();
+
 const ScriptBlocksSchema = z.array(ScriptBlockSchema).max(200).superRefine((blocks, context) => {
   const seen = new Set<string>();
   for (const [index, block] of blocks.entries()) {
@@ -843,7 +857,7 @@ const ProductionSceneModelActionSchema = z
               title: z.string().trim().min(1).max(200).optional(),
               synopsis: z.string().max(2_000).nullable().optional(),
               status: z.string().trim().min(1).max(120).optional(),
-              inherits: SceneInheritsSchema.nullable().optional(),
+              inherits: SceneInheritsEditSchema.nullable().optional(),
               defaults: ShotFramingSchema.nullable().optional(),
             })
             .strict()
