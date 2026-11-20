@@ -42,8 +42,14 @@ export const PLACE_POSITION_NAME_MAX = 24;
 
 const Point3Schema = z.tuple([z.number().finite(), z.number().finite(), z.number().finite()]);
 const FocalSchema = z.number().finite().positive().max(1000);
-/** Counted as a person reads it: a name of 24 accented letters is 24, whatever it is in code units. */
-const PositionNameSchema = z.string().trim().min(1).refine((name) => [...name].length <= PLACE_POSITION_NAME_MAX, `a position's name is ${PLACE_POSITION_NAME_MAX} characters at most`);
+const graphemes = typeof Intl.Segmenter === "function" ? new Intl.Segmenter(undefined, { granularity: "grapheme" }) : null;
+/**
+ * A name's length as a person reads it. Yoruba writes a letter with a dot below and a tone above
+ * it, which is one letter and up to three code points: counted in code units, a name of fifteen
+ * letters could be refused as too long.
+ */
+export const placePositionNameLength = (name: string): number => (graphemes ? [...graphemes.segment(name)].length : [...name].length);
+const PositionNameSchema = z.string().trim().min(1).refine((name) => placePositionNameLength(name) <= PLACE_POSITION_NAME_MAX, `a position's name is ${PLACE_POSITION_NAME_MAX} characters at most`);
 
 /**
  * The camera in words, as a position keeps them (turn 229's words; the lens is the position's own).
@@ -188,9 +194,22 @@ export function placePlanAfter(plan: PlacePlan, change: PlacePlanChange): PlaceP
   return { ...plan, positions: plan.positions.map((position) => (position === current ? next : position)) };
 }
 
-/** Whether two sets are the same pieces in the same order: what "the scene carries the place's set" means. */
+/** A value's JSON with every object's keys in one order, so two records that say the same thing read the same. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, inner: unknown) =>
+    inner !== null && typeof inner === "object" && !Array.isArray(inner)
+      ? Object.fromEntries(Object.entries(inner as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)))
+      : inner);
+}
+
+/**
+ * Whether two sets are the same pieces in the same order: what "the scene carries the place's set"
+ * means. Judged on what they say, not on their bytes: a set that has been through the schema comes
+ * back with its keys in the schema's order, and read as bytes it would differ from the same set as
+ * a command wrote it, so a Keep that changed nothing would move the place's version.
+ */
 export function sameStageSets(a: readonly StagingSet[] | undefined, b: readonly StagingSet[] | undefined): boolean {
-  return JSON.stringify(a ?? []) === JSON.stringify(b ?? []);
+  return canonical(a ?? []) === canonical(b ?? []);
 }
 
 /** The plan of the place a scene is set in, when the place has one. */
