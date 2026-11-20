@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { audiobookHeading, audiobookScopeKey, chapterNumber, clockTime, DEFAULT_VIDEO_OPTIONS, ulid, type AudiobookListening, type AudiobookScope, type AudiobookVideoOptions, type AudiobookVideoResult, type ProductionBundle, type VideoShape } from "@arke-studio/contracts";
+import { audiobookHeading, audiobookScopeKey, chapterCalled, chapterNumber, clockTime, DEFAULT_VIDEO_OPTIONS, ulid, type AudiobookListening, type AudiobookScope, type AudiobookVideoOptions, type AudiobookVideoResult, type ProductionBundle, type VideoShape } from "@arke-studio/contracts";
 import {
   cancelExport,
   exportAudiobookPlayer,
@@ -345,7 +345,7 @@ export function AudiobookExportSheet({ worldId, production, chapterId, onReadRem
     <div className="fy-abv-foot"><span>{progress === null ? "Starting render…" : `${progress}%${held?.video?.leftSec === null || held?.video?.leftSec === undefined ? "" : ` · about ${Math.max(1, Math.ceil(held.video.leftSec / 60))} minute${held.video.leftSec > 60 ? "s" : ""} left`}`}</span><span className="grow" /><button type="button" className="fy-abv-btn" onClick={() => cancelExport(worldId, rendering)}>Stop</button></div>
     <p>You can close this sheet. The render stays in Activity.</p>
   </div>;
-  const footer = rendering !== null ? <div className="fy-abv-foot"><span className="grow" /><button type="button" className="fy-abv-btn pri" onClick={onClose}>{scopedChapter === undefined ? "Back to audiobook" : `Back to Chapter ${scopedChapter.order}`}</button></div> : finished !== null ? <div className="fy-abv-foot"><span className="grow" /><button type="button" className="fy-abv-btn pri" onClick={onClose}>Done</button></div> : kind === "video" ? videoFoot : playerFoot;
+  const footer = rendering !== null ? <div className="fy-abv-foot"><span className="grow" /><button type="button" className="fy-abv-btn pri" onClick={onClose}>{scopedChapter === undefined ? "Back to audiobook" : `Back to ${chapterCalled(production.chapters, scopedChapter)}`}</button></div> : finished !== null ? <div className="fy-abv-foot"><span className="grow" /><button type="button" className="fy-abv-btn pri" onClick={onClose}>Done</button></div> : kind === "video" ? videoFoot : playerFoot;
 
   if (phone) {
     // One column, from the foot, 44-high presses (197f). The kind is a row of its own here: the

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import { DEFAULT_STORY_PDF_SETTINGS, StoryPublicationSettingsSchema, worldImageReferences, type ProductionBundle, type StoryEdition, type StoryPublicationReview, type StoryPublicationSettings, type StoryStyleFinding, type StoryPublishAction } from "@arke-studio/contracts";
+import { chapterNumber, DEFAULT_STORY_PDF_SETTINGS, StoryPublicationSettingsSchema, worldImageReferences, type ProductionBundle, type StoryEdition, type StoryPublicationReview, type StoryPublicationSettings, type StoryStyleFinding, type StoryPublishAction } from "@arke-studio/contracts";
 import { listStoryPublications, publishStory, subscribeStoryPublications, useStore, useWorld } from "../lib/store.js";
 import { mediaUrl, storyEditionMediaUrl, storyPreviewMediaUrl } from "../lib/media.js";
 import { isRemoteSession } from "../lib/remote-session.js";
@@ -160,6 +160,8 @@ export function StoryEditionLibrary({ worldId, productionId, onPreview }: { worl
 
 export function StoryPublishSheet({ worldId, production, onClose }: { worldId: string; production: ProductionBundle; onClose: () => void }) {
   const chapters = production.chapters.filter(chapter => !chapter.retired).sort((a, b) => a.order - b.order);
+  // Each chapter by the number the book calls it (SPEC-047 R-2), a prologue by its title alone.
+  const listed = (chapter: (typeof chapters)[number]) => { const number = chapterNumber(production.chapters, chapter); return number === null ? chapter.title : `${number}. ${chapter.title}`; };
   const [settings, setSettings] = useState<StoryPublicationSettings>(() => ({ title: production.meta.title, author: "", language: "en", description: "", label: "Private edition", cover: null,
     chapterIds: chapters.filter(chapter => chapter.status !== "outlined").map(chapter => chapter.id), outputs: ["epub"], avoidEmDashes: false }));
   const [step, setStep] = useState<Step>("Edition"), [review, setReview] = useState<StoryPublicationReview | null>(null);
@@ -265,7 +267,7 @@ export function StoryPublishSheet({ worldId, production, onClose }: { worldId: s
         <StoryEditionLibrary worldId={worldId} productionId={production.meta.id} onPreview={row => { watching.current = row.id; setBusy(row.status === "creating"); setEdition(row); setSettings(row.settings); setStep(row.status === "ready" ? "Files" : "Preview"); }} />
       </>}
       {step === "Chapters" && <><p>Chapters stay in manuscript order. Empty or incomplete chapters must be fixed or explicitly left out.</p>
-        {chapters.map(chapter => <label className="fy-publish-choice" key={chapter.id}><input type="checkbox" checked={settings.chapterIds.includes(chapter.id)} onChange={event => update({ chapterIds: event.target.checked ? chapters.filter(row => row.id === chapter.id || settings.chapterIds.includes(row.id)).map(row => row.id) : settings.chapterIds.filter(id => id !== chapter.id) })} /><span><strong>{chapter.order}. {chapter.title}</strong><small>{chapter.words ?? 0} words</small></span></label>)}
+        {chapters.map(chapter => <label className="fy-publish-choice" key={chapter.id}><input type="checkbox" checked={settings.chapterIds.includes(chapter.id)} onChange={event => update({ chapterIds: event.target.checked ? chapters.filter(row => row.id === chapter.id || settings.chapterIds.includes(row.id)).map(row => row.id) : settings.chapterIds.filter(id => id !== chapter.id) })} /><span><strong>{listed(chapter)}</strong><small>{chapter.words ?? 0} words</small></span></label>)}
         <p>{settings.chapterIds.length} of {chapters.length} chapters selected</p></>}
       {step === "Formatting & style" && (finding ? <div className="fy-publish-review">
         <p>{finding.chapterTitle} · Paragraph {finding.paragraph + 1}</p><p>{finding.reason}</p>

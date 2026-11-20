@@ -4,6 +4,7 @@ import { resolveModel, worldModel } from "./dispatch-bar.js";
 import { ChapterLookSheet } from "./chapter-look-sheet.js";
 import { SavedLookCollection } from "./saved-look-collection.js";
 import { openActivityPanel } from "../lib/activity-panel.js";
+import { calledAt } from "../lib/chapter-called.js";
 import { mediaUrl } from "../lib/media.js";
 import { acceptChapterLook, chooseAudiobookLook, makeChapterLook, useStore } from "../lib/store.js";
 import { lookJobState, lookJobs, useQueueRefusals, type LookJobState } from "./look-jobs.js";
@@ -126,10 +127,11 @@ export function NewLookSheet({ open, onClose, onActivity, worldId, productionId,
   };
   const canMake = !off && photo !== null && model !== null && clothing.trim() !== "";
   const slug = world?.meta.slug ?? "";
+  const called = calledAt(world?.productions.find((production) => production.meta.id === productionId)?.chapters, chapterOrder);
 
   const footer = (
         <div className="fy-newlook__foot">
-          <Checkbox label={`Use for Chapter ${chapterOrder}`} checked={chooseOn} disabled={off} onChange={(event) => setChooseOn(event.target.checked)} data-testid="new-look-choose" />
+          <Checkbox label={`Use for ${called}`} checked={chooseOn} disabled={off} onChange={(event) => setChooseOn(event.target.checked)} data-testid="new-look-choose" />
           <span className="fy-ch__panelpush" />
           <Button variant="ghost" className="fy-newlook__cancel" onClick={onClose} data-testid="new-look-cancel">
             Cancel
@@ -146,7 +148,7 @@ export function NewLookSheet({ open, onClose, onActivity, worldId, productionId,
   );
   return (
     <>
-    <ChapterLookSheet preserveReturnFocus open={open} onClose={onClose} title={`New look · ${who.name}`} subtitle={`For Chapter ${chapterOrder}`} className="fy-newlook" footer={footer}>
+    <ChapterLookSheet preserveReturnFocus open={open} onClose={onClose} title={`New look · ${who.name}`} subtitle={`For ${called}`} className="fy-newlook" footer={footer}>
       <div className="fy-newlook__body" data-testid="new-look-sheet">
         <div className="fy-newlook__top">
           <div className="fy-newlook__photo" data-testid="new-look-photo" hidden>

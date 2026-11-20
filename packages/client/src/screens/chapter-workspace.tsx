@@ -13,6 +13,7 @@ import { SceneBackRow } from "./scene-workspace/responsive-chrome.js";
 import { Fragment, useId, useLayoutEffect, useEffect, useMemo, useRef, useState, useCallback, useSyncExternalStore } from "react";
 import { Link, useParams, useNavigate, useSearchParams } from "react-router";
 import {
+  chapterCalled,
   chapterParagraphs,
   countWords,
   chapterManuscriptWords,
@@ -1631,6 +1632,10 @@ export function ChapterWorkspace({
   const draws = chapter.draws ?? { sheets: [], canon: [] };
   const drawsEmpty = draws.sheets.length === 0 && draws.canon.length === 0;
   const chapterLabel = `chapter ${String(chapter.order).padStart(2, "0")}`;
+  // The chapter as the book calls it wherever a person reads its name (SPEC-047 R-2): by place, an
+  // unnumbered prologue first had Iwo Road named "Chapter 24" under its heading "Chapter 23 · Iwo
+  // Road" (issue 3240). `chapterLabel` stays the words the dock's asks have always begun with.
+  const called = chapterCalled(production.chapters, chapter);
   /* The style the book is written in (turn 128), said in one line beside the manuscript. */
   const style = production.proseStyle ?? null;
 
@@ -1787,7 +1792,7 @@ export function ChapterWorkspace({
     ? `About this passage in ${chapterLabel}${selection?.paragraph ? `, paragraph ${selection.paragraph}` : ""}: «${passage}»`
     : `About ${chapterLabel}:`;
   // The dock's head, and the sheet's on a phone: Arke names what it is about (126a, 172a, 195g).
-  const dockTitle = `Arke · Chapter ${String(chapter.order).padStart(2, "0")}`;
+  const dockTitle = `Arke · ${called}`;
   /*
    * An ask from the menu beside the selection. The page holds it, not the dock, until the dock
    * says it is done with it (codex on PR 1232): putting the dock away while it waits, or while
@@ -2946,13 +2951,13 @@ export function ChapterWorkspace({
             // A line a menu press started is about the passage it was pressed on, and the dock
             // says that one, not whatever is selected now (codex on PR 1232).
             ...(shownSubject.kind === "passage"
-              ? { subjectLine: shownSubject.paragraph !== undefined ? `Chapter ${chapter.order} · paragraph ${shownSubject.paragraph}` : `about this passage · ${countWords(shownSubject.text).toLocaleString()} words` }
-              : nameAsk !== null ? { subjectLine: `about ${nameAsk}` } : { subjectLine: `Chapter ${chapter.order}` }),
+              ? { subjectLine: shownSubject.paragraph !== undefined ? `${called} · paragraph ${shownSubject.paragraph}` : `about this passage · ${countWords(shownSubject.text).toLocaleString()} words` }
+              : nameAsk !== null ? { subjectLine: `about ${nameAsk}` } : { subjectLine: called }),
           }}
           openingNote="opening…"
-          emptyLine={live.trim() === "" ? `Let’s write Chapter ${chapter.order}` : `Nothing written with Arke for ${chapterLabel} yet.`}
+          emptyLine={live.trim() === "" ? `Let’s write ${called}` : `Nothing written with Arke for ${called} yet.`}
           // A chapter with no words yet is written with Arke, not asked about (227u).
-          placeholder={emptyChapter ? `Write Chapter ${chapter.order} with Arke…` : `Ask about ${chapterLabel}`}
+          placeholder={emptyChapter ? `Write ${called} with Arke…` : `Ask about ${called}`}
           {...(stagedDraft === undefined && view === "audiobook" && audiobook.directionRun !== undefined
             ? { side: <DirectionCard run={audiobook.directionRun} chapterOrder={chapter.order} blocks={audiobook.rows.length} onAccept={audiobook.accept} onDiscard={audiobook.discard} /> }
             : stagedDraft === undefined && view === "audiobook" && illustration.run !== undefined
@@ -3055,15 +3060,18 @@ export function ChapterWorkspace({
     sub: sheet.type !== "character" ? "Place" : linesHere(sheet.id) > 0 ? `${linesHere(sheet.id)} line${linesHere(sheet.id) === 1 ? "" : "s"} here` : (sheet.role ?? ""),
   }));
   // The chapters each character speaks in, from the book's cast stamps: the card's first and last seen.
-  const appearances = new Map<string, number[]>();
+  // Counted by chapter, not by label: two chapters can share a title ("Interlude"), and the card
+  // counts appearances by this list's length.
+  const appearances = new Map<string, string[]>();
+  const lastOrder = new Map<string, number>();
   for (const each of [...production.chapters].filter((c) => c.retired !== true).sort((a, b) => a.order - b.order)) {
     const stamp = each.voices;
     if (stamp === undefined || "unreadable" in stamp) continue;
+    const name = chapterCalled(production.chapters, each);
     for (const who of stamp.speakers) {
-      if (who.sheet === undefined) continue;
-      const list = appearances.get(who.sheet) ?? [];
-      if (list[list.length - 1] !== each.order) list.push(each.order);
-      appearances.set(who.sheet, list);
+      if (who.sheet === undefined || lastOrder.get(who.sheet) === each.order) continue;
+      lastOrder.set(who.sheet, each.order);
+      appearances.set(who.sheet, [...(appearances.get(who.sheet) ?? []), name]);
     }
   }
   const [nameHit, setNameHit] = useState<{ ids: string[]; text: string; rect: DOMRect } | null>(null);
@@ -3738,7 +3746,7 @@ export function ChapterWorkspace({
               />
             )}
             {(room || phoneRoom) && (
-              <DocHead order={chapter.order} title={chapter.title} locked={locked} fresh={freshChapter} onTitle={(title) => plan({ title })}>
+              <DocHead called={called} title={chapter.title} locked={locked} fresh={freshChapter} onTitle={(title) => plan({ title })}>
                 {/* The plan stays while Arke's first draft waits under it (227v). */}
                 {record !== null && (record.body ?? "").trim() === "" && (
                   <BriefFields page synopsis={chapter.synopsis} pov={chapter.pov} when={chapter.when} goal={goal.words} goalSource={goal.source}
@@ -3913,7 +3921,7 @@ export function ChapterWorkspace({
                   onChange={onChange}
                   onSelect={onSelect}
                   placeholder={PLACEHOLDER}
-                  ariaLabel={`Chapter ${chapter.order}`}
+                  ariaLabel={called}
                   onEditor={(live) => {
                     editorRef.current = live;
                     setWriting(live !== null && live.isFocused);
@@ -3951,7 +3959,7 @@ export function ChapterWorkspace({
                 onMouseUp={onTextareaSelect}
                 spellCheck
                 placeholder={PLACEHOLDER}
-                aria-label={`Chapter ${chapter.order}`}
+                aria-label={called}
               />
             )}
             {draftConflict && !locked && (
@@ -4152,7 +4160,7 @@ export function ChapterWorkspace({
               </aside>
             </ResponsiveSheet>
           )}
-          <ResponsiveSheet sheet={compact} open={notesOpen} title={`Chapter ${String(chapter.order).padStart(2,"0")} · notes`} onClose={() => setNotesOpen(false)} className="fy-chapter-notes-sheet">
+          <ResponsiveSheet sheet={compact} open={notesOpen} title={`${called} · notes`} onClose={() => setNotesOpen(false)} className="fy-chapter-notes-sheet">
           <aside className="fy-ch__side fy-ch__notes">
             {view === "manuscript" && !compact && !emptyChapter && (
               <BriefFields synopsis={chapter.synopsis} pov={chapter.pov} when={chapter.when} goal={goal.words} goalSource={goal.source}
@@ -4231,7 +4239,7 @@ export function ChapterWorkspace({
       {view === "audiobook" && illustrationSheet.open && illustration.run !== undefined && (
         <IllustrationSheet
           run={illustration.run}
-          chapterOrder={chapter.order}
+          called={called}
           slug={worldSlug}
           wordsOf={(block) => {
             // A row shows the words its picture would: from its sentence to the next picture, one

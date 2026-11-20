@@ -97,6 +97,8 @@ export interface PictureCardChapter {
   productionId: string;
   chapterFile: string;
   order: number;
+  /** What the book calls the chapter (SPEC-047 R-2): `Chapter N`, or a prologue's own title. */
+  called: string;
   look: AudiobookLook | null;
   /**
    * The looks held on this block for its next picture alone (design turn 193d, R-146), as the
@@ -233,7 +235,7 @@ function LookMenu({ id, label, who, kit, slug, chapter, mode, onMode, chosen, of
       </div>
       {/* Two boxes as 193d draws them, one of them on: the other is the box turned off. */}
       <Checkbox label="Only this picture" checked={mode === "only"} disabled={off} onChange={(event) => onMode(event.target.checked ? "only" : "chapter")} data-testid="picture-card-look-only" />
-      <Checkbox label={`Set for Chapter ${chapter.order}`} checked={mode === "chapter"} disabled={off} onChange={(event) => onMode(event.target.checked ? "chapter" : "only")} data-testid="picture-card-look-chapter" />
+      <Checkbox label={`Set for ${chapter.called}`} checked={mode === "chapter"} disabled={off} onChange={(event) => onMode(event.target.checked ? "chapter" : "only")} data-testid="picture-card-look-chapter" />
     </div>
   );
 }

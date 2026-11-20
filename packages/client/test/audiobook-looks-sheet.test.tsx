@@ -146,7 +146,7 @@ describe("a character with looks (193a)", () => {
   });
 
   it("says where a carried choice came from, by the chapter's number", async () => {
-    const carried = { ...state(), world: { ...state().world!, productions: state().world!.productions.map((p) => (p.meta.id === "saltlight" ? { ...p, chapters: [...p.chapters, { ...p.chapters[0]!, id: "03-the-stair", file: "03-the-stair", order: 3 }] } : p)) } } as ClientState;
+    const carried = { ...state(), world: { ...state().world!, productions: state().world!.productions.map((p) => (p.meta.id === "saltlight" ? { ...p, chapters: [...p.chapters, { ...p.chapters[0]!, id: "03-the-stair", file: "03-the-stair", order: 3, title: "The stair", status: "drafted", version: 1 }] } : p)) } } as ClientState;
     await mount(LOOK({ text: STORM.prompt, lookId: STORM.id, from: "03-the-stair" }), carried);
     assert.equal(text(bodyAll('[data-key="maren-kest"] [data-testid="look-from"]')[0]), "From Chapter 3");
   });

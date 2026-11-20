@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode, type UIEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import {
-  episodeScriptFile, estimateScriptSeconds, pickableSheets, productionShape,
+  audiobookHeading, chapterCalled, chapterNumber, episodeScriptFile, estimateScriptSeconds, pickableSheets, productionShape,
   type EpisodeScriptBlock, type ProductionBundle, type ScriptChannel, type ScriptHeading, type WorldBundle,
 } from "@arke-studio/contracts";
 import { artifactById, useProduction } from "../lib/selectors.js";
@@ -830,7 +830,7 @@ function HeadingRow({ block, n, on, production, world, source, onChange, onSourc
               onChange({ source: picked ? { story: story.meta.id, chapter: picked.id, version: picked.version ?? 1, ...(picked.hash ? { hash: picked.hash } : {}) } : undefined });
             }}>
               <option value="">No chapter</option>
-              {story.chapters.filter((c) => !c.retired).map((c) => <option key={c.id} value={c.id}>Chapter {c.order} · {c.title}</option>)}
+              {story.chapters.filter((c) => !c.retired).map((c) => <option key={c.id} value={c.id}>{audiobookHeading(chapterNumber(story.chapters, c), c.title)}</option>)}
             </select>
           )}
           {on && block.source && (
@@ -840,7 +840,7 @@ function HeadingRow({ block, n, on, production, world, source, onChange, onSourc
           )}
           {!on && block.source && chapter && (
             <button type="button" className={cx("fy-ad-chip", changed && "fy-ad-chip--warn")} onClick={(event) => { event.stopPropagation(); onSource(); }}>
-              Chapter {chapter.order}{changed ? ` · changed v${current ?? 1}` : ""}
+              {chapterCalled(story?.chapters ?? [], chapter)}{changed ? ` · changed v${current ?? 1}` : ""}
             </button>
           )}
           {block.estimateSec !== undefined && <span className="fy-ad-chip">≈{Math.floor(block.estimateSec / 60)}:{String(block.estimateSec % 60).padStart(2, "0")}</span>}
@@ -932,7 +932,7 @@ function SourceColumn({ world, story, heading, block, onClose }: {
       <header><h2>Source</h2>{story && pin && <small>{story.meta.title} v{pin.version}</small>}<span className="gap" /><IconButton label="Close source" onClick={onClose}><X size={14} /></IconButton></header>
       {!pin || !chapter ? <p className="fy-ad-source__none">{heading ? "This scene adapts no chapter yet. Choose one in its heading." : "Select a scene."}</p> : (
         <>
-          <h3><BookOpen size={14} />Chapter {chapter.order} · {chapter.title}</h3>
+          <h3><BookOpen size={14} />{audiobookHeading(chapterNumber(story?.chapters ?? [], chapter), chapter.title)}</h3>
           {(chapter.version ?? 1) > pin.version && <p className="fy-ad-source__changed">The chapter is now v{chapter.version}. This scene was written from v{pin.version}.</p>}
           {(chapter.version ?? 1) === pin.version && pin.hash !== undefined && chapter.hash !== undefined && chapter.hash !== pin.hash && (
             <p className="fy-ad-source__changed">The chapter was edited since this scene was written. This is the chapter now; its paragraph numbers may have moved.</p>
