@@ -21,7 +21,7 @@ import type {
 import { chaptersReadWhole } from "./source-reads.js";
 import { voiceBackgroundTerminal, voiceBackgroundTransition, type VoiceBackgroundOperation } from "@arke-studio/contracts";
 import { refusedChangeReason } from "./turn-result.js";
-import { projectWorldChatInputQueue, unresolvedWorldChatInputs } from "@arke-studio/contracts";
+import { CARD_WAITS_ON_EARLIER_CARD, projectWorldChatInputQueue, unresolvedWorldChatInputs } from "@arke-studio/contracts";
 import { conversationActionDigest, stableJson } from "../arke-actions/digest.js";
 import { foldWorldChatInputs } from "./input-fold.js";
 import { sheetCreationProseFields } from "./sheet-card.js";
@@ -820,7 +820,7 @@ function dependencyBlockReason(dependency: ConversationActionRecord): string {
     case "superseded":
       return "The card this waits on was replaced.";
     default:
-      return "Waiting for the card before it.";
+      return CARD_WAITS_ON_EARLIER_CARD;
   }
 }
 

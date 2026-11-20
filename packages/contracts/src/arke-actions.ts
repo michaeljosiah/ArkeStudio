@@ -599,6 +599,12 @@ export const ConversationExportStateSchema = z.object({
   status: z.enum(["running", "done", "failed", "cancelled"]), percent: z.number().min(0).max(100),
   output: ConversationCardMediaSchema.shape.path.refine(path => path.startsWith("exports/"), "expected an export media address").nullable(),
 }).strict();
+/**
+ * A card's `blockedReason` while the cards it depends on are still to finish. A numbered list of
+ * cards says which ones instead ("After 1 to 4") and drops this sentence by matching it, so it is
+ * shared rather than spelled twice; a card drawn alone has no numbers to give and shows it.
+ */
+export const CARD_WAITS_ON_EARLIER_CARD = "Waiting for the card before it.";
 export const ConversationActionCardSchema = ConversationActionRecordSchema.extend({
   availableDecisions: z.array(ConversationActionDecisionKindSchema),
   blockedReason: z.string().min(1).max(1_000).optional(),
