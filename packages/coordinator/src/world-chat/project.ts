@@ -352,6 +352,34 @@ export function wordReceipt(receipt: WorldChatCheckReceipt): string {
     case "analyze-audio-signal": return "measured original audio channels; no listening judgment";
     case "transcribe-audio": return "recognized speech locally; automatic words may be wrong";
     case "review-audio-content": return "compared recognized speech with the supplied script; delivery unreviewed";
+    case "measure-sync": {
+      const sync = receipt.media?.sync;
+      if (!sync || sync.lagSec === null) return "measured lip sync; no signal to line up";
+      return sync.follows ? `measured lip sync: ${Math.round(sync.lagSec * 1000)} ms off its reference` : "measured lip sync: does not follow its reference";
+    }
+    case "song-map": {
+      const song = receipt.media?.song;
+      if (!song) return "mapped a song";
+      return `mapped a song: ${song.tempoBpm === null ? "no steady beat" : `${song.tempoBpm} bpm`}, ${song.sections.length} section${song.sections.length === 1 ? "" : "s"}`;
+    }
+    case "review-export": {
+      const review = receipt.media?.review;
+      if (!review) return "reviewed a film";
+      return `reviewed a film: ${review.shots.length} shot${review.shots.length === 1 ? "" : "s"}, ${review.findings.length ? `${review.findings.length} finding${review.findings.length === 1 ? "" : "s"}` : "nothing found"}`;
+    }
+    case "cut-contact-sheet": {
+      const sheet = receipt.media?.sheet;
+      if (!sheet) return "made a contact sheet";
+      return `made a contact sheet: ${sheet.shots.length} shot${sheet.shots.length === 1 ? "" : "s"} on ${sheet.pages.length} page${sheet.pages.length === 1 ? "" : "s"}${sheet.shotsFrom === "picture" ? ", cuts found in the picture" : ""}`;
+    }
+    case "clip-quality": {
+      const quality = receipt.media?.quality;
+      if (!quality) return "measured a clip";
+      const repeats = quality.cadence.repeatedFrames;
+      return `measured a clip: sharpness ${quality.detail.sharpness}, ${quality.cadence.still ? "a still picture" : `${repeats ?? 0} repeated frame${repeats === 1 ? "" : "s"}`}`
+        + (!quality.compare ? "" : quality.compare.sharpnessChangePct === null ? "; the other has detail where this has none"
+          : `; the other ${quality.compare.sharpnessChangePct >= 0 ? "+" : ""}${quality.compare.sharpnessChangePct}% sharpness`);
+    }
     case "search-canon":
       return `searched ${receipt.searchedCount ?? 0} canon entries`;
     case "search-sheets":

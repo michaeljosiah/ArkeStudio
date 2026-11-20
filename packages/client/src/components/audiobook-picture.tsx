@@ -27,6 +27,7 @@ import {
 } from "@arke-studio/contracts";
 import { usableModels } from "./dispatch-bar.js";
 import { setupForMode, type ModeSetup } from "../lib/composer-mode.js";
+import { calledAt } from "../lib/chapter-called.js";
 import { mediaUrl } from "../lib/media.js";
 import { subscribeCommandFailures, sendBenchAddReference, sendBenchCompose, sendBenchNewSession, setAudiobookPicture, useBench, useStore } from "../lib/store.js";
 import type { BlockRow } from "../screens/chapter-audiobook.js";
@@ -250,8 +251,8 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   // A look it was made with alone is judged by that look's own line (R-115, R-146), read from the kits.
   const lookChanged = pictureLookChanged(here?.entry.look, record?.look, kitLookLibrary(world?.referenceKits ?? [], record?.look), here?.entry.lookReview);
 
-  const pad = String(chapterOrder).padStart(2, "0");
-  const remove = () => setAudiobookPicture(worldId, production.meta.id, chapterFile, key, null);
+  const called = calledAt(production.chapters, chapterOrder);
+  const remove =() => setAudiobookPicture(worldId, production.meta.id, chapterFile, key, null);
   // A picture Arke made reads back as the card it was made from (194a, 194g): the prompt, model and
   // what rode from the Bench's sidecar, who was in it from its stamp, the shot where it was kept.
   const manifest = store.state?.app.manifest?.models;
@@ -263,7 +264,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
   const card: PictureSuggestionState = suggestion.ask === null && made !== null ? { ...suggestion, ask: { state: "suggested", suggestion: made } } : suggestion;
   const choosePicture = connection === "open" ? () => { setTallFrom(null); setOpen(true); } : undefined;
   const chooseTall = connection === "open" && here !== null ? () => { setTallFrom(here.file); setOpen(true); } : undefined;
-  const motionControl = here !== null && world !== null ? <AudiobookMotionControl key={key} worldId={worldId} productionId={production.meta.id} chapterFile={chapterFile} block={key} picture={here.entry} slug={world.meta.slug} label={blockName} chapterLabel={`Chapter ${chapterOrder}`} holdLabel={until ?? undefined} /> : undefined;
+  const motionControl = here !== null && world !== null ? <AudiobookMotionControl key={key} worldId={worldId} productionId={production.meta.id} chapterFile={chapterFile} block={key} picture={here.entry} slug={world.meta.slug} label={blockName} chapterLabel={called} holdLabel={until ?? undefined} /> : undefined;
   // The Picture tab (design turn 194, rule 12; 194a, 194g): 193's card — the picture beside Frame,
   // Rides and the model, In frame, Not in frame, the prompt, the checks; Remove, Edit prompt and
   // Make again at the foot. When it shows and how long it holds are the chip's and the tab's, not
@@ -288,7 +289,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
           {...(here !== null ? { onRemove: remove } : {})}
           {...(choosePicture !== undefined ? { onChoose: choosePicture } : {})}
           {...(chooseTall !== undefined ? { onChooseTall: chooseTall } : {})}
-          chapter={{ productionId: production.meta.id, chapterFile, order: chapterOrder, look: record?.look ?? null, ...(record?.ownLooks?.[key] !== undefined ? { own: record.ownLooks[key] } : {}) }}
+          chapter={{ productionId: production.meta.id, chapterFile, order: chapterOrder, called, look: record?.look ?? null, ...(record?.ownLooks?.[key] !== undefined ? { own: record.ownLooks[key] } : {}) }}
         />
       ) : !open ? (
         <>
@@ -343,7 +344,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
                 </>
               ) : (
                 <div className="fy-pcard__fact">
-                  <span className="fy-mono">Chapter {pad}</span>
+                  <span className="fy-mono">{called}</span>
                   <b>
                     {pictures.count} picture{pictures.count === 1 ? "" : "s"}
                     {pictures.lost.length > 0 ? ` · ${pictures.lost.length} lost` : ""}
@@ -410,7 +411,7 @@ export function BlockPicturePanel({ worldId, production, chapterFile, chapterOrd
           </div>
           <div className="fy-ab__reads">
             <div className="fy-ab__read">
-              <b>Chapter {pad}</b>
+              <b>{called}</b>
               <span>
                 {pictures.count} picture{pictures.count === 1 ? "" : "s"}
                 {pictures.coverAtStart ? " · cover at the start" : ""}

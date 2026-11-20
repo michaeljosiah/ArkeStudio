@@ -384,7 +384,7 @@ import {
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { deriveContinuity, makeAdapterContinuityDeriver, type ContinuityDeriver } from "./productions/continuity.js";
-import { castLines, makeAdapterVoicesDeriver, readVoices, setVoicePin, VoicePinRefusal, type VoicesDeriver } from "./productions/voices.js";
+import { castLines, makeAdapterVoicesDeriver, readVoices, setVoicePin, setVoicePins, VoicePinRefusal, type VoicesDeriver } from "./productions/voices.js";
 import { discardRecording, keepRecording, RECORDED_TAKE_EXTENSIONS, RecordedTakeRefusal, stageRecording, type StagedRecording } from "./productions/audiobook-recorded.js";
 import { exportScript, speakerLines, matchFiles, type MatchedFile } from "./productions/audiobook-lines.js";
 import {
@@ -486,6 +486,7 @@ const OLLAMA_SHUTDOWN_RELEASE_MS = 2_000;
 import { exportWorld, runExport, type ExportHandle, type FfmpegRunner } from "./takes/export.js";
 import { runEffectExport } from "./productions/editor-effect-export.js";
 import { EditorEffectAnalysisService } from "./productions/editor-effect-analysis.js";
+import { SongSectionsService } from "./productions/song-sections.js";
 import { EditorEffectDependencies } from "./productions/editor-effect-dependencies.js";
 import { handleTransitionReview } from "./productions/editor-transition-requests.js";
 import { handlePictureReview } from "./productions/editor-picture-requests.js";
@@ -1972,6 +1973,7 @@ export class Coordinator {
         refreshConversations: store => this.refreshConversations(store),
         openWorldChat: (store, conversationId) => this.openWorldChat(store, conversationId),
         stillOpen: store => this.stillOpen(store),
+        songSections: (store, productionId) => this.songSections.read(store, productionId),
         worldChat: () => this.readModel.getState().worldChat,
         setWorldChat: worldChat => this.readModel.setWorldChat(worldChat),
       }),
@@ -4067,6 +4069,8 @@ export class Coordinator {
     return this.runMingBatch(combined => this.opts.ming!.run(command, combined), signal, waiting);
   }
   private readonly effectAnalysis: EditorEffectAnalysisService;
+  /** Where each production's song changes (#3099): measured through the effects' own decode, kept while the Studio runs. */
+  private readonly songSections: SongSectionsService;
   /**
    * Titles drawn while they are typed (SPEC-065 R-32), answered to the window that asked. It holds
    * no world: a failure is logged by its kind alone, never with the words or the look.
@@ -4113,6 +4117,7 @@ export class Coordinator {
       at: this.nowIso(), type: "editor-effect.analysis", ...scope, analysis,
     }));
     this.effectDependencies = new EditorEffectDependencies(this.effectAnalysis);
+    this.songSections = new SongSectionsService(opts.effectAudioAnalysisHost, this.runtimeStop.signal);
     // `opts.manifest` is read in a hundred places and handed to services as they are built; a
     // getter makes each of them read the manifest as the author's plans price it, now, rather
     // than as it was when they were built — so a plan switched mid-session reaches every quote.
@@ -20380,6 +20385,20 @@ export class Coordinator {
         if (!review) throw new Error("Chapter review did not produce a durable result.");
         return { id: review.id, summary: chapterReviewSummary(review) };
       },
+      // Arke's card of corrections (issue 3233) goes the speaker menu's way (`set-voice-pin`):
+      // refused while the chapter is cast, its directions conformed and every window told after.
+      setVoicePins: async (productionId, chapterId, pins) => {
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === productionId)?.chapters.find((c) => c.id === chapterId || c.file === chapterId);
+        if (!chapter) return { written: 0, refused: "that chapter is gone" };
+        if (this.castingVoices.has(`${store.worldId}/${productionId}/${chapter.file}`)) return { written: 0, refused: "casting… · wait for the cast" };
+        const result = await setVoicePins(store, productionId, chapter.id, pins);
+        if (result.record !== null) {
+          await this.conformAudiobookDirections(store, store.worldId, [productionId]);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: this.nowIso(), type: "voices.record", worldId: store.worldId, productionId, chapterId: chapter.id, record: result.record });
+        }
+        return { written: result.written, ...(result.refused !== undefined ? { refused: result.refused } : {}) };
+      },
       getGenerationRouteRows: () => this.benchGenerationRoutes(),
       effectDependencies: this.effectDependencies,
       audioStudioOptions: this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {},
@@ -20790,6 +20809,7 @@ export class Coordinator {
       voiceTools: context => { const owner = this.backgroundVoice(); return owner ? voiceBackgroundTools(owner, context) : undefined; },
       shutdownSignal: this.runtimeStop.signal,
       audioStudio: (productionId, chapterFile) => audioStudioSnapshot(store, productionId, chapterFile, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}),
+      songSections: productionId => this.songSections.read(store, productionId),
       ...(this.opts.audioMediaTools ? { audioMediaTools: this.opts.audioMediaTools } : {}),
       generationRoutes: () => this.benchGenerationRoutes(),
       voiceCatalogue: () => this.benchVoiceCatalogue(store),
@@ -21314,6 +21334,7 @@ export class Coordinator {
       await audioStudioStopped;
       this.opts.onShutdownWait?.("audio analysis");
       await this.effectAnalysis.stop();
+      await this.songSections.stop();
       const setupStopped = Promise.allSettled([this.setup?.dispose()]);
       this.opts.onShutdownWait?.("adapter library");
       await this.adapterLibrary?.dispose();

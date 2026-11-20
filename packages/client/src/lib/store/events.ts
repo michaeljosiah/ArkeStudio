@@ -594,6 +594,28 @@ export function requestMediaMeasurement(message: Omit<Extract<ClientMessage, { k
     if (!send({ kind: "measure-production-media", ...message, requestId })) { cleanup(); reject(new Error("Not connected. Reconnect to try again.")); }
   });
 }
+export const songSectionsListeners = new Set<(event: Extract<DomainEvent, { type: "song.sections" }>) => void>();
+/**
+ * Where a production's song changes (issue 3099), as the coordinator measures it: once per file,
+ * then kept, so asking again is cheap. Null when the ask is dropped or cannot be sent. No timer
+ * waits on it: every ask is answered, measured or not, and one cut off by the connection is
+ * dropped by its asker, who asks again on the next.
+ */
+export function requestSongSections(worldId: string, productionId: string, signal: AbortSignal): Promise<import("@arke-studio/contracts").SongSectionsResult | null> {
+  const requestId = ulid();
+  return new Promise((resolve) => {
+    const cleanup = () => { songSectionsListeners.delete(listener); signal.removeEventListener("abort", cancel); };
+    const cancel = () => { cleanup(); resolve(null); };
+    const listener = (event: Extract<DomainEvent, { type: "song.sections" }>) => {
+      if (event.requestId !== requestId || event.worldId !== worldId) return;
+      cleanup(); resolve(event.result);
+    };
+    if (signal.aborted) { resolve(null); return; }
+    signal.addEventListener("abort", cancel, { once: true });
+    songSectionsListeners.add(listener);
+    if (!send({ kind: "song-sections", worldId, productionId, requestId })) cancel();
+  });
+}
 export function setPromptTools(enabled: boolean): void { send({ kind: "set-prompt-tools", enabled }); }
 export function requestPromptTools(message: Omit<Extract<ClientMessage, { kind: "prompt-history-read" }>, "requestId"> |
   Omit<Extract<ClientMessage, { kind: "prompt-history-restore" }>, "requestId"> |

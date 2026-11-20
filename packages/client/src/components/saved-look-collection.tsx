@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { chapterLooksOf, lookName, lookOlderFace, mainPhotoFor, type CharacterLook } from "@arke-studio/contracts";
+import { calledAt, numberAt } from "../lib/chapter-called.js";
 import { mediaUrl } from "../lib/media.js";
 import { readAudiobookLooks, renameSavedLook, subscribeLookRename, useAudiobookAsks, useStore } from "../lib/store.js";
 import { ChapterLookSheet } from "./chapter-look-sheet.js";
@@ -60,10 +61,17 @@ export function SavedLookCollection({ worldId, productionId, sheetId, name, chap
   const tabStop = options.includes(focused) ? focused : options[0];
   const usageAnswer = usageRequest === null ? undefined : asks[usageRequest];
   const usage = usageAnswer?.state === "looks" ? usageAnswer.usage : null;
+  // The chapters as the book calls them (SPEC-047 R-2): a prologue first takes no number.
+  const book = world?.productions.find((production) => production.meta.id === productionId)?.chapters;
+  const called = calledAt(book, chapterOrder);
   const usageLine = (id: string) => {
     if (usage === null) return usageAnswer?.state === "working" ? "Loading usage…" : "Usage unavailable";
     const chapters = usage[id] ?? [];
-    return chapters.length === 0 ? "No chapters" : `Chapter${chapters.length === 1 ? "" : "s"} ${[...chapters].sort((a, b) => a - b).join(", ")}`;
+    if (chapters.length === 0) return "No chapters";
+    const sorted = [...chapters].sort((a, b) => a - b);
+    const numbers = sorted.map((order) => numberAt(book, order));
+    // `Chapters 3, 5` while every one is numbered; a prologue among them goes by its title.
+    return numbers.every((number) => number !== null) ? `Chapter${numbers.length === 1 ? "" : "s"} ${numbers.join(", ")}` : sorted.map((order) => calledAt(book, order)).join(", ");
   };
   const imageOf = (look: CharacterLook | null) => {
     const file = look === null ? photo?.file : look.file || look.closeFile;
@@ -99,12 +107,12 @@ export function SavedLookCollection({ worldId, productionId, sheetId, name, chap
   const browse = (id: string | null) => { setSelection(id); setFocused(id); };
   const leave = () => { if (saving !== null) return; if (rename !== null) closeRename(); else onClose(); };
   return (
-    <ChapterLookSheet preserveReturnFocus open title={`${rename !== null ? "Saved look" : fromNewLook ? "Saved looks" : "Choose look"} · ${name}`} subtitle={rename !== null ? selected?.name ? "Rename this saved look" : "Legacy look · no name yet" : fromNewLook ? `From New look · ${looks.length} saved looks` : `For Chapter ${chapterOrder}`} onClose={leave} className={cx("fy-savedlook", rename !== null && "fy-savedlook--renaming")} footer={rename !== null ? <Button variant="ghost" onClick={leave} disabled={saving !== null}>Close</Button> : <>
+    <ChapterLookSheet preserveReturnFocus open title={`${rename !== null ? "Saved look" : fromNewLook ? "Saved looks" : "Choose look"} · ${name}`} subtitle={rename !== null ? selected?.name ? "Rename this saved look" : "Legacy look · no name yet" : fromNewLook ? `From New look · ${looks.length} saved looks` : `For ${called}`} onClose={leave} className={cx("fy-savedlook", rename !== null && "fy-savedlook--renaming")} footer={rename !== null ? <Button variant="ghost" onClick={leave} disabled={saving !== null}>Close</Button> : <>
       {onNewLook !== undefined && <><Button variant="outline" data-testid="saved-look-new" onClick={onNewLook} disabled={rename !== null}>New look</Button><span className="fy-savedlook__footcount">{looks.length} saved looks</span></>}
       {!fromNewLook && <span className="fy-ch__panelpush" />}
       <Button variant="ghost" className={fromNewLook ? undefined : "fy-savedlook__cancel"} onClick={leave} disabled={saving !== null}>{fromNewLook ? "Back to New look" : "Cancel"}</Button>
       {fromNewLook && <span className="fy-ch__panelpush" />}
-      <Button variant="primary" disabled={off || gone || (fromNewLook && selected === null) || saving !== null || rename !== null} onClick={() => onChoose(selection)} data-testid="saved-look-use">Use for Chapter {chapterOrder}</Button>
+      <Button variant="primary" disabled={off || gone || (fromNewLook && selected === null) || saving !== null || rename !== null} onClick={() => onChoose(selection)} data-testid="saved-look-use">Use for {called}</Button>
     </>}>
       <div className="fy-savedlook__columns" data-testid="saved-look-collection">
         <div className="fy-savedlook__browse">
@@ -138,11 +146,11 @@ export function SavedLookCollection({ worldId, productionId, sheetId, name, chap
             </div></div>
 
             {selected !== null && <details className="fy-savedlook__details"><summary>Details</summary><p className="fy-savedlook__prompt">{selected.prompt}</p><dl><dt>Name</dt><dd>{lookName(selected, looks)}</dd><dt>Used in</dt><dd>{usage === null ? usageLine(selected.id) : (usage[selected.id]?.length ?? 0) === 0 ? "No chapters" : usage[selected.id]!.map((order, i) => {
-              const chapter = world?.productions.find((production) => production.meta.id === productionId)?.chapters.find((entry) => entry.order === order);
-              return <span key={order}>{i ? ", " : ""}{chapter ? <a href={`#/w/${worldId}/p/${productionId}/story/chapters/${chapter.file}?view=audiobook`}>Chapter {order}</a> : `Chapter ${order}`}</span>;
+              const chapter = book?.find((entry) => entry.order === order);
+              return <span key={order}>{i ? ", " : ""}{chapter ? <a href={`#/w/${worldId}/p/${productionId}/story/chapters/${chapter.file}?view=audiobook`}>{calledAt(book, order)}</a> : calledAt(book, order)}</span>;
             })}</dd><dt>Views</dt><dd>{selected.closeFile ? "Full body and close view" : "Full body"}</dd><dt>Accepted</dt><dd>{new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(selected.acceptedAt)).replace(" at ", ", ")}</dd>{kit !== null && <><dt>Face</dt><dd>{lookOlderFace(kit, selected) ? "Older face" : "Main photo"}</dd></>}</dl></details>}
             {rename !== null && <div className="fy-savedlook__renamepanel"><form className="fy-savedlook__rename" onSubmit={(event) => { event.preventDefault(); saveName(); }}><label>Look name<input className="ui-input" ref={renameInput} value={rename.value} maxLength={60} onChange={(event) => setRename({ ...rename, value: event.target.value })} disabled={saving !== null} /></label><p>A name for this saved look, wherever you use it.</p><div><Button variant="ghost" type="button" onClick={closeRename} disabled={saving !== null}>Cancel</Button><Button variant="primary" type="submit" disabled={off || saving !== null || gone}>{saving !== null ? "Saving…" : "Save name"}</Button></div></form>{renameError !== null && <p role="alert">Name not saved. {renameError}</p>}<p>A duplicate name is allowed. The date and thumbnail still distinguish it.</p></div>}
-            {rename === null && <p className="fy-savedlook__status">{fromNewLook ? "Viewing a saved look. New-look candidates stay as they are." : selection === currentId ? `Used for Chapter ${chapterOrder}${sourceOrder ? ` · from Chapter ${sourceOrder}` : ""}` : "Viewing a saved look. Use it to change the chapter."}</p>}
+            {rename === null && <p className="fy-savedlook__status">{fromNewLook ? "Viewing a saved look. New-look candidates stay as they are." : selection === currentId ? `Used for ${called}${sourceOrder ? ` · from ${calledAt(book, sourceOrder)}` : ""}` : "Viewing a saved look. Use it to change the chapter."}</p>}
           </>}
           {off && <p role="status">Reconnect to use or rename a look.</p>}
         </div>

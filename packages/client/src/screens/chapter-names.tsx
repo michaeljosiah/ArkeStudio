@@ -16,8 +16,8 @@ export interface NameCardSheet {
   face: string | null;
   /** Lines spoken in this chapter, from its cast. */
   linesHere?: number;
-  /** The chapters, by number, the book's cast stamps have them speaking in. */
-  chapters?: number[];
+  /** The chapters, in order and as the book calls them (SPEC-047 R-2), the book's cast stamps have them speaking in. */
+  chapters?: string[];
   /** How many chapters the book has, for "14 of 25". */
   book?: number;
   voice?: string;
@@ -48,13 +48,13 @@ function sub(sheet: NameCardSheet): string {
 }
 
 /** First seen, how many chapters, last seen (227b): label and value, a row each. */
-function seen(chapters: number[], book: number | undefined): [string, string][] {
+function seen(chapters: string[], book: number | undefined): [string, string][] {
   if (chapters.length === 0) return [];
   const first = chapters[0]!, last = chapters[chapters.length - 1]!;
   return [
-    ["First seen", `Chapter ${first}`],
+    ["First seen", first],
     ["Chapters", book !== undefined ? `${chapters.length} of ${book}` : String(chapters.length)],
-    ...(last !== first ? [["Last seen", `Chapter ${last}`] as [string, string]] : []),
+    ...(last !== first ? [["Last seen", last] as [string, string]] : []),
   ];
 }
 

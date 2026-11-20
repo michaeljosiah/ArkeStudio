@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
-import { captionWordParts, clockTime, ulid, type AudiobookWordTimingState } from "@arke-studio/contracts";
+import { captionWordParts, chapterCalled, clockTime, ulid, type AudiobookWordTimingState } from "@arke-studio/contracts";
 import { send, subscribeAudiobookWordTiming, useStore } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
 import { claimRead, releaseRead } from "../lib/reply-reads.js";
@@ -84,13 +84,9 @@ export function WordTimingControl({
   if (!enabled) return null;
   const pending = state?.blocks.filter((b) => !b.ready) ?? [];
   const chapterIds = [...new Set(state?.blocks.map((block) => block.chapterId) ?? chapters ?? [])];
-  const chapter =
-    chapterIds.length === 1
-      ? world?.productions
-          .find((production) => production.meta.id === productionId)
-          ?.chapters.find((entry) => entry.id === chapterIds[0])
-      : undefined;
-  const scopeLabel = chapter === undefined ? "Current reading" : `Chapter ${chapter.order}`;
+  const book = world?.productions.find((production) => production.meta.id === productionId)?.chapters;
+  const chapter = chapterIds.length === 1 ? book?.find((entry) => entry.id === chapterIds[0]) : undefined;
+  const scopeLabel = chapter === undefined ? "Current reading" : chapterCalled(book ?? [], chapter);
   const openReview = () => {
     setSelected(null);
     setReview(true);

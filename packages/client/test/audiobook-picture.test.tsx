@@ -231,7 +231,7 @@ describe("Picture on a block (turn 186c)", () => {
     assert.equal(q(m, '[data-testid="picture-card-checks"]'), null);
     assert.ok(button(m, "Suggest picture"), "Arke can make one for it");
     await press(q(m, '[data-testid="audiobook-picture-open"]'));
-    assert.match(text(q(m, ".fy-ab__reads")), /Chapter 07\s*2 pictures · cover at the start/);
+    assert.match(text(q(m, ".fy-ab__reads")), /Chapter 7\s*2 pictures · cover at the start/);
     assert.match(text(q(m, ".fy-ab__reads")), /Holds\s*until block 4/);
     await press(button(m, "Remove"));
     const removed = m.sent.at(-1) as Extract<ClientMessage, { kind: "set-audiobook-picture" }>;
