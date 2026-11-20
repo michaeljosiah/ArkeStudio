@@ -4603,6 +4603,41 @@ describe("Arke sets a production's song (issue 3081)", () => {
       assert.deepEqual(left, orderedShots(scene).slice(2).map((shot) => shot.id));
     });
 
+    // Marking the song's sections from the scenes carries no markers: its authority reads the
+    // scenes. The deletion's dry run did not, so it refused that card, left the song a revision
+    // behind, passed over the unpin after it, and refused the deletion for the pins the unpin
+    // clears (codex on PR 3265).
+    it("prepares the sections from the scenes, the unpin and the deletion after them in one turn, and all three land in order", async () => {
+      const w = await songWorld();
+      const { scene, shots } = await pinnedScene(w);
+      // No fixture scene has a place in the song, and no command gives a scene one after creation.
+      const path = `productions/${PRODUCTION}/scenes/${production(w).sceneFiles[scene.id]}.json`;
+      const raw = await readFile(join(w.store.dir, path), "utf8");
+      await w.store.commit({ kind: "scene-window", source: "test", files: [{ path, action: "replace", baseHash: `sha256:${createHash("sha256").update(raw).digest("hex")}`,
+        content: `${JSON.stringify({ ...JSON.parse(raw), songWindow: { startSec: 0, endSec: 16 } }, null, 2)}\n` }] });
+      const spine = spineRead(w.store), scenes = sceneRead(w, scene.id);
+      const card = (ref: string, after: string[], baseRevision: number, command: unknown) => ModelWorldChatActionSchema.parse({
+        kind: "audio-spine-command", productionId: PRODUCTION, ref, ...(after.length > 0 ? { after } : {}), baseRevision, command, checkReceiptIds: [spine.id] });
+      const oneTurn = turn(w.conversationId, context, { receipts: [spine, scenes], actions: [
+        card("sections", [], 3, { kind: "mark-sections-from-scenes" }),
+        card("unpin", ["sections"], 4, { kind: "delete-anchors", shotIds: shots.map((shot) => shot.id) }),
+        deletion(scene.id, shots, scenes, { after: ["unpin"] }),
+      ] });
+      const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+      await appendTurn(w.log, oneTurn, prepared);
+      await bindAll(w.lifecycle, prepared);
+      const cards = (await loaded(w.log)).actions;
+      assert.equal(cards.length, 3, "the deletion is offered with the two cards it waits on");
+      assert.equal(production(w).spine?.revision, 3, "preparing writes nothing");
+
+      for (const one of cards) assert.equal((await decide(w.lifecycle, w.log, one)).status, "completed", one.shown.title);
+      assert.equal(production(w).spine?.revision, 5);
+      assert.deepEqual(production(w).spine?.markers.map((marker) => marker.kind === "section" ? [marker.label, marker.atSec] : null), [[scene.title, 0]]);
+      assert.deepEqual(production(w).spine?.anchors, {});
+      const left = orderedShots(production(w).scenes.find((candidate) => candidate.id === scene.id)!).map((shot) => shot.id);
+      assert.deepEqual(left, orderedShots(scene).slice(2).map((shot) => shot.id));
+    });
+
     it("tells Arke to unpin several shots on one card, and to unpin before it deletes", () => {
       const spine = describeAction("audio-spine-command")!;
       assert.match(spine.description, /To unpin several shots use one delete-anchors \{shotIds\} card/);

@@ -1,6 +1,7 @@
-import { ModelWorldChatActionSchema, applyAudioSpineCommand, nextShotIdIn, orderedShots, sceneCommandCandidate, sceneCommandBatchCandidate, shotDeleteBlockers,
+import { ModelWorldChatActionSchema, nextShotIdIn, orderedShots, sceneCommandCandidate, sceneCommandBatchCandidate, shotDeleteBlockers,
   turnActionGroups, type ModelWorldChatAction, type NewShotId, type SceneRecord, type WorldBundle, type WorldChatDependencyPreview } from "@arke-studio/contracts";
 import { SceneCommandRefused, sceneCommandFrom } from "../productions/scene-commands.js";
+import { applySpineCommand } from "../productions/spine.js";
 
 export function sceneActionCommands<T>(action: { command?: T; commands?: readonly T[] }): T[] {
   if ((action.command === undefined) === (action.commands === undefined)) throw new Error("A scene action needs command or commands, never both.");
@@ -126,6 +127,12 @@ export function shotDeletionBlockers(
  * card before it clears. A spine card says which song it applies to by its base revision, as
  * `spineAfterDependencies` reads it for a card already prepared: one whose revision is not the
  * song's so far changes nothing here, and one the reducer refuses is refused on its own card.
+ *
+ * It is applied as approving it applies it, with the production's scenes read (codex on PR
+ * 3265). The bare reducer is handed no scenes, so it refused `mark-sections-from-scenes` for
+ * having none with a place in the song; the song stayed a revision behind here, the unpin card
+ * after it was passed over for its base revision, and the deletion was refused for pins the
+ * cards before it clear.
  */
 function afterSpineCommand(bundle: WorldBundle, action: Extract<ModelWorldChatAction, { kind: "audio-spine-command" }>): WorldBundle {
   const production = bundle.productions.find(candidate => candidate.meta.id === action.productionId);
@@ -133,7 +140,7 @@ function afterSpineCommand(bundle: WorldBundle, action: Extract<ModelWorldChatAc
   let spine: typeof production.spine;
   try {
     // Only the anchors are read from it, so the time it is stamped with is never seen.
-    spine = applyAudioSpineCommand(production.spine, action.command, production.spine?.updatedAt ?? new Date(0).toISOString());
+    spine = applySpineCommand(production, production.spine, action.command, production.spine?.updatedAt ?? new Date(0).toISOString());
   } catch {
     return bundle;
   }
