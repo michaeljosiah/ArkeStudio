@@ -1,6 +1,6 @@
 # Turn 285 · the Plan
 
-Drawn 20 November 2026 for the owner's approval. Nothing here is built. It answers issue 2302's
+Drawn 20 November 2026 and approved by the owner the same day. Nothing here is built. It answers issue 2302's
 comment of the same day: the film's second scene needed a floor plan, named camera positions and a
 rule of sides, and all three were drawn outside Arke. It extends turns 229 (the Stage, uplifted)
 and 231 (the Stage in the page), which are built.
