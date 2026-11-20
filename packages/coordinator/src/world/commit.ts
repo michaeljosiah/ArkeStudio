@@ -720,6 +720,17 @@ const LIP_SYNC_KEY = /"lipSync"\s*:/;
  */
 export const SHOT_LOOKS_SCHEMA_VERSION = 138;
 const SHOT_LOOKS_KEY = /"looks"\s*:/;
+/**
+ * Issue 3154 (codex on PR 3265): the size a board sheet came back at is a strict field of a
+ * panel take (`panel.returnedSize`), and why a board could not be split is a strict field of a
+ * frame-run step (`landingRefusal`). A build that predates them opens the world all the same,
+ * drops each such take on scan and reads each such run as absent, so work already paid for goes
+ * unseen where the world should have been refused. Neither record is a commit's file: the code
+ * that lands a board writes both in place, so it raises the world itself, before the first of
+ * either and for nothing else it writes. A board that lands at its frozen canvas leaves the
+ * world where it is. (146 follows 145, a scene's place in the song; no branch held it.)
+ */
+export const BOARD_LANDING_SCHEMA_VERSION = 146;
 /** SPEC-047 R-191: older readers cannot discard the chapter's authoritative arrangement. */
 export const AUDIO_STUDIO_SCHEMA_VERSION = 83;
 

@@ -48,6 +48,7 @@ import { recordTakesFromJob } from "../takes/arrival.js";
 import type { BoundaryFrameMaker } from "../takes/boundary.js";
 import { fileDrawnFrame, reviewAppendFor } from "../takes/drawn-frame.js";
 import { atomicWriteFile, serializeFileMutation } from "../world/atomic.js";
+import { BOARD_LANDING_SCHEMA_VERSION } from "../world/commit.js";
 import { toExtendedLength } from "../world/paths.js";
 import type { WorldStore } from "../world/store.js";
 
@@ -1260,13 +1261,20 @@ async function recordBoardLandingRefusal(
   const runId = job.params["frameRun"];
   const stepIndex = job.params["frameRunStep"];
   if (typeof runId !== "string" || typeof stepIndex !== "number" || !Number.isInteger(stepIndex)) return false;
-  const run = await mutateRun(store, productionId, runId, (current) => {
-    const step = current.steps[stepIndex];
-    if (step === undefined || step.jobId !== job.id || step.dispatch.target.kind !== "board-sheet") return current;
-    return {
-      ...current,
-      steps: current.steps.map((candidate, index) => index === stepIndex ? { ...candidate, landingRefusal: reason } : candidate),
-    };
+  const holds = (run: FrameRun | null): boolean => {
+    const step = run?.steps[stepIndex];
+    return step !== undefined && step.jobId === job.id && step.dispatch.target.kind === "board-sheet";
+  };
+  // Asked before the write as well as in it: a job that holds no step of the run records nothing,
+  // and a world must not be raised for a refusal that was never written.
+  if (!holds(await readFrameRun(store, productionId, runId))) return false;
+  // An older build reads a run carrying the refusal as no run at all, so the world is raised
+  // first. Out here because the raise enters the store's queue, and a retry holds that queue
+  // while it waits for this run's file.
+  await store.ensureSchemaVersion(BOARD_LANDING_SCHEMA_VERSION, "board-landing");
+  const run = await mutateRun(store, productionId, runId, (current) => !holds(current) ? current : {
+    ...current,
+    steps: current.steps.map((candidate, index) => index === stepIndex ? { ...candidate, landingRefusal: reason } : candidate),
   });
   return run?.steps[stepIndex]?.landingRefusal === reason;
 }
@@ -1398,6 +1406,9 @@ export async function recordBoardSheetFromJob(
           ...(returnedSize === undefined ? {} : { returnedSize }),
         },
       };
+      // An older build drops a panel take that says what size its sheet came back at, so the
+      // world is raised before the first one is written, and never for a sheet at its canvas.
+      if (returnedSize !== undefined) await store.ensureSchemaVersion(BOARD_LANDING_SCHEMA_VERSION, "board-landing");
       const dir = join(store.dir, "productions", production.meta.id, "takes", childId);
       await atomicWriteFile(join(dir, `panel-${panel.panel}.png`), bytes);
       await atomicWriteFile(join(dir, "take.json"), JSON.stringify(child, null, 2) + "\n");

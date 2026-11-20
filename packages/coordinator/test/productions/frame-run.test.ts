@@ -43,6 +43,7 @@ import { ReadModel } from "../../src/read-model.js";
 import { decodePng, encodePng, solidImage } from "../../src/references/png.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { acceptTake } from "../../src/takes/review.js";
+import { BOARD_LANDING_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { WorldStore } from "../../src/world/store.js";
 import { readWorldMeta, WorldOpenError } from "../../src/world/scan.js";
 import { discoverConversations } from "../../src/world-chat/discover.js";
@@ -1152,6 +1153,7 @@ describe("frame-run coordinator service", () => {
     assert.ok(children.every((take) => take.panel?.parentHash !== take.panel?.cropSourceHash));
     assert.ok(children.every((take) => take.panel?.crop.width === 16 && take.panel.crop.height === 9));
     assert.ok(children.every((take) => take.panel?.returnedSize === undefined), "a sheet at its frozen canvas records no resize");
+    assert.ok((await readWorldMeta(f.dir)).schemaVersion < BOARD_LANDING_SCHEMA_VERSION, "and leaves the world open to the builds that could always read it");
     for (const take of takes) {
       const bytes = await readFile(join(f.dir, "productions", f.production.meta.id, "takes", take.id, take.media!));
       const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
@@ -1222,8 +1224,14 @@ describe("frame-run coordinator service", () => {
     };
 
     const updates = run.steps[0]!.updateShotIds;
+    assert.ok((await readWorldMeta(f.dir)).schemaVersion < BOARD_LANDING_SCHEMA_VERSION, "starting the run and enqueuing its board raise nothing");
     const takes = await recordBoardSheetFromJob(f.store, f.production, job, 0, "included-plan", converter);
     assert.equal(takes.length, 1 + updates.length, "the parent and every update panel land");
+    // A build before `returnedSize` drops each of these takes on scan and still opens the world,
+    // so it is refused the world by name instead (codex on PR 3265).
+    assert.equal((await readWorldMeta(f.dir)).schemaVersion, BOARD_LANDING_SCHEMA_VERSION);
+    await assert.rejects(readWorldMeta(f.dir, { supports: BOARD_LANDING_SCHEMA_VERSION - 1 }),
+      (error) => error instanceof WorldOpenError && error.reason === "schema-newer");
     const children = takes.slice(1);
     const sheetDigest = `sha256:${createHash("sha256").update(sheetBytes).digest("hex")}`;
     for (const child of children) {
@@ -1289,9 +1297,20 @@ describe("frame-run coordinator service", () => {
     };
     const reason = "The picture came back 1024×1024 instead of 1672×941";
 
+    // A job that holds no step of the run it names writes no refusal, and so raises nothing.
+    const elsewhere: Job = { ...job, params: { ...job.params, frameRunStep: 7 } };
+    await assert.rejects(recordBoardSheetFromJob(f.store, f.production, elsewhere, 0, "included-plan", converter), new RegExp(reason));
+    assert.equal((await readFrameRun(f.store, f.production.meta.id, run.id))!.steps[0]!.landingRefusal, undefined);
+    assert.ok((await readWorldMeta(f.dir)).schemaVersion < BOARD_LANDING_SCHEMA_VERSION);
+
     const takes = await recordBoardSheetFromJob(f.store, f.production, job, 0, "included-plan", converter);
     assert.equal(takes.length, 1, "the sheet is kept; no panel is guessed at");
     assert.equal(takes[0]!.boardSheetParent, true);
+    // A build before `landingRefusal` reads this run as no run at all and still opens the world,
+    // so it is refused the world by name instead (codex on PR 3265).
+    assert.equal((await readWorldMeta(f.dir)).schemaVersion, BOARD_LANDING_SCHEMA_VERSION);
+    await assert.rejects(readWorldMeta(f.dir, { supports: BOARD_LANDING_SCHEMA_VERSION - 1 }),
+      (error) => error instanceof WorldOpenError && error.reason === "schema-newer");
     const replayed = await recordBoardSheetFromJob(f.store, f.production, job, 0, "included-plan", converter);
     assert.equal(replayed.length, 1, "a replay meets the same answer without failing");
     const production = f.store.getBundle().productions.find((candidate) => candidate.meta.id === f.production.meta.id)!;
