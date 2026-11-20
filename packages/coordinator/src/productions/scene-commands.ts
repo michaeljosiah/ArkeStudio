@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { fromPortable, toExtendedLength } from "../world/paths.js";
 import { sceneLookReleases } from "../references/kit.js";
+import { followPlacePlan } from "../references/place-plan.js";
 import { currentPerformanceTarget } from "../audio/performances.js";
 import { sha256 } from "../world/text-files.js";
 import { parseSceneRecord } from "./scene-record.js";
@@ -159,6 +160,9 @@ export async function applySceneCommands(store: WorldStore, input: SceneCommands
       // The same numbers as `after`, or a later command anchored at a new shot would not find it.
       working = await candidateFor(store, { ...input, command }, working, files, bundle, newShotId);
     }
+    // What was reviewed is what lands, so the scene is not changed here; a set the batch changed
+    // still goes to the place that owns it and to the other scenes set there.
+    await followPlacePlan(store, { path, before: record, after, commands: input.commands, fixed: true }, files);
     const unique = new Map(files.map(file => [file.path, file]));
     unique.set(path, { path, action: "replace", content: JSON.stringify(after, null, 2) + "\n", baseHash: sha256(raw) });
     await store.commitUnserialised({ kind: "scene-command-batch", source: "production-chat", files: [...unique.values()],
@@ -219,7 +223,9 @@ export async function applySceneCommand(
     }
 
     const files: CommitFileInput[] = [];
-    const next = await candidateFor(store, input, record, files);
+    // The scene's place may own its set (design turn 285): the place takes a set this command
+    // changed, or the scene takes the place's, in this commit and under this gate.
+    const next = await followPlacePlan(store, { path, before: record, after: await candidateFor(store, input, record, files), commands: [input.command] }, files);
 
     files.unshift({
       path,

@@ -143,7 +143,10 @@ export function resolvedShotStaging(scene: Pick<SceneRecord, "blocking">, stagin
  */
 export function stageSourceFingerprintInput(scene: SceneRecord, shot: Shot, aspect: string, look = shot.staging?.playblast?.look): string {
   if (!shot.staging) return "";
-  const { playblast: _playblast, authorship: _authorship, ...staging } = resolvedShotStaging(scene, shot.staging);
+  // Which of the place's positions the camera started from is a name for it, not part of what a
+  // playblast shows: the keys are. Left out, so choosing one for a camera already standing there
+  // leaves its playblast current.
+  const { playblast: _playblast, authorship: _authorship, position: _position, ...staging } = resolvedShotStaging(scene, shot.staging);
   const dressed = look === "lit" || look === "plate"
     ? { look, scene: { lights: scene.blocking?.lights ?? null, atmosphere: scene.blocking?.atmosphere ?? null, plate: scene.blocking?.plate ?? null } }
     : {};
@@ -832,36 +835,45 @@ export interface StageLineFinding {
   message: string;
 }
 
+/**
+ * A staged shot at each of its camera keys: where the camera stands, and each of `cast` with
+ * whether the lens holds them there. Shared by the line check below and the Plan's sides (design
+ * turn 285), so the two judge one frame and cannot disagree about who is in it.
+ */
+export function stageKeySamples(scene: SceneRecord, shot: Shot, staging: ResolvedShotStaging, cast: readonly StagingFigure[], aspect: string) {
+  const ratio = parseAspect(aspect) ?? 16 / 9;
+  const duration = shot.durationSec ?? DEFAULT_SHOT_SEC;
+  const fov = stagingFov(effectiveFraming(scene, shot).lens, aspect);
+  const camera = new PerspectiveCamera(fov, ratio, STAGE_CAMERA_NEAR, 200);
+  return staging.keys.map(key => {
+    const pose = sampleStageCamera(staging, key.t, duration);
+    const lens = stageCameraKeyAt(staging, key.t, duration, fov, ratio);
+    camera.fov = lens.focalMm === undefined ? fov : stagingFov(`${lens.focalMm}mm`, aspect);
+    camera.updateProjectionMatrix();
+    camera.position.set(...pose.p);
+    camera.lookAt(new Vector3(...pose.l));
+    camera.rotateZ((lens.roll ?? 0) * Math.PI / 180);
+    camera.updateMatrixWorld(true);
+    return { at: key.t, key, camera: pose.p, figures: cast.map(figure => {
+      const state = stageFigureAt(figure, staging.performances, key.t, duration, staging.objectMotions);
+      const point = new Vector3(state.x, state.y + (figure.height ?? 1.8) * (state.pose === "lie" ? .1 : state.pose === "sit" ? .5 : .65), state.z).project(camera);
+      return { ...state, sheetId: figure.sheetId, visible: Math.abs(point.x) <= 1 && Math.abs(point.y) <= 1 && point.z >= -1 && point.z <= 1 };
+    }) };
+  });
+}
+
 /** Advisory screen direction at authored camera marks; never a write-boundary refusal (#1045). */
 export function stageLineCrossings(scene: SceneRecord, aspect = "16:9", draft?: { shotId: string; staging: ResolvedShotStaging }): StageLineFinding[] {
   const findings: StageLineFinding[] = [];
   const coverage: Array<{ shot: Shot; blocking: string; pair: [string, string]; sides: Array<{ at: number; side: number }> }> = [];
-  const ratio = parseAspect(aspect) ?? 16 / 9;
   for (const shot of orderedShots(scene)) {
     const staging = draft?.shotId === shot.id ? draft.staging : shot.staging && resolvedShotStaging(scene, shot.staging);
     if (!staging || staging.cast.length < 2 || !staging.keys.length) continue;
-    const duration = shot.durationSec ?? DEFAULT_SHOT_SEC;
-    const fov = stagingFov(effectiveFraming(scene, shot).lens, aspect);
-    const camera = new PerspectiveCamera(fov, ratio, STAGE_CAMERA_NEAR, 200);
     const cast = [...staging.cast].sort((a, b) => a.sheetId.localeCompare(b.sheetId));
     // Shared blocking naturally has the same value. Identical private copies cover the same
     // action too; a deliberately changed private layout must not be compared with the scene.
     const blocking = JSON.stringify([cast, staging.sets]);
-    const samples = staging.keys.map(key => {
-      const pose = sampleStageCamera(staging, key.t, duration);
-      const lens = stageCameraKeyAt(staging, key.t, duration, fov, ratio);
-      camera.fov = lens.focalMm === undefined ? fov : stagingFov(`${lens.focalMm}mm`, aspect);
-      camera.updateProjectionMatrix();
-      camera.position.set(...pose.p);
-      camera.lookAt(new Vector3(...pose.l));
-      camera.rotateZ((lens.roll ?? 0) * Math.PI / 180);
-      camera.updateMatrixWorld(true);
-      return { at: key.t, camera: pose.p, figures: cast.map(figure => {
-        const state = stageFigureAt(figure, staging.performances, key.t, duration, staging.objectMotions);
-        const point = new Vector3(state.x, state.y + (figure.height ?? 1.8) * (state.pose === "lie" ? .1 : state.pose === "sit" ? .5 : .65), state.z).project(camera);
-        return { ...state, visible: Math.abs(point.x) <= 1 && Math.abs(point.y) <= 1 && point.z >= -1 && point.z <= 1 };
-      }) };
-    });
+    const samples = stageKeySamples(scene, shot, staging, cast, aspect);
     for (let a = 0; a < cast.length - 1; a++) for (let b = a + 1; b < cast.length; b++) {
       if (!samples.some(sample => sample.figures[a]!.visible && sample.figures[b]!.visible)) continue;
       const pair: [string, string] = [cast[a]!.sheetId, cast[b]!.sheetId];
