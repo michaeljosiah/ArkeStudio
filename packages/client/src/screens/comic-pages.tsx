@@ -5,6 +5,7 @@ import {
   balanceFaulted,
   BLOCKING_FINDINGS,
   harnessModelReference,
+  chapterCalled,
   chapterParagraphs,
   ComicScriptSchema,
   DEFAULT_COMIC_SETTINGS,
@@ -383,7 +384,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
         </div>
         {(draftPlan !== null && drafted !== undefined) || (planOpen && keptPlan !== undefined && draftPages === null) ? (
           <div className={`fy-comic__body${narrow ? " narrow" : ""}`} ref={body} style={{ gridTemplateColumns: columns }}>
-            <PlanView plan={(draftPlan ?? keptPlan)!} chapterOrder={chapter?.order ?? 1} fix={chatSurface ? fixLean : null}
+            <PlanView plan={(draftPlan ?? keptPlan)!} called={chapter ? chapterCalled(production.chapters, chapter) : "Chapter 1"} fix={chatSurface ? fixLean : null}
               actions={draftPlan !== null && drafted !== undefined ? (
                 <>
                   <Button size="sm" onClick={() => discardProposal(worldId, drafted.proposal.id)}>Discard</Button>
@@ -413,7 +414,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               <div className="fy-comic__draftbar">
                 <Sparkle size={15} />
                 <b>Arke’s draft</b>
-                <span>{draftPages.length} {draftPages.length === 1 ? "page" : "pages"} from chapter {chapter?.order}</span>
+                <span>{draftPages.length} {draftPages.length === 1 ? "page" : "pages"} from {chapter ? chapterCalled(production.chapters, chapter) : "chapter"}</span>
                 <ReadChip read={draftRead} />
                 {kept(draftRead) > 0 && <span className="fy-comic__keptchip">{kept(draftRead)} kept {kept(draftRead) === 1 ? "mystery" : "mysteries"}</span>}
                 <span className="grow" />
@@ -508,7 +509,7 @@ export function ComicPages({ world, production }: { world: WorldBundle; producti
               </div> : <h3>{chapter && chapterName(chapter)} has no pages</h3>}
               {keptPlan !== undefined && <span className="fy-comic__plankept"><Check size={12} />Plan kept · {keptPlan.pages.length} {keptPlan.pages.length === 1 ? "page" : "pages"}</span>}
               {sourceStory && sourceChapter
-                ? <span className="m">From {sourceStory.meta.title} · chapter {sourceChapter.order}{sourceChapter.words !== undefined ? ` · ${sourceChapter.words.toLocaleString("en-GB")} words` : ""}</span>
+                ? <span className="m">From {sourceStory.meta.title} · {chapterCalled(sourceStory.chapters, sourceChapter)}{sourceChapter.words !== undefined ? ` · ${sourceChapter.words.toLocaleString("en-GB")} words` : ""}</span>
                 : keptPlan === undefined && (chapter?.words ?? 0) > 0 && <span className="m">{chapter!.words!.toLocaleString("en-GB")} words</span>}
               <div className="fy-comic__emptyacts">
                 {chatSurface && keptPlan === undefined && <Button variant="primary" onClick={planWithArke}><Sparkle size={14} />Plan with Arke</Button>}
@@ -1080,7 +1081,7 @@ function DraftSide({ world, page, panel, settings }: { world: WorldBundle; page:
       {panel?.source && (
         <>
           {passage === null ? <span className="m">Reading…</span> : "failure" in passage ? <span className="m" role="alert">{passage.failure}</span> : <blockquote className="fy-comic__quote">{passage.text}</blockquote>}
-          <span className="m">Panel {index + 1} · {chapter ? `chapter ${chapter.order}` : panel.source.chapter}, {paragraphLabel(panel.source.paragraphs)}</span>
+          <span className="m">Panel {index + 1} · {chapter ? chapterCalled(story?.chapters ?? [], chapter) : panel.source.chapter}, {paragraphLabel(panel.source.paragraphs)}</span>
         </>
       )}
       <div className="fy-comic__make"><Button variant="primary" disabled><Sparkle size={14} />{settings.mode === "overlay" ? "Make panels" : "Make page"}</Button><span className="m">Keep the draft first</span></div>
@@ -1189,7 +1190,7 @@ export function ComicBookRows({ production, goTo }: { production: ProductionBund
       <div className="fy-comic-opts">
         <div className="fy-comic-opt"><b>Pages</b><span>{accepted} of {book.length} accepted</span><span className="grow" />{blockers.length > 0 && <i>{blockers.length} to clear</i>}</div>
         <div className="fy-comic-opt"><b>Checks</b><span>{checked} passed</span><span className="grow" />{anyway > 0 && <i>{anyway} accepted anyway</i>}</div>
-        {empty.length > 0 && <div className="fy-comic-opt"><b>Not in this book</b><span>{empty.map((chapter) => `Chapter ${chapter.order}`).join(", ")}</span><span className="grow" /><i>no pages yet</i></div>}
+        {empty.length > 0 && <div className="fy-comic-opt"><b>Not in this book</b><span>{empty.map((chapter) => chapterCalled(production.chapters, chapter)).join(", ")}</span><span className="grow" /><i>no pages yet</i></div>}
         <div className="fy-comic-opt"><b>Reading</b><span>{READING.find(([value]) => value === settings.reading)?.[1]}</span></div>
         <div className="fy-comic-opt"><b>Edition</b><span>{editionDay()}</span></div>
       </div>
@@ -1308,10 +1309,10 @@ const VERDICT_LABEL: Record<ComicChapterPlan["passages"][number]["verdict"], str
  * A chapter's page plan (turn 254b): passages with their verdicts, the pages with the turns they end
  * on, and what the reader knows by which page. A line that leans on a cut is named, with Fix.
  */
-function PlanView({ plan, chapterOrder, fix, actions }: { plan: ComicChapterPlan; chapterOrder: number; fix: ((lean: ComicChapterPlan["leans"][number]) => void) | null; actions: ReactNode }) {
+function PlanView({ plan, called, fix, actions }: { plan: ComicChapterPlan; called: string; fix: ((lean: ComicChapterPlan["leans"][number]) => void) | null; actions: ReactNode }) {
   return (
     <div className="fy-comic__plan">
-      <div className="fy-comic__draftbar"><Sparkle size={15} /><b>Page plan</b><span>{plan.pages.length} {plan.pages.length === 1 ? "page" : "pages"} from chapter {chapterOrder}</span><span className="grow" />{actions}</div>
+      <div className="fy-comic__draftbar"><Sparkle size={15} /><b>Page plan</b><span>{plan.pages.length} {plan.pages.length === 1 ? "page" : "pages"} from {called}</span><span className="grow" />{actions}</div>
       <div className="fy-comic__plancols">
         <section>
           <h4>Passages</h4>

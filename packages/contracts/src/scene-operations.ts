@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ShotIdSchema, SlugSchema } from "./ids.js";
-import { SceneAtmosphereSchema, SceneBlockingSchema, SceneCastMemberSchema, ScenePlateSchema, ScriptBlockSchema, ShotSchema, StageLightSchema, ShotStageEditSchema, type SceneBlocking, type SceneCastMember, type Shot } from "./scene.js";
+import { SceneAtmosphereSchema, SceneBlockingSchema, SceneCastMemberSchema, ScenePlateSchema, ScriptBlockSchema, ShotSchema, StageLightSchema, ShotStageEditSchema, type SceneBlocking, type SceneCastMember, type Shot, type ShotFraming } from "./scene.js";
 import {
   isGraphScene,
   linearizeSceneFlow,
@@ -76,6 +76,29 @@ export const CLEARABLE_SHOT_FIELDS = [
   "beat",
 ] as const;
 
+/**
+ * One field of a patch to the scene's camera defaults (issue 3247): a value sets, null clears.
+ *
+ * Bounded here and not on `ShotFramingSchema`, which is the read path. The bound is the lesson of
+ * issue 942: a scene's look rides in every frame and clip of the scene, and a paragraph long
+ * enough to drown the shot's own words is the fault the production look was taken out for.
+ */
+const SceneDefaultFieldSchema = z.string().trim().min(1).max(400).nullable().optional();
+export const SceneDefaultsPatchSchema = z
+  .object({
+    size: SceneDefaultFieldSchema,
+    angle: SceneDefaultFieldSchema,
+    lens: SceneDefaultFieldSchema,
+    focus: SceneDefaultFieldSchema,
+    movement: SceneDefaultFieldSchema,
+    pace: SceneDefaultFieldSchema,
+    lighting: SceneDefaultFieldSchema,
+    timeOfDay: SceneDefaultFieldSchema,
+    grade: SceneDefaultFieldSchema,
+  })
+  .strict();
+export type SceneDefaultsPatch = { [Field in keyof ShotFraming]?: string | null };
+
 /** One bounded scene mutation. Arbitrary graph replacement is deliberately absent. */
 export const SceneCommandSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -99,6 +122,8 @@ export const SceneCommandSchema = z.discriminatedUnion("kind", [
         .optional(),
       /** The cast, per member: a member replaces its entry whole, null removes it (SPEC-044 R-7, R-9). */
       cast: z.record(SlugSchema, SceneCastMemberSchema.nullable()).optional(),
+      /** The camera every shot inherits, per field: null clears; a shot's own `framing` still wins (issue 3247). */
+      defaults: SceneDefaultsPatchSchema.optional(),
     })
     .strict(),
   z
@@ -422,6 +447,7 @@ export function editScene(
     blocking?: SceneBlocking | undefined;
     inherits?: { location?: string | null; timeOfDay?: string | null; tone?: string | null };
     cast?: Record<string, SceneCastMember | null>;
+    defaults?: SceneDefaultsPatch;
   },
 ): GraphScene {
   const completed = complete(record, shotsOf(record));
@@ -453,6 +479,18 @@ export function editScene(
     }
     const { cast: _cast, ...withoutCast } = next;
     next = Object.keys(merged).length === 0 ? withoutCast : { ...withoutCast, cast: merged };
+  }
+  if (input.defaults !== undefined) {
+    // The same patch as `inherits`: a value sets, null clears, absent leaves, and an emptied
+    // camera is dropped whole, so "from scene" on a shot never reads a key that holds nothing.
+    const merged: ShotFraming = { ...next.defaults };
+    for (const [field, value] of Object.entries(input.defaults) as Array<[keyof ShotFraming, string | null | undefined]>) {
+      if (value === undefined) continue;
+      if (value === null) delete merged[field];
+      else merged[field] = value;
+    }
+    const { defaults: _defaults, ...withoutDefaults } = next;
+    next = Object.keys(merged).length === 0 ? withoutDefaults : { ...withoutDefaults, defaults: merged };
   }
   if (!("blocking" in input)) return next;
   if (input.blocking !== undefined) return { ...next, blocking: input.blocking };

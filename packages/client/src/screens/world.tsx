@@ -19,6 +19,8 @@ import { productionPlate } from "../lib/production-plate.js";
 import { foundingNote } from "../components/queue-note.js";
 import { followLink } from "../lib/activity-panel.js";
 import { useOpenWorldGuard } from "../lib/selectors.js";
+import { editorPictureCut } from "../lib/editor-timeline.js";
+import { runtimeSeconds } from "../lib/format.js";
 import {
   reconcileExternalEdit, useAuthoring, useClientState, dismissBuildNotice, useWorld, renameWorld,
 } from "../lib/store.js";
@@ -329,6 +331,17 @@ export function WorldOverviewScreen() {
   );
   const cut = production ? deriveCut(production) : null;
   const hasChapters = production && productionShape(production.meta).hasChapters;
+  // No story shots is not nothing made (issue 3219): a film cut in the Cut from Library clips held a
+  // finished 3:47 of 75 clips under "No shots yet". Its length, as the rail measures it.
+  const cutSec = (() => {
+    if (!production || hasChapters || cut === null || cut.entries.length > 0) return 0;
+    try {
+      const picture = editorPictureCut(production, world.artifacts).cut;
+      return picture.entries.length === 0 ? 0 : picture.totalSec - picture.uncoveredSec;
+    } catch {
+      return 0;
+    }
+  })();
   // The prototype's fan: per-slot offset, rotation and drift, centre card forward.
   const FAN = [
     { left: -410, top: 30, rotate: -9, z: 1, dur: 7.4, delay: 0 },
@@ -489,6 +502,7 @@ export function WorldOverviewScreen() {
               <div className="fy-cta__title">Continue {production.meta.title}</div>
               <div className="fy-cta__sub">
                 {hasChapters ? `${chapterCountLabel(production)} · ${production.meta.status}`
+                  : cutSec > 0 ? `${cutLength(cutSec)} cut`
                   : cut.entries.length === 0 ? "No shots yet."
                   : `${cut.covered} of ${cut.entries.length} shots covered${cut.gaps > 0
                     ? ` · ${cut.gaps} gap${cut.gaps === 1 ? "" : "s"} to close.`
@@ -634,6 +648,13 @@ function WorldGlance({ world }: { world: WorldBundle }) {
       </div>
     </section>
   );
+}
+
+/** A cut's length as a person says it: `3:47`, and the rail's measurement under a minute, never `0:00`. */
+function cutLength(sec: number): string {
+  if (sec < 59.5) return runtimeSeconds(sec);
+  const whole = Math.round(sec);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
 function chapterCountLabel(production: WorldBundle["productions"][number]): string {

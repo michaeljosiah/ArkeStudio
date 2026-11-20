@@ -65,6 +65,7 @@ import {
   WorldChatProposalActionSchema,
   WorldChatProductionChapterActionSchema,
   WorldChatProductionChapterOrderActionSchema,
+  WorldChatProductionVoicePinsActionSchema,
   WorldChatProductionCreateActionSchema,
   WorldChatProductionEpisodeActionSchema,
   WorldChatProductionEpisodeOrderActionSchema,
@@ -150,6 +151,7 @@ import {
   type ConversationId,
   type ArkeReadObservation,
   type ArkeReadRequirement,
+  type ChapterVoicePin,
   type ArkeGenerationBody,
   type ModelWorldChatAction,
   type WorldChatArtDirectionRestoreAction,
@@ -390,6 +392,8 @@ export interface WorldChatActionAdapterDeps {
   readonly chooseMusicTake?: (productionId: string, trackId: string, sessionId: string, takeId: string, baseHash: string) => Promise<void>;
   readonly reconcileChapterReview?: (productionId: string, chapterId: string, requestId: string) => Promise<{ id: string; summary: string } | null>;
   readonly reviewChapter?: (productionId: string, chapterId: string, requestId: string) => Promise<{ id: string; summary: string }>;
+  /** Corrections to a chapter's cast (issue 3233), written one after another as the speaker menu writes each; the first refused stops the rest. */
+  readonly setVoicePins?: (productionId: string, chapterId: string, pins: readonly ChapterVoicePin[]) => Promise<{ written: number; refused?: string }>;
   readonly audioStudioOptions?: { ffmpeg?: import("../takes/export.js").FfmpegRunner };
   readonly audioStudioChanged?: (productionId: string, chapterId: string) => Promise<void>;
   readonly effectDependencies?: EditorEffectDependencies;
@@ -569,6 +573,7 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-scene": ["scenes"],
   "production-episode-order": ["episodes"],
   "chapter-review": ["chapters"],
+  "production-voice-pins": ["chapters", "sheets"],
   "production-chapter-order": ["chapters"],
   "production-scene-order": ["scenes"],
   "production-scene-delete": ["scenes"],
@@ -824,6 +829,11 @@ function productionActionTargets(
     ];
     case "production-episode-order": return [{ requirement: "episodes", target: action.productionId }];
     case "chapter-review": return [{ requirement: "chapters", target: action.productionId }];
+    // The chapter's own read carries its prose and its cast lines, which name a line as a pin does.
+    case "production-voice-pins": return [
+      { requirement: "chapters", target: `${action.productionId}:${canonicalChapterId(store, action.productionId, action.chapterId)}` },
+      { requirement: "sheets", target: worldId },
+    ];
     case "production-chapter-order": return [{ requirement: "chapters", target: action.productionId }];
     case "production-scene-order": return [{ requirement: "scenes", target: action.productionId }];
     case "production-scene-delete":
@@ -991,7 +1001,12 @@ function worldActionObservations(
       (observation.target === required.target ||
         ((action.kind === "production-chapter" || action.kind === "production-chapter-order") && required.requirement === "chapters" &&
           required.target === action.productionId && observation.target === `${required.target}::plan`) ||
-        (action.kind === "production-chapter" && required.requirement === "story" && observation.target === `${required.target}:overview`))));
+        (action.kind === "production-chapter" && required.requirement === "story" && observation.target === `${required.target}:overview`) ||
+        // get_scene returns the whole script, block ids and all, so its read covers a script
+        // replacement; fenced on the whole scene, it is the stricter of the two. Arke reached for
+        // it five turns running and the script-only target refused each (issue 3230).
+        (action.kind === "production-scene" && required.requirement === "scenes" && required.target.endsWith(":script") &&
+          observation.target === required.target.slice(0, -":script".length)))));
   // One corrective turn should discover every prerequisite, not spend a full draft learning
   // about sheets and then another learning about canon. Invalid receipts never count as reads.
   const problems = [
@@ -1078,6 +1093,7 @@ function preparedWorldPayload(
     case "production-scene": return WorldChatProductionSceneActionSchema.parse({ kind: "world-chat-production-scene", ...common });
     case "production-episode-order": return WorldChatProductionEpisodeOrderActionSchema.parse({ kind: "world-chat-production-episode-order", ...common });
     case "chapter-review": return WorldChatChapterReviewActionSchema.parse({ kind: "world-chat-chapter-review", ...common });
+    case "production-voice-pins": return WorldChatProductionVoicePinsActionSchema.parse({ kind: "world-chat-production-voice-pins", ...common });
     case "production-chapter-order": return WorldChatProductionChapterOrderActionSchema.parse({ kind: "world-chat-production-chapter-order", ...common });
     case "production-scene-order": return WorldChatProductionSceneOrderActionSchema.parse({ kind: "world-chat-production-scene-order", ...common });
     case "production-scene-delete": return WorldChatProductionSceneDeleteActionSchema.parse({ kind: "world-chat-production-scene-delete", ...common });
@@ -1466,7 +1482,8 @@ function worldActionTargets(
         : []),
     ];
     case "production-episode-order": return action.orderedIds.map((id) => ({ kind: "episode", id, label: id }));
-    case "chapter-review": return [{ kind: "chapter", id: action.chapterId, label: action.chapterId }];
+    case "chapter-review":
+    case "production-voice-pins": return [{ kind: "chapter", id: action.chapterId, label: action.chapterId }];
     case "production-chapter-order": {
       const titles = new Map(store.getBundle().productions.find(p => p.meta.id === action.productionId)?.chapters.map(c => [c.id, c.title]));
       return action.orderedIds.map((id) => ({ kind: "chapter", id, label: clipped(titles.get(id) ?? id, 200) ?? id }));
@@ -2023,25 +2040,77 @@ function savedStoryReviewObservations(action: Pick<ConversationActionCard, "prod
 }
 
 const STORY_PROPOSAL_KINDS: readonly string[] = ["world-chat-production-overview", "world-chat-production-prose-style", "world-chat-production-chapter"];
+const SHEET_PROPOSAL_KINDS: readonly string[] = ["world-chat-sheet"];
+const SHEET_PREFIXES = (["character", "location", "faction"] as const).map((kind) => `${sheetDir(kind)}/`);
 
 /**
- * Whether another story card of this card's own turn is what moved its collection reads: one was
- * accepted, and nothing but this turn's cards has touched the production since. An edit from anywhere
- * else keeps the refusal, and an earlier one would have stopped the first sibling too.
+ * Sheet cards fence on the whole sheet collection, so when Arke offers several in one turn the
+ * first approval moved every other card's read, and each was discarded as stale although nothing
+ * it showed had changed (issue 3213). Their siblings are the turn's other sheet cards, and the
+ * only writes they excuse are in the three sheet folders, as a story card's are in its production.
+ */
+function siblingScope(action: Pick<ConversationActionCard, "actionKind" | "productionId">) {
+  if (STORY_PROPOSAL_KINDS.includes(action.actionKind)) return { kinds: STORY_PROPOSAL_KINDS, prefixes: [`productions/${action.productionId}/`] };
+  if (SHEET_PROPOSAL_KINDS.includes(action.actionKind)) return { kinds: SHEET_PROPOSAL_KINDS, prefixes: SHEET_PREFIXES };
+  return undefined;
+}
+
+/**
+ * The reads a sheet card holds once its own turn's siblings are what moved the sheets read, or
+ * undefined when they are not. The collection is fenced again rather than dropped, and the fence is
+ * read before the change log: a write before it shows in the log and fails the sibling check, and
+ * a write after it, even one queued ahead of this acceptance, fails the gate's precondition (codex
+ * on PR 3222). Canon and every other read stay as they were prepared.
+ */
+async function siblingSheetObservations(store: WorldStore, action: ConversationActionCard) {
+  const fence = sheetsFence(store.getBundle());
+  if (!await siblingAccepted(store, action)) return undefined;
+  return { baseObservations: action.baseObservations.map((observation) =>
+    observation.requirement === "sheets" ? { ...observation, revisionOrDigest: fence } : observation) };
+}
+
+const SHEET_ID_TAKEN = "Another sheet now has this name.";
+
+/**
+ * Whether a sheet this proposal creates takes the id of another sheet. Ids are global across the
+ * three folders, and a create allocates its id against the sheets there were when it was staged,
+ * not its siblings: a character and a location of one name, offered in one turn, both become
+ * `harbour` in different folders, so the gate's target check passes both. The collection read used
+ * to refuse the second, and a relaxed one must too (codex on PR 3222).
+ */
+function sheetIdTaken(store: WorldStore, proposal: Proposal): boolean {
+  // Lowercased as `uniqueSlug` compares them.
+  const taken = new Map(store.getBundle().sheets.map((sheet) => [sheet.id.toLowerCase(), `${sheetDir(sheet.type)}/${sheet.id}.md`]));
+  return proposal.targets.some((target) => {
+    if (target.baseHash !== null || !SHEET_PREFIXES.some((prefix) => target.path.startsWith(prefix))) return false;
+    const path = taken.get(target.path.slice(target.path.indexOf("/") + 1).replace(/\.md$/, "").toLowerCase());
+    return path !== undefined && path !== target.path;
+  });
+}
+
+/**
+ * Whether another card of this card's own turn is what moved its collection reads: one was
+ * accepted, and nothing but this turn's cards has touched the production, or the sheets, since. An
+ * edit from anywhere else keeps the refusal, and an earlier one would have stopped the first
+ * sibling too.
  */
 async function siblingAccepted(store: WorldStore, action: ConversationActionCard): Promise<boolean> {
+  const scope = siblingScope(action);
+  if (!scope) return false;
   const log = new WorldChatStore(conversationDir(store.dir, action.conversationId));
   const meta = await log.readMeta();
   if (!meta) return false;
   const siblings = new Set(foldConversation(meta.id, meta.createdAt, (await log.read()).events).view.actions
-    .filter((other) => other.actionId !== action.actionId && other.turnId === action.turnId && other.status === "completed" && STORY_PROPOSAL_KINDS.includes(other.actionKind))
+    .filter((other) => other.actionId !== action.actionId && other.turnId === action.turnId && other.status === "completed" && scope.kinds.includes(other.actionKind))
     .map((other) => other.authority.id));
   if (siblings.size === 0) return false;
   const changes = (await readChanges(join(store.dir, "changes.jsonl"))) as Array<{ entity?: string; path?: string; proposalId?: string }>;
   const first = changes.findIndex((change) => change.proposalId !== undefined && siblings.has(change.proposalId));
   if (first < 0) return false;
-  const prefix = `productions/${action.productionId}/`;
-  return changes.slice(first).every((change) => !(change.path ?? change.entity ?? "").startsWith(prefix) || (change.proposalId !== undefined && siblings.has(change.proposalId)));
+  return changes.slice(first).every((change) => {
+    const path = change.path ?? change.entity ?? "";
+    return !scope.prefixes.some((prefix) => path.startsWith(prefix)) || (change.proposalId !== undefined && siblings.has(change.proposalId));
+  });
 }
 
 /** Native review relaxes only collection context; cited cast and exact chapter reads still fence the write. */
@@ -3322,6 +3391,20 @@ async function sharedResourceProjection(
       shown = { title: `Review ${chapter.title}`, consequence: "Uses configured script, AI tells and visual specialists: the saved chapter goes to the script and AI tells reviewers in one model call each. Selected images may be sent to the permitted image-inspection provider. Saves advisory findings; changes no prose or media.",
         affectedTargets: [...intent.targets], ripples: [], permissionReason: "external-network-action",
         body: { family: "command", commands: [{ label: "Review saved chapter and selected pictures" }], expectedResult: "Evidence-backed findings and an AI tells count in Chapter review; audio delivery is not listened to.", undoAvailable: false } };
+      break;
+    }
+    case "world-chat-production-voice-pins": {
+      // Who speaks a chapter's lines (issue 3233): each correction as the speaker menu writes it.
+      authority = { kind: "extraction", id: intent.actionId };
+      const { productionId, chapterId, pins } = payload.action;
+      const chapter = bundle.productions.find(p => p.meta.id === productionId)?.chapters.find(c => (c.id === chapterId || c.file === chapterId) && !c.retired);
+      if (!chapter) throw new Error("The chapter is no longer available.");
+      if (!deps.setVoicePins) approvalBlockedReason = "Corrections to the cast are unavailable in this session.";
+      shown = { title: `Set who speaks ${pins.length} line${pins.length === 1 ? "" : "s"} in ${chapter.title}`.slice(0, 200),
+        consequence: "Corrects who speaks each line beside the chapter's cast, in order. The prose is unchanged; the first correction refused stops the rest.",
+        affectedTargets: [...intent.targets], ripples: ["Takes made for the old speaker go stale."], permissionReason: "authored-change",
+        body: { family: "command", commands: pins.map((pin) => ({ label: `${pin.narration === true ? "Narration" : pin.speaker}: ${pin.quote}`.slice(0, 200), detail: `Paragraph ${pin.paragraph + 1}` })),
+          expectedResult: "Each line is read by the speaker named here.", undoAvailable: false } };
       break;
     }
     case "world-chat-production-music": {
@@ -4616,6 +4699,16 @@ async function executeSharedResource(
       const result = await deps.reviewChapter(payload.action.productionId, payload.action.chapterId, action.actionId);
       return { status: "completed", receipt: { kind: "chapter-review", id: result.id, summary: result.summary } };
     }
+    case "world-chat-production-voice-pins": {
+      const stale = precondition();
+      if (stale) throw new WorldStateStaleError(stale);
+      if (!deps.setVoicePins) throw new Error("Corrections to the cast are unavailable on this host.");
+      const { productionId, chapterId, pins } = payload.action;
+      const result = await deps.setVoicePins(productionId, chapterId, pins);
+      // Each correction is its own write, so the ones before a refusal stand and are said.
+      if (result.refused !== undefined) return { status: "failed", detail: `${result.written} of ${pins.length} corrections written; the next was refused: ${result.refused}.` };
+      return { status: "completed", receipt: { kind: "voice-pins", id: chapterId, summary: `${pins.length} correction${pins.length === 1 ? "" : "s"} written to the chapter's cast.` } };
+    }
     case "world-chat-production-chapter-order": {
       const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
       if (!production) throw new Error("That production is no longer in this world.");
@@ -5291,7 +5384,12 @@ export function worldChatActionAdapters(
       // Keep that draft for an explicit native review; chat approval still requires its reads.
       const canReviewSaved = STORY_PROPOSAL_KINDS.includes(action.actionKind)
         && observationsCurrent(store, savedStoryReviewObservations(action)).ok;
-      if (!current.ok && !canReviewSaved) {
+      // A sheet card has no saved review to fall back on, so its siblings are asked first: their
+      // landing is the one move of the sheets read that keeps it, and anything else discards it as
+      // before (issue 3213).
+      const relaxedSheets = !current.ok && SHEET_PROPOSAL_KINDS.includes(action.actionKind) ? await siblingSheetObservations(store, action) : undefined;
+      const sheetSiblings = relaxedSheets !== undefined && observationsCurrent(store, relaxedSheets).ok;
+      if (!current.ok && !canReviewSaved && !sheetSiblings) {
         await gate.discard(action.authority.id);
         return current;
       }
@@ -5307,17 +5405,29 @@ export function worldChatActionAdapters(
         await gate.discard(action.authority.id);
         return { ok: false, reason: "stale", detail: "The proposal preview changed after this card was prepared." };
       }
+      if (sheetSiblings && sheetIdTaken(store, await gate.readManifest(action.authority.id))) {
+        await gate.discard(action.authority.id);
+        return { ok: false, reason: "stale", detail: SHEET_ID_TAKEN };
+      }
       // ...unless the move was its own turn's: a card Arke offered beside this one, approved first, is
       // no reason to send the author to a full review (turn 270e, round 95).
-      if (!current.ok && !await siblingAccepted(store, action)) return { ok: false, reason: "blocked", detail: "Story context changed. Review the saved proposal before accepting. No regeneration is needed." };
+      if (!current.ok && !sheetSiblings && !await siblingAccepted(store, action)) return { ok: false, reason: "blocked", detail: "Story context changed. Review the saved proposal before accepting. No regeneration is needed." };
       return { ok: true };
     },
     execute: async (action) => {
       if (!gate) return { status: "failed", detail: "The proposal authority is unavailable." };
       const proposal = await gate.readManifest(action.authority.id);
-      const relaxed = STORY_PROPOSAL_KINDS.includes(action.actionKind) && await siblingAccepted(store, action);
+      // Only story and sheet cards have siblings; every other kind keeps its full precondition.
+      const relaxed = SHEET_PROPOSAL_KINDS.includes(action.actionKind)
+        ? await siblingSheetObservations(store, action)
+        : STORY_PROPOSAL_KINDS.includes(action.actionKind) && await siblingAccepted(store, action) ? savedStoryReviewObservations(action) : undefined;
+      // Read after the fence, so a sibling landing later fails the precondition instead.
+      if (relaxed && SHEET_PROPOSAL_KINDS.includes(action.actionKind) && sheetIdTaken(store, proposal)) {
+        await gate.discard(proposal.id);
+        return { status: "stale", detail: SHEET_ID_TAKEN };
+      }
       const outcome = await gate.accept(proposal.id, {
-        precondition: observationPrecondition(store, relaxed ? savedStoryReviewObservations(action) : action),
+        precondition: observationPrecondition(store, relaxed ?? action),
       }).catch((error): AcceptOutcome => {
         if (error instanceof WorldStateStaleError) {
           return { status: "stale", stalePaths: [], detail: error.detail };
@@ -5801,6 +5911,7 @@ export function worldChatActionAdapters(
     "world-chat-music-sequence-set",
     "world-chat-production-episode-order",
     "world-chat-chapter-review",
+    "world-chat-production-voice-pins",
     "world-chat-production-chapter-order",
     "world-chat-production-scene-order",
     "world-chat-production-scene-delete",

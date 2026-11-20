@@ -1614,6 +1614,17 @@ ffprobe/FFmpeg decoding through `MediaProcessRunner`. Desktop `src/media-tools.t
 `src/media/node-media-host.ts` wire the same tools. `fold.ts`/`project.ts` replay media receipts;
 `take-review-inspection.ts` requires current, completed-turn evidence for review coverage.
 See [media evidence boundaries](../issues/shared-agent-media-evidence.md).
+Measurements of a cut (epic #3070) sit on the same reads: contracts `src/agent-measure.ts` owns
+their arguments and results, each with its own schema boundary (`measure_sync`, lip sync against a
+reference, schema 140; `song_map`, beats, sections and voice, schema 141; `clip_quality`, cadence
+and detail, schema 142; `cut_contact_sheet` and `sample_video`'s `region`, schema 143; `review_export`,
+a finished film checked before it is shared, schema 144);
+`src/agent-media-source.ts` holds the source and interval types both files share. Coordinator
+`src/media/measure-sync.ts`, `src/media/song-map.ts` (beat tracker, voice map), `src/media/clip-quality.ts`
+and `src/media/contact-sheet.ts` (cut finder, tile font, page layout) are the arithmetic;
+`src/world-chat/media-measure.ts` opens a second source (a sync reference, a vocal stem, a compared
+clip), feeds a song to `findSongSections` and reads an export's cut from its timeline.
+See [media measurement](media-measurement.md).
 Contracts `src/agent-listening.ts` owns subjective listening evidence (schema 81). Coordinator
 `media/agent-listening.ts` validates canonical audio and deadlines; `local-audio-listener.ts`
 owns bounded offline native execution; `local-audio-listener.py` passes actual PCM to Qwen2-Audio.
@@ -1852,6 +1863,25 @@ Tests: contracts `test/production-audio-design.test.ts`; coordinator
 `test/media/measurement.test.ts`, `test/media/measurement-wire.test.ts`,
 `test/productions/music-video-policy.test.ts`, existing take
 and Bench subject suites. Client `screens/editor-media-measurement.tsx` resolves the selected physical source and exposes recovery only for absent metadata or failure. `lib/store.ts` correlates and releases transient measurement requests; authoritative metadata arrives through the normal world snapshot. The existing Cut inspector and phone sheet host approved turn 258, with no new route or setting. Client `test/media-measurement.test.tsx` and root `scripts/smoke-media-measurement.mjs` cover controls, source/world invalidation, local-only commands, both themes and native sheet behavior.
+
+### A song's sections, proposed (#3099)
+
+Contracts `song-sections.ts` finds where a song changes from the effects analysis of it
+(`findSongSections` over `createEffectPcmAnalyzer`'s energy and bass): its tempo where it keeps a
+pulse, and section starts on beats. It finds boundaries, never names, and misses a change that
+moves neither level nor low end. Coordinator `productions/song-sections.ts` measures a
+production's master track through the effects' own decode (`EffectAudioAnalysisHost`, the song
+alone as a one-sound plan), one song at a time, and keeps the result in memory per file; nothing
+is written. The Cut asks with `song-sections` and is answered by `song.sections`
+(`commands/productions.ts`); Arke reads the same in `get_spine`'s `spine-song` row
+(`world-chat/target-reads.ts`), which is given by the read and left out of the spine's fence.
+Client `screens/song-sections-notice.tsx` offers the starts for a song with no sections marked
+and sends them as one `spine-command` (`lib/song.ts` `sectionsCommand`), so a section is authored
+only by the person's press.
+
+Tests: contracts `test/song-sections.test.ts` (songs synthesised in the test); coordinator
+`test/productions/song-sections.test.ts`, whose last case runs the installed FFmpeg where there
+is one; client `test/song-sections.test.tsx`.
 
 ## Interactive stories
 

@@ -1,4 +1,4 @@
-import { clearBoardOverride, clearBoardPrompt, deleteShot, duplicateShot, editScene, editShot, insertShot, moveShot, moveBoardBoundary, nextShotIdIn, SceneOperationRefused, setBoardOverride, setBoardPrompt, type ShotAnchor } from "./scene-operations.js";
+import { clearBoardOverride, clearBoardPrompt, deleteShot, duplicateShot, editScene, editShot, insertShot, moveShot, moveBoardBoundary, nextShotIdIn, SceneOperationRefused, setBoardOverride, setBoardPrompt, type SceneDefaultsPatch, type ShotAnchor } from "./scene-operations.js";
 import { orderedShots, type GraphScene, type SceneRecord } from "./scene-flow.js";
 import { parseMentions } from "./planning.js";
 import { stageProblems, resolvedShotStaging, stagingRetimed } from "./staging.js";
@@ -16,6 +16,7 @@ export type SemanticSceneCommand =
       synopsis?: string | null;
       inherits?: { location?: string | null; timeOfDay?: string | null; tone?: string | null };
       cast?: Record<string, SceneCastMember | null>;
+      defaults?: SceneDefaultsPatch;
     }
   | { kind: "edit-stage"; shotId: string; blocking?: (Omit<SceneBlocking, "version" | "plate" | "lights" | "atmosphere"> & { plate?: SceneBlocking["plate"] | null; lights?: SceneBlocking["lights"] | null; atmosphere?: SceneBlocking["atmosphere"] | null }) | null; staging?: ShotStageEdit | null }
   | { kind: "insert-shot"; at: ShotAnchor; shot: Omit<Shot, "id" | "number"> }
@@ -71,13 +72,27 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
         change: current ? {} : { covers: [...(shot.covers ?? []), { blockId: id, textDigest: command.textDigest }] } });
     }
     case "edit-scene": {
-      return editScene(record, {
+      let next = editScene(record, {
         ...(command.title !== undefined ? { title: command.title } : {}),
         // Null on the wire is the clear; the operation reads present-with-undefined as the clear.
         ...(command.synopsis !== undefined ? { synopsis: command.synopsis ?? undefined } : {}),
         ...(command.inherits !== undefined ? { inherits: command.inherits } : {}),
         ...(command.cast !== undefined ? { cast: command.cast } : {}),
+        ...(command.defaults !== undefined ? { defaults: command.defaults } : {}),
       });
+      // A camera written in words follows the lens (issue 1820). edit-shot solves it again when the
+      // shot's own lens moves; a shot that takes its lens from the scene moves with the scene's
+      // (issue 3247), or its keys would go on framing what the old lens saw.
+      if (next.defaults?.lens !== record.defaults?.lens) {
+        for (const shot of orderedShots(next)) {
+          const staging = shot.staging;
+          if (staging === undefined || shot.framing?.lens !== undefined || !staging.keys.some((key) => key.frame !== undefined)) continue;
+          const reframed = stageReframed(resolvedShotStaging(next, staging), shot.durationSec ?? 4, "16:9", effectiveFraming(next, shot).lens);
+          if (JSON.stringify(reframed.keys) === JSON.stringify(staging.keys)) continue;
+          next = editShot(next, { shotId: shot.id, change: { staging: { ...staging, keys: reframed.keys, version: staging.version + 1 } } });
+        }
+      }
+      return next;
     }
     case "edit-stage": {
       if (command.blocking === undefined && command.staging === undefined) {

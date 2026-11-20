@@ -245,6 +245,8 @@ describe("production setup interaction (issue #976)", () => {
     const m = await mount(FIXTURE_STATE, true);
     const film = [...m.container.querySelectorAll("button")].find(button => button.textContent?.includes("Make a film"));
     assert.ok(film);
+    // A feature is made here too, so the card does not say short (issue 3216).
+    assert.match(film.textContent!, /Film, music video or micro-drama/);
     await act(async () => film.dispatchEvent(new dom.Event("click", { bubbles: true })));
     assert.equal(m.commands().at(-1)?.action.operation, "start");
     assert.equal(m.sent.some(message => message.kind === "create-production"), false);
@@ -290,6 +292,46 @@ describe("production setup interaction (issue #976)", () => {
     assert.deepEqual(create.action, { operation: "create", expectedRevision: 3, reviewId: REVIEW_ID });
     await answer(create, { ...reviewed, status: "created", productionId: "the-crossing-2" });
     assert.match(m.container.textContent!, /Created production workspace/);
+  });
+
+  // Retitling a reviewed film dropped the review, and Create went back to Review with nothing said (issue 3217).
+  it("says a draft changed since its review and reviews it again from where Create was", async () => {
+    const reviewedAt = (setup: ProductionSetupState): ProductionSetupState => ({ ...setup, status: "reviewed", review: {
+      id: REVIEW_ID, sourceDigest: `sha256:${"a".repeat(64)}`,
+      plan: {
+        production: { id: "the-crossing-2", title: setup.draft.title, format: "video", kind: "film", status: "in-progress",
+          created: AT, updated: AT, aspect: "16:9", frameRate: 24, failureModes: [] },
+        initialSeason: null, series: { operation: "none" },
+        initialContent: { worldId: FIXTURE_WORLD_ID, setupId: ID, revision: setup.draft.revision, narrative: null, scenes: [], episodes: [] },
+      },
+    } });
+    const buttons = (m: { container: HTMLElement }) => [...m.container.querySelectorAll("button")].map(button => button.textContent);
+    const m = await mount();
+    await answer(m.commands()[0]!, draft());
+    assert.equal(m.container.querySelector('[aria-label="Review production"]'), null, "nothing to say before a review");
+    await click(m.container, "Review production");
+    await answer(m.commands().at(-1)!, reviewedAt(draft()));
+    assert.match(m.container.querySelector('[aria-label="Review production"]')!.textContent!, /Ready to create · The crossing/);
+    assert.ok(buttons(m).includes("Create production"));
+
+    const title = [...m.container.querySelectorAll("label")].find(label => label.textContent?.startsWith("Working title"))!.querySelector("input")!;
+    title.value = "The far crossing";
+    await act(async () => title.dispatchEvent(new dom.Event("focusout", { bubbles: true })));
+    const retitle = m.commands().at(-1)!;
+    assert.deepEqual(retitle.action, { operation: "update", update: { expectedRevision: 3, fields: { title: "The far crossing" } } });
+    const changed = draft();
+    changed.draft.title = "The far crossing"; changed.draft.revision = 4;
+    await answer(retitle, changed);
+    assert.equal(m.container.querySelector('[aria-label="Review production"]')!.textContent, "Changed since review");
+    assert.ok(!buttons(m).includes("Create production"));
+    const again = [...m.container.querySelectorAll("button")].find(button => button.textContent === "Review production")!;
+    assert.equal(again.disabled, false);
+    await click(m.container, "Review production");
+    assert.deepEqual(m.commands().at(-1)!.action, { operation: "review", expectedRevision: 4 }, "one press reviews the changed draft");
+    await answer(m.commands().at(-1)!, reviewedAt(changed));
+    assert.match(m.container.querySelector('[aria-label="Review production"]')!.textContent!, /Ready to create · The far crossing/);
+    assert.doesNotMatch(m.container.textContent!, /Changed since review/);
+    assert.ok(buttons(m).includes("Create production"));
   });
 
   it("attaches a file to setup and sends it with the line (issue 3089)", async () => {
@@ -339,6 +381,28 @@ describe("production setup interaction (issue #976)", () => {
     assert.match(card, /Music video · 9:16 · 24 fps/);
     assert.doesNotMatch(card, /music-video|\b0 (episode|scene|script|open)/);
     assert.doesNotMatch(card, /open question/);
+  });
+
+  // A 55-minute feature had to be made under "Film · short", and nothing about the kind is short (issue 3216).
+  it("names a film Film in Format and in its review", async () => {
+    const m = await mount();
+    await answer(m.commands()[0]!, draft());
+    const format = [...m.container.querySelectorAll("label")].find(label => label.textContent?.startsWith("Format"))!.querySelector("select")!;
+    assert.deepEqual([...format.querySelectorAll("option")].map(option => option.textContent),
+      ["Micro drama", "Film", "Music video", "Story · audio drama", "Story · graphic novel", "Other"]);
+    await click(m.container, "Review production");
+    await answer(m.commands().at(-1)!, { ...draft(), status: "reviewed", review: {
+      id: REVIEW_ID, sourceDigest: `sha256:${"a".repeat(64)}`,
+      plan: {
+        production: { id: "the-crossing-2", title: "The crossing", format: "video", kind: "film", status: "in-progress",
+          created: AT, updated: AT, aspect: "16:9", frameRate: 24, failureModes: [] },
+        initialSeason: null, series: { operation: "none" },
+        initialContent: { worldId: FIXTURE_WORLD_ID, setupId: ID, revision: 3, narrative: null, scenes: [], episodes: [] },
+      },
+    } });
+    const card = m.container.querySelector('[aria-label="Review production"]')!.textContent!;
+    assert.match(card, /Film · 16:9 · 24 fps/);
+    assert.doesNotMatch(card, /short/);
   });
 
   it("switches narrow-panel tabs without losing the composer or outline", async () => {

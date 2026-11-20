@@ -88,6 +88,9 @@ describe("Arke client-command parity (SPEC-041 R-46..R-52)", () => {
     assert.deepEqual(paths("save-chapter"), ["production-chapter"], "authored chapter edits remain reachable");
     assert.deepEqual(paths("bench-accept"), ["production-take-file"]);
     assert.deepEqual(paths("clear-shot-frame"), ["production-shot-frame-clear"]);
+    // Arke told an author it had no tool to say who speaks a line (issue 3233).
+    assert.deepEqual(paths("set-voice-pin"), ["production-voice-pins"]);
+    assert.equal(actionGuideEntry("production-voice-pins")?.unavailable, null, "and the guide offers it");
     assert.deepEqual(paths("accept-take"), ["production-take-review"], "accept-and-select remains reachable");
     assert.deepEqual(paths("scene-command"), ["production-scene-command"], "the scene rename channel cannot perform shot commands");
   });

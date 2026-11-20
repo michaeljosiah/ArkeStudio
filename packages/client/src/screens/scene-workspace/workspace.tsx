@@ -53,6 +53,7 @@ import { ShotLightbox } from "./lightbox.js";
 import { CastPicker, SheetPicture, sceneCast, type CastPickerMode } from "./cast-picker.js";
 import { CharacterDialog } from "./character-dialog.js";
 import { LocationDialog } from "./location-dialog.js";
+import { SceneCamera } from "./scene-camera.js";
 import { Button } from "../../components/ui.js";
 import { Film, Grid2x2, ImageMark, ListBullet, Maximize2, Minimize2, More, Plus, Timer } from "../../components/icons.js";
 import { BoardSheet } from "./board-sheet.js";
@@ -479,7 +480,10 @@ export function SceneWorkspace({
             <button type="button" disabled={locked} onClick={() => setRenameOpen(true)}>Rename</button>
           </SceneBackRow>}
           {renameOpen && <SceneRenameSheet title="Rename scene" value={scene.title} locked={locked} onClose={() => setRenameOpen(false)} onCommit={title => write({ kind: "edit-scene", title })} />}
-          <PageSheet open={synopsisOpen} onClose={() => setSynopsisOpen(false)} title="Scene details" keepMounted><SceneSynopsis scene={scene} onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })} /></PageSheet>
+          <PageSheet open={synopsisOpen} onClose={() => setSynopsisOpen(false)} title="Scene details" keepMounted>
+            <SceneSynopsis scene={scene} onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })} />
+            <SceneCamera scene={scene} disabled={locked} onCommit={(defaults) => write({ kind: "edit-scene", defaults })} />
+          </PageSheet>
           {fullscreen ? (
             <>
               <div className="fy-sw__fullpill">
@@ -567,6 +571,7 @@ export function SceneWorkspace({
                 <summary aria-label="Scene details" title="Scene details"><More size={18} /></summary>
                 <div className="fy-sw__detailspanel">
                   <SceneSynopsis scene={scene} onCommit={(synopsis) => write({ kind: "edit-scene", synopsis })} />
+                  <SceneCamera scene={scene} disabled={locked} onCommit={(defaults) => write({ kind: "edit-scene", defaults })} />
                   {scene.inherits?.timeOfDay === undefined ? null : <span>{scene.inherits.timeOfDay}</span>}
                   {scene.inherits?.tone === undefined ? null : <span>{scene.inherits.tone}</span>}
                 </div>

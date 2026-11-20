@@ -2886,6 +2886,12 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("set-prompt-tools"), enabled: z.boolean() }).strict(),
   z.object({ kind: z.literal("measure-production-media"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema,
     source: MediaMeasurementSourceSchema, expectedHash: MeasurementHashSchema.optional() }).strict(),
+  /**
+   * Where the production's song changes (#3099, SPEC-041 R-68): asked by the Cut for a song with
+   * no sections marked, answered by `song.sections`. It measures and writes nothing; a section is
+   * on the spine only once the person sends it as a spine command.
+   */
+  z.object({ kind: z.literal("song-sections"), worldId: UlidSchema, productionId: SlugSchema, requestId: UlidSchema }).strict(),
   PromptTargetSchema.extend({ kind: z.literal("prompt-history-read"), worldId: UlidSchema, requestId: UlidSchema }).strict(),
   PromptTargetSchema.extend({ kind: z.literal("prompt-history-restore"), worldId: UlidSchema, requestId: UlidSchema,
     assembledHash: z.string().regex(/^sha256:[a-f0-9]{64}$/),

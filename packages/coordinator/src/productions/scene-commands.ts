@@ -371,8 +371,8 @@ async function candidateFor(
   if (command.kind === "edit-scene") {
     // A command that names nothing is refused rather than committed as a version cut over
     // an unchanged record — the schema cannot say "at least one", so this is where it is said.
-    if (command.title === undefined && command.synopsis === undefined && command.inherits === undefined && command.cast === undefined) {
-      throw new SceneCommandRefused(["this edit names neither a title, a synopsis, the inherited context nor the cast"]);
+    if (command.title === undefined && command.synopsis === undefined && command.inherits === undefined && command.cast === undefined && command.defaults === undefined) {
+      throw new SceneCommandRefused(["this edit names neither a title, a synopsis, the inherited context, the cast nor the camera"]);
     }
     // The place must be a location this world holds (SPEC-044 R-19) — the same refusal Arke's
     // proposal path makes, so a picker and a proposal cannot disagree about what a place is.

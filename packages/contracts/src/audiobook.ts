@@ -194,6 +194,16 @@ export function chapterNumber(chapters: ReadonlyArray<{ order: number; title: st
 }
 
 /**
+ * What the book calls a chapter: `Chapter N` by `chapterNumber`, or its own title when it is outside
+ * the count. Arke was given only the place, and called Na Love or Juju's Gold on Gold "ch. 2"
+ * because the unnumbered prologue came first (issue 3215).
+ */
+export function chapterCalled(chapters: ReadonlyArray<{ order: number; title: string }>, chapter: { order: number; title: string }): string {
+  const number = chapterNumber(chapters, chapter);
+  return number === null ? chapter.title.trim() : `Chapter ${number}`;
+}
+
+/**
  * What the narrator reads at the head of a chapter file (R-2): its number (`chapterNumber`), then
  * the title. A chapter titled only by its number is read once — "Chapter 1 · Chapter 1" was the
  * number twice, on the screen and in the narrator's mouth (turn 188). A title that already names

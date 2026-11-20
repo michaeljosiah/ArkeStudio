@@ -2,7 +2,7 @@ import { z } from "zod";
 import { CanonIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { mainPhotoFor, orderedLocationViews, type ReferenceKit } from "./reference.js";
 import type { CanonEntry, Sheet } from "./world.js";
-import { chapterNumber } from "./audiobook.js";
+import { chapterCalled } from "./audiobook.js";
 import {
   GUIDE_FORMAT,
   MAX_GUIDE_DESCRIPTION,
@@ -303,8 +303,7 @@ export function guideProductionsOf(
         .map((chapter) => {
           const number = Math.max(chapter.order, last + 1);
           last = number;
-          const called = chapterNumber(production.chapters, chapter);
-          return { id: chapter.id, number, title: chapter.title, called: called === null ? chapter.title.trim() : `Chapter ${called}` };
+          return { id: chapter.id, number, title: chapter.title, called: chapterCalled(production.chapters, chapter) };
         });
       return { id: production.meta.id, title: production.meta.title, chapters };
     })

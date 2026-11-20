@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { referenceCoverageCounts, type ChapterReferenceCoverage } from "@arke-studio/contracts";
+import { audiobookHeading, chapterNumber, referenceCoverageCounts, type ChapterReferenceCoverage } from "@arke-studio/contracts";
 import { readAudiobookLooks, useStore } from "../lib/store.js";
 import { Button } from "./ui.js";
 
@@ -35,6 +35,8 @@ export function BookReferenceCoverage({ worldId, productionId, disabled }: { wor
   useEffect(() => setRequest(null), [worldId, productionId]);
   const answer = request === null ? undefined : store.audiobookAsks[request];
   const chapters = answer?.state === "looks" ? answer.coverage : undefined;
+  // Each chapter as its book calls it (SPEC-047 R-2): an unnumbered prologue first takes no number.
+  const book = store.state?.world?.meta.worldId === worldId ? store.state.world.productions.find(production => production.meta.id === productionId)?.chapters : undefined;
   const working = answer?.state === "working";
   const unresolved = chapters?.reduce((sum, chapter) => sum + referenceCoverageCounts(chapter).unresolved, 0) ?? 0;
   const missing = chapters?.reduce((sum, chapter) => sum + referenceCoverageCounts(chapter).missing, 0) ?? 0;
@@ -45,7 +47,7 @@ export function BookReferenceCoverage({ worldId, productionId, disabled }: { wor
       <Button variant="secondary" disabled={disabled || working} onClick={() => setRequest(readAudiobookLooks(worldId, productionId, true))}>{working ? "Checking…" : chapters === undefined ? "Check book references" : "Check again"}</Button>
       {chapters !== undefined && <p className="fy-look__savehint">Saved evidence at the last check. Check again after resolving identities or references.</p>}
       {answer?.state === "refused" && <p className="fy-ch__who-where--warn">{answer.refused}</p>}
-      {chapters?.map(chapter => <section key={chapter.chapterId}><h4>Chapter {chapter.order} · {chapter.title}</h4><ReferenceCoverage chapter={chapter} /></section>)}
+      {chapters?.map(chapter => <section key={chapter.chapterId}><h4>{audiobookHeading(chapterNumber(book ?? chapters, chapter), chapter.title)}</h4><ReferenceCoverage chapter={chapter} /></section>)}
     </div>
   </details>;
 }
