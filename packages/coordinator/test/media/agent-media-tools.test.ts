@@ -45,6 +45,14 @@ test("decoder bounds, aborts and raw diagnostics fail without leaking their cont
   await assert.rejects(fail.probe("private", signal()), error => error instanceof Error && !error.message.includes("PRIVATE"));
   const stop = new AbortController(); stop.abort(); await assert.rejects(tools.version(stop.signal));
 });
+test("a full 60 s measurement window at a fractional offset is still the 60 s window", async () => {
+  let asked: readonly string[] = [];
+  const fake = createAgentMediaTools({ run: async (_tool, args) => { asked = args; return { code: 0, stdout: Buffer.alloc(60 * 8000 * 4), stderr: "", timedOut: false, cancelled: false, outputLimitExceeded: false }; } });
+  const stream = { index: 0, kind: "audio" as const, codec: "pcm", sampleRate: 8000, channels: 1, durationSec: 100, startTimeSec: 0 };
+  assert.equal((await fake.monoAudio!("source", stream, 4.4, 4.4 + 60, 8000, signal())).length, 60 * 8000);
+  assert.ok(asked.includes("-ss") && asked[asked.indexOf("-ss") + 1] === "4.4");
+  await assert.rejects(fake.monoAudio!("source", stream, 4.4, 4.4 + 60.01, 8000, signal()), /profile/);
+});
 test("separately configured decoder and probe versions remain distinct", async () => {
   const versions = createAgentMediaTools({ run: async tool => ({ code: 0, stdout: Buffer.from(`${tool} version ${tool === "ffmpeg" ? "8-fixture" : "7-fixture"}\n`), stderr: "", timedOut: false, cancelled: false, outputLimitExceeded: false }) });
   assert.equal(await versions.version(signal()), "ffmpeg version 8-fixture"); assert.equal(await versions.probeVersion(signal()), "ffprobe version 7-fixture");
@@ -79,6 +87,72 @@ test("native high-entropy RGBA footage fits the 1024px frame profile before rend
   await generate(["-f", "rawvideo", "-pixel_format", "rgba", "-video_size", "1024x1024", "-framerate", "1", "-i", raw, "-frames:v", "1", "-pix_fmt", "rgba", "-c:v", "png", video]);
   const frame = await tools.frame(video, 0, 0, 1, signal());
   assert.ok(frame.bytes.length > 3_000_000); assert.ok(frame.bytes.length <= 5 * 1024 * 1024); assert.equal(decodePng(frame.bytes).width, 1024);
+});
+test("native measurement audio is the named window, mixed to mono at the asked rate, and refuses a window the file does not cover", { skip: !available }, async () => {
+  const folder = await tempDir("arke-measure-native-"), wav = join(folder, "stereo.wav");
+  await generate(["-f", "lavfi", "-i", "aevalsrc=if(lt(t\\,1)\\,0\\,0.5)|if(lt(t\\,1)\\,0\\,0.1):s=48000:d=2", "-c:a", "pcm_f32le", wav]);
+  const stream = (await tools.probe(wav, signal())).streams[0]!;
+  const samples = await tools.monoAudio!(wav, stream, 1, 2, 16000, signal());
+  // FFmpeg folds stereo to mono at -3 dB, (0.5 + 0.1) / sqrt(2); a level, not a sum, is all a lag needs.
+  assert.equal(samples.length, 16000); assert.ok(Math.abs(samples[8000]! - .6 / Math.SQRT2) < .01, String(samples[8000]));
+  // Resampling rings a little just before the step at 1 s; the quiet stays quiet away from it.
+  assert.ok((await tools.monoAudio!(wav, stream, 0, 1, 16000, signal())).subarray(0, 14400).every(value => Math.abs(value) < .001), "the silent first second was not decoded");
+  await assert.rejects(tools.monoAudio!(wav, stream, 1.5, 3, 16000, signal()), /cover/);
+});
+test("native measurement frames are the box at the asked rate and size", { skip: !available }, async () => {
+  const folder = await tempDir("arke-measure-frames-"), video = join(folder, "box.mkv");
+  await generate(["-f", "lavfi", "-i", "testsrc2=size=640x360:rate=30:duration=2", "-c:v", "ffv1", video]);
+  const stream = (await tools.probe(video, signal())).streams[0]!;
+  const read = await tools.grayFrames!(video, stream, .5, 1.5, { fps: 25, edge: 96, region: { x: .4, y: .5, width: .2, height: .15 } }, signal());
+  // A 128x54 box (20% by 15% of 640x360) scaled to 96 wide.
+  assert.equal(read.width, 96); assert.equal(read.height, 40); assert.equal(read.fps, 25);
+  assert.ok(Math.abs(read.frames.length - 25) <= 1, String(read.frames.length)); assert.equal(read.frames[0]!.length, 96 * 40);
+});
+test("native: every decoded frame when no rate is asked, at a forced size; a 24 fps clip conformed to 30 repeats every fifth frame", { skip: !available }, async () => {
+  const folder = await tempDir("arke-measure-cadence-"), source = join(folder, "24.mkv"), conformed = join(folder, "30.mkv");
+  await generate(["-f", "lavfi", "-i", "testsrc2=size=320x180:rate=24:duration=3", "-c:v", "ffv1", source]);
+  await generate(["-i", source, "-vf", "fps=30", "-c:v", "ffv1", conformed]);
+  const stream = (await tools.probe(conformed, signal())).streams[0]!;
+  const read = await tools.grayFrames!(conformed, stream, 0, 2, { fps: null, edge: 128, size: { width: 160, height: 90 } }, signal());
+  assert.equal(read.fps, 30); assert.equal(read.width, 160); assert.equal(read.frames.length, 60);
+  const { measureCadence } = await import("../../src/media/clip-quality.js");
+  const cadence = measureCadence(read.frames, read.fps);
+  assert.equal(cadence.repeatPeriod, 5); assert.ok(Math.abs(cadence.motionFps! - 24) < .5, String(cadence.motionFps));
+});
+test("native: a variable-rate read gives each frame its own decoded time, which its index and average rate do not", { skip: !available }, async () => {
+  const folder = await tempDir("arke-measure-vfr-"), video = join(folder, "vfr.mkv");
+  // A second at 60 then a second at 24: the average, 42, puts frame 60 at 1.43 s; it is at 1 s.
+  await generate(["-f", "lavfi", "-i", "testsrc2=size=160x90:rate=60:duration=1", "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=24:duration=1",
+    "-filter_complex", "[0][1]concat=n=2:v=1", "-fps_mode", "vfr", "-c:v", "ffv1", video]);
+  const stream = (await tools.probe(video, signal())).streams[0]!;
+  const read = await tools.grayFrames!(video, stream, 0, 2, { fps: null, edge: 48, times: true }, signal());
+  assert.equal(read.frames.length, 84); assert.equal(read.times!.length, 84);
+  assert.ok(Math.abs(read.times![59]! - 59 / 60) < .002, String(read.times![59])); assert.ok(Math.abs(read.times![60]! - 1) < .002, String(read.times![60]));
+  assert.ok(Math.abs(read.times![83]! - (1 + 23 / 24)) < .002, String(read.times![83]));
+  // After a seek the times run from the read's own start.
+  const later = await tools.grayFrames!(video, stream, 1, 2, { fps: null, edge: 48, times: true }, signal());
+  assert.equal(later.frames.length, 24); assert.ok(Math.abs(later.times![0]!) < .002 && Math.abs(later.times![1]! - 1 / 24) < .002, later.times!.slice(0, 2).join());
+  assert.equal((await tools.grayFrames!(video, stream, 0, 1, { fps: null, edge: 48 }, signal())).times, undefined);
+});
+test("native: a steady tone's EBU R128 loudness and true peak read from FFmpeg's own meter", { skip: !available }, async () => {
+  const folder = await tempDir("arke-measure-loudness-"), tone = join(folder, "tone.wav");
+  // FFmpeg's sine source plays at 1/8 amplitude: a 997 Hz tone peaking at -18 dBFS, the same in both channels.
+  await generate(["-f", "lavfi", "-i", "sine=frequency=997:sample_rate=48000:duration=8", "-af", "pan=stereo|c0=c0|c1=c0", "-c:a", "pcm_f32le", tone]);
+  const stream = (await tools.probe(tone, signal())).streams[0]!, loud = await tools.loudness!(tone, stream, 0, 8, signal());
+  assert.ok(Math.abs(loud.truePeakDbtp! + 18.1) < 1, JSON.stringify(loud));
+  assert.ok(loud.integratedLufs! < -14 && loud.integratedLufs! > -24, JSON.stringify(loud));
+  assert.ok(Math.abs(loud.shortTermMaxLufs! - loud.integratedLufs!) < 1, JSON.stringify(loud));
+});
+test("native: a take that carries the reference 120 ms late measures 120 ms late", { skip: !available }, async () => {
+  const folder = await tempDir("arke-measure-sync-"), reference = join(folder, "reference.wav"), take = join(folder, "take.mkv");
+  // Bursts on two incommensurate periods, so no lag but the true one lines every burst up.
+  const bursts = "random(0)*if(lt(mod(t\\,0.37)\\,0.15)\\,0.3+0.3*lt(mod(t\\,0.61)\\,0.3)\\,0)";
+  await generate(["-f", "lavfi", "-i", `aevalsrc=${bursts}:s=16000:d=6`, "-c:a", "pcm_f32le", reference]);
+  await generate(["-f", "lavfi", "-i", "testsrc2=size=160x90:rate=30:duration=6", "-i", reference, "-af", "adelay=120", "-map", "0:v", "-map", "1:a", "-c:v", "ffv1", "-c:a", "pcm_f32le", "-t", "6", take]);
+  const takeStream = (await tools.probe(take, signal())).streams.find(stream => stream.kind === "audio")!, referenceStream = (await tools.probe(reference, signal())).streams[0]!;
+  const { measureSoundtrackSync } = await import("../../src/media/measure-sync.js");
+  const result = measureSoundtrackSync(await tools.monoAudio!(take, takeStream, 1, 4, 16000, signal()), await tools.monoAudio!(reference, referenceStream, 1, 4, 16000, signal()), 16000, .6);
+  assert.equal(result.lagSec, .12); assert.equal(result.follows, true);
 });
 test("native GIF artifacts expose their metadata and decoded frame timestamps", { skip: !available }, async () => {
   const folder = await tempDir("arke-gif-frame-"), gif = join(folder, "animated.gif");

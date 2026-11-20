@@ -536,7 +536,7 @@ describe("the chapter, opened (turn 126)", () => {
     assert.match(text(m), /CANON-002/, "and the canon");
     assert.match(text(m), /v1|v2|v3/, "earlier versions are listed for a v4 chapter");
     await toView(m, "Manuscript");
-    assert.match(text(m), /Arke · Chapter 02/, "Arke is docked about this chapter");
+    assert.match(text(m), /Arke · Chapter 2/, "Arke is docked about this chapter");
     // The dock's line is what is waiting, not a promise about what talking does not do
     // (issue 1008): the promise is the rule the dock is built to, and it is in the rule.
     assert.doesNotMatch(text(m), /talking changes nothing/, "the standing promise is off the screen");
@@ -2971,9 +2971,9 @@ describe("a new chapter (design turn 227, SPEC-056 §1.10)", () => {
   }
 
   it("a just-made chapter opens with its title being typed; an older one shows it", async () => {
-    const fresh = await render(<DocHead order={3} title="Untitled" locked={false} fresh onTitle={() => {}} />);
+    const fresh = await render(<DocHead called="Chapter 3" title="Untitled" locked={false} fresh onTitle={() => {}} />);
     assert.equal((q(fresh, 'input[aria-label="Chapter title"]') as HTMLInputElement | null)?.getAttribute("value") ?? (q(fresh, 'input[aria-label="Chapter title"]') as HTMLInputElement | null)?.defaultValue, "Untitled", "typing replaces Untitled (R-32)");
-    const older = await render(<DocHead order={3} title="Neap" locked={false} onTitle={() => {}} />);
+    const older = await render(<DocHead called="Chapter 3" title="Neap" locked={false} onTitle={() => {}} />);
     assert.equal(q(older, 'input[aria-label="Chapter title"]'), null);
     assert.match(text(older), /^Chapter 3Neap$/);
   });
@@ -3069,7 +3069,7 @@ describe("the name card (design turn 227b, SPEC-056 R-17)", () => {
     const calls: string[] = [];
     const m = await mountCard([{
       id: "maren-kest", kind: "character", name: "Maren Kest", role: "Bell-keeper", face: null,
-      linesHere: 3, chapters: [1, 2, 4], book: 6, voice: "Ama · ElevenLabs", voicePage: "/w/x/cast/maren-kest/voice?book=inkbound", open: "/w/x/cast/maren-kest",
+      linesHere: 3, chapters: ["Chapter 1", "Chapter 2", "Chapter 4"], book: 6, voice: "Ama · ElevenLabs", voicePage: "/w/x/cast/maren-kest/voice?book=inkbound", open: "/w/x/cast/maren-kest",
     }], calls);
     const card = q(m, '[data-testid="name-card"]')!;
     assert.match(card.textContent ?? "", /Maren KestBell-keeper · 3 lines here/, "the role, then the lines spoken here");

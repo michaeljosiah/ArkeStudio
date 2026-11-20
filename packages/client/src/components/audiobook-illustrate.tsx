@@ -248,9 +248,10 @@ function Card({ row, estimated, words, beat, skipped, without, reason, slug, dis
  * `onMakeLook` is the held row's one action; the default sends a person to the character's page,
  * where the picture a look is made from lives.
  */
-export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, beatOf, onAccept, onDiscard, onSkip, onWithout, onMakeLook, onAgain, onClose, onLook, onRefresh, offline }: {
+export function IllustrationSheet({ run, called, slug, wordsOf, beatOf, onAccept, onDiscard, onSkip, onWithout, onMakeLook, onAgain, onClose, onLook, onRefresh, offline }: {
   run: IllustrationRun;
-  chapterOrder: number;
+  /** What the book calls the chapter (SPEC-047 R-2): `Chapter N`, or a prologue's own title. */
+  called: string;
   slug: string;
   /** A row's words, by its picture key: a block's own, or from a mark's sentence on (design turn 237). */
   wordsOf: (block: string) => string | undefined;
@@ -288,11 +289,11 @@ export function IllustrationSheet({ run, chapterOrder, slug, wordsOf, beatOf, on
   ].join(" · ");
   const ended = run.progress !== undefined && run.progress.state !== "making" ? run.progress : undefined;
   return (
-    <PageSheet preserveReturnFocus open title={`Illustrate · Chapter ${chapterOrder}`} onClose={onClose} className="fy-ills-modal" headless>
+    <PageSheet preserveReturnFocus open title={`Illustrate · ${called}`} onClose={onClose} className="fy-ills-modal" headless>
       <div className="fy-ills" data-testid="illustration-sheet">
         <section className="fy-ills__sheet" data-state="proposed">
           <header className="fy-ills__head">
-            <h3 id="fy-ills-title" tabIndex={-1}>Illustrate · Chapter {chapterOrder}</h3>
+            <h3 id="fy-ills-title" tabIndex={-1}>Illustrate · {called}</h3>
             <span className="fy-mono fy-ills__sum" data-testid="illustration-headline">{headline}</span>
             <span className="fy-mono fy-ills__short">{total.count} · {priceLabel(total.microUsd, proposal.model.plan)}</span>
             <span className="fy-ills__push" />

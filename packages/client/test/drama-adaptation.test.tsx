@@ -103,7 +103,8 @@ describe("the Adaptation page (230m/n)", () => {
     assert.match(container.textContent!, /Read 4 of 4.*Planned 4.*Not planned 0.*1 changed/);
     await act(async () => props(container.querySelector('[data-chapter="market"]')!).onClick!({}));
     const panel = container.querySelector('[data-panel="market"]')!;
-    assert.match(panel.textContent!, /Chapter 3 · Chapter 3.*Words3,600.*VerdictCut.*Repeats chapter 2\..*Leaves outThe market\./);
+    // A chapter titled only by its number is named once, as its heading is read (SPEC-047 R-2).
+    assert.match(panel.textContent!, /^Chapter 3Words3,600.*VerdictCut.*Repeats chapter 2\..*Leaves outThe market\./);
     await act(async () => props([...panel.querySelectorAll("button")].find((button) => button.textContent === "Change")!).onClick!({}));
     await act(async () => props([...container.querySelectorAll("button")].find((button) => button.textContent === "Save")!).onClick!({}));
     assert.deepEqual(sent.at(-1), { kind: "set-drama-verdict", worldId: FIXTURE_WORLD_ID, productionId: "low-water-drama", chapter: "market",

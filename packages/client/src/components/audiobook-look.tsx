@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  audiobookHeading,
   chapterLooksOf,
+  chapterNumber,
   estimateCharacterImageMicroUsd,
   lookClothing,
   lookCharacterHash,
@@ -21,6 +23,7 @@ import { ChapterLookSheet } from "./chapter-look-sheet.js";
 import { SavedLookCollection, SavedLookImage } from "./saved-look-collection.js";
 import { BookReferenceCoverage } from "./reference-coverage.js";
 import { NewLookSheet } from "./audiobook-new-look.js";
+import { calledAt } from "../lib/chapter-called.js";
 import { mediaUrl } from "../lib/media.js";
 import { acceptChapterLook, chooseAudiobookLook, deriveAudiobookLook, makeChapterLook, rejectReferenceTake, setAudiobookLook, linkAudiobookCharacter, useAudiobookRecords, useStore } from "../lib/store.js";
 import { openActivityPanel } from "../lib/activity-panel.js";
@@ -146,12 +149,12 @@ export function closeViewCost(model: Parameters<typeof estimateCharacterImageMic
 }
 
 /** One character: the look chosen (or the main photo), the picker over their looks, the line, and what to do about the rest. */
-function CharacterRow({ view, row, kit, slug, orderOf, off, onWrite, onNewLook, onBrowse, onActivity, closeState, onMakeClose, onAcceptClose, onDiscardClose }: {
+function CharacterRow({ view, row, kit, slug, calledOf, off, onWrite, onNewLook, onBrowse, onActivity, closeState, onMakeClose, onAcceptClose, onDiscardClose }: {
   view: "overview" | "details";
   row: Row;
   kit: ReferenceKit | null;
   slug: string;
-  orderOf: (file: string) => number | null;
+  calledOf: (file: string) => string | null;
   off: boolean;
   onWrite: (target: LookTarget, text: string | null) => void;
   onNewLook: (row: Row, conflict?: LookConflict) => void;
@@ -169,7 +172,7 @@ function CharacterRow({ view, row, kit, slug, orderOf, off, onWrite, onNewLook, 
   const photo = kit === null ? null : mainPhotoFor(kit);
   const model = useStore().state;
   const closeCost = closeViewCost(resolveModel(model, "image", undefined, worldModel(model, "image")).model);
-  const from = line.from !== undefined ? orderOf(line.from) : null;
+  const from = line.from !== undefined ? calledOf(line.from) : null;
   const close: CloseViewState = chosen === null ? { kind: "none" } : chosen.closeFile !== undefined ? { kind: "accepted", path: `references/${sheet}/${chosen.closeFile}` } : closeState(chosen);
   const priced = (label: string) => `${label}${closeCost !== "" ? ` · ${closeCost}` : ""}`;
   const gone = line.lookId !== undefined && chosen === null;
@@ -200,7 +203,7 @@ function CharacterRow({ view, row, kit, slug, orderOf, off, onWrite, onNewLook, 
           <div className="fy-look__facts fy-mono" data-testid="look-facts">
             <span data-testid="look-state">{gone ? "Saved look unavailable" : chosen !== null ? (close.kind === "accepted" ? "Full body and close view" : "Full body · no close view") : "Main photo · no saved look"}</span>
             {row.source !== null && <span>{row.source}</span>}
-            {from !== null && <span data-testid="look-from">From Chapter {from}</span>}
+            {from !== null && <span data-testid="look-from">From {from}</span>}
             {chosen !== null && kit !== null && (lookOlderFace(kit, chosen) ? <span className="fy-ch__who-where--warn" data-testid="look-older">Older face</span> : <span>Main photo · current face</span>)}
             {chosen !== null && line.by === "author" && <span data-testid="look-edited">line edited</span>}
           </div>
@@ -438,7 +441,10 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
   const chosenCount = Object.values(shownLook?.characters ?? {}).filter((line) => line.lookId !== undefined).length;
   const saving = Object.keys(choosing).length > 0 || writing.length > 0 || linking !== null;
   const slug = world?.meta.slug ?? "";
-  const orderOf = (file: string): number | null => world?.productions.find((candidate) => candidate.meta.id === productionId)?.chapters.find((chapter) => chapter.file === file)?.order ?? null;
+  const book = world?.productions.find((candidate) => candidate.meta.id === productionId)?.chapters;
+  const orderOf = (file: string): number | null => book?.find((chapter) => chapter.file === file)?.order ?? null;
+  // A line's source chapter as the book calls it (SPEC-047 R-2), not by its place.
+  const calledOf = (file: string): string | null => { const order = orderOf(file); return order === null ? null : calledAt(book, order); };
   const choose = (row: Row, lookId: string | null) => {
     // The row already shows what was pressed and not yet answered: the same press again sends nothing.
     if ((row.line?.lookId ?? null) === lookId) return;
@@ -522,7 +528,7 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
       row={row}
       kit={kitOf(world, row.sheet)}
       slug={slug}
-      orderOf={orderOf}
+      calledOf={calledOf}
       off={off}
       onWrite={write}
       onNewLook={(entry, conflict) => setMaking({ key: entry.id, name: entry.label ?? entry.id, sheet: entry.sheet!, line: conflict === undefined ? entry.text : newLookLine(entry, conflict) })}
@@ -547,11 +553,11 @@ export function LookSheet({ open, onClose, worldId, productionId, chapterFile, c
   ) : (
     view === "details" ? <LookLine key={row.id} row={row} disabled={off} onWrite={write} /> : <div className="fy-look__unlinked" key={row.id}><b>{row.label}</b><p className="fy-ch__who-where--warn">Identity not linked</p><IdentityLink row={row} sheets={linkable} busy={linking?.key === row.id} disabled={off || linking !== null || writing.length > 0} onLink={linkIdentity} /></div>
   );
-  const chapter = world?.productions.find((production) => production.meta.id === productionId)?.chapters.find((entry) => entry.file === chapterFile);
+  const chapter = book?.find((entry) => entry.file === chapterFile);
   const footer = <><span className="fy-look__footcount">{chosenCount} chosen look{chosenCount === 1 ? "" : "s"} · {count} character{count === 1 ? "" : "s"}</span><span className="fy-ch__panelpush" /><Button variant="primary" onClick={onClose} data-testid="look-done">Done</Button></>;
   return (
     <>
-      <ChapterLookSheet preserveReturnFocus open={open} onClose={onClose} title="Looks" subtitle={`Chapter ${chapterOrder}${chapter?.title ? ` · ${chapter.title}` : ""}`} className="fy-look" footer={footer}>
+      <ChapterLookSheet preserveReturnFocus open={open} onClose={onClose} title="Looks" subtitle={chapter === undefined ? calledAt(book, chapterOrder) : audiobookHeading(chapterNumber(book ?? [], chapter), chapter.title)} className="fy-look" footer={footer}>
         <div className="fy-look__body" data-testid="look-sheet">
           {empty && (
             <div className="fy-look__none fy-look__empty" data-testid="look-none">

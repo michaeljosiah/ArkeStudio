@@ -7645,6 +7645,16 @@ p.fy-ab__menu-eb { margin: 0; }
 /* The banner's `what it did` list wraps under the sentence (SPEC-039 R-46). */
 .fy-cutnotice:has(.fy-cutnotice__did) { flex-wrap: wrap; }
 
+/* The song's proposed sections (issue 3099): each on the line with its time to change and a press to drop it. */
+.fy-songsections { list-style: none; margin-bottom: 8px; padding-left: 0; display: flex; flex-wrap: wrap; gap: 2px 14px; }
+.fy-songsections li { display: inline-flex; align-items: center; gap: 4px; }
+.fy-songsections input { width: 52px; height: 20px; padding: 0 5px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: var(--foreground); font: 400 9.5px var(--font-mono); }
+.fy-songsections input[aria-invalid="true"] { border-color: var(--destructive); }
+/* A long song's times give way to the presses beside them. */
+.fy-songsections__times { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Mark is held while a time is wrong or the spine has not answered, and has to look it. */
+.fy-cutnotice button:disabled { opacity: .5; cursor: default; }
+
 /* The Inspector's cut view (SPEC-039 R-22): what still needs a decision, and the kind chips on a sound clip. */
 .fy-cutinspect__decisions { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px dashed color-mix(in oklab, var(--destructive) 45%, transparent); border-radius: 6px; }
 .fy-cutinspect__eyebrow--warn { color: var(--destructive); }

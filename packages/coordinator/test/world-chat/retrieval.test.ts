@@ -15,6 +15,7 @@ import {
   type WorldChatStoredEvent,
   type ArkeTargetReadPage,
   type ArtifactSidecar,
+  chapterCalled,
 } from "@arke-studio/contracts";
 import { WorldIndex } from "../../src/index-db/world-index.js";
 import { WorldQueryServer } from "../../src/harness/world-query.js";
@@ -24,7 +25,7 @@ import { RetrievalError, WorldChatRetrieval, type RetrievalDeps } from "../../sr
 import { WorldChatService } from "../../src/world-chat/service.js";
 import { assembleContext } from "../../src/world-chat/context.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
-import { buildItemsFence, exportsFence, timelineFence, type ArkeBuildItemRead, type ArkeExportReadRecord } from "../../src/world-chat/target-reads.js";
+import { buildItemsFence, exportsFence, timelineFence, TARGET_READ_PAGE_CHARS, type ArkeBuildItemRead, type ArkeExportReadRecord } from "../../src/world-chat/target-reads.js";
 import { fixtureBundle } from "../index-db/helpers.js";
 import { makeTempWorld } from "../world/helpers.js";
 import { tempDir } from "../tmp.js";
@@ -124,18 +125,34 @@ it("pages authored chapter plans through media progress while full reads and pro
   assert.deepEqual(reread.page.items, plan.page.items, "derived records are never supplied by an authored-only read");
   assert.equal(reread.receipt.observedRevisionOrDigest, plan.receipt.observedRevisionOrDigest);
   assert.notEqual((await read()).receipt.observedRevisionOrDigest, full.receipt.observedRevisionOrDigest);
-  assert.deepEqual((await read()).page.items[0], chapter, "the default still serves the complete summary");
+  assert.deepEqual((await read()).page.items[0], { ...chapter, called: chapterCalled(production.chapters, chapter) }, "the default still serves the complete summary");
   let page = plan.page;
   const items = [...page.items];
   while (page.nextCursor) { page = (await read({ section: "plan", cursor: page.nextCursor })).page; items.push(...page.items); }
   assert.equal(page.complete, true);
   assert.deepEqual(items, [...production.chapters].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
-    .map(({ audiobook: _a, voices: _v, continuity: _c, ...authored }) => authored));
+    .map(({ audiobook: _a, voices: _v, continuity: _c, ...authored }) => ({ ...authored, called: chapterCalled(production.chapters, authored) })));
   await assert.rejects(read({ cursor: full.page.nextCursor }), /changed while it was being read/);
   await assert.rejects(read({ cursor: plan.page.nextCursor }), /different target/);
   await assert.rejects(read({ section: "audio" }), /section must be plan/);
   chapter.hash = "changed-prose";
   await assert.rejects(read({ section: "plan", cursor: plan.page.nextCursor }), /changed while it was being read/);
+});
+
+// Na Love or Juju (issue 3215): its prologue is unnumbered, so Gold on Gold is the book's Chapter 1
+// at place 2. Arke named it by place ("ch. 2"); every chapter summary now says what the book calls it.
+it("says what the book calls each chapter, a prologue by its own title", async () => {
+  const h = await harness({ withIndex: false }), token = h.mint().token;
+  const production = h.bundle.productions.find(p => p.meta.id === "the-ledger-of-nights")!;
+  const ordered = [...production.chapters].sort((a, b) => a.order - b.order);
+  ordered[0]!.title = "Prologue";
+  ordered[1]!.title = "Gold on Gold";
+  for (const section of [undefined, "plan"]) {
+    const read = await h.retrieval.call(token, "list_chapters", { productionId: production.meta.id, limit: 20, ...(section ? { section } : {}) });
+    const items = (read.result as ArkeTargetReadPage).items as Array<{ title: string; called: string }>;
+    assert.deepEqual(items.map(item => [item.title, item.called]), [["Prologue", "Prologue"], ["Gold on Gold", "Chapter 1"],
+      ...ordered.slice(2).map((chapter, n) => [chapter.title, `Chapter ${n + 2}`])]);
+  }
 });
 
 describe("retained proposition reads", () => {
@@ -224,6 +241,35 @@ describe("bounded inventory reads", () => {
     } while (cursor);
     assert.ok(pages > artifacts.length);
     assert.deepEqual([...chunks.values()].map(chunk => JSON.parse(chunk.text)), [...artifacts].sort((a, b) => a.id.localeCompare(b.id)));
+  });
+
+  // Na Love or Juju's sheets (issue 3214): list_sheets paged by rows alone sent 82 KB in one page,
+  // and the harness saved it to a file and showed the model a preview. Every page stays inside the
+  // budget; sheets come whole, and only one too large for a page of its own is split.
+  it("pages many large sheets inside the size budget, splitting only a sheet no page could hold", async () => {
+    const h = await harness({ withIndex: false }), token = h.mint().token;
+    const base = h.bundle.sheets.find(sheet => sheet.type === "character")!;
+    const sheet = (n: number, words: number) => ({ ...structuredClone(base), id: `trader-${String(n).padStart(2, "0")}`, name: `Trader ${n}`,
+      sections: [{ heading: "Essence", body: `Trader ${n} has sold along Iwo Road since the flyover went up. `.repeat(words) }] });
+    const sheets = [...Array.from({ length: 33 }, (_, n) => sheet(n, 80)), sheet(33, 1_200)];
+    h.bundle.sheets = sheets;
+    const whole: unknown[] = [], chunks = new Map<string, string>();
+    let cursor: string | null = null, pages = 0;
+    do {
+      const read = await h.retrieval.call(token, "list_sheets", { limit: 20, ...(cursor ? { cursor } : {}) });
+      const page = read.result as ArkeTargetReadPage;
+      const size = JSON.stringify({ items: page.items }, null, 2).length;
+      assert.ok(size <= TARGET_READ_PAGE_CHARS, `page ${pages + 1} was ${size} characters`);
+      assert.equal(read.receipt.complete, page.nextCursor === null);
+      for (const row of page.items as Array<{ kind?: string; recordKey?: string; text?: string }>) {
+        if (row.kind === "record-chunk") chunks.set(row.recordKey!, (chunks.get(row.recordKey!) ?? "") + row.text);
+        else whole.push(row);
+      }
+      cursor = page.nextCursor; pages++;
+    } while (cursor);
+    assert.ok(pages > 3);
+    assert.deepEqual([...chunks.keys()], ["trader-33"], "only the sheet too large for a page is split");
+    assert.deepEqual([...whole, ...[...chunks.values()].map(text => JSON.parse(text))], sheets, "every sheet once, in order");
   });
 
   it("reads just the named prop or artifact, rejects foreign cursors and fences changes to that record", async () => {

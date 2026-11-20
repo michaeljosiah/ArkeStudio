@@ -23,6 +23,7 @@ import {
   audiobookCounts,
   audiobookDirectionFor,
   audiobookHeading,
+  chapterCalled,
   chapterNumber,
   audiobookNoteFor,
   sheetNarrations,
@@ -1224,13 +1225,16 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
             : null;
 
   // The sheet a grouped read is confirmed in (design turn 185a): blocks, requests, a block a
-  // request, Google's free day where it is known, the estimate.
+  // request, Google's free day where it is known, the estimate. It names the chapter as the book
+  // and its spoken heading do (R-2): counted by place, Iwo Road's sheet said "Read Chapter 24"
+  // under a heading read "Chapter 23 · Iwo Road", the unnumbered prologue taking a number (issue 3235).
+  const asCalled = chapterCalled(bookChapters ?? [], chapter);
   const readSheet = run?.state === "priced" && run.price !== undefined
     ? {
         ...(run.price.previews !== undefined ? { previews: run.price.previews } : {}),
         token: run.price.confirmationToken,
-        recovery: fromExport.current ? { ready: rows.filter(row => row.state === "made").length, total: rows.length, chapter: `Chapter ${chapter.order} · ${chapter.title}` } : null,
-        title: fromExport.current ? "Read remaining blocks" : only.current?.length === 1 ? `Read ${blockReadTarget(only.current[0]!, rows)} · Chapter ${chapter.order}` : `Read Chapter ${chapter.order}`,
+        recovery: fromExport.current ? { ready: rows.filter(row => row.state === "made").length, total: rows.length, chapter: audiobookHeading(number, chapter.title) } : null,
+        title: fromExport.current ? "Read remaining blocks" : only.current?.length === 1 ? `Read ${blockReadTarget(only.current[0]!, rows)} · ${asCalled}` : `Read ${asCalled}`,
         blocks: run.toMake,
         characters: run.price.characters,
         free: run.price.estimatedMicroUsd === 0,
