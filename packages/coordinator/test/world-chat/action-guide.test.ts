@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ModelEditorRequestSchema, ModelWorldChatActionSchema, type WorldChatContext } from "@arke-studio/contracts";
+import { ModelEditorRequestSchema, ModelWorldChatActionSchema, WORLD_CHAT_SHAPE_EXAMPLES, type WorldChatContext } from "@arke-studio/contracts";
 import {
   ACTION_GUIDE_ENTRIES,
   actionGuideScopes,
@@ -66,6 +66,58 @@ it("tells Arke how a spine is created, how markers are named and when they can f
     assert.match(guide, /The first master is create with baseRevision null/);
     assert.match(guide, /may follow in the same turn as cards chained with after/);
   }
+});
+
+/**
+ * What a reply may say about a change (issue 3137). Asked to drop two scenes' shots, Arke replied
+ * "I've dropped the intro and verse 1 shots we'd drafted" with no card in the turn, and the shots
+ * were still there. Nothing after the turn can tell a false reply from a true one, so the wording
+ * is the fix and these assertions are what keeps it.
+ */
+describe("what a reply may say about a change (issue 3137)", () => {
+  const scene = { kind: "scene", productionId: "saltlight", sceneId: "sc_04" } as WorldChatContext;
+  const threads: readonly (WorldChatContext | undefined)[] = [
+    undefined, { kind: "world" }, { kind: "production", productionId: "saltlight" }, scene, { kind: "cut", productionId: "saltlight" },
+  ];
+  const guides = threads.flatMap(context => [HUGE, 1000].map(budget => renderActionGuide(actionGuideScopes(context), budget, context).text));
+
+  it("a change exists only as a card, and a card only for what the result carries", () => {
+    for (const guide of guides) {
+      assert.match(guide, /a change to the world or a production exists only as a card the person approves/);
+      assert.match(guide, /this turn prepares a card only for what this result carries in actions, candidateOperations, bibleEdits, sceneEdits or editorRequests/);
+      assert.match(guide, /Check what the result carries before writing reply/);
+    }
+  });
+
+  it("a change the result carries is prepared for approval, never done", () => {
+    for (const guide of guides) {
+      assert.match(guide, /A change it carries is prepared for their approval, and reply says so/);
+      assert.match(guide, /"Dropping the intro shots is prepared for your approval", never "I've dropped the intro shots"/);
+      assert.match(guide, /A change of yours has been made only when its card is recorded as completed under Recorded action outcomes/);
+    }
+  });
+
+  it("a change asked for and not carried is said as not done, with why", () => {
+    for (const guide of guides) {
+      assert.match(guide, /A change they asked for that the result does not carry is not done: say so plainly in reply, and why/);
+    }
+  });
+
+  it("names every list of the result that carries a change", () => {
+    // A group only says which candidates land together, so it is no change of its own.
+    const lists = Object.keys(WORLD_CHAT_SHAPE_EXAMPLES.turnResult).filter(key => key !== "reply" && key !== "groupOperations");
+    assert.deepEqual(lists.sort(), ["actions", "bibleEdits", "candidateOperations", "editorRequests", "sceneEdits"]);
+    const said = guides[0]!.split("\n").find(line => line.startsWith("What reply may say about a change"))!;
+    for (const list of lists) assert.ok(said.includes(list), `${list} is named`);
+  });
+
+  it("is said before the reads and the kinds, and not at all where nothing can be prepared", () => {
+    for (const guide of guides) {
+      const at = guide.indexOf("What reply may say about a change");
+      assert.ok(at > 0 && at < guide.indexOf("Before drafting a change") && at < guide.indexOf("\n- "));
+    }
+    assert.equal(renderActionGuide(actionGuideScopes({ kind: "production-setup" } as WorldChatContext), HUGE).text, "");
+  });
 });
 
 // Arke cannot hear the song, and asked the author where each verse and chorus starts (issue 3099).

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { WorldBundle } from "@arke-studio/contracts";
-import { TURN_RESULT_BOUNDS } from "@arke-studio/contracts";
+import type { WorldBundle, WorldChatContext } from "@arke-studio/contracts";
+import { orderedShots, TURN_RESULT_BOUNDS } from "@arke-studio/contracts";
 import { MAX_PROPOSALS } from "../../src/world-chat/wrapup.js";
 import { describeEntryContext } from "../../src/world-chat/entry-context.js";
 import { scanWorld } from "../../src/world/scan.js";
@@ -265,6 +265,61 @@ describe("a production thread is briefed on its shape", () => {
     const text = await shaped({ format: "story", medium: "story", kind: "book" });
     assert.ok(!/delivers in/.test(text), "prose does not deliver in 16:9");
     assert.match(text, /one continuous piece/);
+  });
+});
+
+/**
+ * The cast is checked before the plan (issue 3141). A music video's direction named a singer and a
+ * dancer the world had no sheets for; Arke divided the song between them and said nothing, and
+ * only when asked did it search and answer that every shot would invent a different face.
+ */
+describe("a production with shots is told to check the cast before planning around a person (issue 3141)", () => {
+  type Ids = { productionId: string; sceneId: string; shotId: string };
+  async function threadText(meta: Record<string, unknown>, context: (ids: Ids) => WorldChatContext): Promise<string> {
+    const scanned = (await scanWorld(FIXTURE_WORLD)).bundle;
+    const production = scanned.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const patched: WorldBundle = {
+      ...scanned,
+      productions: scanned.productions.map((candidate) =>
+        candidate.meta.id !== "saltlight" ? candidate : { ...candidate, meta: { ...candidate.meta, ...meta } as typeof candidate.meta },
+      ),
+    };
+    const scene = production.scenes.find((candidate) => orderedShots(candidate).length > 0)!;
+    return describeEntryContext(context({ productionId: production.meta.id, sceneId: scene.id, shotId: orderedShots(scene)[0]!.id }), patched);
+  }
+  const productionThread = ({ productionId }: Ids): WorldChatContext => ({ kind: "production", productionId });
+
+  it("a music video's thread hears why, how to check, and to say so and offer the sheet first", async () => {
+    const text = await threadText({ medium: "video", kind: "music-video" }, productionThread);
+    assert.match(text, /someone without a sheet is a different person in every shot/, "why it matters");
+    assert.match(text, /names a person the work is to be built around \(a lead, a singer, a dancer\)/);
+    assert.match(text, /look for their sheet with search_sheets before planning shots around them/, "the tool, by name");
+    assert.match(text, /If there is none, say so in that same reply and offer to make the sheet first/);
+  });
+
+  it("only the people the work is built around, not every name", async () => {
+    const text = await threadText({ medium: "video", kind: "music-video" }, productionThread);
+    assert.match(text, /This is for the people the work is built around, not every name in the story/);
+  });
+
+  it("every kind of video hears it, in the production's thread and in a scene's, a shot's and the cut's", async () => {
+    for (const kind of ["film", "microdrama", "music-video", "interactive"]) {
+      assert.match(await threadText({ medium: "video", kind }, productionThread), /look for their sheet with search_sheets/, kind);
+    }
+    const said = /look for their sheet with search_sheets before planning shots around them/;
+    assert.match(await threadText({}, ({ productionId, sceneId }) => ({ kind: "scene", productionId, sceneId })), said);
+    assert.match(await threadText({}, (ids) => ({ kind: "shot", ...ids })), said);
+    assert.match(await threadText({}, ({ productionId }) => ({ kind: "cut", productionId })), said);
+  });
+
+  it("a production with no shots does not: a book, an audio drama, an album", async () => {
+    for (const meta of [
+      { format: "story", medium: "story", kind: "book" },
+      { format: "story", medium: "story", kind: "audio-drama" },
+      { medium: "music", kind: "album" },
+    ]) {
+      assert.doesNotMatch(await threadText(meta, productionThread), /search_sheets/, JSON.stringify(meta));
+    }
   });
 });
 
