@@ -59,6 +59,7 @@ import { Button } from "../../components/ui.js";
 import { Film, Grid2x2, ImageMark, ListBullet, Maximize2, Minimize2, More, Plus, Timer } from "../../components/icons.js";
 import { BoardSheet } from "./board-sheet.js";
 import { ScenePreview } from "./preview.js";
+import { ScenePlan } from "./plan.js";
 import { PlansPanel } from "./plans.js";
 import { stagedShotChanges, useSceneWriter } from "./scene-writer.js";
 import { rememberedLayout, rememberLayout } from "../../lib/storyboard-layout.js";
@@ -94,7 +95,7 @@ export function SceneWorkspace({
   // `?view=preview` is the shot page's Play from here (turn 145): the address opens the view once
   // and the choice stays a choice, never a bookmark.
   const fold = useMediaQuery(FOLD_QUERY);
-  const [view, setView] = useState<"storyboard" | "flow" | "preview">(() => (searchParams.get("view") === "preview" ? "preview" : "storyboard"));
+  const [view, setView] = useState<"storyboard" | "flow" | "plan" | "preview">(() => (searchParams.get("view") === "preview" ? "preview" : "storyboard"));
   useEffect(() => {
     // Read once, then taken out of the address: a Back to this entry must not reopen Preview.
     if (searchParams.get("view") !== "preview") return;
@@ -325,6 +326,13 @@ export function SceneWorkspace({
     : world.sheets.find((sheet) => sheet.id === scene.inherits?.location);
   // A place the world has no sheet for still reads as words, never as its slug.
   const locationName = scene.inherits?.location === undefined ? null : locationSheet?.name ?? dramaSpeakerLabel(scene.inherits.location);
+  // The Plan is the place's (design turn 285): a scene with no place has none, and a visual novel
+  // has no cameras to stand in one. A place taken away while the Plan is open leaves no tab to
+  // stand on, so the page goes back to the storyboard.
+  const hasPlan = locationSheet?.type === "location" && !playsAsBeats;
+  useEffect(() => {
+    if (!hasPlan && view === "plan") setView("storyboard");
+  }, [hasPlan, view]);
   const dockTitle =
     subject.kind === "edge"
       ? `Arke · Edge ${subject.fromShotId ?? "Entry"} to ${subject.toShotId ?? "Exit"}`
@@ -594,7 +602,7 @@ export function SceneWorkspace({
           <div className="fy-sw__toolbar">
             <div className="fy-sw__tabs" role="radiogroup" aria-label="View">
               {/* A visual novel has no motion to lay out, so Flow is a film's (turn 174). */}
-              {(playsAsBeats || phone ? (["storyboard", "preview"] as const) : (["storyboard", "flow", "preview"] as const)).map((candidate) => (
+              {(["storyboard", "flow", "plan", "preview"] as const).filter((candidate) => (candidate !== "flow" || !(playsAsBeats || phone)) && (candidate !== "plan" || hasPlan)).map((candidate) => (
                 <button
                   key={candidate}
                   type="button"
@@ -604,7 +612,7 @@ export function SceneWorkspace({
                   data-on={view === candidate ? "true" : undefined}
                   onClick={() => setView(candidate)}
                 >
-                  {candidate === "storyboard" ? (playsAsBeats ? "Beats" : "Storyboard") : candidate === "flow" ? "Flow" : "Preview"}
+                  {candidate === "storyboard" ? (playsAsBeats ? "Beats" : "Storyboard") : candidate === "flow" ? "Flow" : candidate === "plan" ? "Plan" : "Preview"}
                 </button>
               ))}
             </div>
@@ -757,6 +765,10 @@ export function SceneWorkspace({
               onRenderBoard={(memberShotIds) => openGenerator({ kind: "board", memberShotIds })}
               onTalkToArke={talkToArke}
             />
+          ) : view === "plan" ? (
+            // The accepted scene, not a staged proposal over it: a position is the place's and is
+            // written at once, so its shots are counted as the place's other scenes see them.
+            <ScenePlan world={world} production={production} scene={scene} onOpenStage={openStage} />
           ) : playsAsBeats ? (
             // A visual novel previews as it will be read (174d): the beat player over the window,
             // from this scene, back to the beats on close — never the film's timeline.

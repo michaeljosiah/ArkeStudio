@@ -141,25 +141,34 @@ function canPickFiles(): boolean {
   return typeof window !== "undefined" && window.arke !== undefined;
 }
 
-function LocationHeader({ worldId, sheetId, name, status }: {
+/**
+ * The head a location's Reference and Plan tabs share: the place's name, one line under it that
+ * the tab writes, and the tabs with the one being read drawn as where you are.
+ */
+export function LocationHeader({ worldId, sheetId, name, line, active }: {
   worldId: string;
   sheetId: string;
   name: string;
-  status: string;
+  line: string;
+  active: "reference" | "plan";
 }) {
   const navigate = useNavigate();
+  const tab = (id: "reference" | "plan", label: string) => active === id
+    ? <span className="fy-seg__item fy-seg__item--active">{label}</span>
+    : <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/locations/${sheetId}/${id}`)}>{label}</button>;
   return (
     <header className="fy-character-head">
       <div>
         <h1>{name}</h1>
-        <p>{status} · location reference set</p>
+        <p>{line}</p>
       </div>
       <span className="fy-character-head__push" />
       <nav className="fy-seg fy-location-tabs">
         <button type="button" className="fy-seg__item" onClick={() => navigate(`/w/${worldId}/locations/${sheetId}`)}>
           Overview
         </button>
-        <span className="fy-seg__item fy-seg__item--active">Reference</span>
+        {tab("reference", "Reference")}
+        {tab("plan", "Plan")}
       </nav>
     </header>
   );
@@ -233,7 +242,7 @@ export function LocationReferenceScreen() {
 
   return (
     <div data-screen="location-reference">
-      <LocationHeader worldId={worldId} sheetId={sheetId} name={sheet.name} status={sheet.status} />
+      <LocationHeader worldId={worldId} sheetId={sheetId} name={sheet.name} line={`${sheet.status} · location reference set`} active="reference" />
       <main className={cx("fy-locref", !sheetFile && "fy-locref--uncompiled")}>
         <section className="fy-locref__views">
           {views.length > 0 && <div className="fy-locref__sechead">

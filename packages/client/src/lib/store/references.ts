@@ -1,4 +1,4 @@
-import { ONE_IMAGE_ONLY, type SizeTier, ulid, type DomainEvent } from "@arke-studio/contracts";
+import { ONE_IMAGE_ONLY, type PlacePlanChange, type PlacePlanSource, type SizeTier, ulid, type DomainEvent } from "@arke-studio/contracts";
 import type { AttachTarget } from "../../arke-bridge.js";
 import { current, emitChange, send, type FrameSlices, type Folded } from "./core.js";
 import { useStoreSelector } from "./hooks.js";
@@ -278,6 +278,18 @@ export function clearLocationViewUpload(sheetId: string): void {
   const locationViewUpload = { ...current.locationViewUpload };
   delete locationViewUpload[sheetId];
   emitChange({ ...current, locationViewUpload });
+}
+
+// ---- The Plan (design turn 285, issue 2302) -------------------------------------
+
+/**
+ * One change to a place's camera positions. `from` names the scene whose set becomes the place's
+ * when the place has no plan yet: the scene page always names it, and the location's own page,
+ * which has no scene to name, never does. Nothing is kept here while it is in flight: the plan on
+ * screen is the snapshot's, and a refusal arrives as any failed command does.
+ */
+export function changePlacePlan(worldId: string, sheetId: string, change: PlacePlanChange, from?: PlacePlanSource): boolean {
+  return send({ kind: "place-plan", worldId, sheetId, ...(from === undefined ? {} : { from }), change });
 }
 
 export function generateCharacterLooks(

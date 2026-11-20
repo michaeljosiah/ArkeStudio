@@ -140,7 +140,7 @@ export {
   dropMainPhoto, dropMainPhotoCandidate, dropCharacterSheet,
   generateMainPhoto, generateCharacterSheet, acceptCharacterSheet, generateLocationView,
   acceptLocationView, importLocationViewCandidate, useLocationViewUpload, clearLocationViewUpload,
-  generateCharacterLooks, acceptCharacterLook, makeChapterLook, acceptChapterLook,
+  changePlacePlan, generateCharacterLooks, acceptCharacterLook, makeChapterLook, acceptChapterLook,
   readAudiobookLooks, chooseAudiobookLook, rejectReferenceTake, promoteCharacterLook,
   attachCharacterLook, setStyleOverride, createProp, addPropState, importPropStateCandidate,
   acceptPropState,

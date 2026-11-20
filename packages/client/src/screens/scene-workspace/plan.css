@@ -1,0 +1,81 @@
+/* The Plan · design turn 285 (issue 2302). After workspace.css and responsive.css. The Plan's
+   inspector is the Stage's inspector and takes the Stage's rules; these are only the parts the
+   Stage has no word for. The plan's ground is a render with a fixed light ground, so what is
+   written on it uses the theme-invariant neutrals, as the Stage's own labels do. */
+
+/* The Plan on the scene page: where the storyboard was, in the Stage's own work row. */
+:where([data-screen="scene-detail"]) .pl-plan { display: flex; flex-direction: column; flex: 1; min-height: 380px; margin: 12px 0 0; }
+:where([data-screen="scene-detail"]) .pl-plan--empty { align-items: flex-start; flex: none; min-height: 0; }
+.pl-plan__picture { position: relative; overflow: hidden; }
+.pl-plan__picture > canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.pl-plan__picture .fy-swstage__label { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; pointer-events: none; }
+
+/* A position's number, on its body in the picture and on its line in the list. The press is the
+   body the canvas drew, in the same place and the same ink, so a number reads over a name it
+   could not be kept clear of, and where nothing can draw the canvas at all. */
+.pl-plan__n { position: absolute; display: grid; place-items: center; box-sizing: border-box; padding: 0; border: 0; border-radius: 50%; transform: translate(-50%, -50%); background: var(--neutral-950); color: var(--neutral-50); font: var(--weight-semibold) var(--text-2xs)/1 var(--font-sans); letter-spacing: -.02em; cursor: pointer; }
+.pl-plan__n[data-warn="true"] { background: var(--warning); }
+.pl-plan__n[data-selected="true"][data-movable="true"] { cursor: grab; touch-action: none; }
+.pl-plan__n:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.pl-plan__num { flex: none; display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 3px; box-sizing: border-box; border-radius: 8px; background: var(--foreground); color: var(--background); font: var(--weight-semibold) var(--text-2xs)/1 var(--font-sans); letter-spacing: -.02em; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .pl-plan .fy-swstage__item[data-warn="true"],
+:where([data-screen="scene-detail"], [data-screen="shot"]) .pl-plan .fy-swstage__item[data-warn="true"] > span:last-child { color: var(--warning); }
+[data-warn="true"] > .pl-plan__num { background: var(--warning); color: var(--neutral-50); }
+
+/* A pair: who is on the left of the picture, then who is on the right, in their colours. It is a
+   line to read, not a press. */
+.pl-plan__pair { flex: none; display: inline-flex; gap: 2px; width: 16px; justify-content: center; }
+.pl-plan__pair > i { width: 7px; height: 7px; border-radius: 50%; }
+.pl-plan__ok { font-style: normal; color: var(--success); }
+.pl-plan__warn { font-style: normal; color: var(--warning); }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .pl-plan .pl-plan__side { cursor: default; }
+:where([data-screen="scene-detail"], [data-screen="shot"]) .pl-plan .pl-plan__side:hover { background: transparent; }
+
+/* The plan's scale, and the one clause a crossing owes. */
+.pl-plan__scale { position: absolute; right: 12px; bottom: 9px; display: flex; flex-direction: column; align-items: flex-end; gap: 3px; color: var(--neutral-700); font: var(--weight-regular) var(--text-2xs)/1 var(--font-mono); pointer-events: none; }
+.pl-plan__scale > i { height: 5px; box-sizing: border-box; border: 1px solid var(--neutral-700); border-top: 0; }
+.pl-plan__find { position: absolute; left: 12px; bottom: 12px; display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px; border-radius: 6px; background: var(--warning-bg); border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent); color: var(--foreground); font: var(--type-label); box-shadow: var(--shadow-xs); pointer-events: none; }
+.pl-plan__find > i { width: 7px; height: 7px; border-radius: 50%; background: var(--warning); }
+
+/* A position's grey view under its form: the Stage's picture-in-picture, at the production's shape. */
+.pl-plan__views { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pl-plan__view { position: relative; aspect-ratio: var(--pl-aspect, 16 / 9); box-shadow: none; }
+.pl-plan__view > img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
+@media (max-width: 900px) {
+  /* The Stage's work row stacks here, so the Plan is as tall as what it holds. */
+  :where([data-screen="scene-detail"]) .pl-plan { flex: none; }
+  :where([data-screen="scene-detail"]) .pl-plan .fy-swstage__panel { overflow: visible; }
+}
+
+/* The Plan on a phone: the picture at the page's width, then one list. Rows are 44 px. */
+:where([data-screen="scene-detail"]) .pl-plan--phone { flex: none; min-height: 0; margin: 12px 0 0; }
+.pl-plan__picture--phone { flex: none; height: 200px; border: 1px solid var(--border); border-radius: 12px; }
+.pl-plan__head { display: flex; align-items: baseline; gap: 10px; padding: 16px 0 4px; color: var(--muted-foreground); font: var(--weight-medium) var(--text-2xs)/1.2 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; }
+.pl-plan__head > span:last-child { letter-spacing: 0; text-transform: none; font: var(--weight-regular) var(--text-2xs)/1.4 var(--font-mono); }
+.pl-plan__row { display: flex; align-items: center; gap: 10px; width: 100%; height: 44px; padding: 0; border: 0; border-top: 1px solid var(--border); background: none; color: var(--foreground); font: var(--weight-regular) var(--text-base)/1.3 var(--font-sans); text-align: left; }
+.pl-plan__head + .pl-plan__row { border-top: 0; }
+button.pl-plan__row { cursor: pointer; }
+/* The count follows the name, not the page's edge: the phone's Arke button floats over the right of a list. */
+.pl-plan__row > span:nth-child(2) { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-plan__row > span:last-child { flex: none; color: var(--muted-foreground); font: var(--weight-regular) var(--text-xs)/1.4 var(--font-mono); }
+.pl-plan__row[data-warn="true"], .pl-plan__row[data-warn="true"] > span:last-child { color: var(--warning); }
+
+/* The Plan on a location's sheet: the picture and the positions as Reference's cards, six across. */
+[data-screen="location-plan"] .pl-place__grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+[data-screen="location-plan"] .pl-plan__picture--place { grid-column: span 4; grid-row: span 2; min-height: 280px; border-radius: var(--radius-card); box-shadow: 0 0 0 1px var(--border); }
+[data-screen="location-plan"] .fy-locref__view { min-width: 0; }
+[data-screen="location-plan"] .fy-locref__viewimage { aspect-ratio: 16 / 9; height: auto; }
+[data-screen="location-plan"] .fy-locref__viewimage img { display: block; width: 100%; height: 100%; object-fit: cover; }
+[data-screen="location-plan"] .fy-locref__viewhead { flex-wrap: nowrap; }
+[data-screen="location-plan"] .fy-locref__viewhead h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pl-place__tag { position: absolute; transform: translate(-50%, -50%); padding: 2px 7px; border: 1px solid var(--neutral-200); border-radius: 6px; background: color-mix(in srgb, var(--neutral-50) 94%, transparent); color: var(--neutral-950); font: var(--weight-medium) var(--text-2xs)/1.3 var(--font-sans); white-space: nowrap; pointer-events: none; }
+.pl-place__foot { display: flex; gap: 8px; margin-top: 2px; }
+@media (max-width: 1099px) {
+  [data-screen="location-plan"] .pl-place__grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  [data-screen="location-plan"] .pl-plan__picture--place { grid-column: 1 / -1; grid-row: auto; min-height: 0; aspect-ratio: 2 / 1; }
+}
+@media (max-width: 599px) {
+  [data-screen="location-plan"] .pl-place__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  [data-screen="location-plan"] .pl-place__foot .ui-btn { min-height: 44px; }
+}
