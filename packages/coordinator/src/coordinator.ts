@@ -20750,6 +20750,8 @@ export class Coordinator {
       supplied: this.opts.conversationActionAdapters,
       now: () => this.nowIso(),
       isWorldOpen: () => !this.stopping && this.stillOpen(store),
+      // As a failed turn is kept: the cause where an operator can read it, never on the card.
+      failed: failure => { void this.appLog?.append({ level: "warn", event: "world-chat.action-failed", ...failure }); },
       ...(archive ? {
         archiveWorld: async () => {
           const { folder } = await archive(store.worldId);

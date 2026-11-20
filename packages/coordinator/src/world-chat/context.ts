@@ -327,7 +327,13 @@ function renderTurns(messages: readonly WorldChatMessage[]): string {
     .join("\n\n");
 }
 
-/** Keep complete identities, never receipt prose, paths or writable authority payloads. */
+/**
+ * Keep complete identities, never receipt prose, paths or writable authority payloads.
+ *
+ * A failed card carries why (issue 3135), in the words the card shows the person. Told only
+ * `"status":"failed"`, Arke could not say why a deletion had failed, guessed a cause that was not
+ * the one, and prepared the same card again.
+ */
 function renderActionReceipts(actions: readonly ConversationActionCard[], bound: number): string {
   const rows: string[] = [];
   let spent = 0;
@@ -340,15 +346,18 @@ function renderActionReceipts(actions: readonly ConversationActionCard[], bound:
       ...(card.receipt ? { receipt: { kind: card.receipt.kind, id: card.receipt.id,
         results: results.slice(0, 8).map(({ id, status }) => ({ id, status })),
         ...(results.length > 8 ? { omittedResults: results.length - 8 } : {}) } } : {}) };
+    const reason = card.status === "failed" && card.statusDetail ? { reason: card.statusDetail.slice(0, 600) } : {};
     const counts = words.length ? { proposedWordTotal: chapterWordTotal(words),
       proposedBatchWords: chapterWordTotal(proposedBatchWords(actions.filter(action => action.turnId === card.turnId))) } : {};
     const room = bound - 100 - spent - 1;
-    let row = JSON.stringify({ ...record, ...counts, ...(words.length ? {
+    let row = JSON.stringify({ ...record, ...reason, ...counts, ...(words.length ? {
       proposedWords: words.slice(0, 8).map(change => ({ ...change, delta: change.after - change.before })),
       ...(words.length > 8 ? { omittedChapterCounts: words.length - 8 } : {}),
     } : {}) });
     // Count detail must never evict the action identity/status that fitted before counts existed.
-    if (row.length > room) row = JSON.stringify({ ...record, ...counts, ...(words.length ? { omittedChapterCounts: words.length } : {}) });
+    if (row.length > room) row = JSON.stringify({ ...record, ...reason, ...counts, ...(words.length ? { omittedChapterCounts: words.length } : {}) });
+    // Nor may the reason: a card that failed is still known to have failed.
+    if (row.length > room) row = JSON.stringify({ ...record, ...reason });
     if (row.length > room) row = JSON.stringify(record);
     if (spent + row.length + 1 > bound - 100) break;
     rows.unshift(row);

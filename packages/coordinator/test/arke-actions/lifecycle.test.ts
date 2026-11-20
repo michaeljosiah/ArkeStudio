@@ -15,9 +15,11 @@ import {
   conversationActionDigest,
   recoverConversationActions,
   type ConversationActionAuthorityAdapter,
+  type ConversationActionFailure,
   type PrepareConversationActionInput,
 } from "../../src/arke-actions/lifecycle.js";
 import { readConversationActionTombstones } from "../../src/arke-actions/tombstones.js";
+import { assembleContext } from "../../src/world-chat/context.js";
 import { foldConversation } from "../../src/world-chat/fold.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
 import { conversationDir, conversationsDir, WorldChatStore } from "../../src/world-chat/store.js";
@@ -72,6 +74,19 @@ function adapter(state: { executions: number; stale?: boolean }): ConversationAc
     reconcile: async () => null,
   };
 }
+
+/** An authority's own refusal, as the world-chat adapters' `describeRefusal` reads the real ones. */
+class Refused extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "Refused";
+  }
+}
+const PINNED = "Shot 1 is anchored to the track — move or clear the anchor first.";
+const refusalReader = (authority: ConversationActionAuthorityAdapter): ConversationActionAuthorityAdapter => ({
+  ...authority,
+  refusal: (error) => error instanceof Refused ? error.message : null,
+});
 
 async function conversation(worldPath: string, title = "Actions"): Promise<ConversationId> {
   const conversationId = newId("cv") as ConversationId;
@@ -665,7 +680,9 @@ describe("conversation action folding and decisions", () => {
         throw new Error("private authority detail");
       },
     };
-    const lifecycle = new ConversationActionLifecycle({ worldPath, worldId: WORLD_ID, adapters: [failing], now: NOW });
+    const reported: ConversationActionFailure[] = [];
+    const lifecycle = new ConversationActionLifecycle({ worldPath, worldId: WORLD_ID, adapters: [failing], now: NOW,
+      onUnexpectedFailure: (failure) => reported.push(failure) });
     const action = await prepare(lifecycle, conversationId);
     const result = await lifecycle.decide(decision(action, (await loaded(worldPath, conversationId)).seq));
     const failed = (await loaded(worldPath, conversationId)).actions[0]!;
@@ -674,6 +691,92 @@ describe("conversation action folding and decisions", () => {
     assert.equal(failed.decision?.decision, "approve");
     assert.equal(failed.status, "failed");
     assert.equal(state.executions, 1);
+    // An unexpected error's words are for the log, never the card (issue 3135).
+    assert.equal(failed.statusDetail, "The authority failed while executing the approved action.");
+    assert.deepEqual(reported, [{ conversationId, actionId: action.actionId, actionKind: "rename-world", phase: "execute",
+      cause: "Error: private authority detail" }]);
+  });
+
+  // The card that removed a scene's four pinned shots said only "The authority failed while
+  // executing the approved action", and Arke, asked why, could not see the reason either.
+  it("shows an authority's refusal on the failed card in its own words (issue 3135)", async () => {
+    const worldPath = await tempDir("arke-actions-");
+    const conversationId = await conversation(worldPath);
+    const reported: ConversationActionFailure[] = [];
+    const refusing: ConversationActionAuthorityAdapter = { ...refusalReader(adapter({ executions: 0 })),
+      execute: async () => { throw new Refused(PINNED); } };
+    const lifecycle = new ConversationActionLifecycle({ worldPath, worldId: WORLD_ID, adapters: [refusing], now: NOW,
+      onUnexpectedFailure: (failure) => reported.push(failure) });
+    const action = await prepare(lifecycle, conversationId);
+
+    assert.equal((await lifecycle.decide(decision(action, (await loaded(worldPath, conversationId)).seq))).status, "failed");
+    const failed = (await loaded(worldPath, conversationId)).actions[0]!;
+    assert.equal(failed.statusDetail, PINNED);
+    assert.equal(failed.decision?.decision, "approve", "the approval is kept beside the failure");
+    assert.deepEqual(reported, [], "a refusal is the authority working, not a fault to log");
+    // The same words reach Arke's next turn, beside the status that used to be all it was told.
+    const outcomes = assembleContext({ candidates: [], messages: [], tombstones: [], currentUserMessage: "Why did that fail?",
+      currentUserMessageId: newId("msg"), actions: [failed] }).actionReceipts;
+    assert.deepEqual(JSON.parse(outcomes), { actionId: action.actionId, kind: "rename-world", targets: [{ kind: "world", id: WORLD_ID }],
+      status: "failed", authority: failed.authority, reason: PINNED });
+    const tight = assembleContext({ candidates: [], messages: [], tombstones: [], currentUserMessage: "Why?", currentUserMessageId: newId("msg"),
+      actions: [{ ...failed, statusDetail: "x".repeat(900) }], budgetChars: 5_000 }).actionReceipts;
+    assert.equal((JSON.parse(tight) as { status: string; reason?: string }).status, "failed", "a long reason never costs the record that it failed");
+  });
+
+  it("says the generic line when the authority cannot read what it threw", async () => {
+    for (const refusal of [undefined, () => null, () => "   ", () => { throw new Error("the reader failed"); }]) {
+      const worldPath = await tempDir("arke-actions-");
+      const conversationId = await conversation(worldPath);
+      const reported: ConversationActionFailure[] = [];
+      const failing: ConversationActionAuthorityAdapter = { ...adapter({ executions: 0 }), ...(refusal ? { refusal } : {}),
+        execute: async () => { throw new Refused(PINNED); } };
+      const lifecycle = new ConversationActionLifecycle({ worldPath, worldId: WORLD_ID, adapters: [failing], now: NOW,
+        onUnexpectedFailure: (failure) => reported.push(failure) });
+      const action = await prepare(lifecycle, conversationId);
+
+      await lifecycle.decide(decision(action, (await loaded(worldPath, conversationId)).seq));
+
+      assert.equal((await loaded(worldPath, conversationId)).actions[0]!.statusDetail, "The authority failed while executing the approved action.");
+      assert.deepEqual(reported.map((failure) => failure.cause), [`Refused: ${PINNED}`]);
+    }
+  });
+
+  it("records the failure when the log it is reported to cannot be written", async () => {
+    const worldPath = await tempDir("arke-actions-");
+    const conversationId = await conversation(worldPath);
+    const failing: ConversationActionAuthorityAdapter = { ...adapter({ executions: 0 }), execute: async () => { throw new Error("x".repeat(2_000)); } };
+    const causes: string[] = [];
+    const lifecycle = new ConversationActionLifecycle({ worldPath, worldId: WORLD_ID, adapters: [failing], now: NOW,
+      onUnexpectedFailure: (failure) => { causes.push(failure.cause); throw new Error("the log is unwritable"); } });
+    const action = await prepare(lifecycle, conversationId);
+
+    assert.equal((await lifecycle.decide(decision(action, (await loaded(worldPath, conversationId)).seq))).status, "failed");
+    assert.equal(causes[0]!.length, 500, "the cause is bounded");
+  });
+
+  it("keeps a host completion's refusal, and reports a host fault with the line it always said", async () => {
+    for (const [thrown, shown, causes] of [
+      [new Refused("The scene moved while the Stage was recording."), "The scene moved while the Stage was recording.", []],
+      [new TypeError("renderer payload was undefined"), "The host could not finish the approved action.", ["TypeError: renderer payload was undefined"]],
+    ] as const) {
+      const worldPath = await tempDir("arke-actions-");
+      const conversationId = await conversation(worldPath);
+      const reported: ConversationActionFailure[] = [];
+      const authority: ConversationActionAuthorityAdapter = { ...refusalReader(adapter({ executions: 0 })),
+        execute: async () => ({ status: "awaiting-host" }), completeHost: async () => { throw thrown; } };
+      const lifecycle = new ConversationActionLifecycle({ worldPath, worldId: WORLD_ID, adapters: [authority], now: NOW,
+        onUnexpectedFailure: (failure) => reported.push(failure) });
+      const action = await prepare(lifecycle, conversationId);
+      await lifecycle.decide(decision(action, (await loaded(worldPath, conversationId)).seq));
+
+      await lifecycle.completeHostAction({ conversationId, actionId: action.actionId, payload: {} });
+
+      const failed = (await loaded(worldPath, conversationId)).actions[0]!;
+      assert.equal(failed.status, "failed");
+      assert.equal(failed.statusDetail, shown);
+      assert.deepEqual(reported.map((failure) => [failure.phase, failure.cause]), causes.map((cause) => ["host", cause]));
+    }
   });
 
   it("settles a stale card's authority after the stale status is durable, and retries it on restart (issue 3104)", async () => {
@@ -934,6 +1037,44 @@ describe("conversation action recovery and deletion", () => {
     assert.equal(secondPass.reconciled, 0);
     assert.equal(state.executions, 1);
     assert.equal((await loaded(worldPath, conversationId)).actions[0]!.status, "completed");
+  });
+
+  // An approval a crash left unexecuted is resumed at the next open. What it then says is the
+  // refusal when there is one, and otherwise still that it could not be resumed (issue 3135).
+  it("says why a resumed approval was refused, and that it could not be resumed when the fault is unexpected", async () => {
+    for (const [thrown, shown, causes] of [
+      [new Refused(PINNED), PINNED, []],
+      [new Error("private authority detail"), "The approved action could not be resumed after restart.", ["Error: private authority detail"]],
+    ] as const) {
+      const worldPath = await tempDir("arke-actions-");
+      const conversationId = await conversation(worldPath);
+      const authority: ConversationActionAuthorityAdapter = { ...refusalReader(adapter({ executions: 0 })), execute: async () => { throw thrown; } };
+      const action = await prepare(new ConversationActionLifecycle({ worldPath, worldId: WORLD_ID, adapters: [authority], now: NOW }), conversationId);
+      await new WorldChatStore(conversationDir(worldPath, conversationId)).append(
+        {
+          type: "action.decision-recorded",
+          actionId: action.actionId,
+          decision: {
+            requestId: ulid(),
+            decision: "approve",
+            actorId: LOCAL_ACTOR_ID,
+            expectedConversationSeq: (await loaded(worldPath, conversationId)).seq,
+            expectedStatus: "pending",
+            decidedAt: AT,
+          },
+        },
+        { at: AT },
+      );
+      const reported: ConversationActionFailure[] = [];
+
+      await recoverConversationActions({ worldPath, worldId: WORLD_ID, adapters: [authority], now: NOW,
+        onUnexpectedFailure: (failure) => reported.push(failure) });
+
+      const failed = (await loaded(worldPath, conversationId)).actions[0]!;
+      assert.equal(failed.status, "failed");
+      assert.equal(failed.statusDetail, shown);
+      assert.deepEqual(reported.map((failure) => [failure.phase, failure.cause]), causes.map((cause) => ["resume", cause]));
+    }
   });
 
   it("keeps a pending card pending when its adapter is unavailable after restart", async () => {
