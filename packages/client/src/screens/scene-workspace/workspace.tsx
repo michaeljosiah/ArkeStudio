@@ -904,6 +904,9 @@ export function SceneWorkspace({
                 : { kind: "edit-scene", inherits: { location: sheetId } });
               if (sent) closeDoor();
             }}
+            // No location writes the explicit null edit-scene already clears with; the scene's
+            // view attachment on the old place is released in the same commit (scene-commands).
+            onClear={() => { if (write({ kind: "edit-scene", inherits: { location: null } })) closeDoor(); }}
             onClose={closeDoor}
           />
         )}

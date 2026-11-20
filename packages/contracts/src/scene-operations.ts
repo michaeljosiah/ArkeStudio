@@ -74,6 +74,7 @@ export const CLEARABLE_SHOT_FIELDS = [
   "promptOverride",
   "notes",
   "beat",
+  "looks",
 ] as const;
 
 /**

@@ -2,7 +2,7 @@ import { referencePrompt } from "./reference-prompt.js";
 import { dialogueSlots, type DialogueSlot } from "./dialogue-timing.js";
 import type { ProductionBundle } from "./client-state.js";
 import { resolvedAuthoredDuration, DEFAULT_SHOT_SEC } from "./scene.js";
-import { planCharacterAudio, characterAudioInstructions, type CharacterAudioPlan, type FrozenPerformanceAudio, type FrozenMasterAudio } from "./audio-reference.js";
+import { planCharacterAudio, characterAudioInstructions, characterAudioRoute, type CharacterAudioPlan, type FrozenPerformanceAudio, type FrozenMasterAudio } from "./audio-reference.js";
 import {
   compilationIsStale,
   designatedCompilation,
@@ -111,6 +111,45 @@ export function resolveCast(description: string, sheets: Sheet[]): ResolvedCast 
     else unknown.push(slug);
   }
   return { cast, unknown };
+}
+
+/**
+ * Where a shot is (issue 3152; SPEC-044 R-21): the first place its description cites, else the
+ * scene's location. A music video's section is one scene that intercuts the singer's set, the
+ * dancer's floor and a room from the film; its one location rode beside every shot's own place,
+ * plate and prompt alike, and the singer was drawn inside the film's house. A shot that names a
+ * place is there, and the scene's place is not.
+ */
+export function shotPlaceId(
+  scene: Pick<SceneRecord, "inherits">,
+  shot: Pick<Shot, "description">,
+  sheets: readonly Sheet[],
+): string | undefined {
+  const own = scene.inherits?.location;
+  const cited = citedPlaceIds(shot, sheets);
+  // A shot that cites the scene's own place as well as another ("from the rail of @the-vigil,
+  // the @the-saltmarket pilings") is still at the scene's: the other is what it looks at.
+  if (own !== undefined && cited.includes(own)) return own;
+  return cited[0] ?? own;
+}
+
+/** The location sheets a shot cites by `@` mention, in order of first mention. */
+function citedPlaceIds(shot: Pick<Shot, "description">, sheets: readonly Sheet[]): string[] {
+  return parseMentions(shot.description).filter((slug) => sheets.some((sheet) => sheet.id === slug && sheet.type === "location"));
+}
+
+/** The first location sheet a shot cites by `@` mention, if any. */
+export function citedPlaceId(shot: Pick<Shot, "description">, sheets: readonly Sheet[]): string | undefined {
+  return citedPlaceIds(shot, sheets)[0];
+}
+
+/** Whether the scene's location applies to any of these shots: one of them cites no place. */
+export function scenePlaceApplies(
+  scene: Pick<SceneRecord, "inherits">,
+  shots: readonly Pick<Shot, "description">[],
+  sheets: readonly Sheet[],
+): boolean {
+  return scene.inherits?.location !== undefined && shots.some((shot) => citedPlaceId(shot, sheets) === undefined);
 }
 
 /** The slug a prop is mentioned by: `@polaroid` for a prop named "Polaroid" (issue 536). */
@@ -315,8 +354,9 @@ export interface AssembleInput {
  * asked of an agent — a fixture list nobody wrote is a fixture list nobody can be held to, and
  * the failure mode this block exists to fix is precisely a model inventing geometry.
  */
-export function spatialLayoutFor(scene: SceneRecord, sheets: readonly Sheet[]): string | null {
-  const locationId = scene.inherits?.location;
+export function spatialLayoutFor(scene: SceneRecord, sheets: readonly Sheet[], shot?: Pick<Shot, "description">): string | null {
+  // A shot that cites its own place is described in that room, never the scene's (issue 3152).
+  const locationId = shot === undefined ? scene.inherits?.location : shotPlaceId(scene, shot, sheets);
   const location = locationId !== undefined ? sheets.find((sheet) => sheet.id === locationId) : undefined;
   if (location?.type !== "location") return null;
 
@@ -356,15 +396,15 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
   const { sheets, scene, shot } = input;
   const carried = input.carriedSheetIds ?? new Set<string>();
   const { cast } = resolveCast(shot.description, sheets);
-  const location =
-    scene.inherits?.location !== undefined
-      ? sheets.find((s) => s.id === scene.inherits!.location)
-      : undefined;
+  const placeId = shotPlaceId(scene, shot, sheets);
+  const location = placeId !== undefined ? sheets.find((s) => s.id === placeId) : undefined;
 
   // Local subjects and setting remain an editable seed for shots without an authored prompt.
   // A shot still carrying its birth title has no name, and contributes none: the literal
   // `Untitled shot.` was reaching the model as content on every unnamed shot in a scene.
-  const who = cast.map((c) => c.sheet.name);
+  // The place is where they are, never one of them (issue 3152): "Timi J and the Dark Set at
+  // Ade's House" put a set beside the singer and the scene's house around both.
+  const who = cast.filter((c) => c.sheet.id !== location?.id).map((c) => c.sheet.name);
   const whoClause =
     who.length === 0
       ? ""
@@ -383,7 +423,7 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
   // The room's own words, video only. When it is present it replaces the location's first Look
   // clause below rather than joining it — saying the same room twice, once abridged, invites the
   // model to arbitrate between two descriptions of one place.
-  const spatial = input.capability === "video" ? (spatialLayoutFor(scene, sheets) ?? "") : "";
+  const spatial = input.capability === "video" ? (spatialLayoutFor(scene, sheets, shot) ?? "") : "";
 
   // 2 — standing: true for the whole clip. A subject whose image travels contributes nothing
   // here; a sketch citation contributes its appearance once, rather than at every mention.
@@ -501,10 +541,14 @@ export function assembleBoardPrompt(input: {
   aspect: string;
   artDirection?: string;
 }): string {
-  const location =
-    input.scene.inherits?.location === undefined
-      ? undefined
-      : input.sheets.find((sheet) => sheet.id === input.scene.inherits?.location);
+  // Each panel's own place (issue 3152). One shared place heads the sheet as before; panels in
+  // different places each say where they are, so no cell is drawn in another cell's room.
+  const places = input.shots.map((shot) => {
+    const id = shotPlaceId(input.scene, shot, input.sheets);
+    return id === undefined ? undefined : input.sheets.find((sheet) => sheet.id === id);
+  });
+  const shared = places.every((place) => place?.id === places[0]?.id);
+  const location = shared ? places[0] : undefined;
   const contexts = input.shots.map((shot) =>
     assembleBlocks({
       world: input.world,
@@ -532,7 +576,8 @@ export function assembleBoardPrompt(input: {
     const framing = effectiveFraming(input.scene, shot);
     const camera = [framing.size, framing.lens].filter(Boolean).join(", ");
     const direction = [blocks.cameraAnchor, blocks.direction].filter(Boolean).join(" ");
-    return `${index + 1}. ${camera.length > 0 ? `${camera} — ` : ""}${blocks.body}${direction.length > 0 ? ` ${direction}` : ""}`;
+    const where = shared || places[index] === undefined ? "" : `At ${places[index]!.name}. `;
+    return `${index + 1}. ${where}${camera.length > 0 ? `${camera} — ` : ""}${blocks.body}${direction.length > 0 ? ` ${direction}` : ""}`;
   });
   return [head, ...beats].join("\n\n");
 }
@@ -619,8 +664,15 @@ export function assemblePassBlocks(input: {
     persistent: lead?.persistent ?? "",
   };
 
+  // Each room the pass's un-authored beats are in, once (issue 3152): a beat that cites its own
+  // place is set there, and a pass that crosses two places describes both rather than one.
   function spatialFromScene(): string {
-    return input.capability === "video" ? (spatialLayoutFor(input.scene, input.sheets) ?? "") : "";
+    if (input.capability !== "video") return "";
+    const rooms = input.entries
+      .filter((entry) => !entry.prompt.overridden)
+      .map((entry) => spatialLayoutFor(input.scene, input.sheets, entry.shot))
+      .filter((room): room is string => room !== null);
+    return [...new Set(rooms)].join("\n\n");
   }
 }
 
@@ -899,13 +951,16 @@ export function bindReferences(
     const sheet = sheets.find((s) => s.id === decision.sheetId);
     if (sheet === undefined) continue;
     const first = bound.find((b) => b.sheetId === decision.sheetId);
+    // The main photo beside a look is there for the face (issue 3178): a cream shirt in the photo
+    // beside a navy suit in the look was seen to compete, so the line says which clothes win.
+    const faceOnly = decision.role === "secondary" && first?.mode === "scoped-look";
     bound.push({
       index: bound.length + 1,
       sheetId: decision.sheetId,
       subject: sheet.name,
       file: decision.file,
       kind: "image",
-      rolePhrase: rolePhraseFor(sheet, decision),
+      rolePhrase: faceOnly && first !== undefined ? `the face only — the clothing is image ${first.index}'s, not this one's` : rolePhraseFor(sheet, decision),
       mode: decision.mode,
       sameSubjectAs: first ? first.index : null,
     });
@@ -1239,6 +1294,53 @@ export function lookHoldingScope(
     );
 }
 
+/** A costume look of this kit a shot may name (issue 3178); any other kind, or a gone id, is none. */
+export function shotLookIn(kit: ReferenceKit | null, lookId: string): NonNullable<ReferenceKit["looks"]>[number] | undefined {
+  return (kit?.looks ?? []).find((look) => look.id === lookId && look.kind === "costume");
+}
+
+/** The look a shot names for one character, by id, whether or not the kit still holds it. */
+export function shotLookId(shot: Pick<Shot, "looks">, sheetId: string): string | undefined {
+  return shot.looks?.find((entry) => entry.sheetId === sheetId)?.lookId;
+}
+
+/**
+ * The look several shots carry for one character as one request — a whole-scene pass, a board
+ * subject: the first of them that names one. A clip carries one picture of each person, so a
+ * pass whose shots name two looks for the same person wears the first; per-shot frames are
+ * where each shot gets its own.
+ */
+export function groupLookId(shots: readonly Pick<Shot, "looks">[], sheetId: string): string | undefined {
+  for (const shot of shots) {
+    const lookId = shotLookId(shot, sheetId);
+    if (lookId !== undefined) return lookId;
+  }
+  return undefined;
+}
+
+/**
+ * The looks these shots name that their character's kit no longer holds as a costume (issue
+ * 3178), for a cited character only: each falls back to the scene's, the production's or the
+ * main photo, and the dialog names it rather than letting the fallback pass for the choice.
+ */
+export function missingShotLooks(
+  shots: readonly Shot[],
+  sheets: readonly Sheet[],
+  kits: readonly ReferenceKit[],
+): Array<{ shotId: string; number: number; sheetId: string; name: string; lookId: string }> {
+  return shots.flatMap((shot) => {
+    const cited = new Set(parseMentions(shot.description));
+    return (shot.looks ?? []).flatMap((entry) => {
+      const sheet = sheets.find((candidate) => candidate.id === entry.sheetId);
+      if (sheet === undefined || !cited.has(entry.sheetId)) return [];
+      const kit = kits.find((candidate) => candidate.sheetId === entry.sheetId) ?? null;
+      return shotLookIn(kit, entry.lookId) === undefined
+        ? [{ shotId: shot.id, number: shot.number, sheetId: entry.sheetId, name: sheet.name, lookId: entry.lookId }]
+        : [];
+    });
+  });
+}
+
 /**
  * Acceptance as an instant, never as a string. `IsoDateTimeSchema` admits an offset and optional
  * fractional seconds, and lexical order is neither: `2026-08-02T00:00:00+12:00` sorts above
@@ -1253,8 +1355,15 @@ export function attachmentFor(
   kit: ReferenceKit | null,
   sheet: Sheet,
   role: "primary" | "secondary" = "primary",
-  scope?: { productionId?: string; sceneId?: string },
+  /** `lookId` is a shot's own choice for this sheet (issue 3178), the narrowest scope of all. */
+  scope?: { productionId?: string; sceneId?: string; lookId?: string },
 ): AttachmentDecision {
+  // Chosen by pointer, like a chapter's look (SPEC-047 R-112): the look stays unattached, and one
+  // the kit no longer holds falls through to the scene's, the production's, then the main photo.
+  const shotLook = scope?.lookId === undefined ? undefined : shotLookIn(kit, scope.lookId);
+  if (role === "primary" && shotLook) {
+    return { sheetId: sheet.id, file: `references/${sheet.id}/${shotLook.file}`, mode: "scoped-look", role, staleGap: null };
+  }
   const scopedLooks = (kit?.looks ?? []).filter((look) => {
     if (!look.attachedTo || !scope?.productionId) return false;
     if (look.attachedTo.productionId !== scope.productionId) return false;
@@ -1403,6 +1512,11 @@ export interface DispatchWarnings {
     issue: "unresolved" | "missing-reference";
   }>;
   /**
+   * Looks a shot names that have left the character's kit (issue 3178): each rides the next
+   * scope's look or the main photo instead, and is said so before money moves.
+   */
+  missingLooks?: ReturnType<typeof missingShotLooks>;
+  /**
    * Cast owned by a *different* production (SPEC-020 R-6).
    *
    * The mention resolved — scope is not consulted at resolution time, deliberately (R-5, D3), so
@@ -1456,6 +1570,12 @@ export interface DispatchWarnings {
   aspectUnsupported: { aspect: string; model: string; supported: readonly string[] } | null;
   /** Subjects past the model's stated reliable range — carried anyway, and said so (R-42). */
   subjectsOverRange: BudgetResult["subjectsOverRange"];
+  /**
+   * A singer's slice of the song the route that shot takes cannot carry (issue 3186), with the
+   * label the plan card says. The slice is left out and the clip is made without it, rather than
+   * refusing a scene over one shot's lip sync.
+   */
+  songNotSent?: Array<{ shotId: string; number: number; reason: string }>;
 }
 
 /**
@@ -1542,6 +1662,8 @@ export interface ScenePlanInput {
     styleOverride?: string;
     musicPolicy?: "environmental-only";
     failureModes?: readonly string[];
+    /** What its clips are made from (issue 3185); absent is frames. A shot may differ. */
+    clipsFrom?: "frames" | "references";
   };
   /**
    * The production's audio design, which is where the score negative comes from (R-11). Absent
@@ -1605,6 +1727,8 @@ export interface ShotDispatchPlan {
    * and the warnings name them.
    */
   continuation?: ContinuationPlan;
+  /** The clip is made from references by choice (issue 3185): no frame was even looked for. */
+  fromReferences?: true;
 }
 
 export interface ScenePlan {
@@ -1629,6 +1753,11 @@ export interface ScenePlan {
     negatives: string | null;
     /** The prop states the pass's shots cite, distinct by prop and state (issue 536). */
     propStates: ShotPropResolution[];
+    /**
+     * The pass's first shot makes its clip from references (issue 3185), so the pass opens on
+     * nothing: the compiler does not chain it behind the previous pass's last frame.
+     */
+    fromReferences?: true;
   }>;
   pack: PackResult;
   /**
@@ -1678,30 +1807,36 @@ function budgetFor(
   scene: SceneRecord,
   sheets: Sheet[],
   model: ManifestModel,
+  /** The shots these references serve: the scene's place rides only for one that names no place (issue 3152). */
+  shots: readonly Shot[],
   productionId?: string,
   propStates: readonly ShotPropResolution[] = [],
 ) {
   const withLocation: Array<{ sheet: Sheet; retired: boolean }> = [...cast];
   const locationId = scene.inherits?.location;
-  if (locationId !== undefined && !withLocation.some((c) => c.sheet.id === locationId)) {
+  if (locationId !== undefined && scenePlaceApplies(scene, shots, sheets) && !withLocation.some((c) => c.sheet.id === locationId)) {
     const location = sheets.find((s) => s.id === locationId);
     if (location) withLocation.push({ sheet: location, retired: location.retired === true });
   }
-  const candidates: BudgetCandidate[] = withLocation.map((entry, i) => ({
-    sheetId: entry.sheet.id,
-    kind: entry.sheet.type,
-    ...(entry.sheet.billing !== undefined ? { billing: entry.sheet.billing } : {}),
-    appearanceOrder: i,
-    hasReference:
-      attachmentFor(kits.find((k) => k.sheetId === entry.sheet.id) ?? null, entry.sheet, "primary", {
-        ...(productionId ? { productionId } : {}),
-        sceneId: scene.id,
-      }).file !== null,
-    hasSecondaryReference:
-      entry.sheet.type === "character" &&
-      attachmentFor(kits.find((k) => k.sheetId === entry.sheet.id) ?? null, entry.sheet, "secondary").file !==
-        null,
-  }));
+  const candidates: BudgetCandidate[] = withLocation.map((entry, i) => {
+    const lookId = groupLookId(shots, entry.sheet.id);
+    return {
+      sheetId: entry.sheet.id,
+      kind: entry.sheet.type,
+      ...(entry.sheet.billing !== undefined ? { billing: entry.sheet.billing } : {}),
+      appearanceOrder: i,
+      hasReference:
+        attachmentFor(kits.find((k) => k.sheetId === entry.sheet.id) ?? null, entry.sheet, "primary", {
+          ...(productionId ? { productionId } : {}),
+          sceneId: scene.id,
+          ...(lookId !== undefined ? { lookId } : {}),
+        }).file !== null,
+      hasSecondaryReference:
+        entry.sheet.type === "character" &&
+        attachmentFor(kits.find((k) => k.sheetId === entry.sheet.id) ?? null, entry.sheet, "secondary").file !==
+          null,
+    };
+  });
   // Prop states ride after the cast and the location (turn 105's rank), and only when a state
   // has an accepted reference: an unresolved or reference-less state never spends a slot.
   const propCandidates: BudgetCandidate[] = propStates
@@ -1724,6 +1859,27 @@ function budgetFor(
  */
 export const START_FRAME_PREAMBLE =
   "The attached image is this clip's exact first frame. Continue the motion from it.";
+
+/**
+ * The line a clip made from references adds beneath the numbered pictures (issue 3185). A
+ * reference route reads a portrait or a place as loosely as it likes, and a model handed a
+ * picture of a room with nobody in it has opened the clip on that room. The words say what the
+ * pictures are for, so the model composes the shot rather than animating one of them.
+ */
+export const REFERENCES_NOT_FRAMES_LINE =
+  "These pictures show who is in the clip, what they wear and where it happens. None is a frame of the clip: compose each shot from the words.";
+
+/**
+ * Whether a shot's clip is made from its references rather than a frame (issue 3185): the
+ * shot's own choice, else its production's, else frames, which is what every production made
+ * before the choice existed did.
+ */
+export function clipFromReferences(
+  production: { clipsFrom?: "frames" | "references" } | undefined,
+  shot: Pick<Shot, "continuity">,
+): boolean {
+  return (shot.continuity?.clipsFrom ?? production?.clipsFrom ?? "frames") === "references";
+}
 
 /**
  * The line a continuation replaces the binding preamble with (SPEC-019 R-50).
@@ -1938,6 +2094,7 @@ function resolveBoundaryFrames(
   model: ManifestModel,
   artifacts: readonly ArtifactSidecar[] | undefined,
   mode: "per-shot" | "whole-scene",
+  fromReferences: (shot: Shot) => boolean = () => false,
 ): Map<string, { frame?: BoundaryFramePlan; stale?: string }> {
   const states = new Map<string, { frame?: BoundaryFramePlan; stale?: string }>();
   const shots = orderedShots(scene);
@@ -1946,6 +2103,9 @@ function resolveBoundaryFrames(
   if (artifacts === undefined) return states;
   const route = frameDispatchFor(model, 1);
   for (const [shotIndex, shot] of shots.entries()) {
+    // A clip made from references never looks at the frame (issue 3185), so a frame that has
+    // gone stale cannot refuse the plan either: it stays filed, unread, until the shot asks for it.
+    if (fromReferences(shot)) continue;
     const artifactId = selections[shot.id]?.startFrameArtifactId ?? null;
     if (artifactId === null) continue;
     const artifact = artifacts.find((candidate) => candidate.id === artifactId);
@@ -2004,9 +2164,11 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   const props = input.props ?? [];
   const { resolved, perShot } = sceneCast(scene, sheets, props);
   // A carried prop state attaches its accepted reference; everything else attaches as before.
+  // `shots` are the ones the references serve, whose own look choices come first (issue 3178).
   const attachmentsFor = (
     carried: readonly BudgetCandidate[],
     propStates: readonly ShotPropResolution[],
+    shots: readonly Shot[],
   ): AttachmentDecision[] =>
     carried.map((c) => {
       if (c.kind === "prop") {
@@ -2020,11 +2182,12 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
           prop: { name: entry.propName, state: entry.stateName ?? "unresolved" },
         };
       }
+      const lookId = groupLookId(shots, c.sheetId);
       return attachmentFor(
         kits.find((k) => k.sheetId === c.sheetId) ?? null,
         sheets.find((s) => s.id === c.sheetId)!,
         c.referenceRole,
-        { ...(input.productionId ? { productionId: input.productionId } : {}), sceneId: scene.id },
+        { ...(input.productionId ? { productionId: input.productionId } : {}), sceneId: scene.id, ...(lookId !== undefined ? { lookId } : {}) },
       );
     });
   const capSec = durationLimitsFor(model).maxDurationSec ?? Number.POSITIVE_INFINITY;
@@ -2078,7 +2241,8 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
 
   // Boundary frames resolved before anything is bound or priced (issue 154): a shot that opens
   // on a durable frame takes the first-frame route, which changes what else may travel with it.
-  const boundaryFrames = resolveBoundaryFrames(scene, selections, model, input.artifacts, mode);
+  const fromReferences = (shot: Shot) => clipFromReferences(input.production, shot);
+  const boundaryFrames = resolveBoundaryFrames(scene, selections, model, input.artifacts, mode, fromReferences);
   // Resolved beside them, and consulted first where both landed on one shot (R-50): a frame is
   // issue 154's workaround for models that could not take video, and this model can. Continuing
   // keeps the motion and the audio the extracted still throws away, so the frame steps aside
@@ -2101,8 +2265,8 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
   const shots: ShotDispatchPlan[] = ordered.map((shot) => {
     const cast = perShot.get(shot.id)!;
     const propStates = resolvePropStates(shot, props, input.propStateOverrides?.[shot.id]);
-    const budget = budgetFor(cast.cast, kits, scene, sheets, model, input.productionId, propStates);
-    const references = attachmentsFor(budget.carried, propStates);
+    const budget = budgetFor(cast.cast, kits, scene, sheets, model, [shot], input.productionId, propStates);
+    const references = attachmentsFor(budget.carried, propStates, [shot]);
     // A strict start frame displaces the sheet references (issue 154): the first-frame route
     // takes exactly one image, so nothing else may ride, and the budget's carried set is named
     // in the warnings as what stepped aside rather than silently thinned.
@@ -2167,7 +2331,9 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
             ? [bindingPreamble(bound), CARRY_PREAMBLE].filter(Boolean).join("\n")
             : frame !== undefined
               ? START_FRAME_PREAMBLE
-              : bindingPreamble(bound),
+              : fromReferences(shot) && bound.length > 0
+                ? [bindingPreamble(bound), REFERENCES_NOT_FRAMES_LINE].join("\n")
+                : bindingPreamble(bound),
       body: prompt.text,
       negatives: derivedNegatives({
         capability: model.capability,
@@ -2188,6 +2354,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       estimatedMicroUsd: estimate,
       ...(frame !== undefined ? { frame } : {}),
       ...(continuation !== undefined ? { continuation } : {}),
+      ...(fromReferences(shot) ? { fromReferences: true as const } : {}),
     };
   });
 
@@ -2249,10 +2416,15 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     );
   })();
 
+  // A singer's shot is a clip of its own (issue 3186): its slice of the song is its length, so
+  // a pass that ran on into the next shot would ask the singer to mouth a song that has stopped.
+  const singing = new Set((input.masterReferences ?? []).map((ref) => ref.master.shotId));
+  const songBreaks = ordered.flatMap((shot, index) =>
+    singing.has(shot.id) ? [shot.id, ...(ordered[index + 1] ? [ordered[index + 1]!.id] : [])] : []);
   const pack = packScene(ordered, capSec, {
     referenceCapSec,
     shotCarriesReferences: (shotId) => boundByShot.get(shotId) ?? false,
-    forceBreakBefore: new Set([...boardBoundaries,...timingBreaks]),
+    forceBreakBefore: new Set([...boardBoundaries,...timingBreaks, ...songBreaks]),
   });
 
   const passReferences: ScenePlan["passReferences"] = pack.ok
@@ -2274,14 +2446,21 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
             (entry, i, all) =>
               all.findIndex((other) => other.propId === entry.propId && other.stateId === entry.stateId) === i,
           );
-        const budget = budgetFor([...seen.values()], kits, scene, sheets, model, input.productionId, propStates);
-        const references = attachmentsFor(budget.carried, propStates);
+        const passShots = pass.plan
+          .map((entry) => ordered.find((s) => s.id === entry.shotId))
+          .filter((s): s is Shot => s !== undefined);
+        const budget = budgetFor([...seen.values()], kits, scene, sheets, model, passShots, input.productionId, propStates);
+        const references = attachmentsFor(budget.carried, propStates, passShots);
+        // The pass opens where its first shot opens, so that shot decides whether it may open on
+        // the previous pass's last frame (issue 3185).
+        const opening = ordered.find((s) => s.id === pass.plan[0]?.shotId);
         return {
           passIndex: pass.index,
           references,
           budget,
           bound: bindReferences(references, sheets),
           propStates,
+          ...(opening !== undefined && fromReferences(opening) ? { fromReferences: true as const } : {}),
           // A pass is one clip, so its negatives are the clip's. Silence is still stated, but
           // only when the whole clip is silent — one spoken beat among four is not a silent pass.
           negatives: derivedNegatives({
@@ -2316,7 +2495,7 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
         )
       : perShotTotal;
 
-  const sceneBudget = budgetFor(resolved.cast, kits, scene, sheets, model, input.productionId);
+  const sceneBudget = budgetFor(resolved.cast, kits, scene, sheets, model, ordered, input.productionId);
   const droppedReferences =
     mode === "whole-scene"
       ? passReferences
@@ -2384,6 +2563,8 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
             .filter(
               (s) =>
                 continuations.get(s.id)?.continuation === undefined &&
+                // A clip made from references opens on no frame by choice (issue 3185).
+                !fromReferences(s) &&
                 !(selections[s.id]?.startFrameArtifactId ?? selections[s.id]?.startFrameTakeId ?? null),
             )
             .map((s) => ({ shotId: s.id, number: s.number }))
@@ -2452,12 +2633,14 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
         return [];
       }),
     ),
+    missingLooks: missingShotLooks(ordered, sheets, kits),
     foreignGuests: (() => {
       // The cast is `@` mentions, but a scene also cites its inherited location, which never
       // enters `resolved.cast` and which `budgetFor` deliberately carries into the references and
       // the prompt. Warning only on mentions would let a scene inherit and dispatch another
       // production's guest place in silence, unless the author redundantly mentioned it in a shot.
-      const inherited = scene.inherits?.location;
+      // A place every shot overrides with its own sends nothing, so it warns of nothing (issue 3152).
+      const inherited = scenePlaceApplies(scene, ordered, sheets) ? scene.inherits?.location : undefined;
       const cited = [
         ...resolved.cast.map((c) => c.sheet),
         ...(inherited !== undefined ? sheets.filter((s) => s.id === inherited) : []),
@@ -2502,10 +2685,33 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     })(),
   };
 
+  /*
+   * A singer's slice rides only where the route can sync to it (issue 3186): performance sync on
+   * a reference route that also carries a picture. Anywhere else — a frame or an extend route, a
+   * model that hears no audio, a pass with no picture to sing — the slice stays home and the shot
+   * is named with the reason, once, from the dispatch shape this plan is for.
+   */
+  const songNotSent: NonNullable<DispatchWarnings["songNotSent"]> = [];
+  const songFor = (shotIds: ReadonlySet<string>, imageCount: number, videoCount: number, taskMode: string, record: boolean) =>
+    (input.masterReferences ?? []).filter((ref) => {
+      if (!shotIds.has(ref.master.shotId)) return false;
+      const route = characterAudioRoute(model, taskMode);
+      const reason = route === null && (taskMode === "first-frame" || taskMode === "continue") ? "opens on a frame"
+        : !route?.supportsPerformanceSync ? "model takes no song"
+        : route.requiresImages && imageCount + videoCount === 0 ? "no picture rides" : null;
+      if (reason !== null && record) {
+        const shot = ordered.find((candidate) => candidate.id === ref.master.shotId);
+        if (shot !== undefined) songNotSent.push({ shotId: shot.id, number: shot.number, reason });
+      }
+      return reason === null;
+    });
   for (const entry of shots) {
+    const taskMode = entry.continuation?.kind === "extend" ? "continue" : entry.frame ? "first-frame" : "generate";
+    const videoCount = entry.continuation?.kind === "carry" ? 1 : 0;
     entry.audioReferences = planCharacterAudio({ scene, shots: [entry.shot], sheets, kits, model,
-      imageCount: entry.bound.length, videoCount: entry.continuation?.kind === "carry" ? 1 : 0, taskMode: entry.continuation?.kind === "extend" ? "continue" : entry.frame ? "first-frame" : "generate",
-      disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences, masterReferences: input.masterReferences });
+      imageCount: entry.bound.length, videoCount, taskMode,
+      disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences,
+      masterReferences: songFor(new Set([entry.shot.id]), entry.bound.length, videoCount, taskMode, mode === "per-shot") });
     const audioText = characterAudioInstructions(entry.audioReferences);
     if (audioText) entry.parts.preamble = [entry.parts.preamble, audioText].filter(Boolean).join("\n");
     const videos = entry.continuation?.kind === "carry" ? 1 : 0;
@@ -2516,8 +2722,10 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
     const packed = pack.ok ? pack.passes.find(p => p.index === reference.passIndex) : undefined;
     const ids = new Set(packed?.plan.map(p => p.shotId) ?? []);
     reference.audioReferences = planCharacterAudio({ scene, shots: shots.filter(s => ids.has(s.shot.id)).map(s => s.shot),
-      sheets, kits, model, imageCount: reference.bound.length, disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences, masterReferences: input.masterReferences });
+      sheets, kits, model, imageCount: reference.bound.length, disabled: input.audioReferencesDisabled, performanceReferences: input.performanceReferences,
+      masterReferences: songFor(ids, reference.bound.length, 0, "generate", mode === "whole-scene") });
   }
+  if (songNotSent.length > 0) warnings.songNotSent = songNotSent;
 
   return {
     mode,

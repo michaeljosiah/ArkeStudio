@@ -1,4 +1,5 @@
 import { readCharacterAudioInputs } from "../audio/reference-inputs.js";
+import { shotSinger, type SongNotSent } from "../audio/song-slices.js";
 /**
  * Durable scene-dispatch plans (SPEC-024; issue #402).
  *
@@ -23,6 +24,7 @@ import {
   orderedShots,
   resolveCast,
   SlugSchema,
+  shotPlaceId,
   shotSpeakers,
   ulid,
   type CompiledPass,
@@ -145,6 +147,13 @@ export interface CreatePlanInput {
   acknowledgedRecommendationIds?: string[];
   /** Scene-cast voices that did not resolve, for the plan card's clause (SPEC-044 R-28). */
   castNotSent?: DispatchPlan["castNotSent"];
+  /** Singers' slices of the song that could not be made, for the pass's clause (issue 3186). */
+  songNotSent?: readonly SongNotSent[];
+  /**
+   * A card being priced, before its approval writes the audio's cloud rights: the audio's bytes
+   * and checks are read, its upload right is not (issue 3186). Never set where a plan is made durable.
+   */
+  audioEvidenceOnly?: boolean;
   worldId: string;
   productionId: string;
   scene: SceneRecord;
@@ -212,7 +221,8 @@ function passCarries(
       ...(voiceReason !== undefined ? { voiceReason } : {}),
     } as const;
   });
-  const location = input.scene.inherits?.location;
+  // The pass's place is its shots' (issue 3152): the first shot's own, else the scene's.
+  const location = shots.length === 0 ? input.scene.inherits?.location : shotPlaceId(input.scene, shots[0]!, sheets);
   const locationSheet = location === undefined ? undefined : sheets.find((sheet) => sheet.id === location && sheet.type === "location");
   const bound = locationSheet === undefined ? undefined : pass.references.find((ref) => ref.sheetId === locationSheet.id);
   const dropped = locationSheet === undefined ? undefined : pass.dropped.find((entry) => entry.sheetId === locationSheet.id);
@@ -243,11 +253,28 @@ function passCarries(
   const wirePrompt = typeof pass.params["prompt"] === "string" ? pass.params["prompt"] : "";
   const promptOverCap =
     cap !== undefined && wirePrompt.length > cap ? { chars: wirePrompt.length, limit: cap } : undefined;
+  // The pass opens where its first shot opens (issue 3185): a clip that shot makes from its
+  // references carries no frame, and the card says so rather than leaving the frame unsaid.
+  const fromReferences = input.plan.shots.find((entry) => entry.shot.id === first.id)?.fromReferences === true;
+  // Who sings to the song in this pass (issue 3186): the slice that rode, else the first of its
+  // shots whose slice could not be made, from the coordinator or from the route the plan chose.
+  const sung = audioPlan?.references.find((ref) => "master" in ref);
+  const unsung = [
+    ...(input.songNotSent ?? []),
+    ...(input.plan.warnings.songNotSent ?? []).map((entry) => {
+      const shot = shots.find((candidate) => candidate.id === entry.shotId);
+      return { ...entry, name: (shot === undefined ? undefined : shotSinger(shot, sheets)?.name) ?? `shot ${entry.number}` };
+    }),
+  ].find((entry) => pass.target.coversShots.includes(entry.shotId));
+  const song = sung !== undefined ? { name: sung.characterName, rides: true }
+    : unsung !== undefined ? { name: unsung.name, rides: false, reason: unsung.reason } : undefined;
   return {
     shots: shots.map((shot) => ({ shotId: shot.id, number: shot.number })),
     // A chained pass opens on the previous pass's boundary frame, bound at materialisation; it
     // is a frame on this pass's first shot as surely as a selected one is.
     ...(pass.frame !== undefined || pass.route.kind === "frame" ? { frame: { shotId: first.id, number: first.number } } : {}),
+    ...(fromReferences ? { fromReferences: true as const } : {}),
+    ...(song !== undefined ? { song } : {}),
     ...(place !== undefined ? { place } : {}),
     cast,
     ...(timing !== undefined && timing.length > 0 ? { timing } : {}),
@@ -274,10 +301,15 @@ export async function compileDispatchPlan(store: WorldStore, input: CreatePlanIn
   });
   for (const pass of compiled) {
     if (pass.params.audioReferences !== undefined) await readCharacterAudioInputs(store, {
-      model: pass.model.id, provider: pass.model.provider, params: pass.params });
+      model: pass.model.id, provider: pass.model.provider, params: pass.params }, false, input.audioEvidenceOnly === true);
   }
   if (compiled.length === 0) throw new Error("nothing to dispatch — the plan compiled no passes");
-  const dependencies = chainFrames ? chainedDependencies(input.plan.mode, input.model, compiled.length) : compiled.map(() => []);
+  // A pass waits for the previous pass's last frame only when it opens on it: one whose first
+  // shot makes its clip from references compiled to the reference route (issue 3185), and
+  // holding it behind an extraction it never reads would only serialise the scene for nothing.
+  const dependencies = chainFrames
+    ? chainedDependencies(input.plan.mode, input.model, compiled.length).map((needs, index) => compiled[index]!.route.kind === "frame" ? needs : [])
+    : compiled.map(() => []);
   // A timing clause sits on the pass it changes (R-25). A shot whole-scene packing left out is
   // in no pass; its clause files with the pass carrying the nearest earlier shot, so it sits
   // where the gap is rather than vanishing with the shot.
@@ -331,7 +363,8 @@ export async function compileDispatchPlan(store: WorldStore, input: CreatePlanIn
 export async function createDispatchPlan(store: WorldStore, input: CreatePlanInput): Promise<DispatchPlan> {
   const existing = (await listPlans(store, input.productionId)).find(plan => plan.requestId === input.requestId);
   if (existing) return existing;
-  const current = await compileDispatchPlan(store, input);
+  // A durable plan clears its audio in full, whatever the caller priced it with.
+  const current = await compileDispatchPlan(store, { ...input, audioEvidenceOnly: false });
   const withoutPins = (plan: DispatchPlan) => {
     const copy = structuredClone(plan);
     for (const pass of copy.passes) {

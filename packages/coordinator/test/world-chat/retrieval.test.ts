@@ -15,6 +15,8 @@ import {
   type WorldChatStoredEvent,
   type ArkeTargetReadPage,
   type ArtifactSidecar,
+  type Sheet,
+  type WorldBundle,
   chapterCalled,
 } from "@arke-studio/contracts";
 import { WorldIndex } from "../../src/index-db/world-index.js";
@@ -47,9 +49,12 @@ async function harness(options: {
   withDrafts?: boolean;
   drafts?: RetrievalDeps["getConversationDrafts"];
   textBudget?: number;
+  /** Sheets added to the fixture before it is indexed. */
+  addSheets?: (bundle: WorldBundle) => Sheet[];
 } = {}) {
   const worldDir = await makeTempWorld();
   const bundle = await fixtureBundle();
+  if (options.addSheets) bundle.sheets = [...bundle.sheets, ...options.addSheets(bundle)];
   const index = options.withIndex === false ? null : WorldIndex.open(worldDir, bundle);
 
   const worldPath = await tempDir("arke-retrieval-");
@@ -344,6 +349,48 @@ describe("leased retrieval", () => {
     assert.equal(receipt.tool, "search-sheets");
     assert.equal(receipt.status, "complete");
     assert.ok(receipt.consulted.some((c) => c.ref.kind === "sheet" && c.ref.sheetId === "maren-kest"));
+    h.index?.close();
+  });
+
+  it("searches the production's own sheets from inside it, so a place its card just wrote is found (issue 3181)", async () => {
+    // A "New location" card in a production thread writes a sheet that belongs to the production.
+    // The next turn's search ran as though from the world, which leaves every production's sheets
+    // out, and Arke told the author the place it had just written did not exist.
+    const h = await harness({
+      addSheets: (bundle) => {
+        const place = bundle.sheets.find((s) => s.type === "location")!;
+        return [{
+          ...place,
+          id: "the-vi-rooftop",
+          name: "The VI Rooftop",
+          region: "Victoria Island",
+          production: "saltlight",
+          sections: [{ heading: "Look", body: "A rooftop terrace at sunset, forty guests at dressed tables." }],
+        }];
+      },
+    });
+    const search = async (productionId?: string) => {
+      const lease = h.leases.mint({
+        worldId: h.bundle.meta.worldId,
+        conversationId: h.conversationId,
+        runId: h.runId,
+        ...(productionId !== undefined ? { productionId } : {}),
+      });
+      const { receipt } = await h.retrieval.call(lease.token, "search_sheets", { query: "The VI Rooftop", kind: "location" });
+      return { receipt, found: receipt.consulted.some((c) => c.ref.kind === "sheet" && c.ref.sheetId === "the-vi-rooftop") };
+    };
+    const places = h.bundle.sheets.filter((s) => s.type === "location" && s.production === undefined).length;
+
+    const inside = await search("saltlight");
+    assert.equal(inside.receipt.status, "complete");
+    assert.ok(inside.found, "the production's own place comes back");
+    assert.equal(inside.receipt.searchedCount, places + 1, "and is counted in what was searched");
+
+    const world = await search();
+    assert.equal(world.found, false, "a world thread does not see a production's place");
+    assert.equal(world.receipt.searchedCount, places);
+
+    assert.equal((await search("the-ledger-of-nights")).found, false, "nor does another production's thread");
     h.index?.close();
   });
 

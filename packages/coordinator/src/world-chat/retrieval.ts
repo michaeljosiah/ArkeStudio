@@ -259,9 +259,12 @@ export class WorldChatRetrieval {
         if (!index) throw new RetrievalError("unavailable", "the index is unavailable");
         const query = String(args["query"] ?? "");
         const kind = args["kind"] !== undefined ? String(args["kind"]) : undefined;
+        // Searched as the conversation sees the world: from inside a production, its own guests
+        // are there with the world's sheets (SPEC-020 R-7, issue 3181).
         const result = searchSheets(index.db, query, {
           limit: boundedLimit(args["limit"]),
           ...(kind !== undefined ? { kind } : {}),
+          ...(lease.productionId !== undefined ? { production: lease.productionId } : {}),
         });
         const consulted = result.candidates
           .map((c) => bundle.sheets.find((s) => s.id === c.sheetId))

@@ -77,6 +77,7 @@ export function CastPicker({
   scene,
   mode,
   onPick,
+  onClear,
   onClose,
 }: {
   world: WorldBundle;
@@ -84,6 +85,8 @@ export function CastPicker({
   scene: SceneRecord;
   mode: CastPickerMode;
   onPick: (sheetId: string) => void;
+  /** Change location only: leave the scene with no place (issue 3153). */
+  onClear?: () => void;
   onClose: () => void;
 }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -148,6 +151,18 @@ export function CastPicker({
           <span className="fy-castpicker__title">{title}</span>
           <button type="button" className="fy-castpicker__close" aria-label="Close" onClick={onClose}><X size={13} /></button>
         </div>
+        {/* A place chosen once could never be taken back (issue 3153): a music video's section
+            intercuts strands no single place holds, and its shots name their own. */}
+        {mode === "change-location" && onClear !== undefined ? (
+          <div className="fy-castpicker__section">
+            <div className="fy-castpicker__cards">
+              <button type="button" className="fy-castpicker__card" aria-label="No location" onClick={onClear}>
+                <span className="fy-castpicker__portrait fy-castpicker__portrait--none" aria-hidden="true" />
+                <span className="fy-castpicker__name">No location</span>
+              </button>
+            </div>
+          </div>
+        ) : null}
         {section(`In ${production.meta.title}`, own)}
         {section("From the world", rest)}
         {offered.length === 0 ? <div className="fy-castpicker__empty">{type === "character" ? "no characters in this world yet" : "no locations in this world yet"}</div> : null}

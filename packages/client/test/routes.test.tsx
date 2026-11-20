@@ -835,7 +835,9 @@ describe("screen inventory", () => {
     // retired dispatch dialog no longer owns another copy of these generation settings.
     const workspace = renderAt(`/w/${worldId}/p/saltlight/generate?view=bench`);
     assert.ok(workspace.includes("World look · v"));
-    assert.ok(workspace.includes("carries as text"));
+    // The look is never pasted into a shot's prompt (SPEC-012 R-14, issue 3188).
+    assert.ok(workspace.includes("inherited · Arke writes it into shot prompts"));
+    assert.ok(!workspace.includes("carries as text"));
   });
 
   it("draws Advanced's wall with the bench's own viewer, not a cropped still on a --primary box (142a)", () => {
@@ -870,7 +872,7 @@ describe("screen inventory", () => {
       const worldId = world.meta.worldId;
       const workspace = renderAt(`/w/${worldId}/p/saltlight/generate?view=bench`);
       assert.ok(workspace.includes("Production look"));
-      assert.ok(workspace.includes("Bleached documentary realism"));
+      assert.ok(workspace.includes("Bleached documentary realism · Arke writes it into shot prompts"));
 
       const overriddenWorld = {
         ...world,
@@ -894,7 +896,7 @@ describe("screen inventory", () => {
       __setStateForTest({ ...FIXTURE_STATE, world: overriddenWorld });
       const overriddenWorkspace = renderAt(`/w/${worldId}/p/saltlight/generate?view=bench`);
       assert.ok(overriddenWorkspace.includes("Shot prompt override"));
-      assert.ok(overriddenWorkspace.includes("edited by you"));
+      assert.ok(overriddenWorkspace.includes("edited by you · carries as text"));
     } finally {
       __setStateForTest(FIXTURE_STATE);
     }

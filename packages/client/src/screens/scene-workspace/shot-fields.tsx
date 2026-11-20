@@ -6,7 +6,9 @@ import {
   DEFAULT_SHOT_SEC,
   assemblePrompt,
   beatPlayback,
+  chapterLooksOf,
   deriveRehearsalLines,
+  lookHoldingScope,
   sceneBeats,
   overrideStaleAgainst,
   promptFor,
@@ -15,6 +17,8 @@ import {
   resolveCast,
   resolvePropStates,
   shotCoverage,
+  shotLookId,
+  shotSingsToSong,
   shotSpeakers,
   withoutMention,
   type ClientMessage,
@@ -28,6 +32,8 @@ import { BenchBrief } from "../../components/bench-brief.js";
 import { Checkbox, Select } from "../../components/ui.js";
 import { Archive, FileText, ImageMark, LinkMark, Minus, More, Plus, Speaker, StickyNote, Timer, VideoMark, X } from "../../components/icons.js";
 import { characterPortraitPath, locationPortraitPath, Portrait } from "../../components/portrait.js";
+import { lookTileLabel } from "../character-reference.js";
+import { lookPickerLabels } from "../production-cast.js";
 import { mentionNames, scriptWords } from "./mentions.js";
 import { BeatLineEditor } from "./beat-line-editor.js";
 import { lineVoices, useTableReadPlan } from "./table-read.js";
@@ -178,6 +184,44 @@ export function ShotFields({
   // What a cited character brings to this shot (SPEC-044 R-22): voice where they speak in it,
   // by the same resolution the planner and the dialog use; look where the shot cites them.
   const speakers = shotSpeakers(scene, [shot]).speakers;
+  /*
+   * What a cited character wears in this shot (issue 3178): one of their costume looks, or what
+   * the shot would wear without a choice — the scene's look, the production's, the main photo —
+   * named by what it is. A character with no costume looks has nothing to choose, so no picker.
+   */
+  const lookPicker = (sheetId: string, name: string): ReactNode => {
+    const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId) ?? null;
+    const costumes = chapterLooksOf(kit);
+    const chosen = shotLookId(shot, sheetId);
+    if (costumes.length === 0 && chosen === undefined) return null;
+    const labels = lookPickerLabels(costumes);
+    const inherited = lookHoldingScope(kit, { kind: "scene", productionId: production.meta.id, sceneId: scene.id })
+      ?? lookHoldingScope(kit, { kind: "production", productionId: production.meta.id });
+    const fallback = inherited === undefined
+      ? "Main photo"
+      : `${inherited.name ?? lookTileLabel(inherited.prompt, inherited.kind)} · ${inherited.attachedTo?.kind === "scene" ? "scene" : "production"}`;
+    const missing = chosen !== undefined && !costumes.some((look) => look.id === chosen);
+    return (
+      <Select
+        label={`${name}'s look`}
+        className="fy-shot__select"
+        wrapClassName="fy-shot__look"
+        value={chosen ?? ""}
+        disabled={locked}
+        onChange={(event) => {
+          const lookId = event.target.value;
+          const others = (shot.looks ?? []).filter((entry) => entry.sheetId !== sheetId);
+          const next = lookId === "" ? others : [...others, { sheetId, lookId }];
+          if (next.length > 0) edit({ looks: next });
+          else edit({}, ["looks"]);
+        }}
+      >
+        <option value="">{fallback}</option>
+        {missing ? <option value={chosen} disabled>Look missing</option> : null}
+        {costumes.map((look) => <option key={look.id} value={look.id}>{labels.get(look.id)}</option>)}
+      </Select>
+    );
+  };
 
   // ---- Notes ---------------------------------------------------------------------------------
   const [notesDraft, setNotesDraft] = useState(shot.notes ?? "");
@@ -363,13 +407,14 @@ export function ShotFields({
                   ) : null}
                 </>
               );
-              return entry.sheet.type === "character" ? (
+              if (entry.sheet.type !== "character") return <span key={entry.sheet.id} className="fy-shot__ref" title={title}>{inner}</span>;
+              const chip = (
                 <button key={entry.sheet.id} type="button" className="fy-shot__ref fy-shot__ref--door" title={title} aria-haspopup="dialog" onClick={(event) => onOpenCharacter(entry.sheet.id, event.currentTarget)}>
                   {inner}
                 </button>
-              ) : (
-                <span key={entry.sheet.id} className="fy-shot__ref" title={title}>{inner}</span>
               );
+              const picker = lookPicker(entry.sheet.id, entry.sheet.name);
+              return picker === null ? chip : <span key={entry.sheet.id} className="fy-shot__refpick">{chip}{picker}</span>;
             })}
           </div>
         )}
@@ -565,6 +610,22 @@ export function ShotFields({
           checked={shot.continuity?.continuesPrevious ?? false}
           onChange={(event) => continuitySet({ continuesPrevious: event.target.checked || undefined })}
         />
+        {/* Issue 3185: this shot's clip from a frame or from the cast and place pictures, where it
+            differs from the production. The first option follows the production and says how. */}
+        <div className="fy-shot__row">
+          <span className="fy-shot__rowlabel">clip</span>
+          <Select
+            label="Clip from"
+            className="fy-shot__select"
+            value={shot.continuity?.clipsFrom ?? ""}
+            disabled={disabled}
+            onChange={(event) => continuitySet({ clipsFrom: event.target.value === "frames" || event.target.value === "references" ? event.target.value : undefined })}
+          >
+            <option value="">{production.meta.clipsFrom === "references" ? "Production · from references" : "Production · from frames"}</option>
+            <option value="frames">From frames</option>
+            <option value="references">From references</option>
+          </Select>
+        </div>
         <div className="fy-shot__row">
           <span className="fy-shot__rowlabel">keep out</span>
           <input
@@ -584,6 +645,23 @@ export function ShotFields({
       </Section>
 
       <Section icon={<Speaker size={15} />} name="Sound">
+        {/* Issue 3186: in a production cut to a song, a singer's shot sends its slice of the song
+            for lip sync. On marks the shot's sound as the song; off keeps the sound and opts out. */}
+        {production.spine === null ? null : (
+          <Checkbox
+            className="fy-shot__check"
+            label="Sings to the song"
+            disabled={disabled}
+            checked={shotSingsToSong(shot)}
+            onChange={(event) => {
+              const audio: NonNullable<Shot["audio"]> = { ...(shot.audio ?? { kind: "music" }) };
+              delete audio.lipSync;
+              edit({ audio: event.target.checked
+                ? { ...audio, kind: shotSingsToSong({ audio }) ? audio.kind : "music" }
+                : { ...audio, lipSync: false } });
+            }}
+          />
+        )}
         {([["line", "dialogue", "None · the shot is silent"], ["ambience", "ambience", "The bed under the line"], ["effects", "effects", "The hits beside it"]] as const).map(([key, label, placeholder]) => (
           <div key={key} className="fy-shot__row">
             <span className="fy-shot__rowlabel">{label}</span>

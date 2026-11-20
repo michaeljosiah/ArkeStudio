@@ -14,6 +14,7 @@ import {
   composePrompt,
   DEFAULT_SHOT_SEC,
   passStructure,
+  REFERENCES_NOT_FRAMES_LINE,
   START_FRAME_PREAMBLE,
   type BoundaryFramePlan,
   type BoundReference,
@@ -482,8 +483,9 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
     const passReferencePlan = plan.passReferences.find((candidate) => candidate.passIndex === pass.index)!;
     // A chained continuation pass (SPEC-024 R-6): opens on the previous pass's boundary still,
     // which does not exist yet. The first-frame route takes one image, so the sheet references
-    // step aside now — named — and the frame fields are bound at materialisation.
-    const chained = chainFrameRoute !== null && model.capability === "video" && position > 0;
+    // step aside now — named — and the frame fields are bound at materialisation. A pass whose
+    // first shot makes its clip from references (issue 3185) is never chained: it keeps them.
+    const chained = chainFrameRoute !== null && model.capability === "video" && position > 0 && passReferencePlan.fromReferences !== true;
     const references = chained ? [] : boundFiles(passReferencePlan.bound);
     const route: CompiledRoute = chained
       ? { kind: "frame", mode: chainFrameRoute.mode, endpoint: chainFrameRoute.route }
@@ -545,7 +547,9 @@ export function compilePasses(input: CompilePassesInput): CompiledPass[] {
           }),
           // A chained pass states what its one image will be (SPEC-024 R-6); a referenced pass
           // numbers its assets. Never both — the route carries one or the other.
-          preamble: chained ? START_FRAME_PREAMBLE : referencePrompt([bindingPreamble(passReferencePlan.bound), passReferencePlan.audioReferences ? characterAudioInstructions(passReferencePlan.audioReferences) : null].filter(Boolean).join("\n"), model, 0, 0, true),
+          preamble: chained ? START_FRAME_PREAMBLE : referencePrompt([bindingPreamble(passReferencePlan.bound),
+            passReferencePlan.fromReferences && passReferencePlan.bound.length > 0 ? REFERENCES_NOT_FRAMES_LINE : null,
+            passReferencePlan.audioReferences ? characterAudioInstructions(passReferencePlan.audioReferences) : null].filter(Boolean).join("\n"), model, 0, 0, true),
           body: referencePrompt(passBody, model),
           // From the plan, not recomputed here: the dialog showed these and the dispatch has to
           // be the same request (R-9).

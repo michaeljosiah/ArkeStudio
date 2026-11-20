@@ -2756,6 +2756,15 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       aspect: z.string().min(1).max(20),
     })
     .strict(),
+  /** issue 3185: what the production's clips are made from — frames, or the cast and place pictures. */
+  z
+    .object({
+      kind: z.literal("set-production-clips"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      clipsFrom: z.enum(["frames", "references"]),
+    })
+    .strict(),
   /**
    * Which model this world's own work reaches for (design turn 153). `null` clears it, which is
    * how the world goes back to following Settings — never by writing the default's id.

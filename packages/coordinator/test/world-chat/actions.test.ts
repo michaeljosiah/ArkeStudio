@@ -51,11 +51,13 @@ import { ConversationActionLifecycle, conversationActionDigest } from "../../src
 import { ARKE_CLIENT_COMMAND_REGISTRY, worldChatActionDescriptor } from "../../src/arke-actions/registry.js";
 import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
 import { readEditorRequest } from "../../src/productions/editor-requests.js";
-import { createChapter, createEpisode, createProduction, openChapter } from "../../src/productions/ops.js";
+import { createChapter, createEpisode, createProduction, openChapter, reorderScenes, setProductionStyle } from "../../src/productions/ops.js";
 import { castLines, readVoices, setVoicePins } from "../../src/productions/voices.js";
 import { addMusicTrack, editMusicTrack, ensureMusicSession, musicRecordFence, readMusicRecord } from "../../src/productions/music.js";
 import { bookAuthoringRefusal } from "../../src/world-chat/production-authoring.js";
 import { applySceneCommand } from "../../src/productions/scene-commands.js";
+import { acceptCharacterLook } from "../../src/references/kit.js";
+import { productionRecord } from "../../src/world-chat/production-record.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { recordUploadedShotFrameTake } from "../../src/takes/drawn-frame.js";
 import { applySceneEdits, sceneVersionFor } from "../../src/productions/scene-edits.js";
@@ -1893,6 +1895,32 @@ describe("World Chat authority adapters", () => {
     assert.equal(card.status, "pending", "preview validation grants no execution permission");
   });
 
+  it("clears a scene's location alone, keeping its time of day and tone (issue 3153)", async () => {
+    const w = await setup();
+    const production = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+    const scene = production.scenes[0]!;
+    assert.deepEqual(scene.inherits, { location: "the-vigil", timeOfDay: "dusk", tone: "quiet dread" });
+    const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: scene.id };
+    const scenes = currentReceipt(w.store, "scenes", `${PRODUCTION}:${scene.id}`);
+    const action = (inherits: Record<string, string | null>) => ({
+      kind: "production-scene" as const,
+      productionId: PRODUCTION,
+      change: { operation: "edit" as const, sceneId: scene.id, changes: { inherits } },
+      checkReceiptIds: [scenes.id],
+    });
+    // The empty slug Arke sent twice is still refused, by the schema, with the clearing word beside it.
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, { receipts: [scenes], actions: [action({ location: "" })] })), /location/);
+    const oneTurn = turn(w.conversationId, context, { receipts: [scenes], actions: [action({ location: null })] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    const after = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!
+      .scenes.find((candidate) => candidate.id === scene.id)!;
+    assert.deepEqual(after.inherits, { timeOfDay: "dusk", tone: "quiet dread" });
+  });
+
   it("refuses a production frame-rate card after a timeline exists", async () => {
     const context = { kind: "production" as const, productionId: PRODUCTION };
     const w = await setup(context);
@@ -2005,6 +2033,12 @@ describe("World Chat authority adapters", () => {
       w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.meta.styleOverride,
       "Bleached salt print",
     );
+    // A shot's prompt never has the style pasted in (SPEC-012 R-14); the card promised a music
+    // video's frames a look they were then drawn without (issue 3188).
+    assert.deepEqual((await loaded(w.log)).actions[0]!.shown.ripples, [
+      "Shot prompts Arke writes from now on use this style; it is not added to frame or clip prompts.",
+      "Accepted assets remain pinned.",
+    ]);
 
     const result = await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!);
     assert.equal(result.status, "completed");
@@ -2022,6 +2056,50 @@ describe("World Chat authority adapters", () => {
         checkReceiptIds: [],
       }],
     })), /another production's style/i);
+  });
+
+  // Issue 3187: a frame a run landed while the card waited moved the art-direction read with the
+  // look still at its version, and the card went stale on Approve with nothing it read changed.
+  it("keeps a production style card when only work around the look changes (issue 3187)", async () => {
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    const prepare = async (style: string) => {
+      const production = currentReceipt(w.store, "production-metadata", PRODUCTION);
+      const art = currentReceipt(w.store, "art-direction");
+      const oneTurn = turn(w.conversationId, context, {
+        receipts: [production, art],
+        actions: [{ kind: "production-style", productionId: PRODUCTION, style, checkReceiptIds: [production.id, art.id] }],
+      });
+      const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+      await appendTurn(w.log, oneTurn, prepared);
+      await bindAll(w.lifecycle, prepared);
+      return (await loaded(w.log)).actions.find((card) => card.actionId === prepared[0]!.intent.actionId)!;
+    };
+    const card = await prepare("Bleached salt print");
+    const look = structuredClone(w.store.getBundle().artDirection);
+    // A picture lands, as a frame run's does, and another production takes a style of its own.
+    const frame = join(w.store.dir, "frame.png");
+    await writeFile(frame, encodePng(solidImage(4, 4, [12, 34, 56, 255])));
+    await fileArtifact(w.store, { sourcePath: frame });
+    await setProductionStyle(w.store, "the-ledger-of-nights", "Ink wash");
+    const after = w.store.getBundle().artDirection;
+    assert.equal(after.version, look.version);
+    assert.notDeepEqual(after.reach, look.reach, "the picture and the other style move what the look reaches");
+    assert.notDeepEqual(after.overrides, look.overrides);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    assert.equal(w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.meta.styleOverride, "Bleached salt print");
+
+    // The look itself still fences the card.
+    const next = await prepare("Ink and salt");
+    const path = join(w.store.dir, "art-direction", "art-direction.json");
+    const raw = await readFile(path, "utf8");
+    await w.store.commit({ kind: "art-direction", source: "concurrent-editor", files: [{
+      path: "art-direction/art-direction.json", action: "replace", baseHash: `sha256:${createHash("sha256").update(raw).digest("hex")}`,
+      content: JSON.stringify({ ...JSON.parse(raw), description: "Concurrent description" }),
+    }] });
+    assert.equal(w.store.getBundle().artDirection.description, "Concurrent description");
+    assert.equal((await decide(w.lifecycle, w.log, next)).status, "stale");
+    assert.match((await loaded(w.log)).actions.find((card) => card.actionId === next.actionId)!.statusDetail ?? "", /art-direction changed/);
   });
 
   it("keeps another production's guest out of Production Chat resource actions", async () => {
@@ -2131,6 +2209,35 @@ describe("World Chat authority adapters", () => {
       .scenes.find((scene) => scene.id === context.sceneId)!;
     assert.equal(orderedShots(after)[0]!.description, description);
     assert.equal(after.version, before.version + 1);
+  });
+
+  it("dresses a shot from its card with a look it read off get_production, and refuses one she cannot wear (issue 3178)", async () => {
+    const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
+    const w = await setup(context);
+    await acceptCharacterLook(w.store, "maren-kest", { id: "storm-oilskin", file: "looks/storm-oilskin.png", kind: "costume",
+      prompt: "Storm oilskin, salt-stiff, collar up", takeId: "tk_01J8E0000000000000000000T3", artDirectionVersion: 3 });
+    const read = productionRecord(w.store.getBundle(), PRODUCTION) as { cast?: Array<{ sheetId: string; name: string; looks: Array<{ id: string; name: string; kind: string }> }> };
+    assert.deepEqual(read.cast?.find((member) => member.sheetId === "maren-kest")?.looks, [{ id: "storm-oilskin", name: "Storm oilskin, salt-stiff, collar up", kind: "costume" }]);
+    const dress = (lookId: string) => {
+      const receipt = currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`);
+      return turn(w.conversationId, context, { receipts: [receipt], actions: [{
+        kind: "production-scene-command", productionId: PRODUCTION, sceneId: context.sceneId,
+        command: { kind: "edit-shot", shotId: "sh_12", change: { looks: [{ sheetId: "maren-kest", lookId }] } }, checkReceiptIds: [receipt.id],
+      }] });
+    };
+    // A look id she has no costume for is refused while the turn is read, in words Arke can act on.
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, dress("council-coat")), /not one of Maren Kest's costumes/);
+
+    const oneTurn = dress("storm-oilskin");
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions.find((action) => action.actionId === prepared[0]!.intent.actionId)!;
+    if (card.shown.productionPreview?.kind !== "scene") assert.fail("expected the resulting shot list");
+    assert.deepEqual(orderedShots(card.shown.productionPreview.after).find((shot) => shot.id === "sh_12")!.looks, [{ sheetId: "maren-kest", lookId: "storm-oilskin" }]);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    const after = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!.scenes.find((scene) => scene.id === context.sceneId)!;
+    assert.deepEqual(orderedShots(after).find((shot) => shot.id === "sh_12")!.looks, [{ sheetId: "maren-kest", lookId: "storm-oilskin" }]);
   });
 
   it("refuses an old pending visual-facts card at approval without changing the scene", async () => {
@@ -3824,6 +3931,74 @@ describe("turn-local scene action sequencing (#1417)", () => {
       assert.deepEqual(calls[0]!.target, { kind: "shot", id: inserted.id, coversShots: [inserted.id] });
       assert.deepEqual(scene(w).version, before.version + 2);
     }
+  });
+});
+
+// Issue 3149: a music video's hook and outro, one card each from one turn. Both cards cited the
+// production's scene list beside their own scene, and that list was fenced on every scene's
+// contents, so approving the hook staled the outro. Both also add shots, and both had numbered
+// them from the same highest shot, so the second card's shots no longer had the numbers it showed.
+describe("cards one turn prepares for different scenes (issue 3149)", () => {
+  const context = { kind: "production" as const, productionId: PRODUCTION };
+  const sceneOf = (w: Awaited<ReturnType<typeof setup>>, id: string) => w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.scenes.find(s => s.id === id)!;
+  async function hookAndOutro(w: Awaited<ReturnType<typeof setup>>) {
+    const list = currentReceipt(w.store, "scenes", PRODUCTION);
+    const hook = currentReceipt(w.store, "scenes", `${PRODUCTION}:sc_02`), outro = currentReceipt(w.store, "scenes", `${PRODUCTION}:sc_06`);
+    const { id: _id, number: _number, visualFacts: _facts, ...shot } = orderedShots(sceneOf(w, "sc_02"))[0]!;
+    const last = (sceneId: string) => orderedShots(sceneOf(w, sceneId)).at(-1)!.id;
+    const add = (sceneId: string, receipt: WorldChatCheckReceipt, ref: string, after: string, title: string) => ModelWorldChatActionSchema.parse({
+      kind: "production-scene-command", productionId: PRODUCTION, sceneId, ref, command: { kind: "insert-shot", at: { after }, shot: { ...shot, title } },
+      checkReceiptIds: [list.id, receipt.id] });
+    const input = turn(w.conversationId, context, { receipts: [list, hook, outro], actions: [
+      ModelWorldChatActionSchema.parse({ kind: "production-scene-command", productionId: PRODUCTION, sceneId: "sc_02",
+        command: { kind: "edit-scene", synopsis: "Her hand comes in." }, checkReceiptIds: [list.id, hook.id] }),
+      add("sc_02", hook, "palm", last("sc_02"), "Flat palm"), add("sc_02", hook, "shoulders", "ref:palm", "Shoulders"),
+      add("sc_06", outro, "rail", last("sc_06"), "The rail"), add("sc_06", outro, "black", "ref:rail", "Black"),
+    ] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, input);
+    assert.equal(prepared.length, 2, "one card for each scene");
+    await appendTurn(w.log, input, prepared); await bindAll(w.lifecycle, prepared);
+    const cards = (await loaded(w.log)).actions;
+    const plans = prepared.map(item => {
+      if (item.payload.kind !== "world-chat-production-scene-command" || !item.payload.scenePlan) throw new Error("wrong action kind");
+      return item.payload.scenePlan;
+    });
+    return { cards, plans };
+  }
+  for (const outroFirst of [false, true]) it(`approves either card after the other${outroFirst ? ", out of turn order" : ""}`, async () => {
+    const w = await setup(context);
+    const { cards, plans } = await hookAndOutro(w);
+    const added = plans.map(plan => orderedShots(plan.after).filter(shot => !orderedShots(plan.before).some(old => old.id === shot.id)).map(shot => shot.id));
+    assert.equal(new Set(added.flat()).size, 4, "the two cards number their new shots apart");
+    for (const index of outroFirst ? [1, 0] : [0, 1]) assert.equal((await decide(w.lifecycle, w.log, cards[index]!)).status, "completed");
+    assert.deepEqual(sceneOf(w, "sc_02"), plans[0]!.after, "the hook lands as its card showed it");
+    assert.deepEqual(sceneOf(w, "sc_06"), plans[1]!.after, "the outro lands as its card showed it");
+    const ids = w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.scenes.flatMap(s => orderedShots(s).map(shot => shot.id));
+    assert.equal(new Set(ids).size, ids.length, "no shot number is used twice");
+  });
+  it("still stales a card when its own scene changes", async () => {
+    const w = await setup(context);
+    const { cards } = await hookAndOutro(w);
+    assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed");
+    const production = w.store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!;
+    await applySceneCommand(w.store, { productionId: PRODUCTION, sceneId: "sc_06", sceneFile: production.sceneFiles["sc_06"]!,
+      baseVersion: sceneOf(w, "sc_06").version, command: { kind: "edit-scene", synopsis: "A later human edit." } });
+    const edited = structuredClone(sceneOf(w, "sc_06"));
+    assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).status, "stale");
+    assert.deepEqual(sceneOf(w, "sc_06"), edited);
+  });
+  it("still stales a card that read the scene list when the scenes are put in another order", async () => {
+    const w = await setup(context);
+    // Every scene takes an explicit place first, so the reorder below leaves the outro's own record alone.
+    await reorderScenes(w.store, PRODUCTION, ["sc_02", "sc_04", "sc_06"]);
+    const { cards } = await hookAndOutro(w);
+    const outro = structuredClone(sceneOf(w, "sc_06"));
+    await reorderScenes(w.store, PRODUCTION, ["sc_04", "sc_02", "sc_06"]);
+    assert.deepEqual(sceneOf(w, "sc_06"), outro);
+    const result = await decide(w.lifecycle, w.log, cards[1]!);
+    assert.equal(result.status, "stale");
+    assert.match((await loaded(w.log)).actions.find(card => card.actionId === cards[1]!.actionId)!.statusDetail ?? "", /scenes changed/);
+    assert.deepEqual(sceneOf(w, "sc_06"), outro);
   });
 });
 

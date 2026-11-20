@@ -31,16 +31,41 @@ export type ScriptBlock = z.infer<typeof ScriptBlockSchema>;
 
 export const ShotAudioSchema = z
   .object({
-    /** "vo" | "dialogue" | "sfx" | "silence" — display vocabulary owned by SPEC-012. */
-    kind: z.string().min(1),
+    /** "vo" | "dialogue" | "sfx" | "silence" — display vocabulary owned by SPEC-012; "music" is sung (issue 3186). */
+    kind: z
+      .string()
+      .min(1)
+      .describe("dialogue, vo, sfx, silence, or music when the speaker (else the first character cited) sings the production's song: in a production with a song, that shot's slice of it is sent for lip sync."),
     speaker: SlugSchema.optional(),
     line: z.string().optional(),
     /** Turn 97 (14d, Sound): the bed under the line and the hits beside it. Free text, optional. */
     ambience: z.string().optional(),
     effects: z.string().optional(),
+    /**
+     * Issue 3186: `false` keeps a shot whose sound is the song (`kind` "music") from singing to
+     * it. A sax player's hands or a dancer's feet are music too, and a mouth synced to the vocal
+     * over them is the one thing that shot must not do. Absent means it sings.
+     */
+    lipSync: z
+      .boolean()
+      .optional()
+      .describe("false: this shot's sound is the song but nobody in it sings, so no slice of the song is sent for lip sync. Leave it out for a singer's shot."),
   })
   .strict();
 export type ShotAudio = z.infer<typeof ShotAudioSchema>;
+
+/** The sound kinds that mean the shot's singer sings the song (issue 3186). Display words, any case. */
+const SUNG_KINDS = new Set(["music", "song", "sung", "singing", "sings", "lip-sync", "lipsync"]);
+
+/**
+ * Whether a shot sings to the production's song (issue 3186): its sound is the song and it has
+ * not opted out. Who sings is the shot's speaker, else the first character it cites; that is the
+ * caller's to resolve, because only it holds the sheets.
+ */
+export function shotSingsToSong(shot: Pick<Shot, "audio">): boolean {
+  const audio = shot.audio;
+  return audio !== undefined && SUNG_KINDS.has(audio.kind.trim().toLowerCase()) && audio.lipSync !== false;
+}
 
 /**
  * The structured camera (turn 97, 14d). One shape serves two places: a scene's `defaults`,
@@ -528,6 +553,19 @@ export const ShotSchema = z
      */
     propStates: z.array(z.object({ propId: PropIdSchema, stateId: PropStateIdSchema }).strict()).optional(),
     /**
+     * What each cited character wears in this shot (issue 3178): a costume look of their kit, by
+     * id. A music video's section intercuts story moments that each have their own clothes, and a
+     * look attached to the scene or production put Ade in one suit through all of them. The
+     * narrowest choice wins — this, then the scene's look, then the production's, then the main
+     * photo (SPEC-044 R-8, SPEC-017 R-20) — and a look that has left the kit falls back to the
+     * next and is named before money moves, never silently.
+     */
+    looks: z
+      .array(z.object({ sheetId: SlugSchema, lookId: z.string().min(1).max(200) }).strict())
+      .refine((looks) => new Set(looks.map((look) => look.sheetId)).size === looks.length, "one look per character")
+      .optional()
+      .describe("Per cited character, the costume look they wear in this shot: sheetId and a lookId from get_production's cast looks. Leave a character out to use the scene's or the production's look, else the main photo."),
+    /**
      * Turn 97 (14d): continuity said plainly. `openOnPrevious` is issue 154's boundary frame as
      * an authored decision, and since issue 851 it is the decision: accepting a take still cuts
      * the still and files it onto the next shot, but the dispatch opens on it only where the
@@ -554,6 +592,16 @@ export const ShotSchema = z
          * take, or its take was itself continued, the plan names the refusal (R-51, R-52).
          */
         continuesPrevious: z.boolean().optional(),
+        /**
+         * What this shot's clip is made from, where it differs from the production's
+         * `clipsFrom` (issue 3185). Absent follows the production. `references` sends no start
+         * frame and opens no pass on the previous one; `frames` keeps today's behaviour for a
+         * shot in a production that makes its clips from references.
+         */
+        clipsFrom: z
+          .enum(["frames", "references"])
+          .optional()
+          .describe("What this shot's clip is made from when it differs from the production's: references (no start frame, the cast and place pictures ride) or frames. Leave it out to follow the production."),
       })
       .strict()
       .optional(),

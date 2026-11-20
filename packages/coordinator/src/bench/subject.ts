@@ -21,7 +21,9 @@ import {
   productionAspect,
   productionStyleFor,
   promptFor,
+  groupLookId,
   resolveCast,
+  scenePlaceApplies,
   stagingMoveWord,
   stagePlayblastIsStale,
   stagingPromptClause,
@@ -129,7 +131,8 @@ function assembledPromptSheetVersions(
 ): Record<string, number> {
   const versions: Record<string, number> = {};
   for (const { sheet } of sheetOrder(shots, world)) versions[sheet.id] = sheet.version;
-  const location = scene.inherits?.location === undefined
+  // The scene's place enters only a prompt one of these shots takes it for (issue 3152).
+  const location = !scenePlaceApplies(scene, shots, world.sheets)
     ? undefined
     : world.sheets.find((sheet) => sheet.id === scene.inherits?.location);
   if (location !== undefined) versions[location.id] = location.version;
@@ -164,14 +167,16 @@ async function sheetTokens(
   const references: BenchReferenceToken[] = [];
   let image = startAt;
   const ordered = sheetOrder(shots, world);
-  const decisions = ordered.map(({ sheet }) =>
-    attachmentFor(
+  const decisions = ordered.map(({ sheet }) => {
+    // The look the shot names comes first (issue 3178); a board wears its first shot's choice.
+    const lookId = groupLookId(shots, sheet.id);
+    return attachmentFor(
       world.referenceKits.find((candidate) => candidate.sheetId === sheet.id) ?? null,
       sheet,
       "primary",
-      { productionId: production.meta.id, sceneId: scene.id },
-    ),
-  );
+      { productionId: production.meta.id, sceneId: scene.id, ...(lookId !== undefined ? { lookId } : {}) },
+    );
+  });
   for (const bound of bindReferences(decisions, world.sheets)) {
     const sheet = world.sheets.find((candidate) => candidate.id === bound.sheetId)!;
     const entry = await sourceToken(

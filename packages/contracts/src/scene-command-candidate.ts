@@ -1,6 +1,6 @@
 import { clearBoardOverride, clearBoardPrompt, deleteShot, duplicateShot, editScene, editShot, insertShot, moveShot, moveBoardBoundary, nextShotIdIn, SceneOperationRefused, setBoardOverride, setBoardPrompt, type SceneDefaultsPatch, type ShotAnchor } from "./scene-operations.js";
 import { orderedShots, type GraphScene, type SceneRecord } from "./scene-flow.js";
-import { parseMentions } from "./planning.js";
+import { parseMentions, shotLookIn, shotPlaceId } from "./planning.js";
 import { stageProblems, resolvedShotStaging, stagingRetimed } from "./staging.js";
 import { stageReframed } from "./stage-framing.js";
 import { effectiveFraming, ScriptBlockSchema } from "./scene.js";
@@ -32,9 +32,33 @@ export type SemanticSceneCommand =
   | { kind: "clear-board-prompt"; members: string[] };
 
 
+/**
+ * A look a shot names must be one its character can wear (issue 3178): a costume look in the kit
+ * of a character the shot cites. Checked where a command sets looks, preview and authority alike:
+ * the person's picker offers nothing else, and a look id guessed wrong would otherwise fall back
+ * to the scene's look in silence at every dispatch.
+ */
+function refuseUnwearableLooks(bundle: WorldBundle, description: string, looks: Shot["looks"], where: string): void {
+  if (looks === undefined) return;
+  const cited = new Set(parseMentions(description));
+  for (const entry of looks) {
+    const sheet = bundle.sheets.find((candidate) => candidate.id === entry.sheetId && candidate.type === "character");
+    if (sheet === undefined) throw new SceneOperationRefused([`${entry.sheetId} is not a character in this world`]);
+    if (!cited.has(sheet.id)) throw new SceneOperationRefused([`${sheet.name} is not in ${where}`]);
+    const kit = bundle.referenceKits.find((candidate) => candidate.sheetId === sheet.id) ?? null;
+    if (shotLookIn(kit, entry.lookId) === undefined) throw new SceneOperationRefused([`that look is not one of ${sheet.name}'s costumes`]);
+  }
+}
+
+/**
+ * Names a new shot from every shot id the production holds. By default the next number after the
+ * highest; a reviewed plan names its own (issue 3149).
+ */
+export type NewShotId = (taken: readonly string[]) => string;
+
 /** The same graph candidate for a preview and the locked scene authority (SPEC-051 R-15/R-16).
  * Caller supplies the complete production snapshot, including preceding dry-run commands. */
-export function sceneCommandCandidate(bundle: WorldBundle, productionId: string, record: SceneRecord, command: SemanticSceneCommand): GraphScene {
+export function sceneCommandCandidate(bundle: WorldBundle, productionId: string, record: SceneRecord, command: SemanticSceneCommand, newShotId: NewShotId = nextShotIdIn): GraphScene {
   switch (command.kind) {
     case "set-beat-line": {
       const shots = orderedShots(record), shot = shots.find(one => one.id === command.shotId);
@@ -159,8 +183,9 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
       // Ids clear the WHOLE production, never just this scene: takes and selections key by bare
       // shot id, so a per-scene number would collide with another scene's shot 3.
       const taken = production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => shot.id));
+      refuseUnwearableLooks(bundle, command.shot.description, command.shot.looks, "this shot");
       return insertShot(record, {
-        shot: { ...command.shot, id: nextShotIdIn(taken) } as Omit<Shot, "number">,
+        shot: { ...command.shot, id: newShotId(taken) } as Omit<Shot, "number">,
         at: command.at,
       });
     }
@@ -170,7 +195,7 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
       const production = bundle.productions.find(p => p.meta.id === productionId);
       if (!production) throw new SceneOperationRefused([`production ${productionId} is not in this world`]);
       const taken = production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => shot.id));
-      return duplicateShot(record, { shotId: command.shotId, newShotId: nextShotIdIn(taken) });
+      return duplicateShot(record, { shotId: command.shotId, newShotId: newShotId(taken) });
     }
     case "edit-shot": {
       if ("staging" in command.change) {
@@ -181,6 +206,7 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
       // its beats) describing seconds the shot no longer has. The version moves with it, which
       // is what marks a playblast recorded at the old length stale.
       const current = orderedShots(record).find((candidate) => candidate.id === command.shotId);
+      if (current !== undefined) refuseUnwearableLooks(bundle, command.change.description ?? current.description, command.change.looks, `shot ${current.number}`);
       const retimed = command.change.durationSec !== undefined && current?.staging !== undefined
         ? stagingRetimed(current.staging, command.change.durationSec, current.durationSec ?? 4)
         : undefined;
@@ -204,7 +230,9 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
         return editShot(record, { shotId: command.shotId, change: { promptOverride: undefined } });
       }
       const sheetVersions: Record<string, number> = {};
-      for (const slug of new Set([...parseMentions(shot.description), ...(record.inherits?.location ? [record.inherits.location] : [])])) {
+      // The place the prompt was written in: the shot's own when it cites one (issue 3152).
+      const place = shotPlaceId(record, shot, bundle.sheets);
+      for (const slug of new Set([...parseMentions(shot.description), ...(place ? [place] : [])])) {
         const sheet = bundle.sheets.find((candidate) => candidate.id === slug);
         if (sheet !== undefined) sheetVersions[slug] = sheet.version;
       }
@@ -233,13 +261,13 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
 }
 
 /** One prospective version with production-wide identities reserved by preceding commands. */
-export function sceneCommandBatchCandidate(bundle: WorldBundle, productionId: string, record: SceneRecord, commands: readonly SemanticSceneCommand[]): GraphScene {
+export function sceneCommandBatchCandidate(bundle: WorldBundle, productionId: string, record: SceneRecord, commands: readonly SemanticSceneCommand[], newShotId: NewShotId = nextShotIdIn): GraphScene {
   if (commands.length === 0 || commands.length > 24) throw new SceneOperationRefused(["A scene batch needs between one and 24 commands."]);
   let next = record;
   for (const command of commands) {
     const working = { ...bundle, productions: bundle.productions.map(p => p.meta.id !== productionId ? p :
       { ...p, scenes: p.scenes.map(s => s.id === record.id ? next : s) }) };
-    next = sceneCommandCandidate(working, productionId, next, command);
+    next = sceneCommandCandidate(working, productionId, next, command, newShotId);
   }
   // JSON is the durable representation: explicit undefined patches must not make a recovered
   // plan differ from the same resulting record calculated at approval.

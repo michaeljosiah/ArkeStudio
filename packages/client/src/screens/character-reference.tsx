@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
   compilationIsStale,
@@ -8,6 +8,7 @@ import {
   stagedReferenceKey,
   type CharacterLook,
   type ManifestModel,
+  type ProductionBundle,
   type ReferenceKit,
   type ReviewDecision,
   type SizeTier,
@@ -24,6 +25,7 @@ import { ImageDialog } from "../components/image-dialog.js";
 import { ImageDownload } from "../components/image-actions.js";
 import { CharacterLookImport } from "../components/character-look-import.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
+import { sceneCast } from "./scene-workspace/cast-picker.js";
 import {
   acceptCharacterLook,
   acceptCharacterSheet,
@@ -41,6 +43,8 @@ import {
   pickStagedReference,
   promoteCharacterLook,
   rejectReferenceTake,
+  renameSavedLook,
+  subscribeLookRename,
   subscribeQueueResults,
   useCharacterSheetAcceptance,
   useMainPhotoAcceptance,
@@ -908,6 +912,51 @@ export function lookTileLabel(prompt: string | undefined, kind: string | undefin
 }
 
 /**
+ * A look's name, set where the look is chosen (issue 3178). A look explored here had no name and
+ * read as its prompt cut short — in the Wardrobe, in a shot's look picker, and to Arke choosing a
+ * shot's clothes by name. The same command the audiobook's saved looks rename with, fenced on the
+ * name as read; Enter or leaving the field saves, Escape puts the name back, empty clears it.
+ */
+function LookNameField({ worldId, sheetId, look }: { worldId: string; sheetId: string; look: CharacterLook }) {
+  const [draft, setDraft] = useState(look.name ?? "");
+  const [saving, setSaving] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => subscribeLookRename((answer) => {
+    if (answer.requestId !== saving) return;
+    setSaving(null);
+    if (answer.error === undefined) return;
+    setFailed(true);
+    setDraft(look.name ?? "");
+  }), [saving, look.name]);
+  const save = () => {
+    const next = draft.trim();
+    if (saving !== null || next === (look.name ?? "")) return;
+    setFailed(false);
+    setSaving(renameSavedLook(worldId, sheetId, look.id, next, look.name ?? null));
+  };
+  return (
+    <label className="fy-looks-attach fy-looks-name">
+      <span>Name</span>
+      <input
+        className="ui-input fy-looks-name__input"
+        value={draft}
+        maxLength={60}
+        placeholder={lookTileLabel(look.prompt, look.kind)}
+        disabled={saving !== null}
+        aria-invalid={failed || undefined}
+        onChange={(event) => { setDraft(event.target.value); setFailed(false); }}
+        onBlur={save}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") { event.preventDefault(); save(); }
+          if (event.key === "Escape") setDraft(look.name ?? "");
+        }}
+      />
+      {failed ? <small role="alert">Not saved</small> : null}
+    </label>
+  );
+}
+
+/**
  * Where an accepted look is in use, in the fewest words that identify it.
  *
  * An attachment is the whole point of a look — it is what makes the look ride as the subject
@@ -933,6 +982,79 @@ export function lookAttachmentLabel(
   // the same words a production-wide attachment uses (codex round 3). A scope whose target is
   // gone reads as no scope, exactly as a deleted production already did.
   return scene ? `${production.meta.title} · Sc ${scene.number}` : null;
+}
+
+/**
+ * Every scene this character is in, as `production:scene` keys, by the rule the scene's own cast
+ * row draws from (SPEC-044 R-6): cited or speaking in a shot, or added by hand. A scene whose flow
+ * cannot be ordered still has its hand-added members, which is all `sceneCast` could not read.
+ */
+export function scenesWithCharacter(
+  productions: readonly ProductionBundle[],
+  sheets: readonly Sheet[],
+  sheetId: string,
+): Set<string> {
+  const keys = new Set<string>();
+  for (const production of productions) {
+    for (const scene of production.scenes) {
+      let members: string[];
+      try {
+        members = sceneCast(scene, sheets);
+      } catch {
+        members = Object.keys(scene.cast ?? {});
+      }
+      if (members.includes(sheetId)) keys.add(`${production.meta.id}:${scene.id}`);
+    }
+  }
+  return keys;
+}
+
+export interface LookUseOptions {
+  /** One whole-production choice each, named by title. */
+  productions: Array<{ id: string; title: string }>;
+  /** Per production, in the same order, the scenes worth offering; a production with none is absent. */
+  scenes: Array<{ productionId: string; title: string; scenes: Array<{ id: string; number: number; title: string }> }>;
+}
+
+/**
+ * The Use in select's choices, in the order somebody looks for them (issue 3170).
+ *
+ * It listed every production with every one of its scenes, in world order, so one long
+ * production's 136 scenes stood between the author and the production they were working on, and
+ * each production's own choice read `Entire production`, told apart only by its group label. The
+ * control is still design 67's labelled select; only what it lists, and in what order, changes:
+ *
+ * - The production the page was opened from leads (the scene dialog's door names it, SPEC-044
+ *   R-12), then the productions this character is in, then the rest, each in world order.
+ * - Every whole-production choice sits in one group above all the scenes, under its own title,
+ *   so no production's scenes can sit between the author and another production.
+ * - A production lists only the scenes this character is in. A scene's look is a choice for a
+ *   character in that scene — its dialog is where the choice is made (SPEC-017 R-20 as amended) —
+ *   and a look attached to a scene she is not in rides nowhere. The scene this look already holds
+ *   stays listed whatever the cast says, or the select would show a choice it cannot name.
+ */
+export function lookUseOptions(
+  productions: readonly ProductionBundle[],
+  castIn: ReadonlySet<string>,
+  from: string | null,
+  attached: CharacterLook["attachedTo"],
+): LookUseOptions {
+  const appears = (production: ProductionBundle) =>
+    production.scenes.some((scene) => castIn.has(`${production.meta.id}:${scene.id}`));
+  const rank = (production: ProductionBundle) => (production.meta.id === from ? 0 : appears(production) ? 1 : 2);
+  // `sort` is stable, so world order holds within each rank.
+  const ordered = [...productions].sort((a, b) => rank(a) - rank(b));
+  return {
+    productions: ordered.map((production) => ({ id: production.meta.id, title: production.meta.title })),
+    scenes: ordered.flatMap((production) => {
+      const scenes = production.scenes
+        .filter((scene) =>
+          castIn.has(`${production.meta.id}:${scene.id}`) ||
+          (attached?.kind === "scene" && attached.productionId === production.meta.id && attached.sceneId === scene.id))
+        .map((scene) => ({ id: scene.id, number: scene.number, title: scene.title }));
+      return scenes.length > 0 ? [{ productionId: production.meta.id, title: production.meta.title, scenes }] : [];
+    }),
+  };
 }
 
 /**
@@ -1002,6 +1124,12 @@ export function CharacterLooksScreen() {
     const scene = scope === "scene" ? world?.productions.find((production) => production.meta.id === productionId)?.scenes.find((candidate) => candidate.id === sceneId) : undefined;
     return scene !== undefined && productionId !== undefined && sceneId !== undefined ? { productionId, sceneId, number: scene.number } : null;
   })();
+  // Read once per world change, not per render: it walks every shot of every scene, and this page
+  // re-renders on every queue tick while a look is selected.
+  const castIn = useMemo(
+    () => (world && sheetId ? scenesWithCharacter(world.productions, world.sheets, sheetId) : new Set<string>()),
+    [world?.productions, world?.sheets, sheetId],
+  );
   if (!world || !sheet || !sheetId) return null;
   const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId);
   const photo = kit ? mainPhotoFor(kit) : null;
@@ -1015,6 +1143,7 @@ export function CharacterLooksScreen() {
   const selectedImage = images.find((image) => image.key === selected);
   const selectedLook = selectedImage?.look;
   const selectedTake = selectedImage?.take;
+  const useIn = selectedLook ? lookUseOptions(world.productions, castIn, preset?.productionId ?? null, selectedLook.attachedTo) : null;
   return (
     <div data-screen="character-looks">
       <CharacterHeader active="looks" />
@@ -1215,6 +1344,7 @@ export function CharacterLooksScreen() {
                   that a look is a candidate portrait. So the scope is the labelled control here,
                   and the anchor rewrite is the quiet one.
                 */}
+                <LookNameField key={`${selectedLook.id}:${selectedLook.name ?? ""}`} worldId={world.meta.worldId} sheetId={sheetId} look={selectedLook} />
                 <label className="fy-looks-attach">
                   <span>Use in</span>
                   <select
@@ -1241,11 +1371,17 @@ export function CharacterLooksScreen() {
                     }}
                   >
                     <option value="">Not used</option>
-                    {world.productions.map((production) => (
-                      <optgroup key={production.meta.id} label={production.meta.title}>
-                        <option value={`production:${production.meta.id}`}>Entire production</option>
-                        {production.scenes.map((scene) => (
-                          <option key={scene.id} value={`scene:${production.meta.id}:${scene.id}`}>
+                    {useIn !== null && useIn.productions.length > 0 && (
+                      <optgroup label="Entire production">
+                        {useIn.productions.map((production) => (
+                          <option key={production.id} value={`production:${production.id}`}>{production.title}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {useIn?.scenes.map((group) => (
+                      <optgroup key={group.productionId} label={group.title}>
+                        {group.scenes.map((scene) => (
+                          <option key={scene.id} value={`scene:${group.productionId}:${scene.id}`}>
                             Scene {scene.number} · {scene.title}
                           </option>
                         ))}

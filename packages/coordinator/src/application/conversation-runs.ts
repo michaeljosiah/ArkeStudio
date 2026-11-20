@@ -257,7 +257,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       }
     },
     ...(summarise ? { summarise } : {}),
-    prepare: async ({ conversationId, runId, attachmentIds }) => {
+    prepare: async ({ conversationId, runId, attachmentIds, productionId }) => {
       // The catalogue can now retain Bench-source cards. Raise before leased metadata reads,
       // so this host's own schema commit cannot stale the first approval in an older world.
       await store.ensureSchemaVersion(WORLD_RESULT_USE_SCHEMA_VERSION, "world-chat-result-use");
@@ -265,6 +265,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
         worldId: store.worldId,
         conversationId,
         runId,
+        ...(productionId !== undefined ? { productionId } : {}),
         allowedAttachmentIds: attachmentIds,
       });
       /*

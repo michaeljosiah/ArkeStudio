@@ -2,13 +2,15 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject 
 import { useCompact, usePhone } from "../../lib/media-query.js";
 import {
   aspectSupport,
+  clipFromReferences,
   formatMicroUsd,
   CODEX_IMAGE_PLAN_LABEL,
   isReplayableFinalization,
-  lookHoldingScope,
+  missingShotLooks,
   orderedShots,
   resolveCast,
   sceneImageOutput,
+  scenePlaceApplies,
   ulid,
   type FrameRunQuote,
   type FrameRunState,
@@ -17,10 +19,12 @@ import {
   type ManifestModel,
   type ProductionBundle,
   type SceneRecord,
+  type Shot,
   type WorldBundle,
   resolvePropStates,
   beatPictureShotId,
   productionShape,
+  productionStyleFor,
 } from "@arke-studio/contracts";
 import { productionModel, resolveModel, strandReason, usableModels } from "../../components/dispatch-bar.js";
 import { X } from "../../components/icons.js";
@@ -167,6 +171,12 @@ function GenerateFramesDialogOpen({
     ? sceneShots.filter((shot) => !playsAsBeats || beatPictureShotId(sceneShots, shot.id) === shot.id)
     : sceneShots.filter((shot) => shot.id === shotId);
   const missing = shots.filter((shot) => !shotHasFrame(production, world.artifacts, shot.id));
+  // What the clips these frames are for will be made from (issue 3185): a frame drawn for a clip
+  // made from references is a storyboard picture, never the clip's opening.
+  const fromReferences = shots.filter((shot) => clipFromReferences(production.meta, shot)).length;
+  const clipsLabel = fromReferences === 0 ? "clips from frames"
+    : fromReferences === shots.length ? "clips from references"
+    : `${fromReferences} of ${shots.length} clips from references`;
   const [mode, setMode] = useState<"per-shot" | "board">(shotId === undefined ? "board" : "per-shot");
   const [scope, setScope] = useState<"missing" | "all">(shotId === undefined && missing.length > 0 ? "missing" : "all");
   const remembered = productionModel(state, production.meta.id, "image");
@@ -327,12 +337,19 @@ function GenerateFramesDialogOpen({
       ? `No available image model supports ${aspect}; turn one on in AI models.`
       : `Choose ${alternativeName}, which supports ${aspect}.`}`
     : blockedReason;
-  const references = matchingOptions ? quoteReferences(quote, scene, world, production.meta.id) : [];
+  const references = matchingOptions ? quoteReferences(quote, scene, world) : [];
   // R-16's second layer: a scope that resolves to nothing swaps the primary for the sentence
   // naming the fix. Only the all-framed case has a fix to name — a scene with no shots keeps
   // the backend's refusal, because switching scope would not change anything there.
   const emptyScope = shotId === undefined && scope === "missing" && missing.length === 0 && shots.length > 0;
   const displayedCount = matchingOptions && quote.blockedReason === null ? quote.includedCount : included.length;
+  // A frame's prompt never has the look pasted in (SPEC-012 R-14): Arke reads it when it writes a
+  // shot's prompt, and a shot nobody wrote one for is drawn from its own fields alone. A music
+  // video's production style was set to make its frames look filmed, and reached none of them
+  // (issue 3188), so the press names the look it does not add.
+  const styleHint = productionStyleFor(production.meta, world.artDirection.description) === undefined
+    ? undefined
+    : `${production.meta.styleOverride?.trim() ? "Production style" : "World look"} not added · Arke writes it into shot prompts`;
 
   const start = () => {
     if (startPending !== null || !canStart || quote.signature === null || quote.estimatedMicroUsd === null) return;
@@ -390,6 +407,7 @@ function GenerateFramesDialogOpen({
         <header className="fy-swgen__head">
           <h2 id={titleId}>Generate {displayedCount} frame{displayedCount === 1 ? "" : "s"}</h2>
           <span className="fy-swgen__scene">scene {scene.number}</span>
+          <span className="fy-swgen__scene" data-testid="clips-from">{clipsLabel}</span>
           {compact && <button type="button" aria-label="Close" onClick={onClose}><X size={20} /></button>}
         </header>
 
@@ -516,10 +534,10 @@ function GenerateFramesDialogOpen({
           </section>
         )}
 
-        {phone && <p className="fy-swgen__context fy-swgen__context-body" aria-label="Inherited scene context">{contextValues(scene, world, aspect, !playsAsBeats).join(" · ")}</p>}
+        {phone && <p className="fy-swgen__context fy-swgen__context-body" aria-label="Inherited scene context">{contextValues(scene, world, aspect, included, !playsAsBeats).join(" · ")}</p>}
         <footer className="fy-swgen__foot">
           {!phone && <span className="fy-swgen__context" aria-label="Inherited scene context">
-            applies the scene context · {contextValues(scene, world, aspect, !playsAsBeats).join(", ")}
+            applies the scene context · {contextValues(scene, world, aspect, included, !playsAsBeats).join(", ")}
           </span>}
           {emptyScope ? (
             <div className="fy-swgen__actions">
@@ -541,7 +559,7 @@ function GenerateFramesDialogOpen({
               </span>
               <Button variant={compact ? "outline" : "ghost"} size="sm" onClick={onClose}>Cancel</Button>
               {startReason === null ? null : <p className="fy-swgen__guard" role="status">{startReason}</p>}
-              {displayedBlockedReason !== null && startPending === null ? <p className="fy-swgen__guard" role="status">{displayedBlockedReason}</p> : <Button variant="primary" size="sm" disabled={!canStart || startPending !== null} onClick={start}>{startPending === null ? compact ? "Generate" : "Generate frames" : "Starting..."}</Button>}
+              {displayedBlockedReason !== null && startPending === null ? <p className="fy-swgen__guard" role="status">{displayedBlockedReason}</p> : <Button variant="primary" size="sm" {...(styleHint === undefined ? {} : { hint: styleHint, className: "fy-tip--end" })} disabled={!canStart || startPending !== null} onClick={start}>{startPending === null ? compact ? "Generate" : "Generate frames" : "Starting..."}</Button>}
             </div>
           )}
         </footer>
@@ -605,14 +623,16 @@ function PackingPreview({
 
 /**
  * The same values the header's context chips carry, in the same order, and the scene's light.
+ * The place only where a shot in scope takes it (issue 3152): a shot that cites its own place is
+ * not in the scene's.
  *
  * The light is said here because this is the last look before frames are drawn (issue 3247): a
  * film's frames went out with no light named on the scene or on any shot, and came back lit like
  * a studio still. A film with none says so; a production that plays as beats draws pictures, not
  * photographed frames, and is told nothing.
  */
-function contextValues(scene: SceneRecord, world: WorldBundle, aspect: string, film: boolean): string[] {
-  const location = scene.inherits?.location === undefined
+function contextValues(scene: SceneRecord, world: WorldBundle, aspect: string, shots: readonly Shot[], film: boolean): string[] {
+  const location = scene.inherits?.location === undefined || !scenePlaceApplies(scene, shots, world.sheets)
     ? null
     : world.sheets.find((sheet) => sheet.id === scene.inherits?.location)?.name ?? scene.inherits.location;
   const said = scene.defaults?.grade !== undefined
@@ -622,32 +642,35 @@ function contextValues(scene: SceneRecord, world: WorldBundle, aspect: string, f
     .filter((value): value is string => value !== null);
 }
 
-function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldBundle, productionId: string) {
+function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldBundle) {
   const shotById = new Map(orderedShots(scene).map((shot) => [shot.id, shot]));
   const sheetById = new Map(world.sheets.map((sheet) => [sheet.id, sheet]));
-  // What rides beside the sheet (SPEC-044 R-30): the look in use on a character's row when it is
-  // not the kit's — this scene's, else the production's, the order the resolver prefers — and
-  // the plate on the location's. Voice never applies to stills and is not said here.
-  const detailFor = (sheetId: string): string | null => {
-    const sheet = sheetById.get(sheetId);
-    if (sheet?.type === "location") return "plate";
-    const kit = world.referenceKits.find((candidate) => candidate.sheetId === sheetId) ?? null;
-    const look = lookHoldingScope(kit, { kind: "scene", productionId, sceneId: scene.id }) ?? lookHoldingScope(kit, { kind: "production", productionId });
-    return look === undefined ? null : `look · ${(look.name ?? lookTileLabel(look.prompt, look.kind))}`;
+  /*
+   * What rides beside the sheet (SPEC-044 R-30), read off the files the steps carry: the looks
+   * that rode for a character, which differ by shot now that a shot can choose one (issue 3178),
+   * and the plate on the location's. Voice never applies to stills and is not said here.
+   */
+  const lookRiding = (sheetId: string, path: string): string | null => {
+    const look = world.referenceKits.find((candidate) => candidate.sheetId === sheetId)?.looks
+      ?.find((candidate) => candidate.kind !== "view" && `references/${sheetId}/${candidate.file}` === path);
+    return look === undefined ? null : look.name ?? lookTileLabel(look.prompt, look.kind);
   };
+  // A look a shot names that has left the kit rides the next scope's instead, and is said so.
+  const quoted = [...new Set(quote.steps.flatMap((step) => step.requestShotIds))].flatMap((shotId) => shotById.get(shotId) ?? []);
+  const missing = missingShotLooks(quoted, world.sheets, world.referenceKits);
   const summary = new Map<string, {
     sheet: WorldBundle["sheets"][number];
     path: string | null;
     citedSteps: number;
     ridingSteps: number;
-    detail: string | null;
+    looks: string[];
   }>();
   for (const step of quote.steps) {
     const cited = new Set<string>();
-    if (scene.inherits?.location !== undefined) cited.add(scene.inherits.location);
-    for (const shotId of step.requestShotIds) {
-      const shot = shotById.get(shotId);
-      if (shot === undefined) continue;
+    const stepShots = step.requestShotIds.flatMap((shotId) => shotById.get(shotId) ?? []);
+    // The scene's place is cited by a step only through a shot that names no place (issue 3152).
+    if (scene.inherits?.location !== undefined && scenePlaceApplies(scene, stepShots, world.sheets)) cited.add(scene.inherits.location);
+    for (const shot of stepShots) {
       for (const entry of resolveCast(shot.description, world.sheets).cast) cited.add(entry.sheet.id);
     }
     for (const reference of step.references) cited.add(reference.sheetId);
@@ -656,21 +679,32 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
       if (sheet === undefined) continue;
       const riding = step.references.find((reference) => reference.sheetId === sheetId);
       const previous = summary.get(sheetId);
+      const looks = step.references.flatMap((reference) => reference.sheetId === sheetId ? lookRiding(sheetId, reference.path) ?? [] : []);
       summary.set(sheetId, {
         sheet,
         path: previous?.path ?? riding?.path ?? null,
         citedSteps: (previous?.citedSteps ?? 0) + 1,
         ridingSteps: (previous?.ridingSteps ?? 0) + (riding === undefined ? 0 : 1),
-        detail: previous?.detail ?? detailFor(sheetId),
+        looks: [...new Set([...(previous?.looks ?? []), ...looks])],
       });
     }
   }
-  return [...summary.values()].map((entry) => ({
-    ...entry,
-    path: entry.path ?? (entry.sheet.type === "location"
-      ? locationPortraitPath(world, entry.sheet.id)
-      : characterPortraitPath(world, entry.sheet.id)),
-  }));
+  return [...summary.values()].map(({ looks, ...entry }) => {
+    const gone = missing.filter((item) => item.sheetId === entry.sheet.id).map((item) => item.number);
+    const detail = entry.sheet.type === "location"
+      ? ["plate"]
+      : [
+          ...(looks.length === 0 ? [] : [`look · ${looks.join(", ")}`]),
+          ...(gone.length === 0 ? [] : [`look missing · ${gone.length === 1 ? `shot ${gone[0]}` : `shots ${gone.join(", ")}`}`]),
+        ];
+    return {
+      ...entry,
+      detail: detail.length === 0 ? null : detail.join(" · "),
+      path: entry.path ?? (entry.sheet.type === "location"
+        ? locationPortraitPath(world, entry.sheet.id)
+        : characterPortraitPath(world, entry.sheet.id)),
+    };
+  });
 }
 
 export function FrameRunBar({ run, worldId, productionId, onReview }: { run: FrameRunState; worldId: string; productionId: string; onReview?: () => void }) {

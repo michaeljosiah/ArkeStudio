@@ -126,6 +126,8 @@
   .fy-looks-footer__actions .fy-looks-attach { flex-basis: 100%; height: 44px; border: 1px solid var(--border); border-radius: 10px; padding-left: 12px; }
   .fy-looks-attach > span { flex: none; font: var(--type-ui); text-transform: none; letter-spacing: 0; }
   .fy-looks-results > footer select.fy-looks-attach__select { flex: 1; width: 0; height: 42px; min-height: 42px; border: 0; box-shadow: none; font: var(--type-ui); background: transparent; }
+  .fy-looks-name > .fy-looks-name__input { flex: 1; width: 0; height: 42px; border: 0; box-shadow: none; font: var(--type-ui); background: transparent; }
+  .fy-looks-grid:has(.fy-looks-footer--chosen .fy-looks-name) { padding-bottom: calc(244px + env(safe-area-inset-bottom, 0px)); }
   .fy-voicepage { padding: 14px 20px calc(24px + env(safe-area-inset-bottom, 0px)); gap: 14px; }
   .fy-voicepage__orphans { padding: 0 20px 24px; }
   .fy-voicehero { grid-template-columns: 1fr; }

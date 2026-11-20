@@ -244,7 +244,7 @@ import {
 } from "../productions/ops.js";
 import { AudioSpineCommandRefused, applyProductionSpineCommand, previewAudioSpineCommand, type AudioSpineCommandPreview } from "../productions/spine.js";
 import { applyAudioSpineCommand, type WorldBundle } from "@arke-studio/contracts";
-import { applySceneCommand, applySceneCommands, sceneCommandFrom } from "../productions/scene-commands.js";
+import { applySceneCommand, applySceneCommands, plannedShotIds, sceneCommandFrom } from "../productions/scene-commands.js";
 import { sceneActionCommands, sequenceTurnActions, dependencyPreviewWorld, type TurnActionGroup } from "./action-sequencing.js";
 import { modelActionInputRefusal } from "./model-action-input.js";
 import { filePlayblast, conversationStagePlayblastArtifact } from "../productions/stage-playblast.js";
@@ -305,8 +305,10 @@ import {
   referencesFence,
   routingFence,
   sceneFence,
+  sceneOrderFence,
   sceneScriptFence,
   scenesFence,
+  SCENE_ORDER_TARGET_SUFFIX,
   seasonFence,
   seriesFence,
   sheetsFence,
@@ -680,6 +682,8 @@ function currentWorldObservation(
       const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
       if (sceneId && suffix === "script") return { target: targetId, fence: sceneScriptFence(production, sceneId) };
       if (sceneId && suffix === undefined) return { target: targetId, fence: sceneFence(production, sceneId) };
+      // A one-scene card's scene-order fence (issue 3149); never a read's target.
+      if (targetId === `${productionId}${SCENE_ORDER_TARGET_SUFFIX}`) return { target: targetId, fence: sceneOrderFence(production) };
       return { target: targetId, fence: scenesFence(production) };
     }
     case "timeline": {
@@ -1009,7 +1013,26 @@ function worldActionObservations(
   if (problems.length) {
     throw new Error([...new Set(problems)].join(" "));
   }
-  return [...new Map(observations.map((observation) => [observation.receiptId, observation])).values()];
+  return withSceneOrderFence(store, action, [...new Map(observations.map((observation) => [observation.receiptId, observation])).values()]);
+}
+
+/**
+ * A card for one scene keeps the production's scene list it cited only for which scenes there are
+ * and where each sits (issue 3149). The list's own fence covers every scene's contents, so the
+ * hook and outro cards of one turn each went stale the moment the other was approved, with nothing
+ * either depends on changed. What the card does depend on is fenced elsewhere: its own scene by its
+ * required read, and the production facts its commands consult (shot numbers, sheets, pictures) by
+ * the dry run its approval repeats. The list was current a moment ago, checked above, so the order
+ * taken here is the order it showed.
+ */
+function withSceneOrderFence(store: WorldStore, action: ModelWorldChatAction, observations: ArkeReadObservation[]): ArkeReadObservation[] {
+  const scenes = productionActionTargets(store, action).filter(required => required.requirement === "scenes").map(required => required.target.split(":"));
+  const productionId = scenes[0]?.[0];
+  if (productionId === undefined || scenes.some(([owner, sceneId]) => owner !== productionId || !sceneId)) return observations;
+  const production = store.getBundle().productions.find(candidate => candidate.meta.id === productionId);
+  return observations.map(observation => observation.requirement === "scenes" && observation.target === productionId
+    ? { ...observation, target: `${productionId}${SCENE_ORDER_TARGET_SUFFIX}`, revisionOrDigest: sceneOrderFence(production) }
+    : observation);
 }
 
 function preparedWorldPayload(
@@ -2266,6 +2289,11 @@ function shownValue(value: unknown): string | null {
   return JSON.stringify(value);
 }
 
+/** A production's clip source as its card reads it (issue 3185): absent has always meant frames. */
+function clipsWords(clipsFrom: "frames" | "references" | undefined): string {
+  return clipsFrom === "references" ? "From references" : "From frames";
+}
+
 function diffFields(
   before: Record<string, unknown>,
   after: Record<string, unknown>,
@@ -3203,8 +3231,10 @@ async function sharedResourceProjection(
         status: production.meta.status,
         aspect: production.meta.aspect ?? null,
         frameRate: productionFrameRate(production.meta),
+        clipsFrom: clipsWords(production.meta.clipsFrom),
       };
-      const after = { ...before, ...payload.action.changes };
+      const after = { ...before, ...payload.action.changes,
+        ...(payload.action.changes.clipsFrom !== undefined ? { clipsFrom: clipsWords(payload.action.changes.clipsFrom) } : {}) };
       if (
         payload.action.changes.seriesId !== undefined &&
         payload.action.changes.seriesId !== null &&
@@ -3218,6 +3248,7 @@ async function sharedResourceProjection(
         status: "Status",
         aspect: "Aspect",
         frameRate: "Frame rate",
+        clipsFrom: "Clips",
       });
       if (fields.length === 0) throw new Error("The production metadata already has those values.");
       shown = {
@@ -3435,7 +3466,15 @@ async function sharedResourceProjection(
         title: payload.action.style === null ? "Clear the production style" : "Set the production style",
         consequence: "Updates the production's scoped style through its world-owned production metadata authority.",
         affectedTargets: [...intent.targets],
-        ripples: ["Future production generations inherit this style; accepted assets remain pinned."],
+        // A shot's prompt never has the style pasted in (SPEC-012 R-14, issue 942): Arke reads it
+        // when it writes the prompt. "Future generations inherit this style" promised a music
+        // video's frames a look they were then drawn without (issue 3188).
+        ripples: productionShape(production.meta).hasScenes
+          ? [
+              `Shot prompts Arke writes from now on use ${payload.action.style === null ? "the world look" : "this style"}; it is not added to frame or clip prompts.`,
+              "Accepted assets remain pinned.",
+            ]
+          : ["Future production generations inherit this style; accepted assets remain pinned."],
         permissionReason: "authored-change",
         body: {
           family: "setting",
@@ -5512,7 +5551,8 @@ export function worldChatActionAdapters(
           if (input.kind === "world-chat-production-scene-command" && input.scenePlan) {
             const scene = store.getBundle().productions.find(p => p.meta.id === input.action.productionId)?.scenes.find(s => s.id === input.action.sceneId);
             if (!scene || !isDeepStrictEqual(scene, input.scenePlan.before) || !isDeepStrictEqual(
-              sceneCommandBatchCandidate(store.getBundle(), input.action.productionId, scene, sceneActionCommands(input.action).map(sceneCommandFrom)), input.scenePlan.after)) {
+              sceneCommandBatchCandidate(store.getBundle(), input.action.productionId, scene, sceneActionCommands(input.action).map(sceneCommandFrom),
+                plannedShotIds(input.scenePlan.before, input.scenePlan.after)), input.scenePlan.after)) {
               throw new Error("The dependency result or fixed shot identities differ from this preview.");
             }
           }

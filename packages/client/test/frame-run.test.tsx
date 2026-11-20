@@ -468,10 +468,71 @@ const click = async (element: HTMLElement) => act(async () => element.click());
 
 describe("frame-run quote authorization", () => {
   it("names the look riding for a character beside the sheet, as the kit names it", async () => {
-    const item = await mount(stateWithSceneLook(), []);
+    const sent: ClientMessage[] = [];
+    const item = await mount(stateWithSceneLook(), sent, false);
     await click(named(item, "Generate frames"));
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
+    // Read off what the step carries (issue 3178), so the quote carries the look's own file.
+    const quote = quoteFor(request);
+    await act(async () => emitQuote({ ...quote, steps: quote.steps.map((step) => ({ ...step, references: [{ sheetId: "maren-kest", version: 4, path: "references/maren-kest/looks/council-coat.png" }] })) }));
     const maren = all(item, ".fy-swgen__references article").find((reference) => reference.textContent?.includes("Maren Kest"));
     assert.match(maren?.textContent ?? "", /rides · look · Formal council coat, storm-grey wool with a hig…/, "cut where the kit's tile cuts it");
+  });
+
+  it("names each look that rides for one person across shots, and a shot's look that has left the kit (issue 3178)", async () => {
+    const sent: ClientMessage[] = [];
+    const state = stateWithSceneLook();
+    const kit = state.world!.referenceKits.find((candidate) => candidate.sheetId === "maren-kest")!;
+    kit.looks = [
+      ...(kit.looks ?? []),
+      { id: "storm-oilskin", file: "looks/storm-oilskin.png", kind: "costume", name: "Storm oilskin", prompt: "Oilskin", acceptedAt: "2026-07-15T09:00:00Z" },
+    ];
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")!;
+    const [first, second] = orderedShots(scene);
+    (second as { description: string }).description += " @maren-kest";
+    (second as { looks?: unknown }).looks = [{ sheetId: "maren-kest", lookId: "gone-look" }];
+    const item = await mount(state, sent, false);
+    await click(named(item, "Generate frames"));
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
+    const quote = quoteFor(request);
+    const step = quote.steps[0]!;
+    await act(async () => emitQuote({ ...quote, steps: [
+      { ...step, label: `Shot ${first!.number}`, requestShotIds: [first!.id], updateShotIds: [first!.id], references: [{ sheetId: "maren-kest", version: 4, path: "references/maren-kest/looks/storm-oilskin.png" }] },
+      { ...step, label: `Shot ${second!.number}`, requestShotIds: [second!.id], updateShotIds: [second!.id], references: [{ sheetId: "maren-kest", version: 4, path: "references/maren-kest/looks/council-coat.png" }] },
+    ] }));
+    const maren = all(item, ".fy-swgen__references article").find((reference) => reference.textContent?.includes("Maren Kest"));
+    assert.match(maren?.textContent ?? "", /rides · look · Storm oilskin, Formal council coat/);
+    assert.match(maren?.textContent ?? "", new RegExp(`look missing · shot ${second!.number}`), "the fallback is said, never passed off as the choice");
+  });
+
+  it("leaves the scene's place out of the context and the references when every shot names its own (issue 3152)", async () => {
+    const state = stateWith();
+    state.world!.sheets.push({ id: "the-weigh-house", type: "location", name: "The Weigh-House", version: 1, status: "draft", canonRules: [], links: [], created: "2026-05-02", updated: "2026-05-02", sections: [] } as never);
+    const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")!;
+    for (const shot of orderedShots(scene)) (shot as { description: string }).description = `${shot.description.replaceAll("@the-vigil", "the rail")} @the-weigh-house`;
+    const item = await mount(state, []);
+    await click(named(item, "Generate frames"));
+    const context = one(item, '[aria-label="Inherited scene context"]')?.textContent ?? "";
+    assert.match(context, /applies the scene context/);
+    assert.doesNotMatch(context, /The Vigil/, "no shot in scope is set at the scene's place");
+    const references = all(item, ".fy-swgen__references article").map((reference) => reference.textContent ?? "");
+    assert.ok(references.some((text) => /The Weigh-House/.test(text)), "the shots' own place is cited");
+    assert.ok(!references.some((text) => /The Vigil/.test(text)), "and the scene's is not");
+  });
+
+  it("says what the scene's clips are made from (issue 3185)", async () => {
+    const frames = await mount(stateWith(), []);
+    await click(named(frames, "Generate frames"));
+    assert.equal(one(frames, '[data-testid="clips-from"]')?.textContent, "clips from frames");
+    const state = stateWith();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.meta.clipsFrom = "references";
+    const shots = orderedShots(production.scenes.find((candidate) => candidate.id === "sc_04")!);
+    // One shot keeps opening on its frame: the label counts the clips made from references.
+    shots[0]!.continuity = { clipsFrom: "frames" };
+    const references = await mount(state, []);
+    await click(named(references, "Generate frames"));
+    assert.equal(one(references, '[data-testid="clips-from"]')?.textContent, `${shots.length - 1} of ${shots.length} clips from references`);
   });
 
   it("quotes current options, displays the backend amount, and echoes the authorization on start", async () => {
@@ -653,6 +714,25 @@ describe("frame-run quote authorization", () => {
     assert.equal(request.modelId, square.id, "an explicit production choice is never silently replaced");
     assert.match(one(item, ".fy-swgen__guard")?.textContent ?? "", /Choose FAL · Wide image, which supports 16:9/);
     assert.match(one(item, '[aria-label="Image model"] [aria-checked="true"]')?.textContent ?? "", /^FAL · Square imageno 16:9 · 4 refs$/);
+  });
+
+  // A frame's prompt never has the look pasted in (SPEC-012 R-14): a production style set to make
+  // a music video's frames look filmed reached none of them, and nothing said so (issue 3188).
+  it("names the look a frame run does not add on its primary", async () => {
+    const primary = (item: Mounted) =>
+      [...one(item, ".fy-swgen")!.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLButtonElement;
+    const inherited = await mount(stateWith());
+    await click(named(inherited, "Generate frames"));
+    assert.equal(primary(inherited).title, "World look not added · Arke writes it into shot prompts");
+    assert.ok(primary(inherited).classList.contains("fy-tip--end"), "the tip hangs inside the footer");
+
+    const styled = stateWith();
+    const production = styled.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.meta = { ...production.meta, styleOverride: "Photographed on 35 mm colour negative film." };
+    const item = await mount(styled);
+    await click(named(item, "Generate frames"));
+    assert.equal(primary(item).title, "Production style not added · Arke writes it into shot prompts");
+    assert.equal(primary(item).dataset.tip, primary(item).title, "said on focus as well as under the pointer");
   });
 
   describe("the production's image model (issue 3107)", () => {

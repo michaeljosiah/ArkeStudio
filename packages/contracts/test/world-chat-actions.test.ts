@@ -298,6 +298,35 @@ describe("World Chat authored action contracts", () => {
     }
   });
 
+  it("carries a shot's looks on Arke's shot cards, one per character (issue 3178)", () => {
+    const looks = [{ sheetId: "maren-kest", lookId: "storm-oilskin" }];
+    const action = (command: unknown) => ({ kind: "production-scene-command", productionId: "saltlight", sceneId: "sc_04", command, checkReceiptIds: [CHECK] });
+    assert.doesNotThrow(() => ModelWorldChatActionSchema.parse(action({ kind: "insert-shot", at: { after: "sh_12" }, shot: { title: "Dressed", description: "@maren-kest waits.", looks } })));
+    assert.doesNotThrow(() => ModelWorldChatActionSchema.parse(action({ kind: "edit-shot", shotId: "sh_12", change: { looks } })));
+    assert.doesNotThrow(() => ModelWorldChatActionSchema.parse(action({ kind: "edit-shot", shotId: "sh_12", change: {}, clear: ["looks"] })));
+    assert.throws(() => ModelWorldChatActionSchema.parse(action({ kind: "edit-shot", shotId: "sh_12", change: { looks: [...looks, { sheetId: "maren-kest", lookId: "council-coat" }] } })), /one look per character/);
+  });
+
+  it("lets a scene edit clear its location with null, and still refuses an empty one (issue 3153)", () => {
+    const edit = (inherits: unknown) => ({
+      kind: "production-scene",
+      productionId: "saltlight",
+      change: { operation: "edit", sceneId: "sc_04", changes: { inherits } },
+      checkReceiptIds: [CHECK],
+    });
+    assert.doesNotThrow(() => ModelWorldChatActionSchema.parse(edit({ location: null })));
+    assert.doesNotThrow(() => ModelWorldChatActionSchema.parse(edit({ timeOfDay: null, tone: "hushed" })));
+    assert.doesNotThrow(() => ModelWorldChatActionSchema.parse(edit(null)));
+    assert.throws(() => ModelWorldChatActionSchema.parse(edit({ location: "" })));
+    // A new scene has nothing to clear, so its context stays plain values.
+    assert.throws(() => ModelWorldChatActionSchema.parse({
+      kind: "production-scene",
+      productionId: "saltlight",
+      change: { operation: "create", title: "The Ledger", inherits: { location: null } },
+      checkReceiptIds: [CHECK],
+    }));
+  });
+
   it("requires unique stable ids in a complete scene-script replacement", () => {
     assert.throws(() => ModelWorldChatActionSchema.parse({
       kind: "production-scene",

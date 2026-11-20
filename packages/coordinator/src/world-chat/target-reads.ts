@@ -18,6 +18,7 @@ import {
   seedFirstPictureTimeline,
   seedSpinePictureTimeline,
   shotCast,
+  shotPlaceId,
   sortScenes,
   spineTimelineFingerprint,
   storyShotFrames,
@@ -169,8 +170,17 @@ export function sceneScriptFence(production: ProductionBundle | undefined, scene
   return fence(scene?.script?.blocks ?? [], scene ? scene.version : "absent");
 }
 
+/**
+ * The look as its own record holds it, not the facts the scan counts around it (issue 3187).
+ * `reach` counts every picture, kit, production and accepted take in the world, and `overrides`
+ * repeats the style each kit and production carries, so a frame landing from a run moved this
+ * fence while the look stood at its version, and every card that had read the look went stale on
+ * Approve with nothing it read changed. A card that depends on one of those reads it from its own
+ * authority and is fenced there. The read still shows them.
+ */
 export function artDirectionFence(bundle: WorldBundle): string {
-  return fence(bundle.artDirection, bundle.artDirection.version);
+  const { reach: _reach, overrides: _overrides, ...look } = bundle.artDirection;
+  return fence(look, look.version);
 }
 
 export function worldMetadataFence(bundle: WorldBundle): string {
@@ -307,6 +317,17 @@ export function scenesFence(production: ProductionBundle | undefined): string {
   return fence(sortScenes(production?.scenes ?? []));
 }
 
+/** The observation target a one-scene card's scene-order fence is kept under (issue 3149); never a read's target. */
+export const SCENE_ORDER_TARGET_SUFFIX = "::order";
+
+/**
+ * Which scenes the production holds and where each sits, without what is in them (issue 3149):
+ * what a card for one scene still takes from the scene list it cited beside its own scene's read.
+ */
+export function sceneOrderFence(production: ProductionBundle | undefined): string {
+  return fence(sortScenes(production?.scenes ?? []).map((scene) => ({ id: scene.id, number: scene.number, order: scene.order ?? null })), "order");
+}
+
 export function routingFence(production: ProductionBundle | undefined): string {
   return fence(production?.routing ?? null, production?.routing?.version ?? "absent");
 }
@@ -385,7 +406,7 @@ function timelineRows(production: ProductionBundle | undefined, artifacts: World
   if (production !== undefined && sheets !== undefined) {
     for (const scene of sortScenes(production.scenes)) {
       for (const shot of orderedShots(scene)) {
-        story.set(shot.id, { scene: { id: scene.id, number: scene.number, title: scene.title }, cast: shotCast(scene, shot, sheets), place: scene.inherits?.location ?? null });
+        story.set(shot.id, { scene: { id: scene.id, number: scene.number, title: scene.title }, cast: shotCast(scene, shot, sheets), place: shotPlaceId(scene, shot, sheets) ?? null });
       }
     }
   }

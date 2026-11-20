@@ -149,6 +149,13 @@ export const PassCarriesSchema = z
     /** Numbered when the plan is written (codex round 2): a shot inserted or moved later renumbers the scene, not this pass. */
     shots: z.array(z.object({ shotId: z.string().min(1), number: z.number().int().min(1) }).strict()),
     frame: z.object({ shotId: z.string().min(1), number: z.number().int().min(1) }).strict().optional(),
+    /** The clip is made from references by choice (issue 3185): no frame travels, nothing chains. */
+    fromReferences: z.literal(true).optional(),
+    /**
+     * The singer whose shot sings to the song in this pass (issue 3186): their slice rides, or it
+     * does not and `reason` says why in the card's words.
+     */
+    song: z.object({ name: z.string().min(1), rides: z.boolean(), reason: z.string().min(1).optional() }).strict().optional(),
     place: z
       .object({ sheetId: z.string().min(1), name: z.string().min(1), rides: z.boolean(), reason: z.string().min(1).optional() })
       .strict()

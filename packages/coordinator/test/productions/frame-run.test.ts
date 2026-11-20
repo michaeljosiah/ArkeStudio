@@ -17,6 +17,7 @@ import {
 import {
   advanceFrameRun,
   cancelFrameRun,
+  compileFrameRun,
   dismissFrameRun,
   frameRunState,
   listFrameRuns,
@@ -309,6 +310,87 @@ describe("frame-run coordinator service", () => {
     const frozenReferences = run.steps.map((step) => step.request.references);
     assert.ok(frozenReferences.some((references) => references.length > 0));
     assert.deepEqual(quotedReferences, frozenReferences);
+  });
+
+  it("sends a shot that cites its own place without the scene's, per shot and per panel (issue 3152)", async () => {
+    const f = await fixture();
+    const shots = orderedShots(f.scene);
+    const market = shots.find((shot) => shot.description.includes("@the-saltmarket"))!;
+    const stair = shots.find((shot) => shot.description.includes("@bray-half-hitch"))!;
+    assert.equal(f.scene.inherits?.location, "the-vigil");
+    const plate = (sheetId: string) => ({
+      sheetId, tiles: [], compilations: [],
+      mainPhoto: { file: "main-photo.png", sheetVersion: 1, acceptedAt: "2026-08-01T12:00:00.000Z", source: "upload" as const },
+    });
+    const world = { ...f.world, referenceKits: [...f.world.referenceKits, plate("the-vigil"), plate("the-saltmarket")] };
+    const compile = (mode: "per-shot" | "board") => compileFrameRun({
+      worldId: WORLD_ID, productionId: f.production.meta.id, scene: f.scene as SceneRecord, production: f.production, world,
+      model: IMAGE, mode, scope: "all", boardCapSec: 30, boardPanelCap: 6, eligible: true, clock: CLOCK,
+    });
+    const perShot = await compile("per-shot");
+    const step = (shotId: string) => perShot.steps.find((candidate) => candidate.requestShotIds.includes(shotId))!;
+    const places = (shotId: string) => step(shotId).request.references.map((reference) => reference.sheetId).filter((id) => id.startsWith("the-"));
+    assert.deepEqual(places(market.id), ["the-saltmarket"], "the market's own plate rides, and the Vigil's does not");
+    assert.ok(!step(market.id).request.prompt.includes("The Vigil"), "nor is the shot told it is there");
+    assert.deepEqual(places(stair.id), ["the-vigil"], "a shot that names no place takes the scene's");
+
+    const board = await compile("board");
+    const sheet = board.steps.find((candidate) => candidate.requestShotIds.includes(market.id) && candidate.requestShotIds.includes(stair.id));
+    assert.ok(sheet, "the stair and the market share a board");
+    assert.match(sheet.request.prompt, /At The Saltmarket\. /, "a panel set elsewhere says where it is");
+    assert.match(sheet.request.prompt, /At The Vigil\. /);
+  });
+
+  it("dresses one person differently in two shots of one scene, per shot and per panel, beside a shot set in its own place (issue 3178)", async () => {
+    const f = await fixture();
+    const shots = orderedShots(f.scene);
+    const [rail, lamps] = shots;
+    const market = shots.find((shot) => shot.description.includes("@the-saltmarket"))!;
+    const look = (id: string, extra: Record<string, unknown> = {}) => ({ id, file: `looks/${id}.png`, kind: "costume" as const, name: id, prompt: id, acceptedAt: "2026-08-01T12:00:00.000Z", ...extra });
+    const plate = (sheetId: string) => ({
+      sheetId, tiles: [], compilations: [],
+      mainPhoto: { file: "main-photo.png", sheetVersion: 1, acceptedAt: "2026-08-01T12:00:00.000Z", source: "upload" as const },
+    });
+    const world = {
+      ...f.world,
+      referenceKits: [
+        ...f.world.referenceKits.map((kit) => kit.sheetId !== "maren-kest" ? kit : {
+          ...kit,
+          // The scene's own look is what a shot that names none wears; each shot here names one.
+          looks: [look("navy-suit"), look("cream-shirt"), look("council-coat", { attachedTo: { kind: "scene", productionId: f.production.meta.id, sceneId: f.scene.id } })],
+        }),
+        plate("the-vigil"),
+        plate("the-saltmarket"),
+      ],
+    };
+    const scene = { ...f.scene, shots: shots.map((shot) =>
+      shot.id === rail!.id ? { ...shot, looks: [{ sheetId: "maren-kest", lookId: "navy-suit" }] }
+      : shot.id === lamps!.id ? { ...shot, description: `${shot.description} @maren-kest watches them.`, looks: [{ sheetId: "maren-kest", lookId: "cream-shirt" }] }
+      : shot) } as SceneRecord;
+    const compile = (mode: "per-shot" | "board") => compileFrameRun({
+      worldId: WORLD_ID, productionId: f.production.meta.id, scene, production: f.production, world,
+      model: IMAGE, mode, scope: "all", boardCapSec: 30, boardPanelCap: 6, eligible: true, clock: CLOCK,
+    });
+    const perShot = await compile("per-shot");
+    const files = (shotId: string) => perShot.steps.find((step) => step.requestShotIds.includes(shotId))!.request.references.map((reference) => reference.path);
+    assert.ok(files(rail!.id).includes("references/maren-kest/looks/navy-suit.png"), "the rail shot dresses her in the suit");
+    assert.ok(!files(rail!.id).some((path) => /cream-shirt|council-coat/.test(path)), "and in nothing else");
+    assert.ok(files(lamps!.id).includes("references/maren-kest/looks/cream-shirt.png"), "the lamps shot, in the same scene, in the shirt");
+    assert.ok(!files(lamps!.id).some((path) => /navy-suit|council-coat/.test(path)));
+    const prompt = perShot.steps.find((step) => step.requestShotIds.includes(rail!.id))!.request.prompt;
+    // Her main photo rides beside the look for identity, and the prompt says it is for the face only.
+    assert.ok(files(rail!.id).includes("references/maren-kest/head-front.png"), JSON.stringify(files(rail!.id)));
+    assert.match(prompt, /Maren Kest — the face only — the clothing is image \d+'s, not this one's/, "the main photo beside the look is for her face");
+    // A shot that cites its own place drops the scene's (issue 3152).
+    assert.ok(!files(market.id).some((path) => path.startsWith("references/the-vigil/")));
+    assert.ok(files(market.id).includes("references/the-saltmarket/main-photo.png"));
+
+    // A board resolves each panel's look and place: both dresses ride the sheet that draws both shots.
+    const board = await compile("board");
+    const sheet = board.steps.find((step) => step.requestShotIds.includes(rail!.id) && step.requestShotIds.includes(lamps!.id))!;
+    const carried = sheet.request.references.map((reference) => reference.path);
+    assert.ok(carried.includes("references/maren-kest/looks/navy-suit.png") && carried.includes("references/maren-kest/looks/cream-shirt.png"));
+    assert.ok(!carried.includes("references/maren-kest/looks/council-coat.png"), "the scene's look stands aside where every panel chose");
   });
 
   it("refuses a quote for shot A when start asks for shot B", async () => {
@@ -823,6 +905,37 @@ describe("frame-run coordinator service", () => {
       }),
     });
     assert.equal(quote.blockedReason, "Codex Image cannot deliver 4:5 - it offers 9:16, 16:9");
+  });
+
+  // The look informs Arke when it writes a shot's prompt and is never pasted into one (SPEC-012
+  // R-14, issue 942), frames and clips alike. A music video's frames came back without its
+  // production style (issue 3188); the surfaces now say so, and this holds the frames to the spec.
+  it("leaves the production style and the world look out of frame prompts, recording which applied", async () => {
+    const look = "Lagos at night, shot close and handheld.";
+    const style = "Photographed on 35 mm colour negative film; natural skin, no beauty filter.";
+    for (const override of [undefined, style]) {
+      for (const mode of ["per-shot", "board"] as const) {
+        const value = await fixture();
+        const world = { ...value.world, artDirection: { ...value.world.artDirection, description: look } };
+        const production = override === undefined
+          ? value.production
+          : { ...value.production, meta: { ...value.production.meta, styleOverride: override } };
+        const run = await start(value, mode, "all", production, world);
+        assert.ok(run.steps.length > 0);
+        for (const step of run.steps) {
+          assert.ok(!step.request.prompt.includes(look), `a ${mode} frame pastes no world look`);
+          assert.ok(!step.request.prompt.includes(style), `a ${mode} frame pastes no production style`);
+        }
+        if (mode === "per-shot") {
+          assert.deepEqual(
+            run.steps[0]!.dispatch.params["artDirection"],
+            override === undefined
+              ? { version: world.artDirection.version, source: "world", transport: "text" }
+              : { version: world.artDirection.version, source: "production", transport: "text", description: style },
+          );
+        }
+      }
+    }
   });
 
   it("preserves the board parent and extracts only update panels as deterministic child takes", async () => {
@@ -1531,8 +1644,8 @@ describe("frame-run Arke outcomes", () => {
     await log.append({ type: "conversation.created", title: "Generate this shot",
       entryContext: { kind: "generate", productionId: f.production.meta.id, sceneId: f.scene.id,
         shotId: completed.state.run.steps[0]!.updateShotIds[0]! } }, { at: CLOCK() });
-    assert.equal(await recordFrameRunOutcome(f.store, completed.state), conversationId);
-    assert.equal(await recordFrameRunOutcome(f.store, completed.state), conversationId);
+    assert.deepEqual(await recordFrameRunOutcome(f.store, completed.state), { conversationId, recorded: true });
+    assert.deepEqual(await recordFrameRunOutcome(f.store, completed.state), { conversationId, recorded: false });
     assert.equal((await log.read()).events.filter(event => event.event.type === "frame-run.outcome-recorded").length, 1);
   });
   it("raises schema 4 before appending to an existing scene conversation", async () => {
@@ -1553,7 +1666,7 @@ describe("frame-run Arke outcomes", () => {
     });
     const completed = await finishRun(f, "succeeded");
 
-    assert.equal(await recordFrameRunOutcome(f.store, completed.state), conversationId);
+    assert.equal((await recordFrameRunOutcome(f.store, completed.state)).conversationId, conversationId);
     assert.equal((await readWorldMeta(f.dir)).schemaVersion, 4);
     await assert.rejects(
       () => readWorldMeta(f.dir, { supports: 3 }),
@@ -1584,16 +1697,18 @@ describe("frame-run Arke outcomes", () => {
     const f = await fixture();
     const completed = await finishRun(f, "succeeded");
     assert.equal(completed.state.status, "completed");
-    const [first, duplicate] = await Promise.all([
+    const [recorded, duplicate] = await Promise.all([
       recordFrameRunOutcome(f.store, completed.state),
       recordFrameRunOutcome(f.store, completed.state),
     ]);
-    assert.equal(duplicate, first);
+    const first = recorded.conversationId;
+    assert.equal(duplicate.conversationId, first);
+    assert.deepEqual([recorded.recorded, duplicate.recorded].sort(), [false, true], "only the call that wrote it reports it");
 
     const failed = await finishRun(f, "failed");
     assert.equal(failed.state.status, "completed");
     assert.ok(failed.state.failedShots > 0);
-    assert.equal(await recordFrameRunOutcome(f.store, failed.state), first);
+    assert.equal((await recordFrameRunOutcome(f.store, failed.state)).conversationId, first);
 
     const cancelledQueue = queue();
     const cancelledRun = await start(f, "per-shot");
@@ -1610,7 +1725,7 @@ describe("frame-run Arke outcomes", () => {
       [...cancelledQueue.jobs.values()],
     );
     assert.equal(cancelledState.status, "cancelled");
-    assert.equal(await recordFrameRunOutcome(f.store, cancelledState), first);
+    assert.equal((await recordFrameRunOutcome(f.store, cancelledState)).conversationId, first);
 
     const summaries = (await discoverConversations(f.store.dir)).summaries.filter(
       (summary) => summary.entryContext?.kind === "scene" && summary.entryContext.sceneId === f.scene.id,
@@ -1772,5 +1887,66 @@ describe("frame-run Arke outcomes", () => {
     assert.equal(runIds.filter((runId) => runId === recovered.run.id).length, 1, "recovery records the missing outcome");
     hooks["jobQueue"] = null;
     await coordinator.stop();
+  });
+
+  it("publishes a run's narration once, however often the production's runs are listed (issue 3167)", async () => {
+    const f = await fixture();
+    const completed = await finishRun(f, "succeeded");
+    const provider: WorldProvider = {
+      listWorlds: async () => [],
+      loadWorld: async () => f.store.getBundle(),
+      openStore: () => f.store,
+    };
+    const events: string[] = [];
+    const coordinator = new Coordinator({
+      provider,
+      adapter: null,
+      appVersion: "test",
+      changeLogPath: join(f.dir, "changes.jsonl"),
+      observeEvent: (event) => { if (event.type === "production.frame-run") events.push(event.runId); },
+    });
+    const hooks = coordinator;
+    hooks["readModel"].setWorld(f.store.getBundle());
+    hooks["jobQueue"] = fakeJobQueue(() => [...completed.q.jobs.values()]);
+    let snapshots = 0;
+    hooks["transport"].broadcastSnapshot = () => { snapshots += 1; };
+    try {
+      await hooks["emitFrameRun"](f.store, WORLD_ID, f.production.meta.id, completed.run.id);
+      // Publishing the thread also refreshes the production's spend, which answers with its own.
+      await hooks["productionSpendWork"];
+      assert.ok(snapshots > 0, "the landing that narrates the run publishes its thread");
+      snapshots = 0;
+
+      // Every scene page that opens lists the production's runs, and the listing emits each past
+      // run again. In the installed app each of those re-emits broadcast the whole world, and
+      // each snapshot voided an open frame quote before it could be confirmed.
+      const list = { kind: "frame-run-list", worldId: WORLD_ID, productionId: f.production.meta.id } as const;
+      await coordinator.dispatch(list);
+      await coordinator.dispatch(list);
+      await hooks["productionSpendWork"];
+      assert.deepEqual(events, [completed.run.id, completed.run.id, completed.run.id], "the run bar still hears every listing");
+      assert.equal(snapshots, 0, "a narration already in its thread publishes nothing");
+    } finally {
+      hooks["jobQueue"] = null;
+      await coordinator.stop();
+    }
+  });
+
+  it("finds a narration already recorded without rescanning the world (issue 3167)", async () => {
+    const f = await fixture();
+    const completed = await finishRun(f, "succeeded");
+    await recordFrameRunOutcome(f.store, completed.state);
+    const rescans = { n: 0 };
+    const live = f.store as unknown as { rescan: () => Promise<unknown> };
+    const rescan = live.rescan.bind(f.store);
+    live.rescan = async () => { rescans.n++; return rescan(); };
+    try {
+      // A listing of a production's runs asks this once per past run. On a large world each full
+      // rescan costs seconds, and every one holds the gate a frame-run start waits on.
+      await recordFrameRunOutcome(f.store, completed.state);
+      assert.equal(rescans.n, 0);
+    } finally {
+      live.rescan = rescan;
+    }
   });
 });

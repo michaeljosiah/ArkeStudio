@@ -1784,6 +1784,7 @@ export interface ProductionMetadataChanges {
   status?: string;
   aspect?: string;
   frameRate?: FrameRate;
+  clipsFrom?: "frames" | "references";
 }
 
 export function validateProductionMetadataChanges(
@@ -1864,6 +1865,7 @@ export async function updateProductionMetadata(
       : {}),
     ...(canonicalAspect ? { aspect: canonicalAspect } : {}),
     ...(changes.frameRate !== undefined ? { frameRate: changes.frameRate } : {}),
+    ...(changes.clipsFrom !== undefined ? { clipsFrom: changes.clipsFrom } : {}),
     updated: store.now(),
   });
   ProductionSchema.parse(doc.value);
@@ -1940,6 +1942,33 @@ export async function setProductionAspect(
     files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw) }],
   });
   return canonical;
+}
+
+/**
+ * What the production's clips are made from (issue 3185), through the same commit as the aspect.
+ * `frames` is written rather than removed, so a person who chose it has a record that they did.
+ */
+export async function setProductionClipsFrom(
+  store: WorldStore,
+  productionId: string,
+  clipsFrom: "frames" | "references",
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
+): Promise<void> {
+  const path = `productions/${productionId}/production.json`;
+  const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+  const doc = JsonFile.parse(raw);
+  doc.set({ clipsFrom, updated: store.now() });
+  ProductionSchema.parse(doc.value);
+  await store.commit(
+    {
+      kind: "production-edit",
+      source: options.source ?? "form",
+      files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw) }],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    },
+    undefined,
+    options.precondition,
+  );
 }
 
 /** Set or clear the production's scoped rendering style through its existing metadata record. */

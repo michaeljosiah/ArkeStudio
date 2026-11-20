@@ -56,6 +56,16 @@ export interface QueryLease {
   readonly worldId: string;
   readonly conversationId: ConversationId;
   readonly runId: RunId;
+  /**
+   * The production the conversation is about, when it is about one, pinned at mint time like the
+   * world. Its own guests are in reach and every other production's are not (SPEC-020 R-7).
+   *
+   * Without it the sheet search ran as though from the world, which leaves every guest out — and a
+   * card prepared inside a production writes a guest. So the sheet Arke's own card had just written
+   * was missing from Arke's next search, and Arke told the author the place did not exist
+   * (issue 3181).
+   */
+  readonly productionId?: string;
   /** Only these attachments are readable, and only as text (§9.2, §13.2). */
   readonly allowedAttachmentIds: readonly ChatAttachmentId[];
   readonly expiresAt: number;
@@ -65,6 +75,7 @@ export interface MintOptions {
   worldId: string;
   conversationId: ConversationId;
   runId: RunId;
+  productionId?: string;
   allowedAttachmentIds?: readonly ChatAttachmentId[];
   /** Default 30 minutes: comfortably longer than a turn, far shorter than a session. */
   ttlMs?: number;
@@ -118,6 +129,7 @@ export class QueryLeaseRegistry {
       worldId: options.worldId,
       conversationId: options.conversationId,
       runId: options.runId,
+      ...(options.productionId !== undefined ? { productionId: options.productionId } : {}),
       allowedAttachmentIds: [...(options.allowedAttachmentIds ?? [])],
       expiresAt: this.now() + (options.ttlMs ?? DEFAULT_TTL_MS),
     };

@@ -112,6 +112,8 @@ async function setup(
     receiptsFor?: RunDeps["receiptsFor"];
     /** Narrates the entry context, which is where a reply-only turn is told to propose nothing. */
     describeEntry?: boolean;
+    /** Every preparation the runner asked for, as it asked for it. */
+    prepared?: Array<Parameters<RunDeps["prepare"]>[0]>;
   } = {},
 ) {
   const worldPath = await tempDir("arke-run-");
@@ -147,7 +149,10 @@ async function setup(
       : {}),
     ...(options.raiseSchemaBoundary ? { raiseSchemaBoundary: options.raiseSchemaBoundary } : {}),
     ...(options.validateProductionPlan ? { validateProductionPlan: options.validateProductionPlan } : {}),
-    prepare: async () => ({ cwd: worldPath, leaseToken: "t".repeat(64) }),
+    prepare: async (input) => {
+      options.prepared?.push(input);
+      return { cwd: worldPath, leaseToken: "t".repeat(64) };
+    },
     release: async ({ runId }) => void released.push(runId),
     receiptsFor: options.receiptsFor ?? (() => []),
     runCheckPlan: async () => ({ receipts: [], canonRevision: bundle.meta.canonRevision }),
@@ -214,6 +219,18 @@ for (const outcome of ["bound", "failed"] as const) {
     assert.equal(view.messages.filter(message => message.role === "studio").length, 1);
   });
 }
+
+it("reads as the conversation's production, so its own sheets are in the run's search (issue 3181)", async () => {
+  const answer = JSON.stringify({ reply: "Noted.", candidateOperations: [], groupOperations: [] });
+  const inside: Array<Parameters<RunDeps["prepare"]>[0]> = [], outside: Array<Parameters<RunDeps["prepare"]>[0]> = [];
+  const production = await setup(fakeAdapter([answer]), { entryContext: { kind: "production", productionId: "saltlight" }, prepared: inside });
+  assert.equal((await production.runner.send(production.store, production.conversationId, "Is the rooftop there?")).status, "completed");
+  assert.deepEqual(inside.map((input) => input.productionId), ["saltlight"]);
+  const world = await setup(fakeAdapter([answer]), { prepared: outside });
+  assert.equal((await world.runner.send(world.store, world.conversationId, "Is the rooftop there?")).status, "completed");
+  assert.equal(outside.length, 1);
+  assert.equal("productionId" in outside[0]!, false, "a world thread reads as the world");
+});
 
 it("a publication error cannot fail or retry a durably saved reply (#2802)", async () => {
   let published = 0;

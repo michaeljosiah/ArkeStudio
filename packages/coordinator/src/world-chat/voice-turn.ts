@@ -48,7 +48,8 @@ export async function runVoiceTurn(deps: RunDeps, store: WorldChatStore, id: Con
   };
   try {
     signal.throwIfAborted();
-    const { cwd } = await deps.prepare({ conversationId: id, runId, attachmentIds: [] });
+    const { cwd } = await deps.prepare({ conversationId: id, runId, attachmentIds: [],
+      ...(view.entryContext !== undefined && "productionId" in view.entryContext ? { productionId: view.entryContext.productionId } : {}) });
     const session = await deps.createSession({ cwd, runId, model: binding.sessionModel, variant: binding.variant, signal, agent: "voice-companion",
       voiceContext: { conversationId: id, turnId } });
     run.harnessSessionId = session.sessionId;

@@ -108,6 +108,10 @@ const props = <T,>(element: Element): T => {
 const chooseOption = async (element: HTMLElement, value: string): Promise<void> => {
   await act(async () => props<{ onChange: (event: { target: { value: string } }) => void }>(element).onChange({ target: { value } }));
 };
+/** A checkbox's change as React hands it on: linkedom's click does not flip checked first. */
+const tick = async (input: HTMLInputElement, checked: boolean): Promise<void> => {
+  await act(async () => props<{ onChange: (event: { target: { checked: boolean } }) => void }>(input).onChange({ target: { checked } }));
+};
 const blurInput = async (input: HTMLInputElement, value: string): Promise<void> => {
   await act(async () => {
     input.value = value;
@@ -330,6 +334,38 @@ describe("the shot page (design turn 145)", () => {
     assert.equal(q(first, ".fy-chardialog")?.getAttribute("aria-label"), "Maren Kest in scene 4");
   });
 
+  it("a cited person's chip picks what they wear in this shot, from their costume looks (issue 3178)", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    const kit = state.world!.referenceKits.find((candidate) => candidate.sheetId === "maren-kest")!;
+    kit.looks = [
+      { id: "council-coat", file: "looks/council-coat.png", kind: "costume", name: "Council coat", prompt: "Formal council coat", acceptedAt: "2026-07-14T09:00:00Z", attachedTo: { kind: "scene", productionId: "saltlight", sceneId: "sc_04" } },
+      { id: "storm-oilskin", file: "looks/storm-oilskin.png", kind: "costume", name: "Storm oilskin", prompt: "Oilskin", acceptedAt: "2026-07-15T09:00:00Z" },
+      { id: "after-the-verse", file: "looks/after.png", kind: "condition-age", prompt: "After the verse", acceptedAt: "2026-07-16T09:00:00Z" },
+    ];
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    const picker = q(mounted, 'select[aria-label="Maren Kest\'s look"]')!;
+    assert.ok(picker, "the chip carries a picker beside it");
+    assert.deepEqual([...picker.querySelectorAll("option")].map((option) => option.textContent), ["Council coat · scene", "Storm oilskin", "Council coat"],
+      "what she wears without a choice comes first, named by where it is from; then her costumes, newest first");
+    assert.equal(q(mounted, 'select[aria-label="The Vigil\'s look"]'), null, "a place has no wardrobe");
+    await chooseOption(picker, "storm-oilskin");
+    assert.deepEqual(commands(sent).at(-1), { kind: "edit-shot", shotId: "sh_12", change: { looks: [{ sheetId: "maren-kest", lookId: "storm-oilskin" }] } });
+
+    await act(async () => mounted.root.unmount());
+    mounted.container.remove();
+    open.splice(open.indexOf(mounted), 1);
+    // A choice already made, and one whose look has since left the kit.
+    const chosen = structuredClone(state);
+    (sceneOf(chosen).shots[0] as { looks?: unknown }).looks = [{ sheetId: "maren-kest", lookId: "gone" }];
+    const again = await mountState(chosen);
+    const held = q(again, 'select[aria-label="Maren Kest\'s look"]') as HTMLSelectElement;
+    assert.equal(held.querySelector('option[value="gone"]')?.textContent, "Look missing");
+    await chooseOption(held, "");
+    assert.deepEqual(commands(sent).at(-1), { kind: "edit-shot", shotId: "sh_12", change: {}, clear: ["looks"] }, "back to the scene's look clears the field");
+  });
+
   it("every editor writes one named scene command where it stands", async () => {
     const cases: Array<[string, (m: Mounted) => Promise<void>, unknown]> = [
       ["the script on blur", async (m) => {
@@ -348,6 +384,9 @@ describe("the shot page (design turn 145)", () => {
         { kind: "edit-shot", shotId: "sh_12", change: { notes: "Hold on her hands." } }],
       ["keep out of frame", async (m) => { await blurInput(q(m, 'input[aria-label="Keep out of frame"]') as HTMLInputElement, "Modern boats"); },
         { kind: "edit-shot", shotId: "sh_12", change: { continuity: { keepOut: "Modern boats" } } }],
+      // Issue 3185: the shot's clip from references, where the production makes them from frames.
+      ["the clip select", async (m) => { await chooseOption(q(m, 'select[aria-label="Clip from"]')!, "references"); },
+        { kind: "edit-shot", shotId: "sh_12", change: { continuity: { clipsFrom: "references" } } }],
       ["a sound field, keeping the kind", async (m) => { await blurInput(q(m, 'input[aria-label="Sound · ambience"]') as HTMLInputElement, "Water under the boards"); },
         { kind: "edit-shot", shotId: "sh_12", change: { audio: { kind: "vo", speaker: "maren-kest", line: "the verse, under the water", ambience: "Water under the boards" } } }],
       ["the title behind its pencil", async (m) => {
@@ -365,6 +404,29 @@ describe("the shot page (design turn 145)", () => {
       mounted.container.remove();
       open.splice(open.indexOf(mounted), 1);
     }
+  });
+
+  it("in a production cut to a song, Sings to the song makes the shot's sound the song, and unticking keeps it and opts out (issue 3186)", async () => {
+    assert.equal(all(await mountState(), "label").some((label) => label.textContent?.includes("Sings to the song")), false, "no song, no box");
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    state.world!.productions.find((p) => p.meta.id === "saltlight")!.spine = { schemaVersion: 1, revision: 1,
+      trackArtifactId: "ar_01J8E0000000000000000000S1", markers: [], anchors: {}, updatedAt: "2026-11-15T10:00:00.000Z" };
+    const box = (m: Mounted) => all(m, "label").find((label) => label.textContent?.includes("Sings to the song"))!.querySelector("input") as HTMLInputElement;
+    const sent: ClientMessage[] = [];
+    __setBridgeForTest(capture(sent));
+    const mounted = await mountState(state);
+    assert.equal(box(mounted).checked, false, "a voice-over is not sung");
+    await tick(box(mounted), true);
+    assert.deepEqual(commands(sent), [{ kind: "edit-shot", shotId: "sh_12",
+      change: { audio: { kind: "music", speaker: "maren-kest", line: "the verse, under the water" } } }]);
+    const sung = structuredClone(state);
+    const shot = sung.world!.productions.find((p) => p.meta.id === "saltlight")!.scenes.flatMap((scene) => orderedShots(scene)).find((s) => s.id === "sh_12")!;
+    shot.audio = { kind: "music", speaker: "maren-kest" };
+    const singing = await mountState(sung);
+    assert.equal(box(singing).checked, true);
+    sent.length = 0;
+    await tick(box(singing), false);
+    assert.deepEqual(commands(sent), [{ kind: "edit-shot", shotId: "sh_12", change: { audio: { kind: "music", speaker: "maren-kest", lipSync: false } } }]);
   });
 
   it("the Stage is its own workspace in the page, and leaving it brings the head, filmstrip, footer and dock back (231a)", async () => {

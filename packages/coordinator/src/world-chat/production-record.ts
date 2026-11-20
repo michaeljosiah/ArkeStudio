@@ -1,5 +1,5 @@
 import type { ProductionBundle, WorldBundle } from "@arke-studio/contracts";
-import { DEFAULT_COMIC_SETTINGS, comicBook, comicPanelStates, orderedShots, panelTakeClears, productionShape, unplacedLines, type ComicBookPage, type ComicSettings } from "@arke-studio/contracts";
+import { DEFAULT_COMIC_SETTINGS, chapterLooksOf, comicBook, comicPanelStates, orderedShots, panelTakeClears, productionShape, resolveCast, unplacedLines, type ComicBookPage, type ComicSettings } from "@arke-studio/contracts";
 import { musicRecordFence } from "../productions/music.js";
 
 /**
@@ -95,7 +95,47 @@ export function productionRecord(bundle: WorldBundle, productionId: string): Rec
       ...(s.synopsis !== undefined ? { synopsis: s.synopsis } : {}),
       shots: orderedShots(s).length,
     })) }),
+    ...(shape.hasScenes ? { cast: castLooks(bundle, production) } : {}),
   };
+}
+
+/**
+ * Who the film's shots cite, with the costume looks each can wear (issue 3178). A shot names the
+ * look a person wears by id, and Arke can only choose one by name if the read lists them: the
+ * look's id, its name (the author's label, else the start of the words it was made from), and
+ * where it is attached already, since a scene's or the production's look is what a shot that
+ * names none wears.
+ */
+function castLooks(bundle: WorldBundle, production: ProductionBundle) {
+  const ids: string[] = [];
+  for (const scene of production.scenes) {
+    let shots: ReturnType<typeof orderedShots> = [];
+    try { shots = orderedShots(scene); } catch { /* another scene's broken flow is its own refusal */ }
+    for (const shot of shots) for (const entry of resolveCast(shot.description, bundle.sheets).cast) {
+      if (entry.sheet.type === "character" && !ids.includes(entry.sheet.id)) ids.push(entry.sheet.id);
+    }
+    for (const id of Object.keys(scene.cast ?? {})) if (!ids.includes(id)) ids.push(id);
+  }
+  return ids.flatMap((id) => {
+    const sheet = bundle.sheets.find((candidate) => candidate.id === id && candidate.type === "character");
+    if (sheet === undefined) return [];
+    const kit = bundle.referenceKits.find((candidate) => candidate.sheetId === id);
+    return [{
+      sheetId: id,
+      name: sheet.name,
+      looks: chapterLooksOf(kit).map((look) => ({
+        id: look.id,
+        name: look.name ?? clipped(look.prompt),
+        kind: look.kind,
+        ...(look.attachedTo?.productionId === production.meta.id ? { attachedTo: look.attachedTo.kind === "scene" ? `scene ${look.attachedTo.sceneId}` : "production" } : {}),
+      })),
+    }];
+  });
+}
+
+function clipped(text: string): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > 60 ? `${flat.slice(0, 59).trimEnd()}…` : flat;
 }
 
 function unpaged(production: ProductionBundle): { chapters: Array<{ chapter: string; baseHash: string | null; planKept: boolean }>; howToWrite: string } {

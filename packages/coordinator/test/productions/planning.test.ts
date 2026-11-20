@@ -16,7 +16,9 @@ import {
   promptFor,
   resolveCast,
   assembleBlocks,
+  assembleBoardPrompt,
   assemblePrompt,
+  shotPlaceId,
   UNTITLED_SHOT,
   assemblePassBlocks,
   joinBlocks,
@@ -840,6 +842,39 @@ describe("SPEC-017 art direction and scoped looks", () => {
     }
     await store.close();
   });
+  /* A shot names what a person wears in it (issue 3178): narrower than the scene, which is
+     narrower than the production. A look the kit no longer holds falls back a scope and is named. */
+  it("lets a shot's own look beat the scene's, and names one that has left the kit", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const production = bundle.productions[0]!;
+    const scene = legacySceneView(production.scenes[0]!);
+    const maren = bundle.referenceKits.find((kit) => kit.sheetId === "maren-kest")!;
+    const sceneLook = {
+      id: "third-verse", file: "looks/third-verse.png", kind: "costume" as const, prompt: "After the third verse", acceptedAt: CLOCK(),
+      attachedTo: { kind: "scene" as const, productionId: production.meta.id, sceneId: scene.id },
+    };
+    const own = { id: "storm-oilskin", file: "looks/storm-oilskin.png", kind: "costume" as const, prompt: "Storm oilskin", acceptedAt: CLOCK() };
+    const kits = bundle.referenceKits.map((kit) => (kit.sheetId === maren.sheetId ? { ...maren, looks: [sceneLook, own] } : kit));
+    const cited = orderedShots(scene).filter((shot) => shot.description.includes("@maren-kest"));
+    assert.ok(cited.length > 0);
+    const plan = (lookId: string) => planScene(
+      {
+        world: bundle.meta, artDirection: bundle.artDirection, productionId: production.meta.id, sheets: bundle.sheets, kits,
+        scene: { ...scene, shots: scene.shots.map((shot) => (shot.id === cited[0]!.id ? { ...shot, looks: [{ sheetId: "maren-kest", lookId }] } : shot)) },
+        selections: production.selections, model: VIDEO_MODEL,
+      },
+      "per-shot",
+    );
+    const carried = (lookId: string) => plan(lookId).shots.find((entry) => entry.shot.id === cited[0]!.id)!.references.map((reference) => reference.file ?? "");
+    assert.ok(carried("storm-oilskin").some((file) => file.includes("storm-oilskin")), "the shot's own look rides");
+    assert.ok(carried("storm-oilskin").every((file) => !file.includes("third-verse")), "and the scene's stands aside for it");
+    assert.ok(carried("gone").some((file) => file.includes("third-verse")), "a look the kit lost falls back to the scene's");
+    assert.deepEqual(plan("gone").warnings.missingLooks, [{ shotId: cited[0]!.id, number: cited[0]!.number, sheetId: "maren-kest", name: "Maren Kest", lookId: "gone" }]);
+    assert.deepEqual(plan("storm-oilskin").warnings.missingLooks, []);
+    await store.close();
+  });
+
   /* Worlds written before attaching displaced can already hold two looks claiming one
      production, and the schema still admits them. Falling back to the first in the array picked
      the OLDEST, because acceptance appends — so an upgraded world went on dispatching the older
@@ -1268,6 +1303,53 @@ describe("SPEC-019 prompt structure (R-5..R-8, D5..D7)", () => {
     // A citation that resolves to a character rather than a location does not qualify either.
     const wrongKind: Scene = { ...scene([s]), inherits: { location: "maren-kest" } };
     assert.equal(spatialLayoutFor(wrongKind, bundle.sheets), null, "a character sheet is not a room");
+    await store.close();
+  });
+
+  it("sets a shot that cites its own place there, and only a shot that cites none in the scene's (issue 3152)", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const market = bundle.sheets.find((sheet) => sheet.id === "the-saltmarket")!;
+    assert.equal(market.type, "location");
+    const away: Shot = shot(1, 6, "@maren-kest walks the pilings of @the-saltmarket");
+    const home: Shot = shot(2, 6, "@maren-kest grips the rail");
+    const both = scene([away, home]);
+    assert.equal(shotPlaceId(both, away, bundle.sheets), "the-saltmarket");
+    assert.equal(shotPlaceId(both, home, bundle.sheets), "the-vigil");
+    const looking: Shot = shot(3, 6, "@maren-kest watches @the-saltmarket from the rail of @the-vigil");
+    assert.equal(shotPlaceId(both, looking, bundle.sheets), "the-vigil", "a shot that cites the scene's place is there, whatever else it names");
+
+    const awayBlocks = assembleBlocks({ world: bundle.meta, sheets: bundle.sheets, scene: both, shot: away, capability: "video" });
+    assert.equal(awayBlocks.summary.split(".")[0], `Maren Kest at ${market.name}, night`, "the place is where she is, not one of the cast");
+    assert.ok(!joinBlocks(awayBlocks).includes("The Vigil"), "the scene's place is not in a shot set elsewhere");
+    assert.match(awayBlocks.spatial, new RegExp(`^SPATIAL LAYOUT\\n${market.name} — `), "the room described is the shot's own");
+    const homeBlocks = assembleBlocks({ world: bundle.meta, sheets: bundle.sheets, scene: both, shot: home, capability: "video" });
+    assert.match(homeBlocks.summary, /^Maren Kest at The Vigil, night\./);
+
+    const plate = (sheetId: string): ReferenceKit => ({
+      sheetId,
+      tiles: [],
+      mainPhoto: { file: "main-photo.png", sheetVersion: 1, acceptedAt: "2026-08-01T12:00:00.000Z", source: "upload" },
+      compilations: [],
+    });
+    const plan = planScene(
+      { world: bundle.meta, sheets: bundle.sheets, kits: [...bundle.referenceKits, plate("the-vigil"), plate("the-saltmarket")], scene: both, selections: {},
+        model: { ...VIDEO_MODEL, accepts: { ...VIDEO_MODEL.accepts, referenceImages: 8 } } },
+      "per-shot",
+    );
+    const carried = (shotId: string) => plan.shots.find((entry) => entry.shot.id === shotId)!.references.map((reference) => reference.sheetId);
+    assert.ok(carried(away.id).includes("the-saltmarket"));
+    assert.ok(!carried(away.id).includes("the-vigil"), "the scene's plate does not ride beside the shot's own place");
+    assert.ok(carried(home.id).includes("the-vigil"), "a shot that names no place still takes the scene's");
+
+    // A board of the two says where each panel is, and names no one place for the sheet.
+    const board = assembleBoardPrompt({ world: bundle.meta, sheets: bundle.sheets, scene: both, shots: [away, home], aspect: "16:9" });
+    assert.match(board, new RegExp(`1\\. At ${market.name}\\. `));
+    assert.match(board, /2\. At The Vigil\. /);
+    assert.ok(!board.split("\n\n")[0]!.startsWith("The Vigil"), "the head names no shared place");
+    const together = assembleBoardPrompt({ world: bundle.meta, sheets: bundle.sheets, scene: both, shots: [home], aspect: "16:9" });
+    assert.match(together, /^The Vigil, night/, "one shared place still heads the sheet");
+    assert.ok(!together.includes("At The Vigil."));
     await store.close();
   });
 
