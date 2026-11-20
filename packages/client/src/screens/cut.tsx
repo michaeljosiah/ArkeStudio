@@ -929,20 +929,26 @@ function CutEditorScreen() {
     );
   }, [searchParams, setSearchParams]);
   useEffect(() => {
-    if (effectReview.active || assembleSceneId === null || !worldId || !prodId || !production || fence === null || timelineState.status === "invalid") return;
-    const key = `${worldId}:${prodId}:${assembleSceneId}`;
-    if (assembled.current === key) return;
-    assembled.current = key;
-    setTimelineCommandError(null);
-    setInFlight({ revision: timelineRevision, since: Date.now() });
-    sendTimelineAssemble(worldId, prodId, assembleSceneId, timelineState.status === "ready" ? timelineState.timeline.revision : null, fence);
-    setSearchParams(
+    if (effectReview.active || assembleSceneId === null || !worldId || !prodId || !production) return;
+    const spend = () => setSearchParams(
       (params) => {
         params.delete("assemble");
         return params;
       },
       { replace: true },
     );
+    // A production cut to a song places its shots at the song's times, by hand, and the authority
+    // refuses to assemble one. The workspace no longer asks for it (issue 3151); an address that
+    // still does is spent unsent rather than answered with a refusal nobody asked for.
+    if (production.spine !== null) { spend(); return; }
+    if (fence === null || timelineState.status === "invalid") return;
+    const key = `${worldId}:${prodId}:${assembleSceneId}`;
+    if (assembled.current === key) return;
+    assembled.current = key;
+    setTimelineCommandError(null);
+    setInFlight({ revision: timelineRevision, since: Date.now() });
+    sendTimelineAssemble(worldId, prodId, assembleSceneId, timelineState.status === "ready" ? timelineState.timeline.revision : null, fence);
+    spend();
   }, [assembleSceneId, worldId, prodId, production, fence, timelineState, timelineRevision, setSearchParams]);
   useEffect(() => {
     const id = pendingSelect.current;

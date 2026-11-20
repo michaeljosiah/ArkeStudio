@@ -184,6 +184,21 @@ describe("Generate hands off to the editor (R-44)", () => {
       await close(screen);
     }
   });
+
+  it("asks nothing for a production cut to a song: its shots are placed at the song's times (issue 3151)", async () => {
+    const state = structuredClone(FIXTURE_STATE) as ClientState;
+    state.world!.artifacts.find(artifact => artifact.id === BELLS)!.mediaInfo = { durationSec: 2, hasAudio: true };
+    const production = state.world!.productions[0]!;
+    production.meta.kind = "music-video";
+    production.spine = { schemaVersion: 1, revision: 1, trackArtifactId: BELLS, markers: [], anchors: {}, updatedAt: "2026-11-15T10:00:00Z" };
+    const screen = await mount(state, `?assemble=${production.scenes[0]!.id}`);
+    try {
+      assert.equal(screen.sent.some((message) => message.kind === "timeline-assemble" || message.kind === "timeline-command"), false);
+      assert.doesNotMatch(screen.host.textContent ?? "", /Edit refused/);
+    } finally {
+      await close(screen);
+    }
+  });
 });
 
 describe("lanes as the target draws them (R-13, R-10)", () => {

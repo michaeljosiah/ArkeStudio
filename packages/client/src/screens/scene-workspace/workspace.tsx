@@ -863,8 +863,12 @@ export function SceneWorkspace({
           returnFocus={generateReturnFocus}
           onClose={() => setGenerateTarget(null)}
           // A scene-wide run hands a film to the Cut to assemble; a visual novel has no cut to
-          // assemble, its pictures play as beats, so it stays on the beats (codex round 6).
-          onStarted={() => { if (generateTarget?.shotId === undefined && !playsAsBeats) navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/cut?assemble=${scene.id}`); }}
+          // assemble, its pictures play as beats, so it stays on the beats (codex round 6). A
+          // production cut to a song stays on the scene too: its shots are placed by the person at
+          // the song's times, the authority refuses to assemble them, and the hand-off showed a
+          // refusal for an edit nobody asked for and took the person off a scene they were still
+          // working through (issue 3151).
+          onStarted={() => { if (generateTarget?.shotId === undefined && !playsAsBeats && production.spine === null) navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/cut?assemble=${scene.id}`); }}
         />
         {openMember === null ? null : (
           <CharacterDialog
