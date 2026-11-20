@@ -12,6 +12,7 @@ import {
   orderedShots,
   canonicalSceneFlow,
   chapterParagraphs,
+  chapterCalled,
   isGraphScene,
   productionFrameRate,
   seedFirstPictureTimeline,
@@ -40,6 +41,8 @@ import {
   type VoiceCandidate,
   type WorldChangeCandidate,
   type CandidateGroup,
+  proposedSectionLabel,
+  type SongSectionsResult,
 } from "@arke-studio/contracts";
 import { conversationActionDigest } from "../arke-actions/digest.js";
 import type { QueryLease } from "./lease.js";
@@ -54,6 +57,19 @@ import { versionTargetId, type VersionRow } from "./version-history.js";
 const DEFAULT_LIMIT = 8;
 const MAX_LIMIT = 20;
 const TEXT_CHUNK_CHARS = 4_000;
+/**
+ * How much of a page's items, as the pretty-printed JSON the agent is handed, a read returns before
+ * it stops at a cursor (issue 3214). The row limit alone let a full chapter read put metadata, the
+ * continuity record and the cast lines ahead of 4,000-character prose chunks: a 20-row page of Iwo
+ * Road passed 80 KB, the harness did not pass it on whole (Claude Code takes an MCP result of up to
+ * about 25,000 tokens), and Arke was left to say part of the narration had gone missing. Pretty JSON
+ * of prose and records runs at three to four characters a token, so 32,000 characters is roughly
+ * 8,000 to 11,000 tokens: under half the cap even for text that tokenises at two characters a token,
+ * with room left for the citation block, and close to the eight prose chunks a default page held.
+ */
+export const TARGET_READ_PAGE_CHARS = 32_000;
+/** Inventory pages stay tighter: their records were split for exactly this before every read had a budget. */
+const INVENTORY_PAGE_CHARS = 12_000;
 
 interface Row {
   readonly key: string;
@@ -105,6 +121,8 @@ export interface TargetReadDeps {
   readonly getChapterBeats?: (productionId: string, chapterFile: string) => Promise<readonly import("@arke-studio/contracts").AudiobookBeat[] | null>;
   /** Where the chapter's audiobook reading goes quiet and breathy, beside its direction (SPEC-047 R-196). */
   readonly getChapterQuiet?: (productionId: string, chapterFile: string) => Promise<import("../productions/audiobook-quiet.js").AudiobookQuietRead>;
+  /** The production's song as the Studio measures it (issue 3099): its tempo and where it changes, for get_spine. */
+  readonly getSongSections?: (productionId: string) => Promise<SongSectionsResult>;
 }
 export interface ArkeBuildItemRead { readonly key: string; readonly kind: string; readonly subject: string; readonly state: string; readonly detail: string | null }
 export const buildItemsFence = (items: readonly ArkeBuildItemRead[]) => conversationActionDigest(items);
@@ -195,16 +213,30 @@ export function artifactsFence(bundle: WorldBundle, artifactId?: string): string
   return fence(artifactId ? bundle.artifacts.find(artifact => artifact.id === artifactId) ?? null : bundle.artifacts);
 }
 
-/** Large sidecars remain exact, but cannot bury the next cursor beyond a tool output limit. */
-function inventoryRows(rows: readonly Row[]): Row[] {
+/** What a page's items come to in the pretty-printed JSON the agent is handed. */
+const pageChars = (rows: readonly Row[]): number => JSON.stringify({ items: rows.map(row => row.value) }, null, 2).length;
+
+/** Large records remain exact, but cannot bury the next cursor beyond a tool output limit. */
+function splitRows(rows: readonly Row[], tooLarge: (row: Row) => boolean): Row[] {
   return rows.flatMap(row => {
+    if (!tooLarge(row)) return [row];
     const text = JSON.stringify(row.value);
-    if (JSON.stringify(row.value, null, 2).length <= TEXT_CHUNK_CHARS) return [row];
     const parts = Math.ceil(text.length / TEXT_CHUNK_CHARS);
     return Array.from({ length: parts }, (_, part) => ({ key: `${row.key}:part:${padded(part)}`,
       value: { kind: "record-chunk", recordKey: row.key, part: part + 1, parts, text: text.slice(part * TEXT_CHUNK_CHARS, (part + 1) * TEXT_CHUNK_CHARS) } }));
   });
 }
+
+/** Inventory sidecars are split whenever they pass a text chunk, as they always were. */
+const inventoryRows = (rows: readonly Row[]): Row[] => splitRows(rows, row => JSON.stringify(row.value, null, 2).length > TEXT_CHUNK_CHARS);
+
+/**
+ * Any other read keeps its records whole, and splits only one that could not fit a page on its own
+ * (issue 3214): a page always takes its first row, so without this one long character sheet would
+ * still be a page past the budget. Paged by rows alone, list_sheets sent 82 KB in one page, and
+ * OpenCode saved it to a file and showed the model only a preview.
+ */
+const pageableRows = (rows: readonly Row[]): Row[] => splitRows(rows, row => pageChars([row]) > TARGET_READ_PAGE_CHARS);
 
 export function voicesFence(bundle: WorldBundle): string {
   return fence({
@@ -501,6 +533,51 @@ function spineRows(production: ProductionBundle | undefined, artifacts: WorldBun
     rows.push({ key: `40:track:${artifact.id}`, value: { kind: "available-spine-track", artifact } });
   }
   return rows.sort((a, b) => a.key.localeCompare(b.key));
+}
+
+const SONG_MEASURE_WAIT_MS = 20_000;
+
+/** `work`, or `late` once `ms` have passed; the timer never outlives the answer. */
+async function within<T>(work: Promise<T>, ms: number, late: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([work, new Promise<T>((resolve) => { timer = setTimeout(() => resolve(late), ms); })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * The song itself, beside the spine (issue 3099): its length, its tempo where it keeps one, and
+ * its sections. Arke cannot hear the song, and asked the author to time its verses; this is what
+ * the Studio measured instead. Marked sections are the spine's own marker rows. Until one is
+ * marked, the starts the Studio proposes are listed here and said to be proposals: places the
+ * sound changes, with no names, on nobody's spine.
+ *
+ * Given by the read alone, never by the fence: a measure that arrives between a card's read and
+ * its approval changes nothing that card would write.
+ */
+function spineSongRow(production: ProductionBundle | undefined, artifacts: WorldBundle["artifacts"], measured: SongSectionsResult | undefined): Row | null {
+  const spine = production?.spine ?? null;
+  if (spine === null) return null;
+  const song = measured?.status === "measured" && measured.song.trackArtifactId === spine.trackArtifactId ? measured.song : null;
+  const marked = spine.markers.filter((marker) => marker.kind === "section").length;
+  return {
+    key: "02:song",
+    value: {
+      kind: "spine-song",
+      trackArtifactId: spine.trackArtifactId,
+      durationSec: song?.durationSec ?? artifacts.find((artifact) => artifact.id === spine.trackArtifactId)?.mediaInfo?.durationSec ?? null,
+      tempoBpm: song?.tempoBpm ?? null,
+      sections: marked > 0
+        ? { status: "marked", count: marked }
+        : song === null
+          ? { status: "not-measured", reason: measured?.status === "unavailable" ? measured.reason : "The song could not be measured here." }
+          : song.startsSec.length < 2
+            ? { status: "none-found" }
+            : { status: "proposed", starts: song.startsSec.map((atSec, index) => ({ label: proposedSectionLabel(index), atSec })) },
+    },
+  };
 }
 
 export function spineFence(production: ProductionBundle | undefined, artifacts: WorldBundle["artifacts"] = []): string {
@@ -893,7 +970,11 @@ export class WorldChatTargetReads {
         const production = productionOf(bundle, productionId);
         const chapters = section === "plan" ? chapterPlans(production?.chapters ?? []) : production?.chapters ?? [];
         readTarget = target("chapters", section === "plan" ? `${productionId}::plan` : productionId);
-        rows = [...chapters].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id)).map((chapter) => ({ key: `${padded(chapter.order)}:${chapter.id}`, value: chapter }));
+        // Each summary says what the book calls the chapter (issue 3215): order counts an unnumbered
+        // prologue, and Arke cited the book's Chapter 1 as chapter 2. It is derived from the titles
+        // and order the fence already covers.
+        rows = [...chapters].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id))
+          .map((chapter) => ({ key: `${padded(chapter.order)}:${chapter.id}`, value: { ...chapter, called: chapterCalled(production?.chapters ?? [], chapter) } }));
         revisionOrDigest = chaptersFence(production, section);
         break;
       }
@@ -1148,6 +1229,12 @@ export class WorldChatTargetReads {
         const production = productionOf(bundle, productionId);
         readTarget = target("spine", productionId);
         rows = spineRows(production, bundle.artifacts);
+        // A song is measured in a second or two and then kept. A read never waits out a long
+        // one: it says the song is still being measured, and the next read has it.
+        const measuring = production?.spine ? this.deps.getSongSections?.(productionId) : undefined;
+        const song = spineSongRow(production, bundle.artifacts, measuring === undefined ? undefined
+          : await within(measuring, SONG_MEASURE_WAIT_MS, { status: "unavailable", reason: "The song is still being measured. Read get_spine again shortly." }));
+        if (song !== null) rows = [...rows, song].sort((a, b) => a.key.localeCompare(b.key));
         revisionOrDigest = spineFence(production, bundle.artifacts);
         break;
       }
@@ -1213,7 +1300,7 @@ export class WorldChatTargetReads {
     }
 
     const inventory = tool === "list_references" || tool === "list_artifacts";
-    return this.page(lease, args, readTarget, revisionOrDigest, inventory ? inventoryRows(rows) : rows, cursorFence, inventory);
+    return this.page(lease, args, readTarget, revisionOrDigest, inventory ? inventoryRows(rows) : pageableRows(rows), cursorFence, inventory);
   }
 
   private page(
@@ -1245,11 +1332,13 @@ export class WorldChatTargetReads {
     }
 
     const limit = boundedLimit(args["limit"]);
+    const budget = inventory ? INVENTORY_PAGE_CHARS : TARGET_READ_PAGE_CHARS;
     const selected: Row[] = [];
     for (const row of rows.slice(start, start + limit)) {
-      // Reserve room for the target, digest, cursor and separate citation block. Large inventory
-      // records were split above, so even a single row cannot exceed the read's output budget.
-      if (inventory && selected.length && JSON.stringify({ items: [...selected, row].map(item => item.value) }, null, 2).length > 12_000) break;
+      // Reserve room for the target, digest, cursor and separate citation block. A page always
+      // takes its first row, so a read never stalls on a cursor; records too large for a page were
+      // split above, so even a single row cannot exceed the read's output budget.
+      if (selected.length && pageChars([...selected, row]) > budget) break;
       selected.push(row);
     }
     const hasMore = start + selected.length < rows.length;

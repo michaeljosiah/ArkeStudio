@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router";
 import {
-  DRAMA_VERDICT_LABEL, DramaVerdictSchema, affectedBlocks, dramaSpeakerLabel, chapterParagraphs, changedParagraphs, productionShape, remapParagraphs,
+  DRAMA_VERDICT_LABEL, DramaVerdictSchema, affectedBlocks, audiobookHeading, dramaSpeakerLabel, chapterCalled, chapterNumber, chapterParagraphs, changedParagraphs, productionShape, remapParagraphs,
   type DramaChapterDecision, type DramaVerdict, type EpisodeScriptBlock, type ProductionBundle, type WorldBundle,
 } from "@arke-studio/contracts";
 import { useProduction } from "../lib/selectors.js";
@@ -17,6 +17,9 @@ import { X } from "../components/icons.js";
 
 type Filter = DramaVerdict | "all" | "unplanned";
 const MAP = { width: 760, left: 236, right: 520, block: 12 };
+
+/** A source chapter as its book calls it (SPEC-047 R-2): an unnumbered prologue first takes no number (issue 3240). */
+const calledIn = (chapters: readonly MapChapter[], chapter: MapChapter | undefined) => (chapter === undefined ? "Chapter" : chapterCalled(chapters, chapter));
 
 /**
  * Adaptation (design turn 230m/n, SPEC-057 R-61..R-66): what became of each chapter. The map is read
@@ -141,7 +144,7 @@ function Adaptation({ world, production }: { world: WorldBundle; production: Pro
               <section className="fy-ad-map__panel">
                 <h2>Episode {scene.episode} · Scene {scene.n}</h2>
                 <p>{scene.heading.place}{scene.heading.time ? ` — ${scene.heading.time}` : ""}</p>
-                {scene.chapter && <p className="fy-ad-map__meta">From chapter {map.chapters.find((entry) => entry.id === scene.chapter)?.order} · v{scene.heading.source?.version}</p>}
+                {scene.chapter && <p className="fy-ad-map__meta">From {calledIn(map.chapters, map.chapters.find((entry) => entry.id === scene.chapter))} · v{scene.heading.source?.version}</p>}
                 <div className="fy-ad-map__acts">
                   <Link className="ui-btn ui-btn--secondary ui-btn--sm" to={`${base}/script/${scene.episode}`}>Open script</Link>
                   {scene.changed && <Button size="sm" variant="primary" onClick={() => setComparing(scene)}>Compare</Button>}
@@ -154,7 +157,7 @@ function Adaptation({ world, production }: { world: WorldBundle; production: Pro
               const from = map.chapters.find((candidate) => candidate.id === entry.chapter);
               return (
                 <section key={entry.key} className="fy-ad-map__changed">
-                  <h3>Chapter {from?.order} changed <small>v{entry.heading.source?.version} → v{from?.version}</small></h3>
+                  <h3>{calledIn(map.chapters, from)} changed <small>v{entry.heading.source?.version} → v{from?.version}</small></h3>
                   <p>Episode {entry.episode}, scene {entry.n} was adapted from v{entry.heading.source?.version}.</p>
                   <Button size="sm" variant="primary" onClick={() => setComparing(entry)}>Compare</Button>
                 </section>
@@ -186,7 +189,7 @@ function ChapterPanel({ world, production, chapter, map, ask, onCompare }: {
   };
   return (
     <section className="fy-ad-map__panel" data-panel={chapter.id}>
-      <h2>Chapter {chapter.order} · {chapter.title}</h2>
+      <h2>{audiobookHeading(chapterNumber(map.chapters, chapter), chapter.title)}</h2>
       <dl>
         <dt>Words</dt><dd>{chapter.words.toLocaleString()}</dd>
         <dt>Verdict</dt><dd><span className={cx("fy-ad-map__vchip", chapter.verdict === "cut" && "fy-ad-map__vchip--cut")}>{chapter.verdict ? DRAMA_VERDICT_LABEL[chapter.verdict] : "Not planned"}</span></dd>
@@ -218,7 +221,7 @@ function ChapterPanel({ world, production, chapter, map, ask, onCompare }: {
       )}
       {scenes.filter((scene) => scene.changed).map((scene) => (
         <section key={scene.key} className="fy-ad-map__changed">
-          <h3>Chapter {chapter.order} changed <small>v{scene.heading.source?.version} → v{chapter.version}</small></h3>
+          <h3>{calledIn(map.chapters, chapter)} changed <small>v{scene.heading.source?.version} → v{chapter.version}</small></h3>
           <p>Episode {scene.episode}, scene {scene.n} was adapted from v{scene.heading.source?.version}.</p>
           <Button size="sm" variant="primary" onClick={() => onCompare(scene.key)}>Compare</Button>
         </section>
@@ -336,14 +339,14 @@ function Compare({ world, production, map, scene, ask, onClose }: {
   return (
     <div className="fy-ad-cmp" aria-label="Compare">
       <header className="fy-ad-cmp__bar">
-        <b>Chapter {chapter?.order} · v{pin.version} → v{chapter?.version}</b>
+        <b>{calledIn(map.chapters, chapter)} · v{pin.version} → v{chapter?.version}</b>
         <span>episode {scene.episode}, scene {scene.n} · {affected.size} line{affected.size === 1 ? "" : "s"} · {keptTakes} kept take{keptTakes === 1 ? "" : "s"}</span>
         <span className="gap" />
         <IconButton label="Close compare" onClick={onClose}><X size={14} /></IconButton>
       </header>
       <div className="fy-ad-cmp__cols">
-        {column(`Chapter ${chapter?.order} · v${pin.version}`, "adapted", adapted, (_, n) => changed.includes(n), (n) => pairedWords(n, "before"))}
-        {column(`Chapter ${chapter?.order} · v${chapter?.version}`, "now", now, (paragraph) => !adaptedSet.has(paragraph.replace(/\s+/g, " ").trim()),
+        {column(`${calledIn(map.chapters, chapter)} · v${pin.version}`, "adapted", adapted, (_, n) => changed.includes(n), (n) => pairedWords(n, "before"))}
+        {column(`${calledIn(map.chapters, chapter)} · v${chapter?.version}`, "now", now, (paragraph) => !adaptedSet.has(paragraph.replace(/\s+/g, " ").trim()),
           (n) => partnerOf.has(n) ? pairedWords(partnerOf.get(n)!, "after") : null)}
         <section className="fy-ad-cmp__col">
           <h2>Episode {scene.episode} · Scene {scene.n} <small>script v{stored?.script.version} · from v{pin.version}</small></h2>

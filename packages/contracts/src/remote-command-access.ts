@@ -7,7 +7,7 @@ import type { AdapterAction } from "./adapters.js";
  * credentials, installation or machine processes. Payload cases mix both and are checked below. */
 export const REMOTE_COMMAND_ACCESS = {
   "set-prompt-tools": "studio", "prompt-history-read": "studio", "prompt-history-restore": "studio", "prompt-request-inspect": "studio",
-  "measure-production-media": "studio",
+  "measure-production-media": "studio", "song-sections": "studio",
   "production-spend-refresh": "studio",
   "check-onboarding": "host", "save-onboarding": "host",
   "import-world": "host",
@@ -196,7 +196,7 @@ export function isRemoteHostCommand(message: ClientMessage): boolean {
 
 /** Conversation decisions resolve these prepared kinds from the durable card, never from the browser. */
 export const REMOTE_PREPARED_ACTION_ACCESS = {
-  "world-chat-chapter-review": "studio",
+  "world-chat-chapter-review": "studio", "world-chat-production-voice-pins": "studio",
   "world-chat-prop-authoring": "studio", "world-chat-prop-reference": "studio",
   "world-chat-proposal": "studio", "world-chat-bible-edit": "studio",
   "world-chat-scene-edit": "studio", "world-chat-editor-request": "studio", "world-chat-audio-studio-proposal": "studio", "world-chat-effect-proposal": "studio", "world-chat-transition-proposal": "studio", "world-chat-picture-proposal": "studio",

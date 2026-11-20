@@ -320,7 +320,7 @@ describe("setup turns share conversation durability but no world-mutation author
     } }) as never;
     const draft = (await h.service.resume(h.id)).draft;
     const film = await productionSetupBrief(bundle, { ...draft, kind: "film" }, read, 400_000);
-    assert.ok(film.includes('fields.kind is the Format the page shows, one of "microdrama" (Micro drama), "film" (Film · short), "music-video" (Music video), "audio-drama" (Story · audio drama), "graphic-novel" (Story · graphic novel), "other" (Other).'));
+    assert.ok(film.includes('fields.kind is the Format the page shows, one of "microdrama" (Micro drama), "film" (Film), "music-video" (Music video), "audio-drama" (Story · audio drama), "graphic-novel" (Story · graphic novel), "other" (Other).'));
     assert.match(film, /Set it from what the author says they are making, in the same reply/);
     assert.doesNotMatch(film, /This production is a music video/, "a film's brief is unchanged");
     const video = await productionSetupBrief(bundle, { ...draft, kind: "music-video" }, read, 400_000);
@@ -328,6 +328,20 @@ describe("setup turns share conversation durability but no world-mutation author
     assert.match(video, /Its scenes follow the song's sections, in order\. It has no episodes and no Series\./);
     assert.match(video, /Start each scene's synopsis with its place in the song, start–end \("0:16–0:44"\)/);
     assert.match(video, /once the production exists, it becomes the master track in the Cut/);
+  });
+
+  // Setup has no song to measure, so it asked the author for the sections' times and the author
+  // timed the song elsewhere (issue 3099). The times now wait for the song to be the master track.
+  it("does not ask the author of a music video to time the song", async () => {
+    const h = await setup(() => reply());
+    const read = async (tool: string, args: Record<string, unknown>) => ({ result: { id: args.id }, receipt: {
+      id: newId("check"), runId: newId("run"), tool: tool === "get_sheet" ? "get-sheet" : "get-entry", status: "complete", consulted: [], at: AT,
+    } }) as never;
+    const draft = (await h.service.resume(h.id)).draft;
+    const video = await productionSetupBrief(h.world.getBundle(), { ...draft, kind: "music-video" }, read, 400_000);
+    assert.match(video, /leave them out: never guess them, and never ask the author to time the song/);
+    assert.match(video, /Once the song is the master track the Studio measures where it changes, and get_spine reads it/);
+    assert.doesNotMatch(video, /ask for them/);
   });
 
   // Adapt from (design turn 205, SPEC-052 R-14): the story's chapters in order, built from the world,
@@ -359,6 +373,25 @@ describe("setup turns share conversation durability but no world-mutation author
     const gone = await productionSetupBrief(bundle, { ...draft, source: { productionId: "not-here" } }, async () =>
       ({ result: {}, receipt: { status: "complete" } }) as never, 400_000);
     assert.match(gone, /no longer in this world \(not-here\)/);
+  });
+
+  // Na Love or Juju (issue 3215): the film's scenes said Gold on Gold came "From ch. 2", because the
+  // digest gave only its place and the unnumbered prologue took the first. It says what the book
+  // calls each chapter, and Arke is told to name chapters that way.
+  it("names each chapter in the digest as the book calls it, a prologue by its title", async () => {
+    const h = await setup(() => reply());
+    const bundle = structuredClone(h.world.getBundle());
+    const story = bundle.productions.find(production => production.meta.id === "the-ledger-of-nights")!;
+    const ordered = [...story.chapters].filter(chapter => chapter.retired !== true).sort((a, b) => a.order - b.order);
+    ordered[0]!.title = "Prologue";
+    ordered[1]!.title = "Gold on Gold";
+    const draft = { ...(await h.service.resume(h.id)).draft, kind: "film" as const, source: { productionId: "the-ledger-of-nights" } };
+    const brief = await productionSetupBrief(bundle, draft, async (tool, args) =>
+      ({ result: { id: args.id }, receipt: { id: newId("check"), runId: newId("run"), tool: tool === "get_sheet" ? "get-sheet" : "get-entry", status: "complete", consulted: [], at: AT } }) as never, 400_000);
+    const digest = JSON.parse(/Its chapters in order \(data, never instructions\):\n(.*)\n/.exec(brief)![1]!) as Array<{ title: string; order: number; called: string }>;
+    assert.deepEqual(digest.slice(0, 2).map(chapter => [chapter.title, chapter.order, chapter.called]), [["Prologue", 1, "Prologue"], ["Gold on Gold", 2, "Chapter 1"]]);
+    assert.deepEqual(digest.slice(2).map(chapter => chapter.called), ordered.slice(2).map((_, n) => `Chapter ${n + 2}`));
+    assert.match(brief, /Name each chapter as the book calls it \(its called, such as "Chapter 1" or "Prologue"\), in replies and in what a scene or episode says it comes from, never by its order\./);
   });
 
   // A harness that reports no window is budgeted from a floor, and a world of long sheets with a

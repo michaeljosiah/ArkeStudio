@@ -131,7 +131,7 @@ export interface TurnBreak { at: number; label: string; tone: string; /** The fu
  * (design turn 181), a delivery marker's span underlined, a held control struck (R-47). A press
  * on a plate opens the menu to change or remove it.
  */
-export function DirectedText({ raw, cues, held, onPlate, turns = [], gap, marks = [] }: {
+export function DirectedText({ raw, cues, held, onPlate, turns = [], gap, speaker, marks = [] }: {
   raw: string;
   cues: readonly CadenceCue[];
   held: ReadonlySet<number>;
@@ -139,6 +139,8 @@ export function DirectedText({ raw, cues, held, onPlate, turns = [], gap, marks 
   turns?: readonly TurnBreak[];
   /** What sits on the rule before each later turn, by its index in `turns`: the Split a fine pointer finds there (design turn 198). */
   gap?: (index: number) => ReactNode;
+  /** What sits on each later turn's name, by its index in `turns`: the press that opens its line's speaker menu (issue 3232). */
+  speaker?: (index: number) => ReactNode;
   /**
    * What stands before a sentence's first character (design turn 237): a picture's mark, or the
    * `+ Picture` a fine pointer finds there, by its place in the text as written. It holds no
@@ -183,12 +185,15 @@ export function DirectedText({ raw, cues, held, onPlate, turns = [], gap, marks 
       if (turn.at !== from) return;
       // The rule holds no words; a press on it is the one thing in it a reader of the page meets.
       const on = gap?.(at) ?? null;
+      // The press over the name holds no text either; the name stays the break's to draw.
+      const press = speaker?.(at) ?? null;
       // A kept turn draws its name and the mark from a child's data (design turn 198), so the
       // break still holds no text and a selection's offsets still count the words alone.
       const who = turn.kept === true ? <span className="fy-ab__turn-who" data-who={turn.label} /> : null;
       out.push(
-        <span key={`turn${from}`} className={`fy-ab__turn fy-voice--${turn.tone}`} data-who={turn.kept === true ? "" : turn.label} {...(on === null ? { "aria-hidden": true } : {})}>
+        <span key={`turn${from}`} className={`fy-ab__turn fy-voice--${turn.tone}`} data-who={turn.kept === true ? "" : turn.label} {...(on === null && press === null ? { "aria-hidden": true } : {})}>
           {who}
+          {press}
           {on}
         </span>,
       );

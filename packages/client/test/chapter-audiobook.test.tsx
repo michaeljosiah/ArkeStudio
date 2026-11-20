@@ -2223,6 +2223,19 @@ describe("audiobook action targets (#1675)", () => {
     assert.deepEqual(read.blocks, ["title"]);
     assert.equal(read.confirmationToken, "target-token");
   });
+
+  it("names the chapter as the book calls it: an unnumbered Prologue first leaves the second Chapter 1 (issue 3235)", async () => {
+    const state = inkbound();
+    state.world = { ...state.world!, productions: state.world!.productions.map((p) => (p.meta.id === "inkbound" ? { ...p, chapters: [{ ...CHAPTERS[0]!, title: "Prologue" }, CHAPTERS[1]!] } : p)) };
+    const m = await mount(state);
+    await answerOpen(m);
+    const ids = { worldId: FIXTURE_WORLD_ID, productionId: "inkbound", chapterId: "neap" };
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.started", ...ids, requestId: "01J8F3K2QW9VZX4N7M0RTYB6H1", toMake: 4, blocks: 4 }));
+    await act(async () => __applyEventForTest({ at: AT, type: "audiobook.priced", ...ids, characters: 120, estimatedMicroUsd: 36_000, confirmationToken: "tok", voices: [] }));
+    const sheet = q(m, '[data-testid="read-sheet"]')!;
+    assert.equal(sheet.getAttribute("aria-label"), "Read Chapter 1", "its place is 2, its number 1");
+    assert.equal(sheet.closest("dialog")?.querySelector(".fy-page-sheet__head h2")?.textContent, "Read Chapter 1", "the sheet's heading");
+  });
 });
 
 describe("grouped reads (design turn 185)", () => {
@@ -2773,6 +2786,75 @@ describe("block seams (design turn 198)", () => {
     await answerOpen(n, { voices: CAST, audiobook: moved });
     assert.equal(q(n, '[data-testid="audiobook-beat-head"]'), null);
     assert.equal(q(n, '[data-testid="audiobook-blocks-press"]')!.textContent, "Blocks 1 changed");
+  });
+
+  it("each line of a beat opens the speaker menu, and a choice pins that line, not the block (issue 3232, SPEC-012 R-63)", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { voices: CAST, audiobook: joined() });
+    const beat = q(m, '[data-block="p0.0"]')!;
+    const presses = [...beat.querySelectorAll('[data-testid="audiobook-turn-speaker"]')] as HTMLElement[];
+    assert.deepEqual(presses.map((press) => press.getAttribute("aria-label")), ["Maren Kest", "narrator"], "each later turn's name is a press");
+    assert.equal(beat.querySelector(".fy-ab__text")!.textContent, `${P0}\n\n${LINE}`, "the presses add nothing to the block's words");
+    await act(async () => presses[0]!.click());
+    const options = [...beat.querySelectorAll(".fy-ab__menu-opt")] as HTMLElement[];
+    assert.equal(options.find((option) => option.textContent?.startsWith("Maren Kest"))?.textContent, "Maren Kest✓", "the line's own speaker, in this chapter, is ticked");
+    await act(async () => options.find((option) => option.textContent === "Narration")!.click());
+    const line = m.sent.findLast((message) => message.kind === "set-voice-pin") as Extract<ClientMessage, { kind: "set-voice-pin" }>;
+    assert.deepEqual(
+      { paragraph: line.paragraph, occurrence: line.occurrence, quote: line.quote, narration: line.narration },
+      { paragraph: 1, occurrence: 0, quote: QUOTE, narration: true },
+      "the line in the beat's second paragraph, named as the saved prose holds it",
+    );
+    // The first turn's is the margin's press.
+    await act(async () => (beat.querySelector("button.fy-ab__speaker") as HTMLElement).click());
+    await act(async () => ([...beat.querySelectorAll(".fy-ab__menu-opt")] as HTMLElement[]).find((option) => option.textContent === "Maren Kest")!.click());
+    const first = m.sent.findLast((message) => message.kind === "set-voice-pin") as Extract<ClientMessage, { kind: "set-voice-pin" }>;
+    assert.deepEqual({ paragraph: first.paragraph, occurrence: first.occurrence, quote: first.quote, sheet: first.sheet }, { paragraph: 0, occurrence: 0, quote: P0, sheet: "maren-kest" });
+  });
+
+  it("a corrected line of a beat offers Undo correction in its own menu and takes back its own pin; the lines beside it do not (codex on PR 3237)", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { voices: { ...CAST, lines: [], pins: [{ paragraph: 1, occurrence: 0, quote: QUOTE, speaker: "Tam Rusk" }] }, audiobook: joined() });
+    const beat = q(m, '[data-block="p0.0"]')!;
+    const presses = [...beat.querySelectorAll('[data-testid="audiobook-turn-speaker"]')] as HTMLElement[];
+    assert.deepEqual(presses.map((press) => press.getAttribute("aria-label")), ["Tam Rusk", "narrator"], "the beat's second turn is the line set by hand");
+    const undo = () => ([...beat.querySelectorAll(".fy-ab__menu-opt")] as HTMLElement[]).find((option) => option.textContent === "Undo correction");
+    // The tag after the line and the beat's first turn were never corrected.
+    await act(async () => presses[1]!.click());
+    assert.equal(beat.querySelectorAll(".fy-ab__menu").length, 1);
+    assert.equal(undo(), undefined, "an uncorrected turn has nothing to take back, though the turn before it has");
+    await act(async () => (beat.querySelector("button.fy-ab__speaker") as HTMLElement).click());
+    assert.equal(beat.querySelectorAll(".fy-ab__menu").length, 1);
+    assert.equal(undo(), undefined, "nor has the beat's first turn");
+    await act(async () => presses[0]!.click());
+    assert.ok(undo(), "the corrected turn's menu offers it");
+    await act(async () => undo()!.click());
+    const cleared = m.sent.findLast((message) => message.kind === "set-voice-pin") as Extract<ClientMessage, { kind: "set-voice-pin" }>;
+    assert.deepEqual(
+      { paragraph: cleared.paragraph, occurrence: cleared.occurrence, quote: cleared.quote, clear: cleared.clear },
+      { paragraph: 1, occurrence: 0, quote: QUOTE, clear: true },
+      "the pin taken back is that turn's, in its own paragraph, not the beat's first",
+    );
+  });
+
+  it("a later line's menu opens under the name pressed, the block's still and no text in its words; the first line's opens where a block's does (codex on PR 3237)", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { voices: CAST, audiobook: joined() });
+    const beat = q(m, '[data-block="p0.0"]')!;
+    const press = beat.querySelectorAll('[data-testid="audiobook-turn-speaker"]')[1] as HTMLElement;
+    // linkedom lays nothing out, so the two are given places: a long beat whose head is scrolled
+    // off the top, and a name pressed far down it.
+    const at = (top: number, bottom: number) => () => ({ top, bottom }) as DOMRect;
+    Object.assign(beat, { getBoundingClientRect: at(-340, 520) });
+    Object.assign(press, { getBoundingClientRect: at(408, 428) });
+    await act(async () => press.click());
+    const menu = beat.querySelector(".fy-ab__menu") as HTMLElement;
+    assert.equal(menu.style.top, "772px", "4 under the pressed name, measured from the block's top: 428 + 340 + 4");
+    // Compared as a boolean: a failing equal on a linkedom node prints the whole document.
+    assert.equal(menu.parentElement === beat, true, "the menu is the block's child, as its own is");
+    assert.equal(beat.querySelector(".fy-ab__text")!.textContent, `${P0}\n\n${LINE}`, "open, it adds nothing to the block's words, so offsets still count them alone");
+    await act(async () => (beat.querySelector("button.fy-ab__speaker") as HTMLElement).click());
+    assert.equal((beat.querySelector(".fy-ab__menu") as HTMLElement).style.top, "", "the first turn's is left where the stylesheet stands a block's");
   });
 
   it("joins at once even where both blocks have a picture: the join keeps the second as a mark (design turn 237, R-203)", async () => {

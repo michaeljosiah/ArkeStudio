@@ -392,6 +392,8 @@ export const CheckToolSchema = z.enum([
   "get-attachment-text",
   "view-image",
   "inspect-media", "sample-video", "analyze-audio-signal", "transcribe-audio", "review-audio-content", "listen-audio",
+  /** Local measurements of a cut (epic #3070): lip sync against a reference (#3205), a song's beats, sections and voice (#3075). */
+  "measure-sync", "song-map", "clip-quality", "cut-contact-sheet", "review-export",
   /** Reading a page from the web, kept as an attachment so its quotes stay checkable. */
   "fetch-url",
   /*
@@ -440,7 +442,8 @@ export const WorldChatCheckReceiptSchema = z
   .strict()
   .superRefine((receipt, context) => {
     const coverage = { "inspect-media": "metadata-only", "sample-video": "sampled-frames-only", "analyze-audio-signal": "decoded-audio-samples",
-      "transcribe-audio": "recognized-speech", "review-audio-content": "recognized-speech", "listen-audio": "model-audio-listening" } as const;
+      "transcribe-audio": "recognized-speech", "review-audio-content": "recognized-speech", "listen-audio": "model-audio-listening",
+      "measure-sync": "measured-sync", "song-map": "measured-song", "clip-quality": "measured-quality", "cut-contact-sheet": "contact-sheet", "review-export": "export-review" } as const;
     const expected = coverage[receipt.tool as keyof typeof coverage];
     if (receipt.media && (!expected || receipt.media.coverage !== expected || receipt.status !== "complete") || expected && receipt.status === "complete" && !receipt.media) {
       context.addIssue({ code: z.ZodIssueCode.custom, message: "Media receipt evidence must match the completed tool's coverage" });
@@ -2667,6 +2670,16 @@ const exampleWorldActions = {
     checkReceiptIds: [`check_${EXAMPLE_ULID}`],
   },
   "chapter-review": { kind: "chapter-review", productionId: "saltlight", chapterId: "the-storm", checkReceiptIds: [`check_${EXAMPLE_ULID}`] },
+  "production-voice-pins": {
+    kind: "production-voice-pins",
+    productionId: "saltlight",
+    chapterId: "the-storm",
+    pins: [
+      { paragraph: 4, occurrence: 0, quote: "“Not tonight,”", speaker: "Maren Kest", sheet: "maren-kest" },
+      { paragraph: 7, occurrence: 1, quote: "“Bring the lamp.”", narration: true },
+    ],
+    checkReceiptIds: [`check_${EXAMPLE_ULID}`],
+  },
   "production-chapter-order": {
     kind: "production-chapter-order",
     productionId: "saltlight",
@@ -2935,9 +2948,10 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-season": "Change the season's question, ending, direction, arcs and episode defaults.",
   "production-episode": "Create or edit an episode: title, order, promise, scenes, links and release details.",
   "production-chapter": "Outline chapters, create one, or edit a chapter's text, plan or a passage.",
-  "production-scene": "Create a scene with its script, edit its title, synopsis, inherited place and defaults, or replace its script. An edit's inherits changes only the fields it names; inherits.location null leaves the scene with no location. Keep an existing block's id when only its text changes.",
+  "production-scene": "Create a scene with its script, edit its title, synopsis, inherited place and defaults, or replace its script. An edit's inherits changes only the fields it names; inherits.location null leaves the scene with no location. Keep an existing block's id when only its text changes. defaults is the camera every shot in the scene inherits and is sent with each of its frames and clips: for a filmed production set lens, focus, lighting (the source, and where it is) and grade (how the scene is photographed, one line) from the production's style when you create the scene; a frame told nothing about its light comes back evenly lit.",
   "production-episode-order": "Put episodes in a new order; name every episode once.",
   "chapter-review": "Run bounded script and visual specialists over a saved chapter; return evidence-backed advisory findings without changing prose or media.",
+  "production-voice-pins": "Say who speaks quoted lines of one chapter, or that words are narration: each pin names its paragraph, its exact words and their occurrence there, as get_chapter's cast lines do. Applied one after another; the prose is unchanged.",
   "production-chapter-order": "Put chapters in a new order; name every chapter once.",
   "production-scene-order": "Put scenes in a new order; name every scene once.",
   "production-scene-delete": "Delete a scene. Its history is kept and it can be restored.",
@@ -2946,7 +2960,7 @@ export const WORLD_ACTION_DESCRIPTIONS = {
   "production-prose-style": "Set the story's point of view, tense, voice and samples.",
   "production-comic-script": `Plan, then write, a graphic novel chapter's pages. A chapter is planned before it is drafted: first send its plan alone, with no pages — every passage of the prose with keep, cut, merge, show or invent and why, each page's change and the turn it ends on, what the reader is shown or told and on which page, and every line that would lean on a cut or on something not yet shown and that the plan does not settle: a line the plan answers is not listed. Once the author keeps the plan, write the pages whole from it: turn the prose, or the chapter it adapts, into pages of panels and exact lettering. Read get_production first and name the chapter's comic baseHash — null for a chapter with nothing yet, as unpagedChapters lists them — keep every unchanged page, panel and line with its id, and cite each panel's source paragraphs. ${COMIC_ADAPTATION_CRAFT} The plan's shape, exactly: {"passages":[{"where":"¶ 1–6","what":"what happens","verdict":"keep","why":"a reason in a few words"}],"pages":[{"change":"what changes on the page","turn":"the turn it ends on"}],"knows":[{"name":"Bray","page":1,"how":"named"}],"leans":[{"page":3,"line":"the line","why":"what it leans on"}],"mysteries":["What is under the water?"]} — verdict is keep, cut, merge, show or invent; knows and leans may be empty; mysteries are the questions the book means the reader to carry unanswered, and the reader of the draft is told them. A page's layout sets how many panels it has: splash 1, feature or strip-3 3, grid-2x2 4, manga 5, grid-3x3 9; give each page exactly the panels its layout has. A reader who has only the pages reads every draft, and the author sees its questions beside the draft. They are advice: a question can be what the book holds back, so never answer one with words the book does not give or by telling the reader early. When the author asks about them, say which you would answer and how and which you would leave open, change nothing until they choose, then send the pages whole; they replace the draft waiting. The author keeps or discards each draft in Pages.`,
   "production-episode-script": "Write or change an audio drama episode's script, whole. Read get_production first and name the script's baseHash — null for an episode with no script yet, as unwrittenEpisodes lists them — and keep every unchanged block with its id; the author keeps or discards the draft in the score.",
-  "production-scene-command": "One command or an ordered commands list on a scene: cast and place, shots, staging, prompt overrides or boards. Independent commands on the same scene share an atomic card showing the resulting shot list. Explicit after dependencies stay separate cards. insert-shot's at, like move-shot's to, is {\"atStart\":true}, {\"after\":shotId} or {\"before\":shotId}, nothing else: there is no end or index, so a shot goes last after the scene's last shot. The studio numbers a new shot, so no command can name it by id. To add several shots in order on one card, send one production-scene-command per new shot on the same scene, each with its own ref and no after: place the first after an existing shot (or atStart) and each next at {\"after\":\"ref:<previous ref>\"}. Use ref:name in any shot target to name the one shot a preceding action with ref=name creates; another kind of action naming that shot is its own card and lists the ref in after. A shot's looks say what each character it cites wears in it: [{\"sheetId\":\"maren-kest\",\"lookId\":\"<a costume look id from get_production's cast>\"}], on insert-shot's shot or edit-shot's change; a character left out wears the scene's look, else the production's, else the main photo, and clear [\"looks\"] removes them all. A shot set in its own place cites it with @ in its description. Visual facts require the person's review on the shot panel and cannot be set here.",
+  "production-scene-command": "One command or an ordered commands list on a scene: cast and place, the camera its shots inherit, shots, staging, prompt overrides or boards. edit-scene's defaults sets that camera a field at a time (lens, focus, lighting, grade; null clears one), and a field a shot sets in its own framing wins. Independent commands on the same scene share an atomic card showing the resulting shot list. Explicit after dependencies stay separate cards. insert-shot's at, like move-shot's to, is {\"atStart\":true}, {\"after\":shotId} or {\"before\":shotId}, nothing else: there is no end or index, so a shot goes last after the scene's last shot. The studio numbers a new shot, so no command can name it by id. To add several shots in order on one card, send one production-scene-command per new shot on the same scene, each with its own ref and no after: place the first after an existing shot (or atStart) and each next at {\"after\":\"ref:<previous ref>\"}. Use ref:name in any shot target to name the one shot a preceding action with ref=name creates; another kind of action naming that shot is its own card and lists the ref in after. A shot's looks say what each character it cites wears in it: [{\"sheetId\":\"maren-kest\",\"lookId\":\"<a costume look id from get_production's cast>\"}], on insert-shot's shot or edit-shot's change; a character left out wears the scene's look, else the production's, else the main photo, and clear [\"looks\"] removes them all. A shot set in its own place cites it with @ in its description. Visual facts require the person's review on the shot panel and cannot be set here.",
   "production-board-compile": "Compile a scene's storyboard from its shots and frames.",
   "production-board-export": "Export a scene's storyboard to a file the person chooses.",
   "production-take-import": "Import a take for a shot from a file the person picks.",

@@ -295,6 +295,20 @@ describe("parsing a turn result", () => {
     const parsed = parseTurnResult("I've noted that for you!");
     assert.equal(parsed.ok, false);
     assert.equal(parsed.ok === false && parsed.problems[0]!.code, "not-json");
+    assert.match(parsed.ok === false ? parsed.problems[0]!.safeMessage : "", /It held no JSON object/);
+  });
+
+  // Told only "not valid JSON", a model sent back the same answer twice, one bracket wrong in its
+  // last line each time (issue 3223). The retry now says where, in the model's own counting.
+  it("says where a nearly whole result broke, so the retry can mend that one place", () => {
+    // One brace too many inside the last action, as the two failed answers had it.
+    const text = `Here it is:\n{"reply":"The car park is red earth under one floodlight.","actions":[{"kind":"sheet","change":{"sections":[{"heading":"Look"}]}}},"checkReceiptIds":[]}]}`;
+    const parsed = parseTurnResult(text);
+    const message = parsed.ok ? "" : parsed.problems[0]!.safeMessage;
+    const position = text.indexOf(`},"checkReceiptIds"`);
+    assert.match(message, new RegExp(`It broke at character ${position} of ${text.length} \\(Expected ',' or '\\]' after array element\\)`), message);
+    assert.ok(message.includes(`just after: …${text.slice(position - 80, position)}`), message);
+    assert.match(message, /every \{ and \[ closed exactly once/);
   });
 
   it("reads a result wrapped in a markdown fence or a line of prose (issue 1403)", () => {

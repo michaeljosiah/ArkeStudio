@@ -884,9 +884,39 @@ describe("edit-scene names the title as well as the synopsis (SPEC-036 R-2, amen
         baseVersion: before.version,
         command: { kind: "edit-scene" },
       }),
-      (err: unknown) => err instanceof SceneCommandRefused && /names neither a title, a synopsis, the inherited context nor the cast/.test(err.message),
+      (err: unknown) => err instanceof SceneCommandRefused && /names neither a title, a synopsis, the inherited context, the cast nor the camera/.test(err.message),
     );
     assert.equal(await worldPrint(dir), print);
+  });
+});
+
+// Every shot's Camera card reads "from scene" for a field it has not set, and until issue 3247
+// nothing could write the scene's side of that: a film's light and look had to be chosen shot by
+// shot, nobody did, and twenty frames went out with no word on how they are photographed.
+describe("edit-scene sets the camera every shot inherits (issue 3247)", () => {
+  it("writes the defaults per field, clears one with null, and drops an emptied camera whole", async () => {
+    const { store } = await open();
+    const before = await sceneOnDisk(store);
+    await applySceneCommand(store, {
+      productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: before.version,
+      command: { kind: "edit-scene", defaults: { lighting: "Practical lantern", focus: "Shallow", grade: "35mm film, a little underexposed" } },
+    });
+    const lit = await sceneOnDisk(store);
+    assert.deepEqual(lit.defaults, { ...before.defaults, lighting: "Practical lantern", focus: "Shallow", grade: "35mm film, a little underexposed" });
+    assert.equal(lit.version, before.version + 1);
+    await applySceneCommand(store, {
+      productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: lit.version,
+      command: { kind: "edit-scene", defaults: { focus: null, lens: "50mm" } },
+    });
+    const moved = await sceneOnDisk(store);
+    assert.deepEqual(moved.defaults, { ...before.defaults, lighting: "Practical lantern", grade: "35mm film, a little underexposed", lens: "50mm" });
+    await applySceneCommand(store, {
+      productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID, baseVersion: moved.version,
+      command: { kind: "edit-scene", defaults: { lighting: null, grade: null, lens: null } },
+    });
+    const cleared = await sceneOnDisk(store);
+    assert.deepEqual(cleared.defaults, before.defaults, "what the scene held before is what it holds again");
+    assert.deepEqual(shotIds(cleared), shotIds(before), "the scene's camera is the scene's: no shot moved");
   });
 });
 

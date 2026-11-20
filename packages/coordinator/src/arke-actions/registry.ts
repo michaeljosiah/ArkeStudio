@@ -1,4 +1,4 @@
-import { WorldChatChapterReviewActionSchema } from "@arke-studio/contracts";
+import { WorldChatChapterReviewActionSchema, WorldChatProductionVoicePinsActionSchema } from "@arke-studio/contracts";
 import { ProductionAudioStudioProposeModelActionSchema, WorldChatAudioStudioProposalActionSchema, ProductionPicturesProposeModelActionSchema, WorldChatPictureProposalActionSchema } from "@arke-studio/contracts";
 import { ProductionTimelineModelActionSchema, WorldChatProductionTimelineActionSchema, WorldChatProductionTimelineTranscribeActionSchema,
   ProductionTransitionsProposeModelActionSchema, WorldChatTransitionProposalActionSchema, ProductionEffectsProposeModelActionSchema, WorldChatEffectProposalActionSchema } from "@arke-studio/contracts";
@@ -540,6 +540,7 @@ const CLIENT_COMMAND_METADATA = {
   "read-music-takes": readOnly(QUERY),
   "read-music-waveform": readOnly(QUERY),
   "measure-production-media": humanOnly("Measure a selected source locally without generating or uploading media."),
+  "song-sections": readOnly("Measures where the production's song changes for the Cut's offer and changes nothing; Arke reads the same from get_spine."),
   "list-guide-voice-lines": readOnly(QUERY),
   "reorder-chapters": action("production", "command", "chapter-store", "authored-change", ["chapters"], { preparation: CHAPTER_TARGET, execution: CHAPTER_TARGET }),
   "reorder-scenes": action("production", "command", "production-store", "authored-change", ["scenes", "episodes"]),
@@ -930,6 +931,7 @@ const COMMAND_MODEL_PATHS = {
   "delete-scene": ["production-scene-delete"],
   "scene-command": ["production-scene-command"],
   "chapter-review-start": ["chapter-review"],
+  "set-voice-pin": ["production-voice-pins"],
   "create-chapter": ["production-chapter"],
   "save-chapter": ["production-chapter"],
   "edit-chapter-plan": ["production-chapter"],
@@ -1339,6 +1341,9 @@ const WORLD_CHAT_ACTION_REGISTRY = {
   },
   "world-chat-chapter-review": { kind: "world-chat-chapter-review", schema: WorldChatChapterReviewActionSchema,
     ...action("production", "command", "production-store", "external-network-action", ["chapters"]),
+  },
+  "world-chat-production-voice-pins": { kind: "world-chat-production-voice-pins", schema: WorldChatProductionVoicePinsActionSchema,
+    ...action("production", "command", "extraction", "authored-change", ["chapters", "sheets"]),
   },
   "world-chat-production-chapter-order": {
     kind: "world-chat-production-chapter-order",

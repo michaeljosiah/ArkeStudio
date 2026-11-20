@@ -23,6 +23,7 @@ import {
   audiobookCounts,
   audiobookDirectionFor,
   audiobookHeading,
+  chapterCalled,
   chapterNumber,
   audiobookNoteFor,
   sheetNarrations,
@@ -46,6 +47,7 @@ import {
   voiceSourceFor,
   type ArtifactSidecar,
   type AudiobookBlock,
+  type AudiobookTurn,
   type AudiobookBlockState,
   type AudiobookGap,
   type AudiobookDirectionInput,
@@ -193,6 +195,13 @@ export interface DirectAlso {
   speakerNotes?: boolean;
 }
 
+/**
+ * A turn of a block of several as its row (design turn 190), with the paragraph its words are a
+ * slice of and whether they wait for that paragraph's cast: what a pin on its line names, since a
+ * beat's block spans paragraphs and no paragraph holds its words (issue 3232).
+ */
+export type TurnRow = TurnBreak & { paragraph: number; waits?: true };
+
 export interface BlockRow {
   block: AudiobookBlock;
   state: AudiobookBlockState;
@@ -217,7 +226,7 @@ export interface BlockRow {
   /** The speakers a block holds when it is one reader's whole paragraph (design turn 190): the lines inside it, by key. */
   speakers?: ReadonlyArray<{ key: string; label: string; full: string; colour: number | null }>;
   /** The turns of a block of several, in order: where each begins in the block's words and who speaks it (design turn 190), drawn as rows. */
-  turnMarks?: ReadonlyArray<TurnBreak>;
+  turnMarks?: ReadonlyArray<TurnRow>;
   /** The speaker's colour, `--voice-N`, the same in every chapter; null for the narrator and a name no sheet carries. */
   colour: number | null;
   /** An edited quote that kept its speaker (design turn 198): the dashed `kept` mark beside the name, until checked. */
@@ -516,9 +525,9 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
       })).values()];
       // The turns as rows (design turn 190): each found in the block's words in order, so the
       // rows draw at the offsets the words keep. One not found leaves the block a single row.
-      const turnMarks = ((): TurnBreak[] | undefined => {
+      const turnMarks = ((): TurnRow[] | undefined => {
         if (block.rows === undefined) return undefined;
-        const marks: TurnBreak[] = [];
+        const marks: TurnRow[] = [];
         let from = 0;
         for (const turn of block.rows) {
           const found = block.text.indexOf(turn.text, from);
@@ -526,7 +535,10 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
           const key = audiobookSpeakerKey(turn);
           const sheetOf = turn.sheet === undefined ? undefined : world?.sheets.find((candidate) => candidate.id === turn.sheet);
           const tone = key === null ? "narrator" : turn.sheet === undefined ? "none" : String(colours.get(turn.sheet) ?? "none");
-          marks.push({ at: marks.length === 0 ? 0 : found, label: key === null ? "narrator" : called(sheetOf, turn.speaker ?? key), full: key === null ? "narrator" : (sheetOf?.name ?? turn.speaker ?? key), tone, ...(turn.kept === true ? { kept: true } : {}) });
+          // A block's words are its paragraphs' parts joined by a blank line, which no paragraph
+          // holds, so the blank lines before a turn count the paragraphs it is past.
+          const paragraph = block.paragraph + (block.text.slice(0, found).match(/\n\n/g)?.length ?? 0);
+          marks.push({ at: marks.length === 0 ? 0 : found, label: key === null ? "narrator" : called(sheetOf, turn.speaker ?? key), full: key === null ? "narrator" : (sheetOf?.name ?? turn.speaker ?? key), tone, ...(turn.kept === true ? { kept: true } : {}), paragraph, ...(waiting.has(paragraph) && turn.speaker === undefined ? { waits: true as const } : {}) });
           from = found + turn.text.length;
         }
         return marks;
@@ -1224,13 +1236,16 @@ export function useChapterAudiobook(input: ChapterAudiobookInput) {
             : null;
 
   // The sheet a grouped read is confirmed in (design turn 185a): blocks, requests, a block a
-  // request, Google's free day where it is known, the estimate.
+  // request, Google's free day where it is known, the estimate. It names the chapter as the book
+  // and its spoken heading do (R-2): counted by place, Iwo Road's sheet said "Read Chapter 24"
+  // under a heading read "Chapter 23 · Iwo Road", the unnumbered prologue taking a number (issue 3235).
+  const asCalled = chapterCalled(bookChapters ?? [], chapter);
   const readSheet = run?.state === "priced" && run.price !== undefined
     ? {
         ...(run.price.previews !== undefined ? { previews: run.price.previews } : {}),
         token: run.price.confirmationToken,
-        recovery: fromExport.current ? { ready: rows.filter(row => row.state === "made").length, total: rows.length, chapter: `Chapter ${chapter.order} · ${chapter.title}` } : null,
-        title: fromExport.current ? "Read remaining blocks" : only.current?.length === 1 ? `Read ${blockReadTarget(only.current[0]!, rows)} · Chapter ${chapter.order}` : `Read Chapter ${chapter.order}`,
+        recovery: fromExport.current ? { ready: rows.filter(row => row.state === "made").length, total: rows.length, chapter: audiobookHeading(number, chapter.title) } : null,
+        title: fromExport.current ? "Read remaining blocks" : only.current?.length === 1 ? `Read ${blockReadTarget(only.current[0]!, rows)} · ${asCalled}` : `Read ${asCalled}`,
         blocks: run.toMake,
         characters: run.price.characters,
         free: run.price.estimatedMicroUsd === 0,
@@ -1536,12 +1551,20 @@ function rawSelection(host: HTMLElement): { from: number; to: number } | null {
 }
 
 /** The speaker menu (design turn 155b, SPEC-012 R-63): a search, this chapter's speakers, the rest of the cast. */
-function SpeakerMenu({ row, choices, onPick, onClose }: {
+function SpeakerMenu({ row, turn, top, choices, onPick, onClose }: {
   row: BlockRow;
+  /** One turn of a block of several, whose speaker is the current one (issue 3232). */
+  turn?: AudiobookTurn;
+  /** Where a later turn's menu stands in its block: under the name pressed. A block's own is the stylesheet's to place. */
+  top?: number;
   choices: SpeakerChoices;
   onPick: (pick: SpeakerPick) => void;
   onClose: () => void;
 }) {
+  const current = turn === undefined ? row.speakerKey : audiobookSpeakerKey(turn);
+  // A correction is the turn's own (codex on PR 3237): a block of several carries none itself, and
+  // one turn's is not another's to take back.
+  const corrected = (turn ?? row.block).pinned === true;
   const [query, setQuery] = useState("");
   const match = (label: string) => label.toLowerCase().includes(query.trim().toLowerCase());
   const typed = query.trim();
@@ -1555,7 +1578,7 @@ function SpeakerMenu({ row, choices, onPick, onClose }: {
     </button>
   );
   return (
-    <div className="fy-ab__menu" role="menu" aria-label="Speaker" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === "Escape" && onClose()}>
+    <div className="fy-ab__menu" role="menu" aria-label="Speaker" {...(top !== undefined ? { style: { top } } : {})} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === "Escape" && onClose()}>
       <input
         className="fy-ab__menu-search"
         placeholder="Speaker"
@@ -1568,16 +1591,16 @@ function SpeakerMenu({ row, choices, onPick, onClose }: {
         }}
       />
       <div className="fy-ab__menu-eb">In this chapter</div>
-      {match("Narration") && option("narration", "Narration", "narrator", row.speakerKey === null, { narration: true })}
+      {match("Narration") && option("narration", "Narration", "narrator", current === null, { narration: true })}
       {choices.chapter.filter((who) => match(who.label)).map((who) =>
-        option(`c:${who.key}`, who.label, who.sheet === undefined ? "none" : String(who.colour ?? "none"), row.speakerKey === who.key, { speaker: who.label, ...(who.sheet !== undefined ? { sheet: who.sheet } : {}) }),
+        option(`c:${who.key}`, who.label, who.sheet === undefined ? "none" : String(who.colour ?? "none"), current === who.key, { speaker: who.label, ...(who.sheet !== undefined ? { sheet: who.sheet } : {}) }),
       )}
       {choices.cast.some((who) => match(who.label)) && <div className="fy-ab__menu-eb">Cast</div>}
       {choices.cast.filter((who) => match(who.label)).map((who) =>
         option(`s:${who.sheet}`, who.label, who.colour === null ? "plain" : String(who.colour), false, { speaker: who.label, sheet: who.sheet }, who.voice ?? "no voice"),
       )}
       {typed !== "" && !known && option("typed", `“${typed}”`, "none", false, { speaker: typed }, "no sheet")}
-      {row.block.pinned === true && (
+      {corrected && (
         <>
           <div className="fy-ab__menu-sep" />
           <button type="button" role="menuitem" className="fy-ab__menu-opt" onClick={() => onPick({ clear: true })}>
@@ -1625,8 +1648,8 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
   filter?: AudiobookFilter;
   /** Offered only while the cast is current and can be written (SPEC-012 R-62): who a block can be given to. */
   choices?: SpeakerChoices;
-  /** A choice made for a block, or for words selected inside a narration block. */
-  onPin?: (row: BlockRow, pick: SpeakerPick, selection?: { from: number; to: number }) => void;
+  /** A choice made for a block, for words selected inside a narration block, or for one turn of a block of several. */
+  onPin?: (row: BlockRow, pick: SpeakerPick, selection?: { from: number; to: number }, turn?: number) => void;
   /** The marker menu, where it is open (R-42); the view's, so the side can open it too. */
   marker?: MarkerAt | null;
   onMarker?: (at: MarkerAt | null) => void;
@@ -1649,7 +1672,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
 }) {
   const coarse = useMediaQuery(COARSE_QUERY);
   const pressedSelection = useRef<BlockSelection | null>(null);
-  const [menu, setMenu] = useState<{ key: string; selection?: { from: number; to: number } } | null>(null);
+  const [menu, setMenu] = useState<{ key: string; selection?: { from: number; to: number }; turn?: number; top?: number } | null>(null);
   // The picture being dragged along the words (design turn 237, R-205), by its key.
   const [dragging, setDragging] = useState<string | null>(null);
   // A mark's chip stands level with its words at the block's end (237a); one whose sentence starts
@@ -1907,6 +1930,34 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
         // A picture set on the block (turn 186c), or proposed by Arke and not yet accepted (191b).
         const picture = pictures?.byKey.get(row.block.key);
         const proposedPicture = picture === undefined ? pictures?.proposed?.get(row.block.key) : undefined;
+        // A later turn's name opens the speaker menu for its line (issue 3232), by its index in `laterTurns`.
+        const turnPress = pinnable && laterTurns !== undefined ? { speaker: (index: number) => {
+          const turn = index + 1;
+          const mark = row.turnMarks![turn]!;
+          if (mark.paragraph < 0 || mark.waits === true) return null;
+          const open = menu?.key === row.block.key && menu.turn === turn;
+          return (
+            <button
+              type="button"
+              className="fy-ab__turn-press"
+              title={mark.full ?? mark.label}
+              aria-label={mark.full ?? mark.label}
+              aria-haspopup="menu"
+              aria-expanded={open}
+              data-testid="audiobook-turn-speaker"
+              onClick={(event) => {
+                event.stopPropagation();
+                // The menu stays the block's, outside its words: drawn in the rule it would be text
+                // in them, which a selection's offsets count (SPEC-047 R-111). So it is told where
+                // the name pressed stands, or a long beat's opens at its head, off the screen
+                // (codex on PR 3237): 4 under the press, which is 32 under the turn's rule, as a
+                // block's own is 32 under its top.
+                const top = event.currentTarget.getBoundingClientRect().bottom - event.currentTarget.closest(".fy-ab__block")!.getBoundingClientRect().top + 4;
+                setMenu(open ? null : { key: row.block.key, turn, top });
+              }}
+            />
+          );
+        } } : {};
         return (
           <Fragment key={row.block.key}>
           <div
@@ -1941,16 +1992,20 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
               // A kept line keeps the menu (design turn 198, rule 14); words that wait for their
               // paragraph's cast do not, and say nothing about it.
               const kept = row.kept === true ? <em className="fy-ab__kept">kept</em> : null;
-              const speaker = pinnable && row.block.paragraph >= 0 && row.turnMarks === undefined && row.waits !== true ? (
+              // A block of several turns gives its first turn's line the menu here, and each later
+              // turn's on its break (issue 3232): a chapter grouped by beats had nowhere to say who speaks.
+              const first = row.turnMarks?.[0];
+              const mine = menu?.key === row.block.key && (menu.turn ?? 0) === 0;
+              const speaker = pinnable && row.block.paragraph >= 0 && (first === undefined ? row.waits !== true : first.waits !== true) ? (
               <button
                 type="button"
-                className={`fy-ab__speaker fy-ab__speaker--press${menu?.key === row.block.key && menu.selection === undefined ? " fy-ab__speaker--open" : ""}`}
+                className={`fy-ab__speaker fy-ab__speaker--press${mine && menu?.selection === undefined ? " fy-ab__speaker--open" : ""}`}
                 title={row.markWarn ? `${row.full} · narrator` : row.full}
                 aria-haspopup="menu"
-                aria-expanded={menu?.key === row.block.key}
+                aria-expanded={mine}
                 onClick={(event) => {
                   event.stopPropagation();
-                  setMenu(menu?.key === row.block.key ? null : { key: row.block.key });
+                  setMenu(mine ? null : { key: row.block.key, ...(first !== undefined ? { turn: 0 } : {}) });
                 }}
               >
                 <i className="fy-ab__speaker-dot" aria-hidden="true" />
@@ -1982,13 +2037,14 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
             >
               {/* A held proposal is drawn in the direction's place, dashed, until it is accepted (design turn 184b). */}
               {row.proposed !== null ? (
-                <DirectedText raw={row.block.text} cues={row.proposed.input.cues} held={new Set(row.proposed.held.flatMap((control) => (control.cueIndex !== undefined ? [control.cueIndex] : [])))} {...(laterTurns !== undefined ? { turns: laterTurns } : {})} marks={marksFor(row)} />
+                <DirectedText raw={row.block.text} cues={row.proposed.input.cues} held={new Set(row.proposed.held.flatMap((control) => (control.cueIndex !== undefined ? [control.cueIndex] : [])))} {...(laterTurns !== undefined ? { turns: laterTurns } : {})} {...turnPress} marks={marksFor(row)} />
               ) : (
                 <DirectedText
                   raw={row.block.text}
                   cues={row.direction?.input.cues ?? []}
                   held={new Set(row.held.flatMap((control) => (control.cueIndex !== undefined ? [control.cueIndex] : [])))}
                   {...(laterTurns !== undefined ? { turns: laterTurns } : {})}
+                  {...turnPress}
                   {...(markable ? { onPlate: (index: number) => onMarker({ key: row.block.key, span: { from: 0, to: 0 }, edit: index }) } : {})}
                   {...(laterTurns !== undefined && hovers ? { gap: (index: number) => {
                     const gap = splitsIn(row.block.key).find((candidate) => candidate.row === index);
@@ -2016,11 +2072,13 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
             {menu?.key === row.block.key && choices !== undefined && onPin !== undefined && (
               <SpeakerMenu
                 row={row}
+                {...(menu.turn !== undefined && row.block.rows?.[menu.turn] !== undefined ? { turn: row.block.rows[menu.turn] } : {})}
+                {...(menu.top !== undefined ? { top: menu.top } : {})}
                 choices={choices}
                 onClose={() => setMenu(null)}
                 onPick={(pick) => {
                   setMenu(null);
-                  onPin(row, pick, menu.selection);
+                  onPin(row, pick, menu.selection, menu.turn);
                 }}
               />
             )}

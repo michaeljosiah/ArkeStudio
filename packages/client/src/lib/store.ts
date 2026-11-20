@@ -49,7 +49,7 @@ export {
   subscribeFrameRunQuote, clearFrameRunQuote, subscribeFrameRunStartResult,
   clearFrameRunStartResult, subscribeRoutingFindings, subscribeInteractiveExports,
   subscribePlanResults, subscribePlanStates, subscribeJobReady, subscribeRecoveryNotices,
-  onStudioAssistantReply, subscribeRemoteRefusals, requestMediaMeasurement, setPromptTools,
+  onStudioAssistantReply, subscribeRemoteRefusals, requestMediaMeasurement, requestSongSections, setPromptTools,
   requestPromptTools, onTextDraft, onTextTypefaces, onWorldCleanup,
 } from "./store/events.js";
 export type { TextDraftFrame, TextTypefacesFrame, WorldCleanupFrame } from "./store/events.js";

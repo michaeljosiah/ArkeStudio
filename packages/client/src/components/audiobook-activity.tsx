@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import {
   audiobookActivityCost, audiobookActivityJobs, audiobookActivityLive, audiobookActivityPath, audiobookActivityStage,
-  audiobookActivityTitle, audiobookActivityPause, audiobookRequestCost, formatMicroUsd, providerName, readerUnavailableWords, type AudiobookActivity, type ClientState,
+  audiobookActivityTitle, audiobookActivityPause, audiobookRequestCost, chapterCalled, formatMicroUsd, providerName, readerUnavailableWords, type AudiobookActivity, type ClientState,
 } from "@arke-studio/contracts";
 import { resolveHeldJob, resumeQueue, stopAudiobook, subscribeAudiobookActivity, useStore } from "../lib/store.js";
 import { activityReason, closeActivityPanel, openActivityPanel, inspectProviderCalls, currentAudiobookActivity } from "../lib/activity-panel.js";
@@ -23,7 +23,10 @@ export function AudiobookActivityRow({ run, state }: { run: AudiobookActivity; s
   const unresolved = jobs.find(ref => state.app.jobs.find(job => job.id === ref.id)?.status === "needs-reconciliation");
   const [expanded, setExpanded] = useState(false);
   const details = useRef<HTMLDetailsElement>(null);
-  const order = run.chapterOrder ?? state.world?.productions.find(p => p.meta.id === run.productionId)?.chapters.find(c => c.id === run.chapterId)?.order;
+  // The chapter as the book calls it (SPEC-047 R-2) where the book is open; the run's own place where it is not.
+  const book = state.world?.meta.worldId === run.worldId ? state.world.productions.find(p => p.meta.id === run.productionId)?.chapters : undefined;
+  const chapter = book?.find(c => c.id === run.chapterId);
+  const called = chapter !== undefined ? chapterCalled(book!, chapter) : run.chapterOrder !== undefined ? `Chapter ${run.chapterOrder}` : undefined;
   const saved = `${run.made} of ${run.toMake} blocks saved`;
   const blockReady = run.scope === "block" && run.phase === "ready";
   const unread = run.toMake - run.made - run.flagged;
@@ -49,7 +52,7 @@ export function AudiobookActivityRow({ run, state }: { run: AudiobookActivity; s
     <span className={cx("fy-ap__dot", `fy-ap__dot--${unresolved || paused ? "warn" : tone(run)}`)} aria-hidden />
     <div className="fy-ap__main">
       <div className="fy-ap__rowtitle">{paused ? `${run.chapterTitle} · ${run.scope === "block" ? "Block re-read" : "Narration"} paused` : audiobookActivityTitle(run)}</div>
-      <div className="fy-ap__rowsub">{order !== undefined ? `Chapter ${order} · ` : ""}{run.productionTitle} · {run.worldName}</div>
+      <div className="fy-ap__rowsub">{called !== undefined ? `${called} · ` : ""}{run.productionTitle} · {run.worldName}</div>
       {!blockReady && <><div className="fy-abactivity__stage" role="status">{storageWait && !storageWait.advisory ? storageWait.phase === "submission" ? "Waiting before submission" : "Waiting to save the result" : stage}</div>
         {run.phase !== "finished" && <div className="fy-ap__rowsub">{progress}</div>}</>}
       {run.phase !== "finished" && <div className="fy-ap__rowsub">{blockReady ? `${run.made} block${run.made === 1 ? "" : "s"} saved · ${cost.replace(" this re-read", " for this re-read")}` : [!uncertain && run.models.join(", "), cost].filter(Boolean).join(" · ")}</div>}

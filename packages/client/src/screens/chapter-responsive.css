@@ -395,6 +395,11 @@
 .fy-ab__turn-who { position: absolute; left: 14px; top: 10px; display: flex; align-items: center; gap: 7px; max-width: 160px; }
 .fy-ab__turn-who::before { content: attr(data-who); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: var(--type-label); color: var(--muted-foreground); }
 .fy-ab__turn-who::after { content: "kept"; flex: none; padding: 0 5px; border: 1px dashed var(--neutral-400); border-radius: 5px; font: var(--type-mono); font-size: var(--text-2xs); line-height: 16px; color: var(--muted-foreground); }
+/* A later turn's name opens its line's speaker menu (issue 3232): a press laid over the name the
+   break draws, holding no text, so a selection's offsets still count the words alone. */
+.fy-ab__turn-press { position: absolute; left: 0; top: 8px; width: 120px; height: 20px; padding: 0; border: 0; border-radius: 6px; background: transparent; cursor: pointer; }
+.fy-ab__turn-press:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.fy-ab__turn:has(> .fy-ab__turn-press:hover)::before, .fy-ab__turn:has(> .fy-ab__turn-press:hover) .fy-ab__turn-who::before { color: var(--foreground); }
 .fy-ab__pill-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--warning); }
 .fy-ab__toolmenu.fy-ab__castmenu { width: 260px; min-width: 0; }
 .fy-ab__menu-hd { padding: 8px 10px 4px; font: var(--type-label); color: var(--muted-foreground); }

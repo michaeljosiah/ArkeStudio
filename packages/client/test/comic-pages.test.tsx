@@ -546,7 +546,7 @@ describe("Arke's pages (turn 249)", () => {
     const drafted = page();
     drafted.panels[0]!.source = { story: "low-water-drawn", chapter: "the-tide", version: 1, paragraphs: [1, 2] };
     const m = await mount(withDraft([drafted, page()]));
-    assert.match(m.container.textContent!, /Arke’s draft2 pages from chapter 1/);
+    assert.match(m.container.textContent!, /Arke’s draft2 pages from Chapter 1/);
     assert.equal(m.container.querySelectorAll(".fy-comic__thumb--draft").length, 2);
     // A draft opens as the reader meets it (turn 256d); Details is the script with its passages.
     assert.ok(m.container.querySelector(".fy-comic__readpanel"));
@@ -693,7 +693,7 @@ describe("Adapt before drawing (turn 254)", () => {
   it("shows a plan as passages, pages and what the reader knows, with the lean named, kept or discarded whole (254b)", async () => {
     const m = await mount(drafting({ pages: [], plan: PLAN }));
     const plan = m.container.querySelector(".fy-comic__plan")!;
-    assert.match(plan.textContent!, /Page plan2 pages from chapter 1/);
+    assert.match(plan.textContent!, /Page plan2 pages from Chapter 1/);
     assert.match(plan.textContent!, /Jory and the boata second threadCut/);
     assert.match(plan.textContent!, /Bray finds herends: “Where’s Jory\?”/);
     assert.match(plan.textContent!, /Braynamed, page 1/);

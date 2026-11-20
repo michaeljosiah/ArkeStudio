@@ -1,4 +1,4 @@
-import type { ClientState, ConversationId, DomainEvent } from "@arke-studio/contracts";
+import type { ClientState, ConversationId, DomainEvent, SongSectionsResult } from "@arke-studio/contracts";
 import { measureProductionMedia } from "../media/measurement.js";
 import type { MediaProbe } from "../media/probe.js";
 import { saveProductionNarrative } from "../productions/narrative.js";
@@ -12,10 +12,10 @@ import type { CommandModule } from "./router.js";
 
 /**
  * A production's spend refreshed, its media measured, its narrative saved, its setup turn run, its
- * song clock changed and what its clips are made from set. Each of the first four checks its
- * world itself: the spend refresh is sent on its own and is dropped without a word once its world
- * is no longer shown, and the rest answer a world that is not open in their own words. The spine
- * and clips commands are the router's open-world kind.
+ * song measured, its song clock changed and what its clips are made from set. Each but the last
+ * two checks its world itself: the spend refresh is sent on its own and is dropped without a word
+ * once its world is no longer shown, and the rest answer a world that is not open in their own
+ * words. The spine and clips commands are the router's open-world kind.
  */
 export function productionCommands(ctx: CommandContext, deps: {
   mediaProbe: MediaProbe | null;
@@ -29,6 +29,7 @@ export function productionCommands(ctx: CommandContext, deps: {
   refreshConversations(store: WorldStore): Promise<void>;
   openWorldChat(store: WorldStore, conversationId: ConversationId): Promise<void>;
   stillOpen(store: WorldStore): boolean;
+  songSections(store: WorldStore, productionId: string): Promise<SongSectionsResult>;
   worldChat: () => ClientState["worldChat"];
   setWorldChat(worldChat: ClientState["worldChat"]): void;
 }) {
@@ -94,6 +95,21 @@ export function productionCommands(ctx: CommandContext, deps: {
         } finally {
           if (deps.stillOpen(store)) await ctx.refreshWorldSnapshot(msg.worldId);
         }
+      },
+    },
+    "song-sections": {
+      scope: "any-world",
+      async handle(msg) {
+        // Where the song changes (#3099), for the Cut's offer. Answered in its own event, measured
+        // or not, so the window that asked is never left waiting on a world that has closed. It
+        // reads the song and writes nothing; a mark reaches the spine only as a spine command.
+        const answer = (result: SongSectionsResult) => ctx.emit({ at: ctx.nowIso(), type: "song.sections", worldId: msg.worldId,
+          productionId: msg.productionId, requestId: msg.requestId, result });
+        const store = ctx.openStore();
+        if (!store || store.worldId !== msg.worldId) { answer({ status: "unavailable", reason: "That world is no longer open." }); return; }
+        const work = deps.songSections(store, msg.productionId);
+        deps.backgroundWork.add(work);
+        try { answer(await work); } finally { deps.backgroundWork.delete(work); }
       },
     },
     "production-setup": {

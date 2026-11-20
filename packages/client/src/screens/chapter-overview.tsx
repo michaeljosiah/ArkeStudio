@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { audiobookHeading, chapterCalled, chapterNumber } from "@arke-studio/contracts";
 import { ChevronLeft, ChevronRight, Check, Waveform } from "../components/icons.js";
 import { cx } from "../components/ui.js";
 
@@ -9,7 +10,11 @@ import { cx } from "../components/ui.js";
  * column held. Every write stays the workspace's: this draws, and calls back.
  */
 
-/** `order` is the chapter's own number, which a retired chapter before it does not change. */
+/**
+ * `order` is the chapter's own place, which a retired chapter before it does not change; the strip
+ * names it as the book calls it (SPEC-047 R-2), so an unnumbered prologue first leaves the next
+ * one Chapter 1 (issue 3240).
+ */
 export type BookStripChapter = { id: string; order: number; title: string; words: number; planned: boolean };
 
 /** One segment a chapter, sized by its words; the open one solid, planned ones outlined (R-36). */
@@ -22,7 +27,7 @@ export function BookStrip({ chapters, current, onChapter }: { chapters: readonly
       <button type="button" className="fy-chov__nav" aria-label="Previous chapter" title={previous?.title} disabled={previous === null} onClick={() => previous && onChapter(previous.id)}>
         <ChevronLeft size={12} />
       </button>
-      <b>Chapter {chapters[at]?.order ?? at + 1}</b>
+      <b>{at >= 0 ? chapterCalled(chapters, chapters[at]!) : `Chapter ${at + 1}`}</b>
       <span>of {chapters.length}</span>
       <span className="fy-chov__strip" role="group" aria-label="Chapters">
         {chapters.map((c) => (
@@ -31,8 +36,8 @@ export function BookStrip({ chapters, current, onChapter }: { chapters: readonly
             type="button"
             className={cx("fy-chov__seg", c.id === current && "fy-chov__seg--here", c.planned && "fy-chov__seg--planned")}
             style={{ flexGrow: Math.max(c.words, 300) }}
-            title={`Chapter ${c.order} · ${c.title}`}
-            aria-label={`Chapter ${c.order} · ${c.title}`}
+            title={audiobookHeading(chapterNumber(chapters, c), c.title)}
+            aria-label={audiobookHeading(chapterNumber(chapters, c), c.title)}
             aria-current={c.id === current ? "page" : undefined}
             onClick={() => c.id !== current && onChapter(c.id)}
           />

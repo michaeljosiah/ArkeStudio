@@ -5,6 +5,8 @@ import {
   arkePlayerPictureEdge,
   arkePlayerReleaseState,
   chapterBlocksRead,
+  chapterCalled,
+  chapterNumber,
   guideCounts,
   guideLiving,
   PART_SCHEDULE_DAYS,
@@ -75,7 +77,12 @@ const dayLabel = (day: PartScheduleDay) => (day === "daily" ? "Daily" : `${day[0
 
 type Listed = WebPackagesListed["packages"][number];
 
-export function arkePlayerCounts(plan: AudiobookListening, options: { book: boolean; motion: boolean; size?: ArkePlayerPictureSize }): ArkePlayerCounts {
+/**
+ * `chapters` are the book's own, which the range names its chapters by (SPEC-047 R-2): a part's
+ * plan holds only its new chapters, and counted among those alone an unnumbered prologue in an
+ * earlier edition would be forgotten.
+ */
+export function arkePlayerCounts(plan: AudiobookListening, options: { book: boolean; motion: boolean; size?: ArkePlayerPictureSize }, chapters: ReadonlyArray<{ order: number; title: string }> = plan.chapters): ArkePlayerCounts {
   const whole = carried(plan);
   // The cover ships with the narration only: a package of the book alone shows no pictures.
   const pictures = new Set<string>(whole.length === 0 ? [] : [...(plan.cover !== null ? [plan.cover] : []), ...whole.flatMap((chapter) => [...chapter.pictures.map((picture) => picture.file), ...(chapter.opening !== null ? [chapter.opening] : [])])]);
@@ -86,12 +93,13 @@ export function arkePlayerCounts(plan: AudiobookListening, options: { book: bool
   const pictureBytes = PICTURE_BYTES * Math.min(1, (edge / FULL_EDGE) ** 2);
   const orders = whole.map((chapter) => chapter.order);
   const runsOn = orders.every((order, index) => index === 0 || order === orders[index - 1]! + 1);
+  const first = whole.length > 0 ? chapterNumber(chapters, whole[0]!) : null, last = whole.length > 0 ? chapterNumber(chapters, whole.at(-1)!) : null;
   const seconds = whole.reduce((sum, chapter) => sum + chapter.seconds, 0);
   const shipped = options.motion ? loops.size : 0;
   return {
     chapters: whole.length,
     of: plan.chapters.length,
-    range: orders.length === 0 ? "none" : orders.length === 1 ? `Chapter ${orders[0]}` : runsOn ? `Chapters ${orders[0]}–${orders[orders.length - 1]}` : `${orders.length} chapters`,
+    range: orders.length === 0 ? "none" : orders.length === 1 ? chapterCalled(chapters, whole[0]!) : runsOn && first !== null && last !== null ? `Chapters ${first}–${last}` : `${orders.length} chapters`,
     pictures: pictures.size,
     tall: tall.size,
     loops: loops.size,
@@ -237,7 +245,9 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
   const guide = world === null ? null : exportGuideCounts(world);
   const guided = guide !== null && guide.characters.public + guide.places.public + guide.lore.public + guide.teasers.chosen > 0;
   // A part carries its chapters alone: no cover, and no guide (R-45).
-  const planned = plan === null ? null : parting ? arkePlayerCounts({ ...plan, cover: null, chapters: ticked }, { ...options, book: options.book && ticked.length > 0 }) : arkePlayerCounts(plan, options);
+  const planned = plan === null ? null : parting ? arkePlayerCounts({ ...plan, cover: null, chapters: ticked }, { ...options, book: options.book && ticked.length > 0 }, production.chapters) : arkePlayerCounts(plan, options, production.chapters);
+  // A row names its chapter by the number the book calls it (SPEC-047 R-2), a prologue by its title alone.
+  const rowName = (chapter: ListeningChapter) => { const number = chapterNumber(production.chapters, chapter); return number === null ? chapter.title : `${number} · ${chapter.title}`; };
   // The guide rides in every package once something is public (R-15), and the estimate counts it.
   const counts = planned === null || !guided || parting ? planned : { ...planned, bytes: planned.bytes + (guide.characters.public + guide.places.public + guide.teasers.chosen) * GUIDE_ENTRY_BYTES };
   const empty = parting ? ticked.length === 0 : counts !== null && counts.chapters === 0 && !options.book;
@@ -271,7 +281,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
         ))}
       </span>
     ),
-    releaseState === null ? undefined : `since ${dayOf(releaseState.last.exportedAt)}${releaseState.last.chapter !== null ? ` · Chapter ${releaseState.last.chapter.order}` : ""}`,
+    releaseState === null ? undefined : `since ${dayOf(releaseState.last.exportedAt)}${releaseState.last.chapter !== null ? ` · ${chapterCalled(production.chapters, releaseState.last.chapter)}` : ""}`,
   );
   const picturesLine = counts === null ? "…" : counts.tall > 0 ? `${counts.pictures} wide · ${counts.tall} tall` : `${counts.pictures}${phone ? "" : " · fitted for a phone"}`;
   const partRows = (
@@ -285,7 +295,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
           {ready.map((chapter, index) => (
             <label key={chapter.chapterId} className="fy-abv-ch">
               <input type="checkbox" checked={index < ticked.length} onChange={(event) => setUpTo(event.target.checked ? index + 1 : index)} />
-              <span className="t">{chapter.order} · {chapter.title}</span>
+              <span className="t">{rowName(chapter)}</span>
               {!phone && <i>read whole · {Math.max(1, Math.round(chapter.seconds / 60))} min · {chapter.pictures.length} picture{chapter.pictures.length === 1 ? "" : "s"}</i>}
             </label>
           ))}
@@ -295,7 +305,7 @@ export function useArkePlayerExport({ worldId, worldSlug, keyArt, production, pl
             return (
               <label key={chapter.chapterId} className="fy-abv-ch no">
                 <input type="checkbox" checked={false} disabled />
-                <span className="t">{chapter.order} · {chapter.title}</span>
+                <span className="t">{rowName(chapter)}</span>
                 <i>{chapter.state === "part" ? `read ${read} of ${of} blocks` : "not read"}</i>
               </label>
             );
