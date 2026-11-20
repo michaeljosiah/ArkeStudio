@@ -201,6 +201,21 @@ export const TakeSchema = z
         /** Hash of the normalized PNG bytes whose pixels the crop geometry addresses. */
         cropSourceHash: z.string().regex(/^sha256:[0-9a-f]{16}$/),
         hash: z.string().regex(/^sha256:[0-9a-f]{16}$/),
+        /**
+         * Present when the sheet came back at a size other than its frozen canvas (issue 3154):
+         * the size it came back at and the ratio each axis of the frozen layout was scaled by to
+         * find this panel. `crop` is still the exact rectangle cut from the `cropSourceHash`
+         * pixels, after centring it back to the panel's own shape.
+         */
+        returnedSize: z
+          .object({
+            width: z.number().int().min(1),
+            height: z.number().int().min(1),
+            scaleX: z.number().positive(),
+            scaleY: z.number().positive(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),

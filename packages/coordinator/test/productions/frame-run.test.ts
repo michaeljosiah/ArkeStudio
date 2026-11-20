@@ -29,6 +29,7 @@ import {
   retryFrameStep,
   retryFrameCell,
   abortFrameRunStart,
+  boardLanding,
   recordBoardSheetFromJob,
   startFrameRun,
   type FrameRunDriverDeps,
@@ -38,7 +39,7 @@ import { Coordinator } from "../../src/coordinator.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import type { WorldProvider } from "../../src/world-provider.js";
 import { ReadModel } from "../../src/read-model.js";
-import { encodePng, solidImage } from "../../src/references/png.js";
+import { decodePng, encodePng, solidImage } from "../../src/references/png.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { acceptTake } from "../../src/takes/review.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -1022,6 +1023,7 @@ describe("frame-run coordinator service", () => {
     assert.ok(children.every((take) => take.panel?.parentTakeId === parent!.id));
     assert.ok(children.every((take) => take.panel?.parentHash !== take.panel?.cropSourceHash));
     assert.ok(children.every((take) => take.panel?.crop.width === 16 && take.panel.crop.height === 9));
+    assert.ok(children.every((take) => take.panel?.returnedSize === undefined), "a sheet at its frozen canvas records no resize");
     for (const take of takes) {
       const bytes = await readFile(join(f.dir, "productions", f.production.meta.id, "takes", take.id, take.media!));
       const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
@@ -1051,6 +1053,149 @@ describe("frame-run coordinator service", () => {
       999,
       "existing children remain in the allocation on replay",
     );
+  });
+
+  it("lands a Codex Image board that came back 1602x981 by scaling its frozen layout (issue 3154)", async () => {
+    const f = await fixture();
+    const run = await start(f, "board", "all", f.production, f.world, CODEX_IMAGE);
+    const layout = run.steps[0]!.request.layout!;
+    assert.deepEqual([layout.canvasWidth, layout.canvasHeight], [1672, 941]);
+    const q = queue();
+    await advanceFrameRun(f.store, f.production.meta.id, run.id, q.deps);
+    const jobId = (await readFrameRun(f.store, f.production.meta.id, run.id))!.steps[0]!.jobId!;
+    const incoming = `productions/${f.production.meta.id}/incoming/${run.id}/step-0/sheet.png`;
+    await mkdir(join(f.dir, "productions", f.production.meta.id, "incoming", run.id, "step-0"), { recursive: true });
+    await writeFile(join(f.dir, incoming), Buffer.from("codex-provider-sheet"));
+    const job: Job = {
+      ...q.jobs.get(jobId)!,
+      status: "succeeded",
+      landedFiles: [incoming],
+      finalization: { status: "pending", error: null, updatedAt: CLOCK() },
+    };
+    // Drawn the way the real sheets were: every panel where the frozen layout lands once each
+    // axis is scaled by its own ratio, the rest of the canvas blank.
+    const sheet = solidImage(1602, 981, [255, 255, 255, 255]);
+    const colours: Array<[number, number, number, number]> = [[200, 40, 40, 255], [40, 200, 40, 255], [40, 40, 200, 255], [200, 200, 40, 255]];
+    for (const [index, region] of layout.regions.entries()) {
+      const left = Math.round(region.x * 1602 / 1672);
+      const top = Math.round(region.y * 981 / 941);
+      const right = Math.round((region.x + region.width) * 1602 / 1672);
+      const bottom = Math.round((region.y + region.height) * 981 / 941);
+      for (let y = top; y < bottom; y++) {
+        for (let x = left; x < right; x++) sheet.pixels.set(colours[index]!, (y * 1602 + x) * 4);
+      }
+    }
+    const sheetBytes = encodePng(sheet);
+    const converter = {
+      write: async (_input: string, output: string) => {
+        await writeFile(output, sheetBytes);
+        return { ok: true as const };
+      },
+    };
+
+    const updates = run.steps[0]!.updateShotIds;
+    const takes = await recordBoardSheetFromJob(f.store, f.production, job, 0, "included-plan", converter);
+    assert.equal(takes.length, 1 + updates.length, "the parent and every update panel land");
+    const children = takes.slice(1);
+    const sheetDigest = `sha256:${createHash("sha256").update(sheetBytes).digest("hex")}`;
+    for (const child of children) {
+      const index = child.panel!.index - 1;
+      assert.deepEqual(child.panel?.returnedSize, { width: 1602, height: 981, scaleX: 1602 / 1672, scaleY: 981 / 941 });
+      assert.ok(sheetDigest.startsWith(child.panel!.cropSourceHash), "the crop still addresses the decoded sheet's pixels");
+      const bytes = await readFile(join(f.dir, "productions", f.production.meta.id, "takes", child.id, child.media!));
+      assert.ok(`sha256:${createHash("sha256").update(bytes).digest("hex")}`.startsWith(child.panel!.hash));
+      const panel = decodePng(bytes);
+      assert.deepEqual([panel.width, panel.height], [child.panel!.crop.width, child.panel!.crop.height]);
+      assert.ok(Math.abs(panel.width / panel.height - 16 / 9) < 0.01, "centred back to the production's shape");
+      const colour = colours[index]!;
+      for (let at = 0; at < panel.pixels.length; at += 4) {
+        if (panel.pixels[at] !== colour[0] || panel.pixels[at + 1] !== colour[1] || panel.pixels[at + 2] !== colour[2]) {
+          assert.fail(`panel ${index + 1} holds a pixel that is not its own picture`);
+        }
+      }
+    }
+    // The first panel's frozen 832x468 at (4, 2) scales to 797x488 and centres to 797x448.
+    assert.deepEqual(layout.regions[0], { panel: 1, x: 4, y: 2, width: 832, height: 468 });
+    assert.deepEqual(children.find((child) => child.panel?.index === 1)?.panel?.crop, { x: 4, y: 22, width: 797, height: 448 });
+    const production = f.store.getBundle().productions.find((candidate) => candidate.meta.id === f.production.meta.id)!;
+    for (const shotId of updates) assert.match(production.selections[shotId]!.startFrameArtifactId!, /^ar_/);
+    const settled = (await readFrameRun(f.store, f.production.meta.id, run.id))!;
+    const state = await frameRunState(f.store, f.production.meta.id, settled, [{ ...job, finalization: { status: "complete", error: null, updatedAt: CLOCK() } }]);
+    assert.equal(state.steps[0]!.status, "succeeded");
+    assert.equal(state.steps[0]!.landingOutcome, "filed");
+    assert.equal(state.filedShots, updates.length);
+  });
+
+  it("refuses a board too far from its canvas's shape, says why on the run, and offers a new board (issue 3154)", async () => {
+    const layout = {
+      columns: 2 as const,
+      rows: 2,
+      canvasWidth: 1672,
+      canvasHeight: 941,
+      regions: [{ panel: 1, x: 4, y: 2, width: 832, height: 468 }],
+    };
+    assert.ok(boardLanding(layout, 1602, 981).ok, "8% narrower lands");
+    assert.ok(boardLanding(layout, 1254, 706).ok, "the frozen shape at another size lands, as it always did");
+    assert.deepEqual(boardLanding(layout, 1672, 941), { ok: true, scaleX: 1, scaleY: 1, crops: [{ x: 4, y: 2, width: 832, height: 468 }] });
+    assert.deepEqual(boardLanding(layout, 1536, 1024), { ok: false, reason: "The picture came back 1536×1024 instead of 1672×941" }, "a 3:2 sheet is 18% off");
+
+    const f = await fixture();
+    const run = await start(f, "board", "all", f.production, f.world, CODEX_IMAGE);
+    const q = queue();
+    await advanceFrameRun(f.store, f.production.meta.id, run.id, q.deps);
+    const jobId = (await readFrameRun(f.store, f.production.meta.id, run.id))!.steps[0]!.jobId!;
+    const incoming = `productions/${f.production.meta.id}/incoming/${run.id}/step-0/sheet.png`;
+    await mkdir(join(f.dir, "productions", f.production.meta.id, "incoming", run.id, "step-0"), { recursive: true });
+    await writeFile(join(f.dir, incoming), Buffer.from("square-provider-sheet"));
+    const job: Job = {
+      ...q.jobs.get(jobId)!,
+      status: "succeeded",
+      landedFiles: [incoming],
+      finalization: { status: "pending", error: null, updatedAt: CLOCK() },
+    };
+    const converter = {
+      write: async (_input: string, output: string) => {
+        await writeFile(output, encodePng(solidImage(1024, 1024, [90, 90, 90, 255])));
+        return { ok: true as const };
+      },
+    };
+    const reason = "The picture came back 1024×1024 instead of 1672×941";
+
+    const takes = await recordBoardSheetFromJob(f.store, f.production, job, 0, "included-plan", converter);
+    assert.equal(takes.length, 1, "the sheet is kept; no panel is guessed at");
+    assert.equal(takes[0]!.boardSheetParent, true);
+    const replayed = await recordBoardSheetFromJob(f.store, f.production, job, 0, "included-plan", converter);
+    assert.equal(replayed.length, 1, "a replay meets the same answer without failing");
+    const production = f.store.getBundle().productions.find((candidate) => candidate.meta.id === f.production.meta.id)!;
+    for (const shotId of run.steps[0]!.updateShotIds) assert.equal(production.selections[shotId]?.startFrameArtifactId, undefined);
+
+    const refused = (await readFrameRun(f.store, f.production.meta.id, run.id))!;
+    assert.equal(refused.steps[0]!.landingRefusal, reason);
+    const done = { ...job, finalization: { status: "complete" as const, error: null, updatedAt: CLOCK() } };
+    const state = await frameRunState(f.store, f.production.meta.id, refused, [done]);
+    assert.equal(state.steps[0]!.status, "failed");
+    assert.equal(state.steps[0]!.error, reason);
+    assert.equal(state.steps[0]!.canRetry, true);
+    assert.equal(state.steps[0]!.canRetryCell, false);
+    assert.equal(state.failedShots, run.steps[0]!.updateShotIds.length);
+
+    const jobById = (id: string) => id === done.id ? done : undefined;
+    await assert.rejects(
+      retryFrameCell(f.store, f.production.meta.id, run.id, 0, run.steps[0]!.updateShotIds[0]!, () => production, jobById),
+      /requires a successful board-sheet attempt/,
+      "a stale cell retry cannot borrow a sheet whose panels were never found",
+    );
+    const retried = await retryFrameStep(f.store, f.production.meta.id, run.id, 0, () => production, jobById);
+    assert.equal(retried!.steps.length, 2);
+    assert.equal(retried!.steps[1]!.grain, "step-retry");
+    assert.equal(retried!.steps[1]!.landingRefusal, undefined, "the new attempt starts unrefused");
+
+    // A sheet no run owns has nowhere to say it, so its finalization fails with the reason.
+    const { frameRun: _run, frameRunStep: _step, ...unowned } = job.params;
+    const orphanIncoming = `productions/${f.production.meta.id}/incoming/orphan.png`;
+    await writeFile(join(f.dir, orphanIncoming), Buffer.from("orphan-provider-sheet"));
+    const orphan: Job = { ...job, id: "jb_00000000000000000000000077", landedFiles: [orphanIncoming], params: unowned };
+    await assert.rejects(recordBoardSheetFromJob(f.store, f.production, orphan, 0, "included-plan", converter), new RegExp(reason));
   });
 
   it("serializes an ordinary take review with a board parent review", async () => {

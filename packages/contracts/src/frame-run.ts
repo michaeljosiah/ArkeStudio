@@ -163,9 +163,19 @@ export const FrameRunStepSchema = z
     retryOf: z.number().int().min(0).optional(),
     jobId: JobIdSchema.nullable(),
     landingOutcomes: z.record(ShotIdSchema, z.enum(["filed", "superseded"])).default({}),
+    /**
+     * Why a board sheet that came back could not be split into its panels, in words for the
+     * person (issue 3154): a sheet too far from the frozen canvas's shape for its layout to be
+     * found. The sheet itself is kept and its finalization completes, because replaying it would
+     * meet the same pixels; what helps is a new board, so the fold offers `Retry board`.
+     */
+    landingRefusal: z.string().min(1).optional(),
   })
   .strict()
   .superRefine((step, ctx) => {
+    if (step.landingRefusal !== undefined && step.dispatch.target.kind !== "board-sheet") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["landingRefusal"], message: "only a board sheet can be refused at landing" });
+    }
     const request = step.requestShotIds;
     const updates = new Set(step.updateShotIds);
     if (new Set(request).size !== request.length) {
@@ -432,6 +442,14 @@ export function foldFrameRun(run: FrameRun, jobs: readonly FrameRunJobFacts[]): 
           : job.status;
   const succeeded = (job: FrameRunJobFacts | undefined) =>
     job?.status === "succeeded" && job.finalization !== "pending" && job.finalization !== "failed";
+  // A board refused at landing finalized cleanly but filed nothing, so it neither reconciles an
+  // earlier failure nor counts as the shot's success (issue 3154).
+  const refusedAtLanding = (step: FrameRun["steps"][number], job: FrameRunJobFacts | undefined) =>
+    step.landingRefusal !== undefined && succeeded(job);
+  const landedAttempt = (step: FrameRun["steps"][number]) => {
+    const job = step.jobId === null ? undefined : jobById.get(step.jobId);
+    return succeeded(job) && !refusedAtLanding(step, job);
+  };
   const descendsFrom = (candidateIndex: number, ancestorIndex: number): boolean => {
     let at = run.steps[candidateIndex]?.retryOf;
     while (at !== undefined) {
@@ -516,13 +534,15 @@ export function foldFrameRun(run: FrameRun, jobs: readonly FrameRunJobFacts[]): 
       };
     }
     const failureClass = job.failureClass ?? null;
-    const rawStatus = baseStatus(job);
+    const refused = refusedAtLanding(step, job);
+    const rawStatus = refused ? "failed" : baseStatus(job);
+    const error = refused
+      ? step.landingRefusal!
+      : job.finalization === "failed" ? (job.finalizationError ?? job.error ?? null) : (job.error ?? null);
     const shots = step.updateShotIds.map((shotId) => {
       const later = laterAttempts(index, shotId);
       const latest = later[0];
-      const reconciled = rawStatus === "failed" && latest !== undefined && succeeded(
-        latest.step.jobId === null ? undefined : jobById.get(latest.step.jobId),
-      );
+      const reconciled = rawStatus === "failed" && latest !== undefined && landedAttempt(latest.step);
       const shotStatus: FrameRunStepStatus = reconciled
         ? "reconciled"
         : rawStatus === "succeeded" && step.landingOutcomes[shotId] === "superseded"
@@ -544,7 +564,7 @@ export function foldFrameRun(run: FrameRun, jobs: readonly FrameRunJobFacts[]): 
         shotId,
         status: shotStatus,
         failureClass,
-        error: job.finalization === "failed" ? (job.finalizationError ?? job.error ?? null) : (job.error ?? null),
+        error,
         landingOutcome: (succeeded(job) ? step.landingOutcomes[shotId] : undefined) ?? inheritedLandingOutcome(index, shotId) ?? null,
         canRetryCell,
       };
@@ -571,15 +591,16 @@ export function foldFrameRun(run: FrameRun, jobs: readonly FrameRunJobFacts[]): 
       run.mode === "board" &&
       step.dispatch.target.kind === "board-sheet" &&
       ["succeeded", "reconciled", "superseded"].includes(status);
+    // A refused board is not a provider failure, but the same press helps it: another sheet.
     const canRetry =
       !run.cancelled &&
-      ((status === "failed" && failureClass === "transient") || wholeBoardRetry) &&
+      ((status === "failed" && (failureClass === "transient" || refused)) || wholeBoardRetry) &&
       !blockedByDescendant(index, step.updateShotIds, wholeBoardRetry);
     return {
       index,
       status,
       failureClass,
-      error: job.finalization === "failed" ? (job.finalizationError ?? job.error ?? null) : (job.error ?? null),
+      error,
       etaSec: job.etaSec ?? null,
       canRetry,
       canRetryCell: shots.some((shot) => shot.canRetryCell),
