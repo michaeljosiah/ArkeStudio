@@ -9,6 +9,7 @@ import {
   type ConversationId,
   type ManifestModel,
   type ProductionBundle,
+  type ReferenceKit,
   type SceneRecord,
   type WorldBundle,
   orderedShots,
@@ -177,6 +178,65 @@ async function start(
     consumeQuote: () => quote,
     compile: () => compile,
   });
+}
+
+/**
+ * The music video's hook (issue 3168): two leads with character sheets, a singer with only a
+ * main photo who has three cells of his own, and the leads' place. `framed` shots already hold a
+ * frame, so a missing-only board carries them as fixed cells.
+ */
+function hookBoard(value: Awaited<ReturnType<typeof fixture>>, framed: readonly string[] = []) {
+  const shot = (id: string, number: number, description: string, durationSec: number) =>
+    ({ id, number, title: `Shot ${number}`, description, durationSec });
+  const scene = {
+    ...value.scene,
+    inherits: { location: "the-saltmarket", timeOfDay: "night" },
+    shots: [
+      shot("sh_70", 1, "Close on @maren-kest's coat in @the-saltmarket. @ines-half-hitch's hand enters frame.", 3),
+      shot("sh_71", 2, "@perrin-tallow close and front-on at @the-vigil, eyes on the lens.", 2),
+      shot("sh_72", 3, "@ines-half-hitch's palm lies flat on @maren-kest's chest in @the-saltmarket.", 3),
+      shot("sh_73", 4, "@perrin-tallow in profile at @the-vigil.", 2),
+      shot("sh_74", 5, "Over @ines-half-hitch's shoulder, @maren-kest's shoulders drop in @the-saltmarket.", 3),
+      shot("sh_75", 6, "@perrin-tallow tight close-up at @the-vigil.", 2),
+    ],
+  } as SceneRecord;
+  const kit = (sheetId: string, mainPhoto: string, sheet?: string): ReferenceKit => ({
+    sheetId,
+    mainPhoto: { file: mainPhoto, source: "upload" },
+    tiles: [],
+    compilations: sheet === undefined ? [] : [{
+      file: sheet, format: "character-sheet", sheetVersion: 3, tiles: [], compiledAt: CLOCK(), source: "local", accepted: true,
+    }],
+  });
+  const artifacts = framed.map((shotId, index) => ({
+    id: `ar_${String(index + 70).padStart(26, "0")}`,
+    kind: "image" as const,
+    file: `frame-${shotId}.png`,
+    hash: "sha256:0000000000000000" as const,
+    origin: { by: "user" as const },
+    links: [shotId],
+    created: CLOCK(),
+  }));
+  const world: WorldBundle = {
+    ...value.world,
+    sheets: value.world.sheets.map((sheet) => (sheet.id === "ines-half-hitch" ? { ...sheet, billing: "lead" } : sheet)),
+    referenceKits: [
+      ...value.world.referenceKits,
+      kit("ines-half-hitch", "main.png", "character-sheet.png"),
+      kit("perrin-tallow", "main.png"),
+      kit("the-saltmarket", "plate.png"),
+    ],
+    artifacts: [...value.world.artifacts, ...artifacts],
+  };
+  const production: ProductionBundle = {
+    ...value.production,
+    meta: { ...value.production.meta, aspect: "16:9" },
+    selections: {
+      ...value.production.selections,
+      ...Object.fromEntries(framed.map((shotId, index) => [shotId, { trimInSec: 0, startFrameArtifactId: artifacts[index]!.id }])),
+    },
+  };
+  return { value: { ...value, scene }, world, production };
 }
 
 async function finishRun(
@@ -823,6 +883,61 @@ describe("frame-run coordinator service", () => {
       }),
     });
     assert.equal(quote.blockedReason, "Codex Image cannot deliver 4:5 - it offers 9:16, 16:9");
+  });
+
+  it("a board carries every cited person before a second picture of anyone, and names the rest (issue 3168)", async () => {
+    const hook = hookBoard(await fixture());
+    let quote: Awaited<ReturnType<typeof quoteFrameRun>> | undefined;
+    const run = await start(hook.value, "board", "all", hook.production, hook.world, CODEX_IMAGE, undefined, (value) => { quote = value; });
+    assert.equal(run.steps.length, 1, "the six cells pack as one board, as the hook's did");
+    const step = run.steps[0]!;
+    // Taken in panel order, the first cell's pass filled all four slots, a second picture of
+    // its lead among them, and the singer of three cells went as a line of text.
+    assert.deepEqual(step.request.references.map((reference) => reference.path), [
+      "references/maren-kest/model-sheet-v4.png",
+      "references/ines-half-hitch/character-sheet.png",
+      "references/perrin-tallow/main.png",
+      "references/the-saltmarket/plate.png",
+    ]);
+    assert.deepEqual(step.dispatch.references, step.request.references.map((reference) => reference.path));
+    assert.deepEqual(quote?.steps[0]?.references, step.request.references, "the dialog reads what the board carries");
+    assert.deepEqual(step.request.droppedReferences, [
+      { path: "references/maren-kest/head-front.png", reason: "a second picture of the same subject, over the model's reference budget" },
+      { path: "references/ines-half-hitch/main.png", reason: "a second picture of the same subject, over the model's reference budget" },
+    ]);
+
+    // One slot fewer: characters before the place, as a shot ranks them (SPEC-010 §2.9).
+    const three = { ...CODEX_IMAGE, accepts: { ...CODEX_IMAGE.accepts, referenceImages: 3 } };
+    const again = hookBoard(await fixture());
+    const tighter = (await start(again.value, "board", "all", again.production, again.world, three)).steps[0]!;
+    assert.deepEqual(tighter.request.references.map((reference) => reference.sheetId), ["maren-kest", "ines-half-hitch", "perrin-tallow"]);
+    assert.deepEqual(tighter.request.droppedReferences[0], {
+      path: "references/the-saltmarket/plate.png",
+      reason: "over the model's reference budget",
+    });
+  });
+
+  it("a board's slots go first to people no fixed cell shows (issue 3168)", async () => {
+    const hook = hookBoard(await fixture(), ["sh_70", "sh_74"]);
+    const run = await start(hook.value, "board", "missing", hook.production, hook.world, CODEX_IMAGE);
+    const step = run.steps[0]!;
+    assert.deepEqual(step.request.panels.map((panel) => panel.role), ["fixed", "update", "update", "update", "fixed", "update"]);
+    // Two fixed frames leave two of Codex Image's four. Both leads are in both frames; the singer
+    // is in neither, and in three of the four cells being drawn.
+    assert.deepEqual(step.dispatch.references, [
+      "artifacts/frame-sh_70.png",
+      "artifacts/frame-sh_74.png",
+      "references/perrin-tallow/main.png",
+      "references/ines-half-hitch/character-sheet.png",
+    ]);
+    assert.match(step.request.prompt, /Panel 1 must preserve reference image 1\.\n\nPanel 5 must preserve reference image 2\./);
+    // What is left out is named on the request, never dropped silently (SPEC-010 R-15).
+    assert.deepEqual(step.request.droppedReferences, [
+      { path: "references/maren-kest/model-sheet-v4.png", reason: "over the model's reference budget once the fixed frames ride" },
+      { path: "references/the-saltmarket/plate.png", reason: "over the model's reference budget once the fixed frames ride" },
+      { path: "references/ines-half-hitch/main.png", reason: "a second picture of the same subject, over the model's reference budget" },
+      { path: "references/maren-kest/head-front.png", reason: "a second picture of the same subject, over the model's reference budget" },
+    ]);
   });
 
   it("preserves the board parent and extracts only update panels as deterministic child takes", async () => {

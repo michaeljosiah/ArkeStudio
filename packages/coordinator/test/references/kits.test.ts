@@ -421,6 +421,15 @@ describe("the reference budget (R-15, D9, §3.2) — the silent-truncation suite
     );
   });
 
+  it("ranks a subject another picture in the request already shows after one nothing shows, within its kind (issue 3168)", () => {
+    const two: ManifestModel = { ...MODEL, accepts: { ...MODEL.accepts, referenceImages: 2 } };
+    const board = candidates.map((candidate) => ({ ...candidate, pictured: candidate.sheetId === "maren-kest" }));
+    const result = referenceBudget(board, two);
+    assert.deepEqual(result.carried.map((c) => c.sheetId), ["bray-half-hitch", "maren-kest"], "the lead's billing no longer outranks a face nothing else shows");
+    const pictured = referenceBudget(candidates.map((candidate) => ({ ...candidate, pictured: candidate.kind === "character" })), two);
+    assert.deepEqual(pictured.carried.map((c) => c.sheetId), ["maren-kest", "bray-half-hitch"], "characters still come before an unseen place");
+  });
+
   it("is stable across runs and updates when the model changes", () => {
     const two: ManifestModel = { ...MODEL, accepts: { ...MODEL.accepts, referenceImages: 2 } };
     const a = referenceBudget(candidates, two);

@@ -21,9 +21,11 @@ import {
   planScene,
   productionAspect,
   promptedShapeLine,
+  referenceBudget,
   resolveCast,
   sceneImageOutput,
   compilePasses,
+  type BudgetCandidate,
   type FrameRun,
   type FrameRunQuote,
   type FrameBoardLayout,
@@ -35,6 +37,7 @@ import {
   type ManifestModel,
   type ProductionBundle,
   type SceneRecord,
+  type Sheet,
   type Take,
   type WorldBundle,
   beatPictureShotId,
@@ -129,6 +132,65 @@ function frozenReferences(
     });
   }
   return [...unique.values()].slice(0, Math.max(0, capacity));
+}
+
+/**
+ * What one board sheet carries beside its fixed frames (issue 3168), budgeted across the whole
+ * board by SPEC-010 §2.9's rank. Each member's pass was budgeted for its own shot alone, so
+ * taking their references in panel order and cutting at the slots left spent those slots on the
+ * first panel's cast, a second picture of its lead included, and dropped a person cited by three
+ * later cells without a word in the request.
+ *
+ * "First appearance" reads the cells being drawn before the fixed ones, and a subject a fixed
+ * cell shows ranks after one nothing in the request shows. Whatever does not fit is named in
+ * `droppedReferences` (R-15).
+ */
+function boardReferences(
+  members: ReadonlyArray<{ pass: ReturnType<typeof compilePasses>[number] | undefined; fixed: boolean; cited: ReadonlySet<string> }>,
+  sheets: readonly Sheet[],
+  model: ManifestModel,
+  capacity: number,
+): Pick<FrameStepRequest, "references" | "droppedReferences"> {
+  const ordered = [...members.filter((member) => !member.fixed), ...members.filter((member) => member.fixed)];
+  // A sheet's first file is its primary; a second is depth (a main photo beside its sheet).
+  const files = new Map<string, FrameStepRequest["references"]>();
+  for (const reference of ordered.flatMap((member) => member.pass?.references ?? [])) {
+    if (reference.sheetVersion === null) continue;
+    const known = files.get(reference.sheetId) ?? [];
+    if (known.some((entry) => entry.path === reference.file)) continue;
+    files.set(reference.sheetId, [...known, {
+      sheetId: reference.sheetId as FrameStepRequest["references"][number]["sheetId"],
+      version: reference.sheetVersion,
+      path: reference.file,
+    }]);
+  }
+  const pictured = new Set(members.filter((member) => member.fixed).flatMap((member) => [...member.cited]));
+  const candidates: BudgetCandidate[] = [...files.entries()].flatMap(([sheetId, entries], index) => {
+    const sheet = sheets.find((candidate) => candidate.id === sheetId);
+    return sheet === undefined ? [] : [{
+      sheetId,
+      kind: sheet.type,
+      ...(sheet.billing !== undefined ? { billing: sheet.billing } : {}),
+      appearanceOrder: index,
+      hasReference: true,
+      hasSecondaryReference: entries.length > 1,
+      pictured: pictured.has(sheetId),
+    }];
+  });
+  const budget = referenceBudget(candidates, { ...model, accepts: { ...model.accepts, referenceImages: Math.max(0, capacity) } });
+  const fileOf = (candidate: BudgetCandidate) => files.get(candidate.sheetId)![candidate.referenceRole === "secondary" ? 1 : 0]!;
+  const fixedCount = members.filter((member) => member.fixed).length;
+  return {
+    references: budget.carried.map(fileOf),
+    droppedReferences: budget.dropped.map((candidate) => ({
+      path: fileOf(candidate).path,
+      reason: candidate.referenceRole === "secondary"
+        ? "a second picture of the same subject, over the model's reference budget"
+        : fixedCount > 0
+          ? "over the model's reference budget once the fixed frames ride"
+          : "over the model's reference budget",
+    })),
+  };
 }
 
 function boardSheetPrompt(
@@ -466,10 +528,25 @@ export async function compileFrameRunEvidence(input: CompileFrameRunInput): Prom
           `board ${board.letter} needs ${fixedCount} fixed frame reference${fixedCount === 1 ? "" : "s"}, but ${input.model.displayName} accepts ${input.model.accepts.referenceImages}`,
         );
       }
-      const boardPasses = board.memberShotIds.flatMap((shotId) => {
-        const pass = passByShot.get(shotId);
-        return pass === undefined ? [] : [pass];
-      });
+      // What a fixed cell shows is what its shot cites and what its own pass carried: the frame
+      // was drawn from both, the scene's location included where no sentence names it.
+      const carried = boardReferences(
+        panels.map((panel) => {
+          const pass = passByShot.get(panel.shotId);
+          const shot = shots.find((candidate) => candidate.id === panel.shotId);
+          return {
+            pass,
+            fixed: panel.role === "fixed",
+            cited: new Set([
+              ...resolveCast(shot?.description ?? "", input.world.sheets).cast.map((entry) => entry.sheet.id),
+              ...(pass?.references ?? []).map((reference) => reference.sheetId),
+            ]),
+          };
+        }),
+        input.world.sheets,
+        input.model,
+        input.model.accepts.referenceImages - fixedCount,
+      );
       const creativePrompt =
         boardPromptFor(input.scene, board.memberShotIds) ??
         assembleBoardPrompt({
@@ -491,8 +568,7 @@ export async function compileFrameRunEvidence(input: CompileFrameRunInput): Prom
       const request: FrameStepRequest = {
         prompt: boardSheetPrompt(creativePrompt, panels, layout, promptedShapeLine(input.model, aspect)),
         panels,
-        references: frozenReferences(boardPasses, input.model.accepts.referenceImages - fixedCount),
-        droppedReferences: [],
+        ...carried,
         provenance: {
           canonRevision: input.world.meta.canonRevision,
           artDirectionVersion: input.world.artDirection.version,
