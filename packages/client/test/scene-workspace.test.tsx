@@ -179,7 +179,7 @@ describe("scene detail owns the workspace", () => {
     assert.equal(q(mounted, '[data-testid="workspace-flow"]'), null, "and Flow is not mounted yet");
     assert.ok(q(mounted, ".fy-arke"), "the real production conversation is docked beside the work");
     assert.equal(q(mounted, ".fy-cx__placeholder")?.textContent, "Ask Arke about this scene…", "the dock names its current subject");
-    assert.deepEqual(all(mounted, ".fy-sw__tab").map((tab) => tab.textContent), ["Storyboard", "Flow", "Preview"], "the Stage is the shot page's (turn 145)");
+    assert.deepEqual(all(mounted, ".fy-sw__tab").map((tab) => tab.textContent), ["Storyboard", "Flow", "Plan", "Preview"], "the Stage is the shot page's (turn 145); the Plan is the scene's place's (turn 285)");
   });
 
   it("opens the Stage on the selected shot, offers to stage it, and keeps the selection shared", async () => {

@@ -50,7 +50,7 @@ function nestedButtons(html: string): string[] {
 }
 
 describe("screen inventory", () => {
-  it("covers the full screen inventory (72 screens)", () => {
+  it("covers the full screen inventory (73 screens)", () => {
     // The number is written three times on purpose — it is a tripwire, not a fact being derived,
     // so `SCREENS.length` on both sides would assert nothing. It does mean two branches that each
     // add a screen merge cleanly and land a count that was right for neither: #268 and #243 did
@@ -66,8 +66,9 @@ describe("screen inventory", () => {
     // Locations and factions are hand-edited at their own addresses (issue 2773).
     // Every production's Publish page (design turn 276).
     // Obsolete First run redirects to current entry (design turn 280).
-    assert.equal(SCREENS.length, 72);
-    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 72, "screen ids are unique");
+    // A location's Plan tab (design turn 285).
+    assert.equal(SCREENS.length, 73);
+    assert.equal(new Set(SCREENS.map((s) => s.id)).size, 73, "screen ids are unique");
   });
 
   for (const screen of SCREENS) {

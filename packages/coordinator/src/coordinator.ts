@@ -560,6 +560,7 @@ import { genesisCommands } from "./commands/genesis.js";
 import { benchCommands } from "./commands/bench.js";
 import { worldChatCommands } from "./commands/world-chat.js";
 import { inboxCommands } from "./commands/inbox.js";
+import { placePlanCommands } from "./commands/place-plan.js";
 import { jobCommands } from "./commands/jobs.js";
 import { localEngineCommands } from "./commands/local-engines.js";
 import { musicCommands } from "./commands/music.js";
@@ -1953,6 +1954,7 @@ export class Coordinator {
         emitMusicTakes: (store, productionId, requestId) => this.emitMusicTakes(store, productionId, requestId),
       }),
       inboxCommands(ctx, { appSettings: () => this.appSettings }),
+      placePlanCommands(ctx),
       vendorAuthCommands({ vendorAuth: this.vendorAuth }),
       answeredElsewhereCommands(),
       productionCommands(ctx, {

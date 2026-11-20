@@ -45,6 +45,8 @@ import {
   ProposalSchema,
   PropSchema,
   type Prop,
+  PlacePlanSchema,
+  type PlacePlan,
   checkPropName,
   propSlug,
   ReferenceKitSchema,
@@ -693,6 +695,7 @@ export async function scanWorld(
   }
 
   const referenceKits = [];
+  const placePlans: PlacePlan[] = [];
   const props = [];
   // Each prop record beside the path it was read from, in scan order — a hand-edited file may
   // claim another id than its directory's, two files may even claim one id, and a report has to
@@ -707,9 +710,10 @@ export async function scanWorld(
   const readReferenceDir = async (sheetId: string) => {
     const kit = await attemptIfPresent(`references/${sheetId}/kit.json`);
     const prop = await attemptIfPresent(`references/${sheetId}/prop.json`);
+    const plan = await attemptIfPresent(`references/${sheetId}/plan.json`);
     const candidates = await listDir(join(dir, "references", sheetId, "candidates"));
     const takeDirs = await listDir(join(dir, "references", sheetId, "takes"));
-    return { kit, prop, candidates, takeDirs };
+    return { kit, prop, plan, candidates, takeDirs };
   };
   for await (const [sheetId, found] of readAhead(await listDir(join(dir, "references")), readReferenceDir)) {
     if (found.kit) {
@@ -717,6 +721,17 @@ export async function scanWorld(
         ReferenceKitSchema.parse(JSON.parse(raw)),
       );
       if (kit) referenceKits.push(kit);
+    }
+    // A place's plan (design turn 285) sits beside its kit. One that claims another place's id was
+    // moved by hand: reported by the path a person can open, and left out rather than drawn on
+    // the wrong location.
+    if (found.plan) {
+      const plan = settle(`references/${sheetId}/plan.json`, found.plan, (raw) => {
+        const value = PlacePlanSchema.parse(JSON.parse(raw));
+        if (value.sheetId !== sheetId) throw new Error(`plan.json names "${value.sheetId}", not the folder it is in`);
+        return value;
+      });
+      if (plan) placePlans.push(plan);
     }
     // A prop keeps the directory shape a sheet's kit does — record, candidates, takes — so the
     // walk below finds its takes and candidates without learning what a prop is (issue 535).
@@ -1594,6 +1609,7 @@ export async function scanWorld(
     performanceBibles,
     referenceCandidates,
     props,
+    placePlans,
     referenceTakes,
     referenceReviews,
     artifacts,

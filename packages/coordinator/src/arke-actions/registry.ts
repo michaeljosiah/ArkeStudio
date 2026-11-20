@@ -441,6 +441,8 @@ const CLIENT_COMMAND_METADATA = {
   "generate-location-view": action("world", "generation", "job-queue", "spend-and-compute", ["sheets", "art-direction", "references"]),
   "import-location-view-candidate": action("world", "host-action", "host", "host-file-access", ["sheets", "references"]),
   "accept-location-view": action("world", "take-review", "reference-kit", "authored-change", ["sheets", "references", "takes"]),
+  // No model action yet: a position is set on the Plan by a person (design turn 285).
+  "place-plan": action("world", "command", "reference-kit", "authored-change", ["sheets", "references", "scenes", "stage"]),
   "import-main-photo-candidate": action("world", "host-action", "host", "host-file-access", ["sheets", "references"]),
   "import-main-photo": action("world", "host-action", "host", "host-file-access", ["sheets", "references"]),
   "import-character-sheet": action("world", "host-action", "host", "host-file-access", ["sheets", "references"]),

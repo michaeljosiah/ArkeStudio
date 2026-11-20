@@ -56,6 +56,7 @@ import "./screens/settings-adapters.css";
 import "./screens/scene-workspace/workspace.css";
 import "./screens/scene-workspace/shot-page.css";
 import "./screens/scene-workspace/responsive.css";
+import "./screens/scene-workspace/plan.css";
 import "./screens/generate-responsive.css";
 import "./screens/editor-responsive.css";
 import "./screens/editor-media-measurement.css";

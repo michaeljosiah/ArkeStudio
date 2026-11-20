@@ -79,6 +79,7 @@ import { PropIdSchema, PropStateIdSchema, PropStateSelectionSchema } from "./pro
 import { ProseReadSourceSchema, CHAPTER_GOAL_LIMITS } from "./prose.js";
 import { BROWSER_ATTACHMENT_MAX_BYTES } from "./world-chat.js";
 import { SceneCommandSchema } from "./scene-operations.js";
+import { PlacePlanChangeSchema, PlacePlanSourceSchema } from "./place-plan.js";
 import { SizeTierSchema } from "./manifest.js";
 import { CapabilitySchema, ModelChoicesSchema, ProviderIdSchema } from "./provider.js";
 import { ReferenceAngleSchema } from "./reference.js";
@@ -1719,6 +1720,21 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       name: z.string().trim().min(1).max(80),
       establishing: z.boolean().optional(),
       replaceExistingName: z.boolean().optional(),
+    })
+    .strict(),
+  /**
+   * One change to a place's camera positions (design turn 285; issue 2302). A place's first plan
+   * takes its set from the scene the change was made in, named by `from`; without a plan and
+   * without a scene that has a set there is nothing to stand a camera in, and it is refused.
+   * The set itself is never written here: it moves with a Stage edit in a scene set there.
+   */
+  z
+    .object({
+      kind: z.literal("place-plan"),
+      worldId: UlidSchema,
+      sheetId: SlugSchema,
+      from: PlacePlanSourceSchema.optional(),
+      change: PlacePlanChangeSchema,
     })
     .strict(),
   /** A prop is born as a name with no states (design turn 105; issue 537); states are added by name. */

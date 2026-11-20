@@ -1,4 +1,4 @@
-import { GUIDE_RECORD_FILE } from "@arke-studio/contracts";
+import { GUIDE_RECORD_FILE, PLACE_PLAN_SCHEMA_VERSION } from "@arke-studio/contracts";
 import { mkdir, readdir, readFile, rm, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -38,6 +38,7 @@ import {
   carriesStageAnimatic,
   STAGE_ANIMATIC_SCHEMA_VERSION,
   carriesSongWindow,
+  carriesStagePosition,
   SCENE_SONG_WINDOW_SCHEMA_VERSION,
   carriesStageEasing,
   carriesStagePerformance,
@@ -747,6 +748,9 @@ function sidecarBoundary(files: ReadonlyArray<{ path: string; newContent?: strin
         const kit = JSON.parse(file.newContent) as { looks?: Array<{ name?: unknown }> };
         if (kit.looks?.some((look) => look.name !== undefined)) boundary = Math.max(boundary, LOOK_NAMES_SCHEMA_VERSION);
       }
+      // A place's plan (design turn 285): a file a build before it never looks for, so the set and
+      // positions a person made there would simply not be in the world it opened.
+      if (/^references\/[^/]+\/plan\.json$/.test(file.path)) boundary = Math.max(boundary, PLACE_PLAN_SCHEMA_VERSION);
       const record = JSON.parse(file.newContent) as { mediaInfo?: Record<string, unknown>; retiredAt?: unknown; generation?: { source?: unknown; workflow?: unknown; directionHash?: unknown; remakeOf?: unknown; recording?: unknown; grouped?: unknown; loudness?: unknown; episode?: unknown } } | null;
       if (file.path.startsWith("artifacts/") && (record?.generation?.source === "founding" || record?.generation?.workflow === "location-view-candidate")) boundary = Math.max(boundary, FOUNDING_IMAGES_SCHEMA_VERSION);
       if (file.path.startsWith("artifacts/") && record?.retiredAt !== undefined) boundary = Math.max(boundary, ARTIFACT_RETIREMENT_SCHEMA_VERSION);
@@ -1248,6 +1252,7 @@ export class Committer {
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStagePose(f.newContent)) ? STAGE_POSE_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageAnimatic(f.newContent)) ? STAGE_ANIMATIC_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesSongWindow(f.newContent)) ? SCENE_SONG_WINDOW_SCHEMA_VERSION : 0,
+      files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStagePosition(f.newContent)) ? PLACE_PLAN_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesBeat(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,
       // The kind as much as the beat: a visual novel created or converted, before any beat is set.
       files.some(f => classify(f.path).track === "production-meta" && f.newContent != null && carriesVisualNovel(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,

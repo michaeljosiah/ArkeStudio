@@ -50,6 +50,7 @@ const GenerateCharacterSheetScreen = preloadable(() => import("./screens/charact
 const ReplaceMainPhotoScreen = preloadable(() => import("./screens/character-reference.js").then((m) => m.ReplaceMainPhotoScreen));
 const CharacterVoiceScreen = preloadable(() => import("./screens/character-voice.js").then((m) => m.CharacterVoiceScreen));
 const LocationReferenceScreen = preloadable(() => import("./screens/location-reference.js").then((m) => m.LocationReferenceScreen));
+const LocationPlanScreen = preloadable(() => import("./screens/location-plan.js").then((m) => m.LocationPlanScreen));
 const PropDetailScreen = preloadable(() => import("./screens/props.js").then((m) => m.PropDetailScreen));
 const PropsScreen = preloadable(() => import("./screens/props.js").then((m) => m.PropsScreen));
 const GuideScreen = preloadable(() => import("./screens/world-guide.js").then((m) => m.GuideScreen));
@@ -334,6 +335,7 @@ function AppRoutes() {
           <Route path="locations/:sheetId" element={<LocationDetailScreen />} />
           <Route path="locations/:sheetId/edit" element={<LocationEditScreen />} />
           <Route path="locations/:sheetId/reference" element={<LocationReferenceScreen />} />
+          <Route path="locations/:sheetId/plan" element={<LocationPlanScreen />} />
           <Route path="props" element={<PropsScreen />} />
           <Route path="props/:propId" element={<PropDetailScreen />} />
           <Route path="factions" element={<FactionsScreen />} />

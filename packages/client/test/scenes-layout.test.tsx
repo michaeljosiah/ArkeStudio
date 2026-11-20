@@ -56,7 +56,7 @@ const commands = () => sent.filter((message): message is Extract<ClientMessage, 
 it("gives a phone scene its back row, read-only scripts and the shared Chat panel", async () => {
   await mount();
   assert.ok(find(".fy-scene-back")); assert.equal(find(".fy-production-mobile-nav"), null); assert.equal(document.querySelectorAll(".fy-titlebar").length, 1); assert.ok(find('[data-global-chat-trigger]'));
-  assert.deepEqual([...find('.fy-sw__tabs').querySelectorAll('button')].map(e => e.textContent), ["Storyboard", "Preview"]);
+  assert.deepEqual([...find('.fy-sw__tabs').querySelectorAll('button')].map(e => e.textContent), ["Storyboard", "Plan", "Preview"]);
   assert.equal(find('.fy-swrow__scripteditor'), null); assert.ok(find('.fy-swrow__script-read'));
   assert.equal(find('.fy-scene-dock[open]'), null);
   await click(find('.fy-sw__rail')); assert.ok(find('.fy-global-chat[open] .fy-arke')); assert.equal(find('.fy-scene-dock[open]'), null);

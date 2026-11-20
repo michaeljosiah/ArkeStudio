@@ -18,6 +18,7 @@ export * from "./staging.js";
 export * from "./stage-prompt.js";
 export * from "./stage-plate.js";
 export * from "./stage-kit.js";
+export * from "./place-plan.js";
 export * from "./stage-look.js";
 export * from "./stage-framing.js";
 export * from "./stage-pose.js";
