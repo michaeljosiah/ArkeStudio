@@ -220,6 +220,20 @@ describe("what an older build must not open", () => {
     assert.equal((await readWorldMeta(h.worldDir)).schemaVersion, PLACE_PLAN_SCHEMA_VERSION);
   });
 
+  it("lets a scene be edited while its place's plan cannot be read, and never writes over that plan", async () => {
+    const h = await harness();
+    await h.stage(FIRST, DECK);
+    await h.add(FIRST);
+    const broken = "{ not a plan";
+    await writeFile(join(h.worldDir, "references", PLACE, "plan.json"), broken);
+    await h.stage(FIRST, HOLD);
+    assert.deepEqual(h.refusals(), [], "a broken plan does not stop an edit to a scene set there");
+    assert.deepEqual((await h.scene(FIRST)).blocking!.sets, HOLD);
+    await h.add();
+    assert.equal(h.failures().length, 1, "but a change to the plan itself is refused");
+    assert.equal(await readFile(join(h.worldDir, "references", PLACE, "plan.json"), "utf8"), broken, "and the file a person may yet mend is left alone");
+  });
+
   it("reports a plan moved by hand to another place's folder, and draws it nowhere", async () => {
     const h = await harness();
     await h.stage(FIRST, DECK);

@@ -132,7 +132,10 @@ export async function followPlacePlan<T extends SceneRecord>(
   const place = input.after.inherits?.location;
   const blocking = input.after.blocking;
   if (place === undefined || blocking === undefined) return input.after;
-  const found = await readPlacePlan(store, place);
+  // A plan that cannot be read is reported by the scan, by the path a person can open. It must
+  // not also stop every edit to every scene set there: a retitled shot has nothing to do with it.
+  // The scene is written as the command left it, and takes the place's set once the plan reads.
+  const found = await readPlacePlan(store, place).catch(() => null);
   if (found === null || sameStageSets(blocking.sets, found.plan.sets)) return input.after;
   const followed = input.before.inherits?.location === place && input.before.blocking !== undefined && sameStageSets(input.before.blocking.sets, found.plan.sets);
   if (followed && input.commands.some((command) => command.kind === "edit-stage")) {
