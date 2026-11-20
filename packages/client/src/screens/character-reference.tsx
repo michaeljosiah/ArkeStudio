@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import {
   compilationIsStale,
@@ -19,13 +19,16 @@ import { resolveModel, worldModel } from "../components/dispatch-bar.js";
 import { authoredPrompt, GenerationDialog } from "../components/generation-dialog.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Button, Callout, IconButton, cx } from "../components/ui.js";
-import { Upload } from "../components/icons.js";
+import { ImageMark, Upload } from "../components/icons.js";
 import { Loading } from "../components/loading.js";
 import { ImageDialog } from "../components/image-dialog.js";
 import { ImageDownload } from "../components/image-actions.js";
 import { CharacterLookImport } from "../components/character-look-import.js";
+import { DropTarget, useFileDrop } from "../components/file-drop.js";
+import { StudioPictureSheet, StudioPicturePicker } from "../components/staged-reference-picker.js";
 import { useOpenWorldGuard, useSheet } from "../lib/selectors.js";
 import { sceneCast } from "./scene-workspace/cast-picker.js";
+import { isRemoteSession } from "../lib/remote-session.js";
 import {
   acceptCharacterLook,
   acceptCharacterSheet,
@@ -33,9 +36,13 @@ import {
   chooseAnchor,
   clearCharacterSheetAcceptance,
   clearMainPhotoAcceptance,
+  dropCharacterSheet,
+  dropMainPhoto,
+  dropMainPhotoCandidate,
   generateCharacterLooks,
   generateCharacterSheet,
   generateMainPhoto,
+  hostCanAttach,
   importCharacterSheet,
   importMainPhoto,
   importMainPhotoCandidate,
@@ -206,6 +213,28 @@ function canPickFiles(): boolean {
 
 const UPLOAD_UNAVAILABLE = "Upload is available in the desktop app";
 
+/**
+ * A picture already in the studio, used as the photo (issue 3146). Copying it is the
+ * coordinator's, so a browser on this computer can ask; a paired device cannot, because the
+ * same command also carries a dropped file's host path, and those stay on the computer.
+ */
+const PICTURE_UNAVAILABLE = "Available on the computer running Arke Studio";
+
+/**
+ * A reference card that takes a dropped file the way its Upload takes a picked one (issue 3146).
+ * The card is the target, not only its picture: a drop that missed the image by a few pixels and
+ * landed on the card's name would otherwise open nothing and say nothing.
+ */
+function DropCard({ onFiles, children }: { onFiles: ((files: File[]) => void) | null; children: ReactNode }) {
+  const drop = useFileDrop(onFiles);
+  return (
+    <section className="fy-reference-card" {...drop.handlers}>
+      {children}
+      {drop.over && <DropTarget />}
+    </section>
+  );
+}
+
 export function CharacterReferenceScreen() {
   const { worldId, sheetId } = useParams();
   const navigate = useNavigate();
@@ -215,6 +244,7 @@ export function CharacterReferenceScreen() {
   const photoUpload = useMainPhotoAcceptance()[sheetId ?? ""];
   const sheetUpload = useCharacterSheetAcceptance()[sheetId ?? ""];
   const [portraitSubject, setPortraitSubject] = useState<string | null>(null);
+  const [choosingSheet, setChoosingSheet] = useState(false);
   // A success says itself — the card changes. What it must not do is linger: the replace screen
   // reads this same slot and leaves the moment it sees "accepted", so a success left here would
   // make the next press of Replace bounce straight back.
@@ -273,11 +303,16 @@ export function CharacterReferenceScreen() {
     : compilation
       ? `references/${sheetId}/${compilation.file}`
       : null;
+  // A drop is the Upload beside it by other means, so it is offered where that is: from a host
+  // that can say where a dropped file lives, and on the sheet not while a generated one is coming.
+  // A drop during an upload already in flight is ignored by the store, as a second press is.
+  const canDrop = hostCanAttach();
+  const remote = isRemoteSession();
   return (
     <div data-screen="reference-kit">
       <CharacterHeader active="reference" />
       <main className="fy-reference-grid">
-        <section className="fy-reference-card">
+        <DropCard onFiles={canDrop ? (files) => void dropMainPhoto(world.meta.worldId, sheetId, files) : null}>
           <div className="fy-reference-card__image fy-reference-card__image--photo fy-imghost">
             {/*
              * "Outstanding" is owed work. A never-depicted character is not waiting for a photo —
@@ -332,8 +367,8 @@ export function CharacterReferenceScreen() {
           {photoUpload?.status === "failed" && (
             <p className="fy-reference-fallback">{photoUpload.reason ?? "The main photo was not changed."}</p>
           )}
-        </section>
-        <section className="fy-reference-card">
+        </DropCard>
+        <DropCard onFiles={canDrop && !runningSheet ? (files) => void dropCharacterSheet(world.meta.worldId, sheetId, files) : null}>
           <div className="fy-reference-card__image fy-reference-card__image--sheet fy-imghost">
             {runningSheet ? (
               <div className="fy-reference-card__generating">
@@ -385,6 +420,15 @@ export function CharacterReferenceScreen() {
             >
               {sheetUploading ? <Loading inline size={13} /> : <Upload />}
             </IconButton>
+            {/* A finished sheet already in the studio, used as the sheet itself (issue 3146) —
+                held by the same rules as Upload, because it lands the same way. */}
+            <IconButton
+              label={remote ? PICTURE_UNAVAILABLE : runningSheet ? "A generated sheet is on its way" : "Choose a picture"}
+              disabled={remote || runningSheet || sheetUploading}
+              onClick={() => setChoosingSheet(true)}
+            >
+              <ImageMark />
+            </IconButton>
             <Button disabled={!photo || runningSheet} onClick={() => navigate(`/w/${worldId}/cast/${sheetId}/model-sheet`)}>
               {runningSheet ? "Generating" : compilation ? "Regenerate" : "Generate"}
             </Button>
@@ -420,8 +464,18 @@ export function CharacterReferenceScreen() {
               More looks
             </Button>
           </div>
-        </section>
+        </DropCard>
       </main>
+      {choosingSheet && (
+        <StudioPictureSheet
+          worldId={world.meta.worldId}
+          title="Use a picture as the character sheet"
+          confirmLabel="Use as character sheet"
+          onChoose={(picture) => importCharacterSheet(world.meta.worldId, sheetId, picture)}
+          {...(canUpload ? { onUpload: () => { setChoosingSheet(false); importCharacterSheet(world.meta.worldId, sheetId); } } : {})}
+          onClose={() => setChoosingSheet(false)}
+        />
+      )}
     </div>
   );
 }
@@ -660,6 +714,8 @@ export function ReplaceMainPhotoScreen() {
   const [carryIdentity, setCarryIdentity] = useState(false);
   const [worldRef, setWorldRef] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
+  // Choosing a picture already in the studio as the photo (issue 3146), in the dialog's own frame.
+  const [choosingPicture, setChoosingPicture] = useState(false);
   // The click itself flips the panel: between the press and the
   // first job event there is a round trip, and a panel that waits for it says "Ready when
   // you are" to somebody who just spent money. Cleared when the queue answers either way;
@@ -738,8 +794,26 @@ export function ReplaceMainPhotoScreen() {
   const model = shownImageModel(state, choice.modelId);
   const carriesReferences = model !== null && model.unverified !== true && model.accepts.referenceImages > 0;
   const canImport = canPickFiles();
+  const remote = isRemoteSession();
   const refs = carryIdentity && photo && carriesReferences ? [`references/${sheetId}/${photo.file}`] : [];
   const back = () => navigate(`/w/${worldId}/cast/${sheetId}/kit`);
+  /*
+   * A picture already in the studio, as the photo (issue 3146). The same browsing as "Add a
+   * reference image" below, and deliberately not the same slot: a reference only steers a
+   * generated portrait, which for a face that must not change is close but not the face. This
+   * one lands among the previews, exactly where Upload's file does, and "Use as main photo"
+   * accepts it the way it accepts an upload.
+   */
+  const picturePanel = choosingPicture ? (
+    <StudioPicturePicker
+      worldId={world.meta.worldId}
+      title="Use a picture as the main photo"
+      confirmLabel="Add to previews"
+      onChoose={(picture) => importMainPhotoCandidate(world.meta.worldId, sheetId, picture)}
+      {...(canImport ? { onUpload: () => { setChoosingPicture(false); importMainPhotoCandidate(world.meta.worldId, sheetId); } } : {})}
+      onClose={() => setChoosingPicture(false)}
+    />
+  ) : undefined;
   /*
    * What travels, as this surface's own controls (design 65).
    *
@@ -751,13 +825,15 @@ export function ReplaceMainPhotoScreen() {
    */
   const travelling = (
     <>
-      <div className="fy-gendialog__refbuttons">
-        {/* Two different things, so two buttons: one decides what travels with the generation,
-            the other brings in a finished image that needs no generation.
+      <div className="fy-gendialog__refbuttons fy-gendialog__refbuttons--pairs">
+        {/* Two different things, so two pairs: the first decides what travels with the
+            generation, the second brings in a finished picture that needs no generation.
 
-            Labels, not sentences: three of these share a 420px column, and "Use current photo ·
-            Choose from world · Upload your own" broke 2 + 1, which reads as two groups with a
-            loose one underneath (issue 1007). What each one means is on its title. */}
+            Labels, not sentences, and the pairs as rows: three across broke 2 + 1 and read as two
+            groups with a loose one underneath (issue 1007); two by two the groups are the meaning.
+            What each one does is on its title. "World look" was "From world", which read as
+            choosing a picture from the world and did not (issue 3146): it shows the look the
+            portrait is styled by, the app's own name for it, as the lede says. */}
         <Button
           disabled={!photo}
           title={
@@ -770,10 +846,10 @@ export function ReplaceMainPhotoScreen() {
           Current photo
         </Button>
         <Button
-          title="Carry an image already in this world as the style reference"
+          title="The world look this portrait is styled by"
           onClick={() => setWorldRef(!worldRef)}
         >
-          From world
+          World look
         </Button>
         <Button
           disabled={!canImport}
@@ -785,6 +861,13 @@ export function ReplaceMainPhotoScreen() {
           onClick={() => importMainPhotoCandidate(world.meta.worldId, sheetId)}
         >
           Upload
+        </Button>
+        <Button
+          disabled={remote}
+          title={remote ? PICTURE_UNAVAILABLE : "A picture from this world or another, used as the photo; it joins the previews to pick from"}
+          onClick={() => setChoosingPicture(true)}
+        >
+          Choose a picture
         </Button>
       </div>
       <div className="fy-gendialog__refs">
@@ -824,8 +907,12 @@ export function ReplaceMainPhotoScreen() {
         characterDialog
         open
         onClose={back}
-        title="Replace main photo"
+        // Named for what it is: there is nothing to replace until there is a main photo (issue 3146).
+        title={photo ? "Replace main photo" : "Main photo"}
         lede={`${sheet.name} · World look · v${world.artDirection.version}`}
+        {...(picturePanel !== undefined ? { panel: picturePanel, onPanelClose: () => setChoosingPicture(false) } : {})}
+        // A file dropped anywhere on the dialog is its Upload by other means (issue 3146).
+        {...(hostCanAttach() ? { onDropFiles: (files: File[]) => void dropMainPhotoCandidate(world.meta.worldId, sheetId, files) } : {})}
         promptLabel="Describe the portrait"
         prompt={prompt}
         onPrompt={setPrompt}
@@ -871,8 +958,9 @@ export function ReplaceMainPhotoScreen() {
           onCommit: () => {
             if (selectedCandidate) chooseAnchor(world.meta.worldId, sheetId, selectedCandidate.selection);
           },
-          // A refusal is the one line the card owes; the consequence rides on the control (turn 137).
-          hint: "Replacing the main photo makes the current character sheet stale.",
+          // A refusal is the one line the card owes; the consequence rides on the control (turn 137),
+          // and only where there is one: with no main photo yet, nothing is replaced.
+          ...(photo ? { hint: "Replacing the main photo makes the current character sheet stale." } : {}),
           ...(acceptance?.status === "failed" ? { note: acceptance.reason } : {}),
         }}
       />

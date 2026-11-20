@@ -110,6 +110,8 @@ export type AttachTarget =
   | { kind: "file-artifact"; worldId: string; production?: string | null }
   | { kind: "genesis-attach"; genesisId: string }
   | { kind: "world-chat-attach"; worldId: string; conversationId: string }
+  /** A picture dropped on a main photo or character sheet (issue 3146). Mirrors preload.ts. */
+  | { kind: "import-main-photo" | "import-main-photo-candidate" | "import-character-sheet"; worldId: string; sheetId: string }
   /** A playblast the Stage rendered, filed onto its shot against the scene version it saw. */
   | {
       kind: "stage-playblast";

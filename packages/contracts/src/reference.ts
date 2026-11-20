@@ -595,6 +595,16 @@ export function characterSheetFor(kit: ReferenceKit): Compilation | null {
   return designatedCompilation(kit);
 }
 
+/**
+ * A main photo and a character sheet are each exactly one image, and both ways of bringing one
+ * in by hand can offer several: the host's dialog is the same seam that attaches whole folders,
+ * and a drop carries whatever was dragged. Taking the first and reporting success would quietly
+ * discard the rest, so the extras are refused out loud instead (PR review). Here rather than in
+ * the coordinator because a drop is counted before it is sent (issue 3146), and the refusal has
+ * to read the same either way.
+ */
+export const ONE_IMAGE_ONLY = "Choose a single image: this replaces one picture, not a set.";
+
 /** The one that rides along (R-13, D8): explicit designation, else the newest accepted. */
 export function designatedCompilation(kit: ReferenceKit): Compilation | null {
   if (kit.designatedCompilation !== undefined) {

@@ -20,9 +20,10 @@ import { makeTempRoot, WORLD_ID } from "../world/helpers.js";
 
 const CLOCK = "2026-08-10T12:00:00.000Z";
 
-async function harness(picked: () => readonly string[]) {
+async function harness(picked: () => readonly string[], before?: (provider: FsWorldProvider) => Promise<unknown>) {
   const { root, worldDir } = await makeTempRoot();
   const provider = new FsWorldProvider(root, { clock: () => CLOCK });
+  await before?.(provider);
   await provider.loadWorld(WORLD_ID);
   const events: DomainEvent[] = [];
   const asked: Array<readonly string[]> = [];
@@ -362,6 +363,183 @@ describe("uploading a character sheet by hand", () => {
       await send({ kind: "import-character-sheet", worldId: WORLD_ID, sheetId: "maren-kest" });
       assert.equal((await kitOf("maren-kest")).designatedCompilation, "model-sheet-v4.png");
       assert.equal(theReport(events, "character-sheet.acceptance").status, "failed");
+    } finally {
+      await provider.close();
+    }
+  });
+});
+
+/**
+ * A file dropped on the slot (issue 3146). The choosing happened in the drop, so the picker is
+ * never asked; from the path on, it is the Upload button's import, refusals included.
+ */
+describe("a file dropped on a main photo or character sheet", () => {
+  it("makes a dropped file the main photo exactly as a picked one", async () => {
+    const dropped = await fileOutsideTheWorld("dropped-portrait.png");
+    const { provider, events, asked, send, kitOf } = await harness(() => []);
+    try {
+      await send({ kind: "import-main-photo", worldId: WORLD_ID, sheetId: "maren-kest", sourcePath: dropped });
+      const kit = await kitOf("maren-kest");
+      assert.equal(kit.mainPhoto?.source, "upload");
+      assert.match(kit.mainPhoto?.file ?? "", /^takes\/tk_[0-9A-Z]+\/upload-[0-9a-z]+\.png$/);
+      assert.equal(kit.anchor, kit.mainPhoto?.file);
+      assert.equal(theReport(events, "main-photo.acceptance").status, "accepted");
+      assert.deepEqual(asked, [], "a drop opens no dialog");
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("refuses a dropped file that is not an image in the Upload button's words", async () => {
+    const dropped = await fileOutsideTheWorld("notes.txt", "not an image");
+    const { provider, worldDir, events, asked, send } = await harness(() => []);
+    try {
+      const before = await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8");
+      await send({ kind: "import-main-photo", worldId: WORLD_ID, sheetId: "maren-kest", sourcePath: dropped });
+      await send({ kind: "import-character-sheet", worldId: WORLD_ID, sheetId: "maren-kest", sourcePath: dropped });
+      assert.equal(await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8"), before);
+      assert.match(theReport(events, "main-photo.acceptance").reason ?? "", /PNG, JPEG or WebP/);
+      assert.match(theReport(events, "character-sheet.acceptance").reason ?? "", /PNG, JPEG or WebP/);
+      assert.deepEqual(asked, []);
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("designates a dropped character sheet", async () => {
+    const dropped = await fileOutsideTheWorld("dropped-sheet.png");
+    const { provider, events, asked, send, kitOf } = await harness(() => []);
+    try {
+      await send({ kind: "import-character-sheet", worldId: WORLD_ID, sheetId: "maren-kest", sourcePath: dropped });
+      const kit = await kitOf("maren-kest");
+      assert.match(kit.designatedCompilation ?? "", /^takes\/tk_[0-9A-Z]+\/character-sheet-upload-[0-9a-z]+\.png$/);
+      assert.equal(theReport(events, "character-sheet.acceptance").status, "accepted");
+      assert.deepEqual(asked, []);
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("adds a file dropped in the main photo dialog to its candidates", async () => {
+    const dropped = await fileOutsideTheWorld("dropped-candidate.png");
+    const { provider, worldDir, asked, send } = await harness(() => []);
+    try {
+      await send({ kind: "import-main-photo-candidate", worldId: WORLD_ID, sheetId: "maren-kest", sourcePath: dropped });
+      const candidates = await readdir(join(worldDir, "references", "maren-kest", "candidates"));
+      assert.equal(candidates.filter((name) => name.startsWith("upload-")).length, 1);
+      assert.deepEqual(asked, []);
+    } finally {
+      await provider.close();
+    }
+  });
+});
+
+/**
+ * A picture already in the studio used as the photo itself (issue 3146): the picture the
+ * reference picker offers, copied in by the coordinator and taken through the upload's own
+ * acceptance, keeping where it came from.
+ */
+describe("a picture already in the studio as the main photo or character sheet", () => {
+  /** Another world holding one finished portrait, created before this one opens. */
+  async function anotherWorld(provider: FsWorldProvider): Promise<{ slug: string; sourceDir: string }> {
+    const source = await provider.createWorld({ name: "Lagos Nights" });
+    const sourceDir = await provider.worldDir(source.worldId);
+    await mkdir(join(sourceDir, "references", "timi-j"), { recursive: true });
+    await writeFile(join(sourceDir, "references", "timi-j", "main-photo.png"), pngBytes());
+    await writeFile(join(sourceDir, "references", "timi-j", "kit.json"), JSON.stringify({
+      sheetId: "timi-j", anchor: "main-photo.png", tiles: [], compilations: [],
+    }));
+    return { slug: source.slug, sourceDir };
+  }
+
+  it("lands this world's picture as a candidate, and choosing it makes it the main photo as an upload", async () => {
+    const { provider, worldDir, events, asked, send, kitOf } = await harness(() => []);
+    try {
+      const store = provider.openStore()!;
+      await send({ kind: "import-main-photo-candidate", worldId: WORLD_ID, sheetId: "perrin-tallow",
+        image: { slug: "the-undersong", path: "references/maren-kest/head-front.png" } });
+      const take = store.getBundle().referenceTakes.find((candidate) => candidate.reference?.sheetId === "perrin-tallow");
+      assert.ok(take, "an undecided main photo take, beside the candidates");
+      assert.equal(take.kind, "main-photo");
+      assert.equal(take.provider, "user");
+      assert.equal(take.params["copiedFrom"], "references/maren-kest/head-front.png", "and where in this world it came from");
+      assert.equal(take.provenance.borrowedImages, undefined, "nothing was borrowed");
+      assert.equal(store.getBundle().referenceReviews.some((review) => review.takeId === take.id), false);
+
+      await send({ kind: "choose-anchor", worldId: WORLD_ID, sheetId: "perrin-tallow", selection: { source: "take", takeId: take.id } });
+      const kit = await kitOf("perrin-tallow");
+      assert.equal(kit.mainPhoto?.file, `takes/${take.id}/${take.media}`);
+      assert.equal(kit.mainPhoto?.source, "upload", "accepted the way an upload is");
+      assert.deepEqual(
+        new Uint8Array(await readFile(join(worldDir, "references", "perrin-tallow", kit.mainPhoto!.file))),
+        new Uint8Array(await readFile(join(worldDir, "references", "maren-kest", "head-front.png"))),
+      );
+      assert.equal(theReport(events, "main-photo.acceptance").status, "accepted");
+      assert.deepEqual(asked, [], "no dialog opened");
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("copies another world's picture as a candidate with the borrow's own record of where it came from", async () => {
+    let slug = "";
+    let sourceDir = "";
+    const { provider, worldDir, send } = await harness(() => [], async (owner) => ({ slug, sourceDir } = await anotherWorld(owner)));
+    try {
+      const store = provider.openStore()!;
+      await send({ kind: "import-main-photo-candidate", worldId: WORLD_ID, sheetId: "maren-kest",
+        image: { slug, path: "references/timi-j/main-photo.png" } });
+      const take = store.getBundle().referenceTakes.find((candidate) => candidate.reference?.sheetId === "maren-kest" && candidate.kind === "main-photo")!;
+      assert.ok(take);
+      assert.deepEqual(take.provenance.borrowedImages, [{ worldName: "Lagos Nights", imageName: "main-photo.png", copiedAt: take.provenance.borrowedImages![0]!.copiedAt }]);
+      assert.equal(take.params["copiedFrom"], undefined, "no path into another world is kept");
+      const stored = JSON.parse(await readFile(join(worldDir, "references", "maren-kest", "takes", take.id, "take.json"), "utf8"));
+      assert.equal(stored.provenance.borrowedImages[0].worldName, "Lagos Nights");
+
+      // A copy, not a link: what happens over there afterwards changes nothing here.
+      await writeFile(join(sourceDir, "references", "timi-j", "main-photo.png"), "changed");
+      assert.deepEqual(
+        new Uint8Array(await readFile(join(worldDir, "references", "maren-kest", "takes", take.id, take.media!))),
+        pngBytes(),
+      );
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("designates another world's picture as the character sheet, keeping where it came from", async () => {
+    let slug = "";
+    const { provider, events, asked, send, kitOf } = await harness(() => [], async (owner) => ({ slug } = await anotherWorld(owner)));
+    try {
+      const store = provider.openStore()!;
+      await send({ kind: "import-character-sheet", worldId: WORLD_ID, sheetId: "maren-kest",
+        image: { slug, path: "references/timi-j/main-photo.png" } });
+      const kit = await kitOf("maren-kest");
+      const file = kit.designatedCompilation!;
+      assert.match(file, /^takes\/tk_[0-9A-Z]+\/character-sheet-upload-[0-9a-z]+\.png$/);
+      assert.equal(kit.compilations.find((candidate) => candidate.file === file)?.anchorFile, undefined);
+      const take = store.getBundle().referenceTakes.find((candidate) => candidate.id === file.split("/")[1])!;
+      assert.equal(take.provenance.borrowedImages?.[0]?.worldName, "Lagos Nights");
+      assert.equal(theReport(events, "character-sheet.acceptance").status, "accepted");
+      assert.deepEqual(asked, []);
+    } finally {
+      await provider.close();
+    }
+  });
+
+  it("refuses a picture the studio no longer offers, and changes nothing", async () => {
+    const { provider, worldDir, events, send } = await harness(() => []);
+    try {
+      const before = await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8");
+      // A file in the world, but not one of its pictures: the catalogue decides, not the path.
+      await send({ kind: "import-character-sheet", worldId: WORLD_ID, sheetId: "maren-kest",
+        image: { slug: "the-undersong", path: "references/maren-kest/kit.json" } });
+      await send({ kind: "import-main-photo-candidate", worldId: WORLD_ID, sheetId: "maren-kest",
+        image: { slug: "no-such-world", path: "references/maren-kest/head-front.png" } });
+      assert.equal(await readFile(join(worldDir, "references", "maren-kest", "kit.json"), "utf8"), before);
+      assert.match(theReport(events, "character-sheet.acceptance").reason ?? "", /no longer available/);
+      assert.match(theReport(events, "main-photo.acceptance").reason ?? "", /no longer available/);
+      assert.equal(provider.openStore()!.getBundle().referenceTakes.some((take) => take.reference?.sheetId === "maren-kest" && take.provider === "user"), false);
     } finally {
       await provider.close();
     }

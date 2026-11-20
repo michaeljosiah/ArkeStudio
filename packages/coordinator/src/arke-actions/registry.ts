@@ -1019,6 +1019,11 @@ function conversationCommandSchema(kind: ClientMessageKind, schema: z.ZodDiscrim
     case "save-bible": return schema.extend({ text: z.string().max(BIBLE_EDIT_BOUNDS.text) });
     case "upload-artifacts": return schema.omit({ editor: true, sourcePaths: true, browserFiles: true });
     case "pick-staged-reference": return schema.omit({ image: true, worldFile: true });
+    // A conversation's import opens the person's picker and nothing else (issue 3146): a dropped
+    // file's path is the host's to name, and a studio picture is chosen in the picker's own screen.
+    case "import-main-photo-candidate":
+    case "import-character-sheet": return schema.omit({ sourcePath: true, image: true });
+    case "import-main-photo": return schema.omit({ sourcePath: true });
     case "clone-voice": return schema.omit({ language: true, clipId: true, consent: true });
     case "bench-dispatch": return schema.omit({ confirmedSpeechMicroUsd: true, voiceUploadConfirmedFor: true });
     default: return schema;
