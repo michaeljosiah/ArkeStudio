@@ -4,7 +4,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   orderedShots, PLACE_PLAN_SCHEMA_VERSION, PlacePlanSchema, SceneRecordSchema,
-  type ClientMessage, type DomainEvent, type PlacePlan, type PlacePlanChange, type SceneRecord, type StagingSet,
+  type ClientMessage, type DomainEvent, type PlacePlan, type PlacePlanChange, type SceneRecord, type StagingFigure, type StagingSet,
 } from "@arke-studio/contracts";
 import { Coordinator } from "../../src/coordinator.js";
 import { FsWorldProvider } from "../../src/world/provider.js";
@@ -56,14 +56,14 @@ async function harness() {
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
   };
   /** A Keep on the scene's first shot: shared marks and set, and a still camera. */
-  const stage = async (which: { file: string; id: string }, sets: StagingSet[], extra: { position?: number; baseVersion?: number } = {}) => {
+  const stage = async (which: { file: string; id: string }, sets: StagingSet[], extra: { position?: number; baseVersion?: number; cast?: StagingFigure[] } = {}) => {
     const current = await scene(which);
     const shot = orderedShots(current)[0]!;
     const duration = shot.durationSec ?? 4;
     const camera = { p: [0, 1.5, 3] as [number, number, number], l: [0, 1, 0] as [number, number, number] };
     await send({
       kind: "scene-command", worldId: WORLD_ID, productionId: PRODUCTION, sceneFile: which.file, sceneId: which.id, baseVersion: extra.baseVersion ?? current.version,
-      command: { kind: "edit-stage", shotId: shot.id, blocking: { cast: CAST, sets },
+      command: { kind: "edit-stage", shotId: shot.id, blocking: { cast: extra.cast ?? CAST, sets },
         staging: { keys: [{ t: 0, ...camera }, { t: duration, ...camera }], ...(extra.position === undefined ? {} : { position: extra.position }) } },
     });
   };
@@ -169,6 +169,32 @@ describe("the place's set, once it has one", () => {
     assert.equal(h.refusals().length, 1);
     assert.deepEqual(await h.scene(SECOND), before);
     assert.deepEqual((await h.planOnDisk())!.sets, wider);
+  });
+
+  it("is not changed under a scene whose people ride a piece the new set lacks", async () => {
+    const h = await harness();
+    const CAR: StagingSet[] = [...DECK, { name: "launch", group: "launch", x: 2, z: 2, w: 2, h: 1, d: 4 }];
+    const aboard: StagingFigure[] = [{ sheetId: "maren-kest", x: 0, z: 0, parent: "launch" }, { sheetId: "ione-vale", x: 1, z: 0 }];
+    await h.stage(FIRST, DECK);
+    await h.stage(SECOND, CAR, { cast: aboard });
+    const second = await h.scene(SECOND);
+
+    // The first plan would take the first scene's set, which has no launch for her to stand in.
+    await h.add(FIRST);
+    assert.match(h.failures().at(-1)!.reason, /rides a piece this set does not have/);
+    assert.match(h.failures().at(-1)!.reason, /The tables say neap|shot \d+/i, "the scene and the shot are named");
+    assert.equal(await h.planOnDisk(), null, "nothing of the plan is written");
+    assert.deepEqual(await h.scene(SECOND), second, "and the other scene is as it was");
+
+    // Made from the scene that has the launch, the plan lands, and a later edit that takes the launch away is refused.
+    await h.add(SECOND);
+    assert.deepEqual((await h.planOnDisk())!.sets, CAR);
+    assert.deepEqual((await h.scene(FIRST)).blocking!.sets, CAR, "the first scene follows: nothing of its own rode a piece");
+    const first = await h.scene(FIRST);
+    await h.stage(FIRST, DECK);
+    assert.equal(h.refusals().length, 1, "refused where the edit was made");
+    assert.deepEqual(await h.scene(FIRST), first);
+    assert.deepEqual([(await h.planOnDisk())!.version, (await h.planOnDisk())!.sets], [1, CAR]);
   });
 
   it("is taken by a scene that did not carry it, whatever that scene's command said about sets", async () => {

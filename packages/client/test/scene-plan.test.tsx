@@ -6,6 +6,7 @@ import { parseHTML } from "linkedom";
 import { MemoryRouter } from "react-router";
 import { PLACE_POSITION_NAME_MAX, orderedShots, placePositionCamera, placePositionNameLength, planBounds, planFrame, planSides, planSpot, type ClientMessage, type ClientState } from "@arke-studio/contracts";
 import { App } from "../src/App.js";
+import { preloadScenePlan } from "../src/components/lazy-plan.js";
 import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -46,6 +47,10 @@ Object.assign(globalThis, {
   requestAnimationFrame: (callback: (time: number) => void) => setTimeout(() => callback(0), 0),
   cancelAnimationFrame: (id: ReturnType<typeof setTimeout>) => clearTimeout(id),
 });
+
+// The Plan is its own chunk, loaded on demand; here it is loaded first, so a press on its tab
+// shows it at once, as it does in the app once the chunk has arrived.
+await preloadScenePlan();
 
 const SCENE_PATH = `/w/${FIXTURE_WORLD_ID}/p/saltlight/scenes/sc_04`;
 const FROM = { productionId: "saltlight", sceneFile: "04-the-verse-rises", sceneId: "sc_04" };

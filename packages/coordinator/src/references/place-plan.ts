@@ -55,8 +55,9 @@ const scenePath = (productionId: string, stem: string): string => `productions/$
  * edit (`followPlacePlan`). Each is read from disk, not from the bundle, so its base hash is the
  * bytes this commit replaces.
  */
-async function scenesFollowing(store: WorldStore, sheetId: string, sets: readonly StagingSet[], except: string | null): Promise<CommitFileInput[]> {
+async function scenesFollowing(store: WorldStore, sheetId: string, sets: readonly StagingSet[], except: string | null, refuse: (reasons: string[]) => Error): Promise<CommitFileInput[]> {
   const files: CommitFileInput[] = [];
+  const stuck: string[] = [];
   for (const production of store.getBundle().productions) {
     for (const scene of production.scenes) {
       if (scene.inherits?.location !== sheetId || scene.blocking === undefined) continue;
@@ -70,9 +71,21 @@ async function scenesFollowing(store: WorldStore, sheetId: string, sets: readonl
       // since must keep its own set.
       if (record.inherits?.location !== sheetId || record.blocking === undefined || sameStageSets(record.blocking.sets, sets)) continue;
       const next = editScene(record, { blocking: { ...record.blocking, sets: [...sets], version: record.blocking.version + 1 } });
+      // A camera, a figure or a moving piece in that scene may ride a piece only its old set had
+      // (codex on PR 3270). Written anyway, the scene would draw an anchored camera at the origin
+      // and then refuse every later Stage edit over a target that is gone. Only what the new set
+      // breaks counts: a fault the scene already had is not this change's to refuse.
+      for (const shot of orderedShots(next)) {
+        if (!shot.staging || (shot.staging.cast !== undefined && shot.staging.sets !== undefined)) continue;
+        const duration = shot.durationSec ?? DEFAULT_SHOT_SEC;
+        const had = new Set(stageProblems(resolvedShotStaging(record, shot.staging), duration));
+        const broken = stageProblems(resolvedShotStaging(next, shot.staging), duration).filter((problem) => !had.has(problem));
+        if (broken.length > 0) stuck.push(`${production.meta.title} · ${record.title}, shot ${shot.number}: ${broken.join(" ")}`);
+      }
       files.push({ path, action: "replace", content: serialise(next), baseHash: sha256(raw) });
     }
   }
+  if (stuck.length > 0) throw refuse(["Another scene set in this place rides a piece this set does not have.", ...stuck]);
   return files;
 }
 
@@ -100,7 +113,7 @@ export async function applyPlacePlanChange(store: WorldStore, input: { sheetId: 
       const sets = record.blocking?.sets ?? [];
       if (sets.length === 0) throw new PlacePlanRefused("This place has no set yet. Build one on the Stage of a scene set here.");
       base = { sheetId: input.sheetId, version: 1, sets, positions: [], next: 1 };
-      files.push(...(await scenesFollowing(store, input.sheetId, sets, path)));
+      files.push(...(await scenesFollowing(store, input.sheetId, sets, path, (reasons) => new PlacePlanRefused(reasons.join(" ")))));
     }
     const next = PlacePlanSchema.parse(placePlanAfter(base, input.change));
     files.unshift(planFile(next, found?.raw ?? null));
@@ -140,7 +153,7 @@ export async function followPlacePlan<T extends SceneRecord>(
   const followed = input.before.inherits?.location === place && input.before.blocking !== undefined && sameStageSets(input.before.blocking.sets, found.plan.sets);
   if (followed && input.commands.some((command) => command.kind === "edit-stage")) {
     files.push(planFile({ ...found.plan, sets: blocking.sets, version: found.plan.version + 1 }, found.raw));
-    files.push(...(await scenesFollowing(store, place, blocking.sets, input.path)));
+    files.push(...(await scenesFollowing(store, place, blocking.sets, input.path, (reasons) => new SceneOperationRefused(reasons))));
     return input.after;
   }
   if (input.fixed) return input.after;

@@ -59,7 +59,7 @@ import { Button } from "../../components/ui.js";
 import { Film, Grid2x2, ImageMark, ListBullet, Maximize2, Minimize2, More, Plus, Timer } from "../../components/icons.js";
 import { BoardSheet } from "./board-sheet.js";
 import { ScenePreview } from "./preview.js";
-import { ScenePlan } from "./plan.js";
+import { LazyScenePlan } from "../../components/lazy-plan.js";
 import { PlansPanel } from "./plans.js";
 import { stagedShotChanges, useSceneWriter } from "./scene-writer.js";
 import { rememberedLayout, rememberLayout } from "../../lib/storyboard-layout.js";
@@ -768,7 +768,7 @@ export function SceneWorkspace({
           ) : view === "plan" ? (
             // The accepted scene, not a staged proposal over it: a position is the place's and is
             // written at once, so its shots are counted as the place's other scenes see them.
-            <ScenePlan world={world} production={production} scene={scene} onOpenStage={openStage} />
+            <LazyScenePlan world={world} production={production} scene={scene} onOpenStage={openStage} />
           ) : playsAsBeats ? (
             // A visual novel previews as it will be read (174d): the beat player over the window,
             // from this scene, back to the beats on close — never the film's timeline.
