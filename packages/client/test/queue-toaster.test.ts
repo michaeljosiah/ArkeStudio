@@ -383,6 +383,29 @@ describe("queue notification", () => {
     assert.equal(subjectOf(job({ target: { kind: "bench-take", id: "sess_01M0649N4RH2WC7QN50JXX9P7R/tk_3" } })), null);
   });
 
+  it("names a place and a person by their sheets, not by their slugs (issue 3164)", () => {
+    // Witnessed making a music video: the slug title-cased read "Timi J S Dark Set, location view
+    // queued" for a place called Timi J's Dark Set.
+    const world = {
+      meta: { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HC" },
+      sheets: [{ id: "timi-j-s-dark-set", name: "Timi J's Dark Set" }, { id: "maren-kest", name: "Maren O'Kest" }],
+    };
+    const view = job({ target: { kind: "location-view-candidate", id: "timi-j-s-dark-set/g1/1" } });
+    assert.equal(enqueueNote(result({ command: "generate-location-view" }), [view], manifest, world)?.title, "Timi J's Dark Set, location view queued");
+    assert.equal(readyNote({ ...view, status: "succeeded" }, manifest, undefined, world).title, "Timi J's Dark Set, location view ready");
+    assert.equal(failedNote({ ...view, status: "failed" }, manifest, undefined, world).title, "Timi J's Dark Set, location view failed");
+    assert.equal(historyNote({ ...view, status: "cancelled" }, manifest, world).title, "Timi J's Dark Set, location view cancelled");
+    // The same function names a person's main photo and look, which were spelled from slugs too.
+    assert.equal(enqueueNote(result(), [job()], manifest, world)?.title, "Maren O'Kest, main photo queued");
+    assert.equal(subjectOf(job({ target: { kind: "character-look", id: "maren-kest/g1/2" } }), world), "Maren O'Kest");
+    // The slug is only the last resort: a sheet since deleted, or work from a world not open now,
+    // which must not borrow a name from the open one (SPEC-014 R-19).
+    assert.equal(subjectOf(view, { ...world, sheets: [] }), "Timi J S Dark Set");
+    assert.equal(subjectOf(view, { ...world, meta: { worldId: "01J8F3K2QW9VZX4N7M0RTYB6HD" } }), "Timi J S Dark Set");
+    // A shot is not a sheet's work, whatever a sheet happens to be called.
+    assert.equal(subjectOf(job({ target: { kind: "shot", id: "sh_12" } }), { ...world, sheets: [{ id: "sh_12", name: "Nobody" }] }), "Shot 12");
+  });
+
   it("uses the manifest's own name for the model, so picker and notification agree", () => {
     assert.match(enqueueNote(result(), [job()], manifest)!.meta, /^GPT Image 2 · /);
     // An unknown row still says something true rather than nothing.
