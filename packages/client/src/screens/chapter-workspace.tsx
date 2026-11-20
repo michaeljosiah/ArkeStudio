@@ -1452,6 +1452,11 @@ export function ChapterWorkspace({
     if (voicesRecord === null || voicesMoved || castingNow || locked || record === null || connection !== "open") return null;
     const chapterSpeakers = new Map<string, SpeakerChoices["chapter"][number]>();
     for (const row of audiobook.rows) {
+      // The lines inside a block of several turns are the chapter's speakers too (issue 3232).
+      for (const who of row.speakers ?? []) {
+        const sheet = row.block.rows?.find((turn) => turn.sheet === who.key)?.sheet;
+        if (!chapterSpeakers.has(who.key)) chapterSpeakers.set(who.key, { key: who.key, label: who.full, ...(sheet !== undefined ? { sheet } : {}), colour: who.colour });
+      }
       if (row.speakerKey === null || chapterSpeakers.has(row.speakerKey)) continue;
       chapterSpeakers.set(row.speakerKey, { key: row.speakerKey, label: row.full, ...(row.block.sheet !== undefined ? { sheet: row.block.sheet } : {}), colour: row.colour });
     }
@@ -1460,9 +1465,18 @@ export function ChapterWorkspace({
       .map((sheet) => ({ sheet: sheet.id, label: sheet.name, voice: sheet.voice === undefined ? null : voiceDisplayLabel(sheet.voice, world), colour: null }));
     return { chapter: [...chapterSpeakers.values()], cast };
   }, [voicesRecord, voicesMoved, castingNow, locked, record, connection, audiobook.rows, world.sheets, prodId]);
-  const pinBlock = (row: BlockRow, pick: SpeakerPick, selection?: { from: number; to: number }) => {
-    const index = audiobook.rows.indexOf(row);
-    const target = pinTarget(record?.body ?? "", audiobook.rows.map((candidate) => candidate.block), index, selection);
+  const pinBlock = (row: BlockRow, pick: SpeakerPick, selection?: { from: number; to: number }, turn?: number) => {
+    // One turn of a block of several names its own words (issue 3232): the chapter walked turn by
+    // turn, each a slice of its paragraph, since a beat's block spans paragraphs none of which holds it.
+    const turns = turn === undefined ? null : audiobook.rows.flatMap((candidate) => {
+      const marks = candidate.turnMarks;
+      return marks === undefined || candidate.block.rows === undefined
+        ? [{ paragraph: candidate.block.paragraph, text: candidate.block.text, pressed: false }]
+        : candidate.block.rows.map((one, at) => ({ paragraph: marks[at]!.paragraph, text: one.text, pressed: candidate === row && at === turn }));
+    });
+    const target = turns === null
+      ? pinTarget(record?.body ?? "", audiobook.rows.map((candidate) => candidate.block), audiobook.rows.indexOf(row), selection)
+      : pinTarget(record?.body ?? "", turns, turns.findIndex((one) => one.pressed));
     if (target === null) return;
     setVoicePin(worldId, prodId, chapter.file, { ...target, ...pick });
   };

@@ -37,6 +37,8 @@ export interface AudiobookTurn {
   text: string;
   speaker?: string;
   sheet?: string;
+  /** The author set this turn's speaker by hand (SPEC-012 R-62), as a block of one turn says of itself: what its menu takes back. */
+  pinned?: true;
   /** An edited quote that kept its speaker (design turn 198): the row's dashed `kept` mark. */
   kept?: true;
 }
@@ -422,7 +424,7 @@ export function audiobookBlocks(
       blocks.push({ ...first.turn, key, ...shape });
       continue;
     }
-    const rows = units.slice(from, to + 1).map(({ turn }) => ({ text: turn.text, ...(turn.speaker !== undefined ? { speaker: turn.speaker } : {}), ...(turn.sheet !== undefined ? { sheet: turn.sheet } : {}), ...(turn.kept === true ? { kept: true as const } : {}) }));
+    const rows = units.slice(from, to + 1).map(({ turn }) => ({ text: turn.text, ...(turn.speaker !== undefined ? { speaker: turn.speaker } : {}), ...(turn.sheet !== undefined ? { sheet: turn.sheet } : {}), ...(turn.pinned === true ? { pinned: true as const } : {}), ...(turn.kept === true ? { kept: true as const } : {}) }));
     // Turns of one speaker joined by hand are that speaker's block (rule 8 keeps Cast's joins to one voice).
     const one = shaped && rows.every((row) => row.speaker !== undefined && audiobookSpeakerKey(row) === audiobookSpeakerKey(rows[0]!)) ? { speaker: rows[0]!.speaker!, ...(rows[0]!.sheet !== undefined ? { sheet: rows[0]!.sheet } : {}) } : {};
     blocks.push({ paragraph: first.place.paragraph, text: textOf(from, to), key, ...one, rows, ...shape });
