@@ -326,7 +326,8 @@ describe("setup turns share conversation durability but no world-mutation author
     const video = await productionSetupBrief(bundle, { ...draft, kind: "music-video" }, read, 400_000);
     assert.match(video, /This production is a music video \(kind "music-video"\)/);
     assert.match(video, /Its scenes follow the song's sections, in order\. It has no episodes and no Series\./);
-    assert.match(video, /Start each scene's synopsis with its place in the song, start–end \("0:16–0:44"\)/);
+    // A scene's place in the song is a field now, not the opening of its synopsis (issue 3100).
+    assert.match(video, /Give each scene its place in the song as songWindow: \{startSec, endSec\}/);
     assert.match(video, /once the production exists, it becomes the master track in the Cut/);
   });
 

@@ -121,7 +121,7 @@ import {
   sendSpineCommand,
   useSpineAskPending,
 } from "../lib/store.js";
-import { songCommand, wantsSong } from "../lib/song.js";
+import { sectionsFromScenes, songCommand, wantsSong } from "../lib/song.js";
 import { SongSectionsNotice } from "./song-sections-notice.js";
 import { storyShotCount } from "./production-story.js";
 import { type PendingImport, type LibraryFilter, ArtifactPanel, AddToLibraryDialog, LIBRARY_DRAWER_QUERY } from "./editor-library.js";
@@ -423,6 +423,8 @@ function CutEditorScreen() {
   // Publish's Create edition asks for the playable edition itself, not the film's options above it.
   const [exportPlayable, setExportPlayable] = useState(() => searchParams.get("export") === "playable");
   const [noticeHidden, setNoticeHidden] = useState<string | null>(null);
+  /** The production whose sections offer was put away (issue 3100); its own state, so hiding an assembly does not bring it back. */
+  const [sectionsHidden, setSectionsHidden] = useState<string | null>(null);
   const [didOpen, setDidOpen] = useState(false);  /** The Audio route lands here with the Library on its audio (R-1); nothing else reads the query. */
   const libraryFilter: LibraryFilter = searchParams.get("library") === "audio" ? "audio" : "all";
   // The Audio address lands with the Library up (R-1): below 1200px it is a drawer that would otherwise stay shut.
@@ -1322,6 +1324,18 @@ function CutEditorScreen() {
     const next = songCommand(production.spine, artifact.id);
     if (next !== null) sendSpineCommand(worldId, prodId, next.baseRevision, next.command);
   };
+  /*
+   * Mark N sections from the scenes (issue 3100): setup gave each scene its place in the song, and
+   * once the song is the master those places can become its sections with one press. Offered only
+   * while the song has none, so it never adds to sections somebody placed.
+   */
+  const sectionsOffer = production
+    ? sectionsFromScenes(production, world?.artifacts.find((artifact) => artifact.id === production.spine?.trackArtifactId)?.mediaInfo?.durationSec)
+    : null;
+  const markSections = () => {
+    if (!worldId || !prodId || sectionsOffer === null) return;
+    sendSpineCommand(worldId, prodId, sectionsOffer.baseRevision, sectionsOffer.command);
+  };
   let notice: React.ReactNode = null;
   // A music video is cut to its song, so its absence is said before anything else (issue 3088).
   if (production && wantsSong(production)) {
@@ -1331,6 +1345,21 @@ function CutEditorScreen() {
         <strong>No song yet.</strong>
         <span className="fy-h1row__push" />
         <button type="button" onClick={chooseSong}>Choose the song</button>
+      </div>
+    );
+  } else if (sectionsOffer !== null && sectionsHidden !== prodId) {
+    notice = (
+      <div className="fy-cutnotice" data-testid="sections-notice">
+        <span className="fy-cutnotice__mark" aria-hidden="true"><MusicMark size={12} /></span>
+        <strong>No sections yet.</strong>
+        <span className="fy-h1row__push" />
+        {/* Held while a spine command is out: a second would name the revision the first is moving. */}
+        <button type="button" disabled={songPending} onClick={markSections}>
+          Mark {sectionsOffer.count} section{sectionsOffer.count === 1 ? "" : "s"} from the scenes
+        </button>
+        <button type="button" className="fy-cutnotice__hide" aria-label="Hide" onClick={() => setSectionsHidden(prodId ?? null)}>
+          &times;
+        </button>
       </div>
     );
   } else if (assembly !== null && noticeKey !== noticeHidden) {

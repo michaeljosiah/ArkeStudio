@@ -3,7 +3,10 @@ import {
   ProductionSpineSchema,
   anchorProblems,
   applyAudioSpineCommand,
+  newId,
   orderedShots,
+  sceneSectionMarkers,
+  songTime,
   type AudioSpineCommand,
   type AudioSpineModelAction,
   type ProductionSpine,
@@ -27,6 +30,21 @@ function visibleToProduction(artifact: { production?: string }, productionId: st
   return artifact.production === undefined || artifact.production === productionId;
 }
 
+/**
+ * One command applied to a spine as its production stands. The scenes are read here, where they
+ * are: `mark-sections-from-scenes` carries no markers, so a caller that applied it without them
+ * would be refused for having no scenes with a place in the song, whatever the scenes say.
+ */
+export function applySpineCommand(
+  production: Pick<WorldBundle["productions"][number], "scenes"> | undefined,
+  current: ProductionSpine | null,
+  command: AudioSpineCommand,
+  at: string,
+): ProductionSpine | null {
+  return applyAudioSpineCommand(current, command, at,
+    command.kind === "mark-sections-from-scenes" ? sceneSectionMarkers(production?.scenes ?? [], () => newId("mk")) : []);
+}
+
 function validatedNext(
   bundle: WorldBundle,
   action: Pick<AudioSpineModelAction, "productionId" | "baseRevision" | "command">,
@@ -45,7 +63,7 @@ function validatedNext(
 
   let next: ProductionSpine | null;
   try {
-    next = applyAudioSpineCommand(current, action.command, at);
+    next = applySpineCommand(production, current, action.command, at);
   } catch (error) {
     if (error instanceof AudioSpineOperationRefused) throw new AudioSpineCommandRefused(error.reason);
     throw error;
@@ -62,6 +80,10 @@ function validatedNext(
   if (durationSec === undefined) throw new AudioSpineCommandRefused(`master track ${artifact.id} has not been measured`);
 
   const late = next.markers.find((marker) => marker.atSec > durationSec);
+  // A scene's section is named as the scene is: its marker id was minted a moment ago and names nothing a person has seen.
+  if (late !== undefined && action.command.kind === "mark-sections-from-scenes" && late.kind === "section") {
+    throw new AudioSpineCommandRefused(`${late.label} starts at ${songTime(late.atSec)}, past the song's ${songTime(Math.floor(durationSec))}`);
+  }
   if (late !== undefined) throw new AudioSpineCommandRefused(`marker ${late.id} at ${late.atSec}s is past the track's ${durationSec}s`);
   const shotIds = new Set(production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => shot.id)));
   const problem = anchorProblems(next, durationSec, shotIds)[0];
@@ -69,13 +91,8 @@ function validatedNext(
   return { current, next, durationSec };
 }
 
-/** `0:16`, `1:02.5`: a place in the song as a player shows it, exact to the millisecond given. */
-export function songTime(sec: number): string {
-  const ms = Math.round(sec * 1000);
-  const fraction = ms % 1000;
-  return `${Math.floor(ms / 60_000)}:${String(Math.floor((ms % 60_000) / 1000)).padStart(2, "0")}${
-    fraction === 0 ? "" : `.${String(fraction).padStart(3, "0").replace(/0+$/, "")}`}`;
-}
+// The song's clock is the contracts' now, so a scene's window on the page reads as its card does.
+export { songTime };
 
 function counted(count: number, noun: string): string {
   return `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -107,6 +124,7 @@ function spineWords(bundle: WorldBundle, productionId: string) {
 function spineTitle(
   command: AudioSpineCommand,
   current: ProductionSpine | null,
+  next: ProductionSpine | null,
   durationSec: number | null,
   words: ReturnType<typeof spineWords>,
 ): string {
@@ -140,6 +158,9 @@ function spineTitle(
         : `Keep ${words.shot(command.shotId)}'s own sound at ${command.clipAudio.gainDb} dB`;
     case "delete-anchor":
       return `Unpin ${words.shot(command.shotId)}`;
+    case "mark-sections-from-scenes":
+      // The words the Cut's own press uses, with the count the scenes give now.
+      return `Mark ${counted((next?.markers.length ?? 0) - (current?.markers.length ?? 0), "section")} from the scenes`;
     case "delete-spine":
       return "Remove the song";
   }
@@ -153,6 +174,7 @@ function spineConsequence(command: AudioSpineCommand): string {
     case "import-markers":
     case "edit-marker":
     case "delete-marker": return "Changes the song's sections and lyrics.";
+    case "mark-sections-from-scenes": return "Each scene's place in the song becomes a section. Shots stay where they are pinned.";
     case "set-anchor":
     case "set-anchor-audio":
     case "delete-anchor": return "Changes where shots sit in the song.";
@@ -211,7 +233,7 @@ export function previewAudioSpineCommand(
   }
   if (commands.length === 0) throw new AudioSpineCommandRefused("the command changes nothing");
   return {
-    title: spineTitle(action.command, current, durationSec, words),
+    title: spineTitle(action.command, current, next, durationSec, words),
     consequence: spineConsequence(action.command),
     authorityRevision: current?.revision ?? 0,
     commands,

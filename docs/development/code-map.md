@@ -2389,3 +2389,13 @@ and focus return. `screens/world-sheets.tsx` supplies a current return target be
 Preparing temporarily replaces the section's read button. Consent and request ownership
 remain in the existing hooks/store. Checks: `scripts/smoke-voice-upload-dialog.mjs`,
 client `remote-voice-upload`, `read-aloud-narrator`, `page-read` and `voice-line` tests.
+
+A scene's place in the song (issues 3100, 3101): `songWindow` is an optional field of the setup
+scene (contracts `production-setup.ts`) and of the scene record (`scene.ts`), defined beside the
+spine in `spine.ts` with the pure reads of it. Coordinator `productions/setup-brief.ts` asks Arke
+for it, `setup-plan.ts` carries it onto the created scene, and world schema 145
+(`productions/scene-record.ts`) fences both. The spine command `mark-sections-from-scenes`
+carries no markers: `applySpineCommand` in `productions/spine.ts` reads the scenes for it. Client
+`lib/song.ts` holds the scene's line (the scene header and its row in Scenes) and the Cut's
+offer. Checks: contracts `song-window`; coordinator `productions/scene-song-window`; client
+`scene-song-window` and `production-setup`.

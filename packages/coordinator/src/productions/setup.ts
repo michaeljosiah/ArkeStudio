@@ -10,6 +10,7 @@ import { chaptersReadWhole } from "../world-chat/source-reads.js";
 import { chapterFence } from "../world-chat/target-reads.js";
 import { WriteQueue } from "../change-log.js";
 import { createProductionFromPlan } from "./ops.js";
+import { SCENE_SONG_WINDOW_SCHEMA_VERSION } from "./scene-record.js";
 import { planProductionSetup, setupSourceDigest } from "./setup-plan.js";
 import { WorldChatStore, conversationDir } from "../world-chat/store.js";
 import { foldConversation } from "../world-chat/fold.js";
@@ -80,6 +81,8 @@ export async function fenceAdaptableSource(world: WorldStore, update: Production
   // A new graphic novel's plan says Panel by panel from its first revision (turn 272), so its kind raises for it too.
   if (update.fields?.kind === GRAPHIC_NOVEL_KIND || update.fields?.comicAsk === "mode" || update.fields?.graphicNovel?.mode !== undefined) await world.ensureSchemaVersion(COMIC_PANELS_SCHEMA_VERSION, "production-setup");
   if (update.fields?.graphicNovel?.noPicture !== undefined || update.fields?.graphicNovel?.chapters.some(chapter => chapter.about !== undefined)) await world.ensureSchemaVersion(COMIC_ORIGINAL_SCHEMA_VERSION, "production-setup");
+  // A scene's place in the song is a strict draft field a build of 134 cannot read (issue 3100).
+  if (update.scenes?.some(scene => scene.songWindow != null)) await world.ensureSchemaVersion(SCENE_SONG_WINDOW_SCHEMA_VERSION, "production-setup");
 }
 
 function initialState(worldId: string, setupId: ConversationId, seed?: ProductionSetupSeed): ProductionSetupState {

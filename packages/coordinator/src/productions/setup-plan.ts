@@ -113,6 +113,8 @@ export function planProductionSetup(bundle: WorldBundle, raw: ProductionSetupDra
       }),
       ...(scene.synopsis !== undefined ? { synopsis: scene.synopsis } : {}),
       ...(scene.inherits ? { inherits: scene.inherits } : {}),
+      // The scene keeps its place in the song (issue 3100): the header and the song's sections read it there.
+      ...(scene.songWindow ? { songWindow: scene.songWindow } : {}),
       ...(scene.scriptBlocks ? { script: { blocks: scene.scriptBlocks } } : {}),
     }),
   }));

@@ -38,6 +38,7 @@ import { ReadAloud } from "../components/read-aloud.js";
 import { PageReadControl, useProsePageRead, type PageReadBlock } from "../components/page-read.js";
 import { Portrait } from "../components/portrait.js";
 import { seconds } from "../lib/format.js";
+import { sceneSongLine } from "../lib/song.js";
 import {
   acceptedTakeId,
   useProduction,
@@ -993,7 +994,8 @@ export function ScenesScreen() {
                   </div>
                   <div className="fy-row__sub">
                     {sceneShots.length} shots ·{" "}
-                    {seconds(sceneShots.reduce((s, x) => s + resolvedAuthoredDuration(x), 0))}
+                    {/* A scene with a place in the song reads by it (issue 3101): its window, and how much is pinned. */}
+                    {sceneSongLine(production, scene) ?? seconds(sceneShots.reduce((s, x) => s + resolvedAuthoredDuration(x), 0))}
                     {scene.inherits?.location ? ` · ${phone ? world?.sheets.find(sheet => sheet.id === scene.inherits?.location)?.name ?? scene.inherits.location : `@${scene.inherits.location}`}` : ""}
                     {scene.inherits?.timeOfDay ? ` · ${scene.inherits.timeOfDay}` : ""}
                   </div>
