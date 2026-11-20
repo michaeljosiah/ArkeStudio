@@ -85,6 +85,25 @@ it("says No shots for an emptied scene and offers nothing to build it with (issu
   }
 });
 
+/**
+ * A prepared scene says who a shot names with no picture going, before it is approved (issue
+ * 3155). Six sections of a music video were approved with shots that named their people in plain
+ * words, and every face in their frames was invented.
+ */
+it("flags a shot that names someone with a sheet without citing them, and not the scene's own place", () => {
+  __setStateForTest(state);
+  const after = migrateLegacyScene({ id: "sc_named", slug: "named", number: 2, order: 2, title: "Named", status: "draft", version: 1,
+    inherits: { location: "the-vigil" },
+    shots: [
+      { id: "sh_plain", number: 1, title: "Plain", description: "Maren Kest grips the rail of The Vigil.", durationSec: 4 },
+      { id: "sh_cited", number: 2, title: "Cited", description: "@maren-kest grips the rail of The Vigil.", durationSec: 4 },
+    ] });
+  const { document } = parseHTML(renderToString(<MemoryRouter><ProductionCardBody action={card()} preview={{ kind: "scene", before: null, after }} /></MemoryRouter>));
+  const unseen = (shotId: string) => [...document.querySelectorAll(`[data-testid="workspace-row-${shotId}"] .fy-production-preview__unseen`)].map(node => node.textContent);
+  assert.deepEqual(unseen("sh_plain"), ["Names Maren Kest · no picture"]);
+  assert.deepEqual(unseen("sh_cited"), [], "a cited person rides, and the scene's place rides whatever is said");
+});
+
 it("deduplicates a group gesture, waits for completion and leaves generation for an individual decision", async () => {
   const first = card(), second = card({ turnId: first.turnId, conversationId: first.conversationId, dependencies: [first.actionId] });
   const generation = card({ turnId: first.turnId, conversationId: first.conversationId, actionKind: "world-chat-production-take-generation", cardFamily: "generation" });

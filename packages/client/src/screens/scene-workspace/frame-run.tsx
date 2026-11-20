@@ -7,6 +7,7 @@ import {
   CODEX_IMAGE_PLAN_LABEL,
   isReplayableFinalization,
   missingShotLooks,
+  namedWithoutCitation,
   orderedShots,
   resolveCast,
   sceneImageOutput,
@@ -337,7 +338,9 @@ function GenerateFramesDialogOpen({
       ? `No available image model supports ${aspect}; turn one on in AI models.`
       : `Choose ${alternativeName}, which supports ${aspect}.`}`
     : blockedReason;
-  const references = matchingOptions ? quoteReferences(quote, scene, world) : [];
+  const { tiles: references, unseen } = matchingOptions
+    ? quoteReferences(quote, scene, world)
+    : { tiles: [], unseen: [] };
   // R-16's second layer: a scope that resolves to nothing swaps the primary for the sentence
   // naming the fix. Only the all-framed case has a fix to name — a scene with no shots keeps
   // the backend's refusal, because switching scope would not change anything there.
@@ -492,10 +495,10 @@ function GenerateFramesDialogOpen({
           {unavailable ? <p className="fy-swgen__hint">This production still names {modelLabel(knownModel!)}; it has not been replaced by another model.</p> : null}
         </section>
 
-        {references.length === 0 ? null : (
+        {references.length + unseen.length === 0 ? null : (
           <section className="fy-swgen__section">
             <h3>References</h3>
-            <div className="fy-swgen__references">
+            {references.length === 0 ? null : <div className="fy-swgen__references">
               {references.map((reference) => (
                 <article key={reference.sheet.id} data-riding={reference.ridingSteps > 0 ? "true" : "false"}>
                   <span className="fy-swgen__reference-image">
@@ -511,7 +514,10 @@ function GenerateFramesDialogOpen({
                   </span>
                 </article>
               ))}
-            </div>
+            </div>}
+            {unseen.map((entry) => (
+              <p key={entry.sheetId} className="fy-swgen__guard" role="status" data-testid="unseen-name">Names {entry.name} · no picture</p>
+            ))}
           </section>
         )}
 
@@ -665,6 +671,11 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
     ridingSteps: number;
     looks: string[];
   }>();
+  // Who a shot being drawn names in plain words with no tile of their own (issue 3155): only a
+  // mention brings a picture, so "Timi J on his dark set" went out with no picture of him and this
+  // dialog showed no References at all. Someone another shot on the same board cites already has
+  // a tile, and is not said twice.
+  const unseen = new Map<string, string>();
   for (const step of quote.steps) {
     const cited = new Set<string>();
     const stepShots = step.requestShotIds.flatMap((shotId) => shotById.get(shotId) ?? []);
@@ -674,6 +685,13 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
       for (const entry of resolveCast(shot.description, world.sheets).cast) cited.add(entry.sheet.id);
     }
     for (const reference of step.references) cited.add(reference.sheetId);
+    for (const shotId of step.updateShotIds) {
+      const shot = shotById.get(shotId);
+      if (shot === undefined) continue;
+      for (const { sheet, name } of namedWithoutCitation(shot.description, world.sheets, cited)) {
+        if (!unseen.has(sheet.id)) unseen.set(sheet.id, name);
+      }
+    }
     for (const sheetId of cited) {
       const sheet = sheetById.get(sheetId);
       if (sheet === undefined) continue;
@@ -689,7 +707,7 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
       });
     }
   }
-  return [...summary.values()].map(({ looks, ...entry }) => {
+  const tiles = [...summary.values()].map(({ looks, ...entry }) => {
     const gone = missing.filter((item) => item.sheetId === entry.sheet.id).map((item) => item.number);
     const detail = entry.sheet.type === "location"
       ? ["plate"]
@@ -705,6 +723,7 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
         : characterPortraitPath(world, entry.sheet.id)),
     };
   });
+  return { tiles, unseen: [...unseen].map(([sheetId, name]) => ({ sheetId, name })) };
 }
 
 export function FrameRunBar({ run, worldId, productionId, onReview }: { run: FrameRunState; worldId: string; productionId: string; onReview?: () => void }) {

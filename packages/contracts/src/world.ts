@@ -209,10 +209,13 @@ export type Sheet = z.infer<typeof SheetSchema>;
  * the full name — `Adeyemi "Ade" Akinola` gives `Ade` — else the first word.
  */
 export function defaultShortName(name: string): string {
-  const quoted = /["\u201C\u201E]([^"\u201C\u201D\u201E]+)["\u201D]/.exec(name);
-  const nickname = quoted?.[1]?.trim();
-  if (nickname !== undefined && nickname !== "") return nickname;
-  return name.trim().split(/\s+/)[0] ?? name.trim();
+  return quotedNickname(name) ?? name.trim().split(/\s+/)[0] ?? name.trim();
+}
+
+/** The nickname a full name quotes \u2014 `Ade` of `Adeyemi "Ade" Akinola` \u2014 or null when it quotes none. */
+export function quotedNickname(name: string): string | null {
+  const nickname = /["\u201C\u201E]([^"\u201C\u201D\u201E]+)["\u201D]/.exec(name)?.[1]?.trim();
+  return nickname !== undefined && nickname !== "" ? nickname : null;
 }
 
 /** The short name a character goes by: the one written on the sheet, else the default. Never empty. */

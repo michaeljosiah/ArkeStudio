@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { effectiveFraming, resolveCast, orderedShots, shotChanges, shotLookId, shotLookIn, type ProductionCardPreview, type ConversationActionCard } from "@arke-studio/contracts";
+import { effectiveFraming, namedWithoutCitation, resolveCast, orderedShots, shotChanges, shotLookId, shotLookIn, type ProductionCardPreview, type ConversationActionCard } from "@arke-studio/contracts";
 import { lookTileLabel } from "../screens/character-reference.js";
 import { useWorld } from "../lib/store.js";
 import { StoryboardRows } from "../screens/scene-workspace/rows.js";
@@ -22,6 +22,10 @@ export function ProductionCardBody({ preview, action, onSelectShot }: { preview:
   const marks = useMemo(() => new Map(changes?.shots.map(row => [row.shot.id, [row.inserted ? "Inserted" : "", row.moved ? `Moved ↑ ${row.from} → ${row.shot.number}` : "", row.changed ? "Changed" : ""].filter(Boolean).join(" · ")]) ?? []), [changes]);
   const newShots = useMemo(() => new Set(changes?.shots.filter(row => row.inserted).map(row => row.shot.id) ?? []), [changes]);
   // Each person with the look the shot puts them in (issue 3178), so the card shows the choice it asks to approve.
+  // A shot naming someone with a sheet in plain words is said on the card before it is approved
+  // (issue 3155): only a mention sends their picture, and six sections of a music video went out
+  // with every face invented while these rows showed no cast line and nothing else. The scene's
+  // own place rides whatever a shot says, so naming it is not flagged.
   const reviewShots = useMemo(() => preview.kind === "scene" ? new Map(orderedShots(preview.after).map(shot => [shot.id, {
     framing: Object.values(effectiveFraming(preview.after, shot)).filter(Boolean).join(" · "),
     cast: world ? resolveCast(shot.description, world.sheets).cast.filter(entry => entry.sheet.type === "character").map(entry => {
@@ -30,6 +34,7 @@ export function ProductionCardBody({ preview, action, onSelectShot }: { preview:
       const look = shotLookIn(world.referenceKits.find(kit => kit.sheetId === entry.sheet.id) ?? null, lookId);
       return `${entry.sheet.name} · ${look === undefined ? "look missing" : look.name ?? lookTileLabel(look.prompt, look.kind)}`;
     }) : [],
+    unseen: world ? namedWithoutCitation(shot.description, world.sheets, new Set(preview.after.inherits?.location === undefined ? [] : [preview.after.inherits.location])).map(entry => entry.name) : [],
   }])) : undefined, [preview, world]);
   if (preview.kind === "production") return <div className="fy-production-preview" aria-label="Resulting production">
     <h4>{preview.title}</h4><dl>{[

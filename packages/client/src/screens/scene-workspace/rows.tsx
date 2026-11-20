@@ -151,7 +151,8 @@ export function StoryboardRows({
   /** Present when the production plays as beats (turn 174): each row reads as a beat. */
   beats?: BeatsView;
   reviewMarks?: ReadonlyMap<string, string>;
-  reviewShots?: ReadonlyMap<string, { framing: string; cast: readonly string[] }>;
+  /** `unseen`: who the shot names in plain words with no picture going (issue 3155). */
+  reviewShots?: ReadonlyMap<string, { framing: string; cast: readonly string[]; unseen: readonly string[] }>;
 }) {
   const shots = orderedShots(scene);
   const lineFindings = useMemo(() => stageLineCrossings(scene, aspect), [scene, aspect]);
@@ -280,7 +281,7 @@ export function StoryboardRows({
           return (
             <li key={shot.id} className="fy-swrow" data-testid={`workspace-row-${shot.id}`} data-review-change={newShotIds.has(shot.id) ? "inserted" : reviewMarks?.get(shot.id) ? "changed" : undefined}>
               {reviewMarks?.get(shot.id) && <div className="fy-production-preview__mark">{reviewMarks.get(shot.id)}</div>}
-              {reviewShots && <div className="fy-production-preview__shotmeta"><span>{reviewShots.get(shot.id)?.framing}</span>{reviewShots.get(shot.id)?.cast.map(name => <span className="fy-swchip" key={name}>{name}</span>)}</div>}
+              {reviewShots && <div className="fy-production-preview__shotmeta"><span>{reviewShots.get(shot.id)?.framing}</span>{reviewShots.get(shot.id)?.cast.map(name => <span className="fy-swchip" key={name}>{name}</span>)}{reviewShots.get(shot.id)?.unseen.map(name => <span className="fy-production-preview__unseen" key={`unseen:${name}`}>Names {name} · no picture</span>)}</div>}
               {showBoards && board !== undefined ? (
                 <BoardBand
                   board={board}

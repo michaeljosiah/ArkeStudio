@@ -18,6 +18,7 @@
 .fy-production-preview__rows .fy-swrow__titleline { padding-right: 0; }
 .fy-production-preview__rows .fy-swrow__pencil { display: none; }
 .fy-production-preview__shotmeta { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px; font: var(--type-meta); }
+.fy-production-preview__unseen { color: var(--danger); }
 .fy-production-preview__rows :is(.fy-swrow__actions, .fy-swrow__frameactions, .fy-swaddshot, .fy-swdivider, .fy-swboard__actions) { display: none; }
 .fy-production-preview__rows textarea { pointer-events: none; }
 .fy-production-preview__mark { padding: 6px 10px; color: var(--foreground); border-left: 3px solid var(--accent); font-size: 11px; }
