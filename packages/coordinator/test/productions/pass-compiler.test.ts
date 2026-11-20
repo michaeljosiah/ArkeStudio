@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
   compilePasses,
   assemblePrompt,
+  newId,
   orderedShots,
   planScene,
   type ArtifactSidecar,
@@ -11,6 +14,8 @@ import {
   type Shot,
 } from "@arke-studio/contracts";
 import { composeDispatches } from "../../src/productions/ops.js";
+import { acceptLocationView, readKit } from "../../src/references/kit.js";
+import { encodePng, solidImage } from "../../src/references/png.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld, WORLD_ID } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -409,6 +414,56 @@ describe("the pass compiler (issue 398)", () => {
     assert.equal(carried.mode, "scoped-look", "the production's own look is legible without parsing prose");
     assert.equal(carried.subject, "Maren Kest");
     assert.ok(carried.file.includes("council-coat"), "and it is the look that actually travels");
+  });
+
+  /* Issue 3194: a reference-to-video model reproduces every picture it is sent, so the location
+     sheet's caption band and grey bars went into the clip as things to draw. The video request
+     carries the place's own view instead, through the same composer the queue runs. */
+  it("a video request at a place carries its view, never the labelled sheet (issue 3194)", async () => {
+    const { dir, store, bundle } = await open();
+    const production = bundle.productions[0]!;
+    const vigil = bundle.sheets.find((sheet) => sheet.id === "the-vigil")!;
+    const accept = async (n: number, name: string) => {
+      const takeId = newId("tk");
+      const file = `takes/${takeId}/location-view-${n}.png`;
+      await mkdir(join(dir, "references", vigil.id, "takes", takeId), { recursive: true });
+      await writeFile(join(dir, "references", vigil.id, file), Buffer.from(encodePng(solidImage(640, 480, [40 * n, 60, 120, 255]))));
+      await acceptLocationView(store, vigil, {
+        id: `lv_${n}`, name, file, takeId, sheetVersion: vigil.version, artDirectionVersion: bundle.artDirection.version,
+      });
+      return `references/${vigil.id}/${file}`;
+    };
+    const scene: Scene = {
+      ...production.scenes[0]!,
+      inherits: { ...production.scenes[0]!.inherits, location: vigil.id },
+      shots: [shot(1, 5, "@maren-kest at the rail")],
+    };
+    const request = async () => {
+      const kit = (await readKit(store, vigil.id))!.kit;
+      const kits = [...bundle.referenceKits.filter((candidate) => candidate.sheetId !== vigil.id), kit];
+      const world = { ...bundle, referenceKits: kits };
+      const plan = planScene(
+        { world: bundle.meta, productionId: production.meta.id, sheets: bundle.sheets, kits, scene, selections: {}, model: WAN_LIKE },
+        "per-shot",
+      );
+      const [only] = composeDispatches(WORLD_ID, production.meta.id, scene, plan, WAN_LIKE, world);
+      return { kit, references: only!.params["references"] as string[], prompt: String(only!.params["prompt"]) };
+    };
+
+    const establishing = await accept(1, "Establishing view");
+    const one = await request();
+    const sheet = `references/${vigil.id}/${one.kit.designatedCompilation}`;
+    assert.match(sheet, /location-sheet-[0-9a-f]{12}\.png$/, "the kit still designates its sheet");
+    assert.ok(one.references.includes(establishing), `the view rides: ${one.references.join(", ")}`);
+    assert.ok(!one.references.includes(sheet), "and the labelled sheet does not");
+    assert.ok(!/panel 1/i.test(one.prompt), "nothing cites a panel the request does not carry");
+
+    // A second angle: the sheet now stacks two panels, and the clip still takes one plain picture.
+    await accept(2, "From the door");
+    const two = await request();
+    assert.ok(two.references.includes(establishing), "the establishing view rides");
+    assert.ok(!two.references.some((file) => /location-sheet-/.test(file)), "no sheet reaches the video route");
+    assert.equal(two.references.filter((file) => file.startsWith(`references/${vigil.id}/`)).length, 1, "a place still takes one slot");
   });
 });
 

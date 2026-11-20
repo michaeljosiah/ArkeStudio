@@ -1818,9 +1818,19 @@ describe("a location sheet at dispatch (#243)", () => {
     inherits: { location: "the-vigil", timeOfDay: "night" },
     shots: [shot(1, 5, "@maren-kest at the rail")],
   });
-  const plan = (kits: ReferenceKit[], bundle: { meta: WorldMeta; sheets: Sheet[] }) =>
+  /** The sheet and its panel map are for a model drawing a still (issue 3194). */
+  const STILLS_MODEL: ManifestModel = {
+    id: "stills",
+    provider: "fal",
+    capability: "image",
+    displayName: "Stills",
+    accepts: { referenceImages: 2, startFrame: false, endFrame: false },
+    limits: {},
+    pricing: { kind: "perImage", microUsdPerImage: 1000 },
+  };
+  const plan = (kits: ReferenceKit[], bundle: { meta: WorldMeta; sheets: Sheet[] }, model: ManifestModel = STILLS_MODEL) =>
     planScene(
-      { world: bundle.meta, sheets: bundle.sheets, kits, scene: scene(), selections: {}, model: VIDEO_MODEL },
+      { world: bundle.meta, sheets: bundle.sheets, kits, scene: scene(), selections: {}, model },
       "per-shot",
     );
 
@@ -1880,6 +1890,56 @@ describe("a location sheet at dispatch (#243)", () => {
     const vigil = shotPlan.bound.find((reference) => reference.sheetId === "the-vigil")!;
     assert.equal(vigil.file, "references/the-vigil/location-sheet-abc123def456.png");
     assert.match(vigil.rolePhrase, /^location reference/, "carried, unmapped");
+    await store.close();
+  });
+
+  it("a video route takes the establishing view, never the labelled sheet (issue 3194)", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const others = bundle.referenceKits.filter((kit) => kit.sheetId !== "the-vigil");
+    const shotPlan = plan([...others, kitWithSheet()], bundle, VIDEO_MODEL).shots[0]!;
+    const vigil = shotPlan.bound.find((reference) => reference.sheetId === "the-vigil")!;
+    assert.equal(vigil.file, "references/the-vigil/takes/tk_a/view.png", "the picture the other angles were made against");
+    assert.equal(shotPlan.bound.filter((reference) => reference.sheetId === "the-vigil").length, 1, "still one slot");
+    assert.equal(vigil.rolePhrase, "location reference — environment and composition");
+    assert.ok(!/panel/i.test(shotPlan.parts.preamble!), "no panel map for a picture with no panels");
+
+    // A scene that chose another angle as its plate keeps it on every route (SPEC-044 R-18).
+    const plated: ReferenceKit = {
+      ...kitWithSheet(),
+      looks: [{
+        id: "lv_b",
+        kind: "view",
+        file: "takes/tk_b/view.png",
+        prompt: "Reverse angle",
+        acceptedAt: "2026-08-01T12:00:00.000Z",
+        attachedTo: { kind: "scene", productionId: "saltlight", sceneId: "sc_243" },
+      }],
+    };
+    const scoped = planScene(
+      { world: bundle.meta, productionId: "saltlight", sheets: bundle.sheets, kits: [...others, plated], scene: scene(), selections: {}, model: VIDEO_MODEL },
+      "per-shot",
+    ).shots[0]!.bound.find((reference) => reference.sheetId === "the-vigil")!;
+    assert.equal(scoped.file, "references/the-vigil/takes/tk_b/view.png");
+    await store.close();
+  });
+
+  it("a place with one view sends the view on every route: its one label cites nothing (issue 3194)", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const others = bundle.referenceKits.filter((kit) => kit.sheetId !== "the-vigil");
+    const full = kitWithSheet();
+    const oneView: ReferenceKit = {
+      ...full,
+      locationViews: full.locationViews!.slice(0, 1),
+      compilations: [{ ...full.compilations[0]!, tiles: [VIEWS[0]!.file] }],
+    };
+    for (const model of [STILLS_MODEL, VIDEO_MODEL]) {
+      const shotPlan = plan([...others, oneView], bundle, model).shots[0]!;
+      const vigil = shotPlan.bound.find((reference) => reference.sheetId === "the-vigil")!;
+      assert.equal(vigil.file, "references/the-vigil/takes/tk_a/view.png", `${model.capability}: the view, not the one-panel sheet`);
+      assert.ok(!/panel/i.test(shotPlan.parts.preamble!), `${model.capability}: and nothing cites a panel`);
+    }
     await store.close();
   });
 });

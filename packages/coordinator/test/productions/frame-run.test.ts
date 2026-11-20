@@ -34,6 +34,7 @@ import {
   startFrameRun,
   type FrameRunDriverDeps,
 } from "../../src/productions/frame-run.js";
+import { acceptLocationView, readKit } from "../../src/references/kit.js";
 import { recordFrameRunOutcome } from "../../src/productions/frame-run-outcome.js";
 import { Coordinator } from "../../src/coordinator.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
@@ -392,6 +393,56 @@ describe("frame-run coordinator service", () => {
     const carried = sheet.request.references.map((reference) => reference.path);
     assert.ok(carried.includes("references/maren-kest/looks/navy-suit.png") && carried.includes("references/maren-kest/looks/cream-shirt.png"));
     assert.ok(!carried.includes("references/maren-kest/looks/council-coat.png"), "the scene's look stands aside where every panel chose");
+  });
+
+  /* Issue 3194 moved a place's video reference to its plain view. A still is drawn by an image
+     model, which reads the sheet's panel map, so a place with several angles keeps sending the
+     sheet here; a place with one angle sends the view, because its one label locates nothing. */
+  it("a frame run sends a place's sheet once it has two views, and its plain view while it has one", async () => {
+    const f = await fixture();
+    const vigil = f.world.sheets.find((sheet) => sheet.id === "the-vigil")!;
+    const accept = async (n: number, name: string) => {
+      const takeId = newId("tk");
+      const file = `takes/${takeId}/location-view-${n}.png`;
+      await mkdir(join(f.dir, "references", vigil.id, "takes", takeId), { recursive: true });
+      await writeFile(join(f.dir, "references", vigil.id, file), Buffer.from(encodePng(solidImage(640, 480, [40 * n, 90, 60, 255]))));
+      await acceptLocationView(f.store, vigil, {
+        id: `lv_${n}`, name, file, takeId, sheetVersion: vigil.version, artDirectionVersion: f.world.artDirection.version,
+      });
+      return `references/${vigil.id}/${file}`;
+    };
+    const withKit = async (): Promise<{ world: WorldBundle; sheet: string }> => {
+      const kit = (await readKit(f.store, vigil.id))!.kit;
+      return {
+        world: { ...f.world, referenceKits: [...f.world.referenceKits.filter((candidate) => candidate.sheetId !== vigil.id), kit] },
+        sheet: `references/${vigil.id}/${kit.designatedCompilation}`,
+      };
+    };
+    // Every step set at the scene's place carries it. A shot that cites its own place is not there
+    // (issue 3152), so the market's shot carries none of the Vigil's pictures.
+    const market = orderedShots(f.scene).find((shot) => shot.description.includes("@the-saltmarket"))!;
+    type PlaceStep = { requestShotIds: readonly string[]; request: { prompt: string; references: ReadonlyArray<{ sheetId: string; path: string }> } };
+    const atTheVigil = (step: PlaceStep) => !step.requestShotIds.includes(market.id);
+    const placePaths = (steps: readonly PlaceStep[]) =>
+      steps.map((step) => step.request.references.filter((reference) => reference.sheetId === vigil.id).map((reference) => reference.path));
+    const riding = (steps: readonly PlaceStep[], path: string) => steps.map((step) => atTheVigil(step) ? [path] : []);
+
+    const establishing = await accept(1, "Establishing view");
+    const one = await withKit();
+    const single = await compileFrameRun({
+      worldId: WORLD_ID, productionId: f.production.meta.id, scene: f.scene as SceneRecord, production: f.production,
+      world: one.world, model: IMAGE, mode: "per-shot", scope: "all", boardCapSec: 30, boardPanelCap: 6, eligible: true, clock: CLOCK,
+    });
+    assert.ok(single.steps.some(atTheVigil) && !single.steps.every(atTheVigil), "the scene has shots at its place and one elsewhere");
+    assert.deepEqual(placePaths(single.steps), riding(single.steps, establishing), "one view rides as itself");
+    assert.ok(!single.steps.some((step) => /panel 1/i.test(step.request.prompt)), "and no prompt cites its panel");
+
+    await accept(2, "From the door");
+    const two = await withKit();
+    assert.match(two.sheet, /location-sheet-[0-9a-f]{12}\.png$/);
+    const run = await start(f, "per-shot", "all", f.production, two.world);
+    assert.deepEqual(placePaths(run.steps), riding(run.steps, two.sheet), "the stacked sheet rides every frame set there");
+    assert.ok(run.steps.filter(atTheVigil).every((step) => /panel 1 \(top\), Establishing view; panel 2 \(bottom\), From the door/.test(step.request.prompt)), "with its panel map");
   });
 
   it("refuses a quote for shot A when start asks for shot B", async () => {

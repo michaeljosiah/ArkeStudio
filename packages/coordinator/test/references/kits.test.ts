@@ -1225,7 +1225,9 @@ describe("location views and the sheet they assemble (#243)", () => {
     assert.equal(kit.locationViews?.length, 1);
     assert.equal(kit.establishingViewId, "v1", "the first angle is the anchor, whatever it is called");
     const sheet = kit.compilations.find((c) => c.format === "location-sheet")!;
-    assert.equal(kit.designatedCompilation, sheet.file, "the sheet is what dispatch carries");
+    // Designated still, though a one-view place dispatches the view itself (issue 3194).
+    assert.equal(kit.designatedCompilation, sheet.file, "the sheet is the kit's designation");
+    assert.equal(attachmentFor(kit, VIGIL).file, `references/${VIGIL.id}/${kit.locationViews![0]!.file}`);
     assert.equal(sheet.source, "local", "assembled here — no provider, no cost");
     assert.equal(sheet.accepted, true);
 
@@ -1246,6 +1248,13 @@ describe("location views and the sheet they assemble (#243)", () => {
     assert.deepEqual(kit.looks?.map((look) => [look.id, look.kind, look.file, look.attachedTo]), [["v2", "view", door.file, scope]], "the first attachment makes the look, keyed by the view");
     assert.equal(attachmentFor(kit, VIGIL, "primary", scope).file, `references/${VIGIL.id}/${door.file}`, "the plate that rides is the view");
     assert.equal(attachmentFor(kit, VIGIL, "primary", { productionId: "saltlight", sceneId: "sc_05" }).mode, "designated", "another scene keeps the kit's sheet");
+    const establishing = orderedLocationViews(kit)[0]!;
+    assert.equal(
+      attachmentFor(kit, VIGIL, "primary", { productionId: "saltlight", sceneId: "sc_05" }, "video").file,
+      `references/${VIGIL.id}/${establishing.file}`,
+      "and a clip there takes the establishing view, not the sheet (issue 3194)",
+    );
+    assert.equal(attachmentFor(kit, VIGIL, "primary", scope, "video").file, `references/${VIGIL.id}/${door.file}`, "the plate wins on video too");
     await attachCharacterLook(store, VIGIL.id, "v2", null);
     const detached = (await readKit(store, VIGIL.id))!.kit;
     assert.deepEqual(detached.looks?.map((look) => [look.id, look.attachedTo]), [["v2", undefined]], "detaching keeps the look and drops the scope");
