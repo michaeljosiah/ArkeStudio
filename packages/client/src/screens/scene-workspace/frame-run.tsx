@@ -516,10 +516,10 @@ function GenerateFramesDialogOpen({
           </section>
         )}
 
-        {phone && <p className="fy-swgen__context fy-swgen__context-body" aria-label="Inherited scene context">{contextValues(scene, world, aspect).join(" · ")}</p>}
+        {phone && <p className="fy-swgen__context fy-swgen__context-body" aria-label="Inherited scene context">{contextValues(scene, world, aspect, !playsAsBeats).join(" · ")}</p>}
         <footer className="fy-swgen__foot">
           {!phone && <span className="fy-swgen__context" aria-label="Inherited scene context">
-            applies the scene context · {contextValues(scene, world, aspect).join(", ")}
+            applies the scene context · {contextValues(scene, world, aspect, !playsAsBeats).join(", ")}
           </span>}
           {emptyScope ? (
             <div className="fy-swgen__actions">
@@ -603,12 +603,22 @@ function PackingPreview({
   );
 }
 
-/** The same values the header's context chips carry, in the same order. */
-function contextValues(scene: SceneRecord, world: WorldBundle, aspect: string): string[] {
+/**
+ * The same values the header's context chips carry, in the same order, and the scene's light.
+ *
+ * The light is said here because this is the last look before frames are drawn (issue 3247): a
+ * film's frames went out with no light named on the scene or on any shot, and came back lit like
+ * a studio still. A film with none says so; a production that plays as beats draws pictures, not
+ * photographed frames, and is told nothing.
+ */
+function contextValues(scene: SceneRecord, world: WorldBundle, aspect: string, film: boolean): string[] {
   const location = scene.inherits?.location === undefined
     ? null
     : world.sheets.find((sheet) => sheet.id === scene.inherits?.location)?.name ?? scene.inherits.location;
-  return [location, scene.inherits?.timeOfDay ?? null, scene.inherits?.tone ?? null, aspect]
+  const said = scene.defaults?.grade !== undefined
+    || orderedShots(scene).some((shot) => shot.framing?.lighting !== undefined || shot.framing?.grade !== undefined);
+  const light = scene.defaults?.lighting ?? (film && !said ? "no light set" : null);
+  return [location, scene.inherits?.timeOfDay ?? null, scene.inherits?.tone ?? null, light, aspect]
     .filter((value): value is string => value !== null);
 }
 
