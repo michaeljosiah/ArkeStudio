@@ -1,0 +1,66 @@
+/* Turn 285 · the Plan. What the turn adds to screens that are otherwise the app's own, which
+   location-plan-285.app.css styles (the client's rules, scoped to .app285 at the desk and .app285p
+   on a phone). The Plan's inspector is the Stage's inspector and takes the Stage's rules; these are
+   only the parts the Stage has no word for yet. Type through the tokens only (check-master's rule
+   from turn 139). The plan's ground is a render with a fixed light ground, so what is written on
+   it uses the theme-invariant neutrals, as the Stage's own labels do. */
+
+/* The Plan on the scene page: where the storyboard was, 442 tall, the Stage's own work row. */
+.app285 .pl285{display:flex;flex-direction:column;height:442px;margin-top:12px;flex:none}
+.app285 .pl285 .fy-swstage__panel{overflow:hidden}
+.app285 .pl285-vp{position:relative;overflow:hidden;background:#e6e3dd center/100% 100% no-repeat}
+.app285 .pl285 .pl285-vp{background:#e6e3dd center/100% 100% no-repeat}
+
+/* A position's number, on its body in the picture and on its line in the list. */
+.pl285-n{position:absolute;transform:translate(-50%,-50%);color:var(--neutral-50);font:var(--weight-semibold) var(--text-2xs)/1 var(--font-sans);letter-spacing:-.02em;pointer-events:none}
+.pl285-num{flex:none;display:inline-grid;place-items:center;min-width:16px;height:16px;padding:0 3px;box-sizing:border-box;border-radius:8px;background:var(--foreground);color:var(--background);font:var(--weight-semibold) var(--text-2xs)/1 var(--font-sans);letter-spacing:-.02em}
+.app285 .pl285 .fy-swstage__item[data-warn="true"],.app285 .pl285 .fy-swstage__item[data-warn="true"]>span:last-child{color:var(--warning)}
+.app285 .pl285 .fy-swstage__item[data-warn="true"] .pl285-num{background:var(--warning);color:var(--neutral-50)}
+
+/* A pair: who is on the left of the picture, then who is on the right, in their colours. */
+.pl285-pair{flex:none;display:inline-flex;gap:2px;width:16px;justify-content:center}
+.pl285-pair i{width:7px;height:7px;border-radius:50%}
+.pl285-ok{font-style:normal;color:var(--success)}
+.pl285-warn{font-style:normal;color:var(--warning)}
+
+/* The plan's scale, and the one clause a crossing owes. */
+.pl285-scale{position:absolute;right:12px;bottom:9px;display:flex;flex-direction:column;align-items:flex-end;gap:3px;color:var(--neutral-700);font:var(--weight-regular) var(--text-2xs)/1 var(--font-mono)}
+.pl285-scale i{height:5px;box-sizing:border-box;border:1px solid var(--neutral-700);border-top:0}
+.pl285-find{position:absolute;left:12px;bottom:12px;display:flex;align-items:center;gap:7px;height:26px;padding:0 10px;border-radius:6px;background:var(--warning-bg);border:1px solid color-mix(in srgb,var(--warning) 45%,transparent);color:var(--foreground);font:var(--type-label);box-shadow:var(--shadow-xs)}
+.pl285-find i{width:7px;height:7px;border-radius:50%;background:var(--warning)}
+
+/* A position's two views, side by side under its form, and the press that draws its picture. */
+.pl285-views{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.app285 .pl285 .pl285-view{position:relative;aspect-ratio:16/9;background:var(--neutral-200) center/cover no-repeat;box-shadow:none}
+.app285 .pl285 .pl285-view--none{border:1px dashed var(--border);border-radius:8px;background:none}
+.pl285-model{margin-left:6px;color:var(--muted-foreground);font:var(--weight-regular) var(--text-2xs)/1.4 var(--font-mono)}
+
+/* The Plan on a location's sheet: the picture and the positions as cards, six across. */
+.app285 .pl285-place .pl285-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin-top:10px}
+.app285 .pl285-place .pl285-vp--place{grid-column:span 4;grid-row:span 2;align-self:start;box-sizing:content-box;border-radius:var(--radius-card,12px);box-shadow:0 0 0 1px var(--border)}
+.app285 .pl285-place .fy-locref__view{grid-column:auto;min-width:0}
+.app285 .pl285-place .fy-locref__viewimage{aspect-ratio:16/9;height:auto}
+.app285 .pl285-place .fy-locref__viewimage img{width:100%;height:100%;object-fit:cover}
+.app285 .pl285-place .fy-locref__viewhead h3{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl285-tag{position:absolute;transform:translate(-50%,-50%);padding:2px 7px;border:1px solid var(--neutral-200);border-radius:6px;background:color-mix(in srgb,var(--neutral-50) 94%,transparent);color:var(--neutral-950);font:var(--weight-medium) var(--text-2xs)/1.3 var(--font-sans);white-space:nowrap}
+.pl285-foot{display:flex;gap:8px;margin-top:12px}
+
+/* Start from, opened on the Stage: turn 231e's menu, with the place as its last choice. */
+.pl285-menu{position:absolute;z-index:40;left:747px;top:149px;width:273px;box-sizing:border-box;padding:6px;border:1px solid var(--border);border-radius:10px;background:var(--popover);box-shadow:var(--shadow-md);color:var(--foreground);font:var(--type-ui)}
+.pl285-opt{display:flex;align-items:center;gap:8px;height:30px;padding:0 8px;border-radius:6px}
+.pl285-opt.on{background:var(--muted)}
+.pl285-opt.off{color:var(--muted-foreground)}
+.pl285-opt>span:nth-child(2){flex:1}
+.pl285-opt .tick{flex:none;width:14px;display:grid;place-items:center}
+.pl285-opt .m{flex:none;white-space:nowrap;color:var(--muted-foreground);font:var(--weight-regular) var(--text-2xs)/1.3 var(--font-mono)}
+
+/* The Plan on a phone: the picture at the page's width, then one list. Rows are 44 px. */
+.app285p .pl285p{display:flex;flex-direction:column;margin-top:12px}
+.app285p .pl285-vp--phone{position:relative;overflow:hidden;height:200px;border:1px solid var(--border);border-radius:12px;background:#e6e3dd center/100% 100% no-repeat}
+.pl285p-head{display:flex;align-items:baseline;gap:10px;padding:16px 0 4px;color:var(--muted-foreground);font:var(--weight-medium) var(--text-2xs)/1.2 var(--font-sans);letter-spacing:.08em;text-transform:uppercase}
+.pl285p-head>span:last-child{letter-spacing:0;text-transform:none;font:var(--weight-regular) var(--text-2xs)/1.4 var(--font-mono)}
+.app285p .pl285p-row{display:flex;align-items:center;gap:10px;height:44px;padding:0;border:0;border-top:1px solid var(--border);background:none;color:var(--foreground);font:var(--weight-regular) var(--text-base)/1.3 var(--font-sans);text-align:left}
+.app285p .pl285p-head+.pl285p-row{border-top:0}
+/* The count follows the name, not the page's edge: the phone's Arke button floats over the right of a list. */
+.pl285p-row>span:nth-child(2){flex:none;max-width:60%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl285p-row>span:last-child{flex:none;color:var(--muted-foreground);font:var(--weight-regular) var(--text-xs)/1.4 var(--font-mono)}

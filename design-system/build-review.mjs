@@ -28,6 +28,15 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN LOCATION PLAN 285
+  { group: "The Plan · turn 285", screen: "The Plan on a scene. The scene page gains a view: the place’s set from straight above in Greybox, each person on a mark in their colour, the two walks dashed, each position a numbered wedge as wide as its lens. The inspector lists the positions with their shots, then the pairs and the side their cameras keep.", frame: "285a", route: "Scene / Plan", status: "drawn", checked: "2026-11-20", controls: [], notes: ["Drawn 20 November 2026 for issue 2302. Awaiting the owner. Not built."] },
+  { group: "The Plan · turn 285", screen: "A position selected. The list folds to it and its form follows: its name, the camera in words as the Stage writes it, the grey view the Stage renders from it and the picture drawn from that view, and one press that draws the picture again.", frame: "285b", route: "Scene / Plan / a position", status: "drawn", checked: "2026-11-20", controls: [], notes: ["Drawn 20 November 2026 for issue 2302. Awaiting the owner. Not built."] },
+  { group: "The Plan · turn 285", screen: "A shot that crosses the line. Shot 23 is tried from the bar’s side: its position’s wedge and row are in the warning colour, the pair counts one crossing, and one clause on the plan names it. Nothing is refused.", frame: "285c", route: "Scene / Plan", status: "drawn", checked: "2026-11-20", controls: [], notes: ["Drawn 20 November 2026 for issue 2302. Awaiting the owner. Not built."] },
+  { group: "The Plan · turn 285", screen: "The Plan on the place’s sheet. A location gains a tab beside Overview and Reference: the same set with no scene’s cast on it, and every position with its picture, or its grey view where none is drawn yet.", frame: "285d", route: "World / Locations / a location / Plan", status: "drawn", checked: "2026-11-20", controls: [], notes: ["Drawn 20 November 2026 for issue 2302. Awaiting the owner. Not built."] },
+  { group: "The Plan · turn 285", screen: "A shot’s Stage, opened on a position. The camera form names the position it started from, the set’s header names the place it belongs to, and Start from offers the place after the scene.", frame: "285e", route: "Scene / shot / Stage", status: "drawn", checked: "2026-11-20", controls: [], notes: ["Drawn 20 November 2026 for issue 2302. Awaiting the owner. Not built."] },
+  { group: "The Plan · turn 285", screen: "The Plan on a phone. The same picture fitted to the width with numbers only; the positions and the sides are the list beneath it.", frame: "285f", route: "Scene / Plan (phone)", status: "drawn", checked: "2026-11-20", controls: [], notes: ["Drawn 20 November 2026 for issue 2302. Awaiting the owner. Not built."] },
+  // END LOCATION PLAN 285
+
   // BEGIN RENDERER RECOVERY 284
   { group: "Desktop recovery · turn 284", screen: "Native crash recovery prompt", frame: "284a", route: "Desktop / renderer failure", status: "built", checked: "2026-11-14", controls: ["Not now", "Reload window"], notes: ["Approved native recovery prompt. OS appearance may vary; see turn 284 notes."] },
   // END RENDERER RECOVERY 284
@@ -1196,6 +1205,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "location-plan-285.review.html", what: "Turn 285: the Plan. A place owns its set, its numbered camera positions and each position’s picture; a scene set there sees them from above with its cast on their marks, and each pair’s cameras held to one side of the line between them, a crossing flagged and never refused. On the scene page, on a location’s sheet, on the Stage’s Start from, and on a phone.", state: "proposed; owner design review pending (issue 2302)" },
   { file: "world-cleanup-278.review.html", what: "Turn 278: Clean up. Studio Storage gains Held and Clean up world; the sheet shows a plan of eight classes with their sizes now and after hold, problems apart with Put back on shelf, the confirm, the run with Stop, the result measured on the drive, held plans with Restore and Empty now, the refusals, and a paired phone that shows and does not run.", state: "proposed; owner design review pending (SPEC-066, issue 3044)" },
   { file: "cut-text-277.review.html", what: "Turn 277: text clips in the Cut. One press adds a title at the playhead; the Inspector holds its words and its look; the clip shows its first line on its track; the typeface menu draws each name in its own face. Desktop and phone.", state: "proposed; owner design review pending (issue 2990)" },
   { file: "publish-arke-player-276.review.html", what: "Turn 276: one Publish page per production, one Arke Player sheet with one made block for every kind, Guide alone, and Add to Arke’s list on the owner’s host.", state: "approved 11 November 2026 (issues 2804, 2805, 2823)" },
@@ -1433,6 +1443,8 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="story-spend-282.css">
 <link rel="stylesheet" href="voice-upload-dialog-283.css">
 <link rel="stylesheet" href="renderer-recovery-284.css">
+<link rel="stylesheet" href="location-plan-285.app.css">
+<link rel="stylesheet" href="location-plan-285.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">
