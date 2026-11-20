@@ -14,7 +14,7 @@ import { TakeComparisonCard } from "./take-comparison-card.js";
 import { ConversationActionGroup } from "./conversation-action-group.js";
 import { ChapterWordCounts } from "./chapter-word-counts.js";
 import { shortDateTime } from "../lib/format.js";
-import { CHAPTER_WORD_COUNT_LABEL, measuredChapterWords, worldChatTextRefusal } from "@arke-studio/contracts";
+import { CARD_WAITS_ON_EARLIER_CARD, CHAPTER_WORD_COUNT_LABEL, measuredChapterWords, worldChatTextRefusal } from "@arke-studio/contracts";
 import { ProductionPlanCardView } from "./production-plan-card.js";
 import { ProductionSetupOutline } from "./production-setup-outline.js";
 import { HumanDecisionCardView } from "./human-decision-card.js";
@@ -160,7 +160,7 @@ export function ConversationTranscript({
       </div>)}
       {olderActions.length > 0 && (
         <div className="fy-chat__turn fy-chat__turn--studio fy-chat__turn--action" aria-label="Earlier actions">
-          {[...new Set(olderActions.map(action => action.turnId))].map(turnId => <ConversationActionGroup key={turnId} actions={olderActions.filter(action => action.turnId === turnId)} conversationSeq={workspace?.seq ?? 0} />)}
+          {[...new Set(olderActions.map(action => action.turnId))].map(turnId => <ConversationActionGroup key={turnId} actions={olderActions.filter(action => action.turnId === turnId)} known={transcriptActions} conversationSeq={workspace?.seq ?? 0} />)}
         </div>
       )}
       {messages.map((m) => {
@@ -261,7 +261,7 @@ export function ConversationTranscript({
               {...(shotLabel === undefined ? {} : { shotLabel })}
             />
           )}
-          {actions.length > 0 && <ConversationActionGroup actions={actions} conversationSeq={workspace?.seq ?? 0} />}
+          {actions.length > 0 && <ConversationActionGroup actions={actions} known={transcriptActions} conversationSeq={workspace?.seq ?? 0} />}
           {m.role === "studio" && m.preparingActions?.map(action => <section key={action.actionId} className="fy-actioncard" aria-label={`${action.title}, Preparing`}>
             <div className="fy-actioncard__head"><strong>{action.title}</strong><span className="fy-actioncard__status">Preparing</span></div>
             <p className="fy-actioncard__notice">The proposed change will appear here when it is ready to review.</p>
@@ -328,9 +328,12 @@ const DECIDABLE_CARD_FAMILIES = new Set([
 export function ConversationPermissionCard({
   action,
   conversationSeq,
+  after,
 }: {
   action: ConversationActionCard;
   conversationSeq: number;
+  /** What the card waits for, in the words of the list it is in: `After 1 to 4`. */
+  after?: string | undefined;
 }) {
   const { state } = useStore();
   const navigate = useNavigate();
@@ -441,7 +444,11 @@ export function ConversationPermissionCard({
       {action.actionKind === "world-chat-production-cut-export" && <ProductionExportReceipt action={action} />}
       <StagePlayblastReceipt action={action} />
       <ConversationFrameRunCard action={action} />
-      {action.blockedReason && <p className="fy-actioncard__notice">{action.blockedReason}</p>}
+      {/* Which cards come first is also why approval waits, so the list's line stands for the
+          coordinator's "Waiting for the card before it.": both said one thing twice (issue 3143).
+          Any other reason, a denied or outdated card among them, is still said under it. */}
+      {after && <p className="fy-actioncard__notice">{after}</p>}
+      {action.blockedReason && !(after && action.blockedReason === CARD_WAITS_ON_EARLIER_CARD) && <p className="fy-actioncard__notice">{action.blockedReason}</p>}
       {savedProposal && proposalReviewNeeded && <p className="fy-actioncard__notice">{announcement}</p>}
       {excerptNotes.map(note => <p key={note} className="fy-actioncard__notice">{note}</p>)}
       {hasExcerpt && excerptNotes.length === 0 && <p className="fy-actioncard__notice">Excerpt shown.{savedProposal ? " Review the full proposal for the complete text." : ""}</p>}

@@ -5,6 +5,7 @@ import { productionShape } from "./production-shape.js";
 import { ProductionTargetSchema, presetTarget } from "./production-target.js";
 import { ModelChoicesSchema } from "./provider.js";
 import { ScriptBlockSchema } from "./scene.js";
+import { SongWindowSchema } from "./spine.js";
 import { NarrativeFieldsSchema } from "./production-narrative.js";
 import { MICRODRAMA_DEFAULTS, ProductionCreationPlanSchema } from "./production-creation.js";
 import { AUDIO_DRAMA_KIND, AudioDramaPlanSchema, DEFAULT_AUDIO_DRAMA_PLAN } from "./audio-drama.js";
@@ -32,6 +33,11 @@ export const SetupSceneSchema = z.object({
   synopsis: Prose.optional(),
   inherits: z.object({ location: SlugSchema.optional(), timeOfDay: Prose.optional(), tone: Prose.optional() }).strict().optional(),
   scriptBlocks: z.array(ScriptBlockSchema.extend({ text: Prose.min(1) }).strict()).max(PRODUCTION_SETUP_BOUNDS.blocks).optional(),
+  /**
+   * The scene's place in the song (issue 3100): setup had no field for it, so a music video's
+   * times went into its titles as words. Creation carries it onto the scene record.
+   */
+  songWindow: SongWindowSchema.optional(),
 }).strict();
 const SetupArcSchema = z.object({
   id: Key, title: Title, note: Prose.optional(),
@@ -152,6 +158,8 @@ export const ProductionSetupUpdateSchema = z.object({
     inherits: z.object({
       location: SlugSchema.nullable().optional(), timeOfDay: Prose.nullable().optional(), tone: Prose.nullable().optional(),
     }).strict().nullable().optional(),
+    /** Null takes the scene's place in the song away; a window replaces it whole. */
+    songWindow: SongWindowSchema.nullable().optional(),
   }).strict()).max(PRODUCTION_SETUP_BOUNDS.scenes).optional(),
   removeEpisodes: z.array(Key).max(PRODUCTION_SETUP_BOUNDS.episodes).optional(),
   removeScenes: Keys.optional(),
@@ -227,12 +235,12 @@ export function applyProductionSetupUpdate(draft: ProductionSetupDraft, raw: Pro
       ...(episode.promise ? { promise: { ...draft.episodes.find(item => item.key === episode.key)?.promise, ...episode.promise } } : {}),
     })), update.removeEpisodes, update.episodeOrder),
     scenes: items(draft.scenes, update.scenes?.map(scene => {
-      const { inherits, ...fields } = scene;
+      const { inherits, songWindow, ...fields } = scene;
       return { ...fields, ...(inherits === undefined ? {} : {
         inherits: inherits === null ? undefined : Object.fromEntries(Object.entries({
           ...draft.scenes.find(item => item.key === scene.key)?.inherits, ...inherits,
         }).filter(([, value]) => value !== null)),
-      }) };
+      }), ...(songWindow === undefined ? {} : { songWindow: songWindow ?? undefined }) };
     }), update.removeScenes, update.sceneOrder),
   });
 }

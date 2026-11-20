@@ -846,6 +846,47 @@ describe("what the studio is told", () => {
     assert.match(prompt, /^- artifact-extraction · /m);
     assert.doesNotMatch(prompt, /^- production-scene-command · /m, "a world thread is told world actions");
   });
+
+  /**
+   * What Arke says it did, and who it plans around (issues 3137, 3141), read in the prompt a turn
+   * is actually sent: a rule that is written and reaches no conversation holds nothing. A world
+   * thread and a production's both prepare changes; only a production with shots plans around a
+   * cast; and a reply-only ask, which may prepare nothing, is told of no actions at all.
+   */
+  it("tells a thread that prepares changes what its reply may say, and a video's thread to check the cast", async () => {
+    const said = /A change they asked for that the result does not carry is not done: say so plainly in reply, and why/;
+    const cast = /If there is none, say so in that same reply and offer to make the sheet first/;
+
+    const world: string[] = [];
+    const inWorld = await setup(fakeAdapter(["not json", "not json"], { prompts: world }), { describeEntry: true });
+    await inWorld.runner.send(inWorld.store, inWorld.conversationId, "drop the two shots we drafted");
+    assert.match(world[0]!, said);
+    assert.doesNotMatch(world[0]!, cast, "a world thread plans no shots");
+
+    const video: string[] = [];
+    const inVideo = await setup(fakeAdapter(["not json", "not json"], { prompts: video }), {
+      entryContext: { kind: "production", productionId: "saltlight" }, describeEntry: true,
+    });
+    await inVideo.runner.send(inVideo.store, inVideo.conversationId, "build the film around the singer and a dancer");
+    assert.match(video[0]!, said);
+    assert.match(video[0]!, cast);
+
+    const book: string[] = [];
+    const inBook = await setup(fakeAdapter(["not json", "not json"], { prompts: book }), {
+      entryContext: { kind: "production", productionId: "the-ledger-of-nights" }, describeEntry: true,
+    });
+    await inBook.runner.send(inBook.store, inBook.conversationId, "drop chapter two");
+    assert.match(book[0]!, said);
+    assert.doesNotMatch(book[0]!, cast, "prose needs no sheet to name somebody");
+
+    const replyOnly: string[] = [];
+    const asked = await setup(fakeAdapter(["not json", "not json"], { prompts: replyOnly }), {
+      entryContext: { kind: "production", productionId: "saltlight" }, describeEntry: true,
+    });
+    await asked.runner.send(asked.store, asked.conversationId, "what is weak in scene one?", [], undefined, undefined, true);
+    assert.doesNotMatch(replyOnly[0]!, /## Actions you can prepare/);
+    assert.match(replyOnly[0]!, /Propose no action this turn; anything you would change, say instead/);
+  });
 });
 
 describe("a turn that never answers", () => {
@@ -1640,6 +1681,9 @@ it("renders a recovered earlier action's completed receipt in the next model pro
   assert.match(prompts[0]!, new RegExp(takeId));
   assert.match(prompts[0]!, /"status":"completed"/);
   assert.doesNotMatch(prompts[0]!, /C:\/private/);
+  // What a reply may say was done (issue 3137) points at this section and this status by name.
+  assert.match(prompts[0]!, /^## Recorded action outcomes$/m);
+  assert.match(prompts[0]!, /has been made only when its card is recorded as completed under Recorded action outcomes/);
 });
 
 describe("an audio drama's create card is fenced before it is durable (SPEC-057 R-82, codex on PR 1866)", () => {

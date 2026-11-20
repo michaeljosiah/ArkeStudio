@@ -9,6 +9,7 @@ import { Loading } from "./loading.js";
 import { Portrait } from "./portrait.js";
 import { ImageDownload } from "./image-actions.js";
 import { StagedReferencePicker } from "./staged-reference-picker.js";
+import { DropTarget, useFileDrop } from "./file-drop.js";
 import { usePhone } from "../lib/media-query.js";
 import { Plus, X } from "./icons.js";
 
@@ -103,6 +104,7 @@ export function GenerationDialog({
   panel,
   onPanelClose,
   referenceTarget,
+  onDropFiles,
 }: {
   open: boolean;
   /** Called for every way out — Esc, the backdrop, Cancel, and a submit that went through. */
@@ -249,8 +251,14 @@ export function GenerationDialog({
   panel?: ReactNode;
   onPanelClose?: () => void;
   referenceTarget?: { worldId: string; key: string; origin?: string | undefined };
+  /**
+   * A file dropped anywhere on the dialog, where the surface has an upload of its own for the
+   * drop to stand in for (issue 3146). Absent, the dialog is not a drop target.
+   */
+  onDropFiles?: (files: File[]) => void;
 }) {
   const [pickingReference, setPickingReference] = useState(false);
+  const drop = useFileDrop(onDropFiles ?? null);
   if (referenceTarget?.origin) referenceHint = <>from {referenceTarget.origin}{referenceHint && <><br />{referenceHint}</>}</>;
   useEffect(() => { if (!open) setPickingReference(false); }, [open]);
   if (pickingReference && worldReferences && referenceTarget) {
@@ -358,7 +366,9 @@ export function GenerationDialog({
           else dialog.current?.close();
         }
       }}
+      {...drop.handlers}
     >
+      {drop.over && <DropTarget />}
       {panel !== undefined ? (
         <div className="fy-gendialog__panel fy-gendialog__panel--picker">{panel}</div>
       ) : (

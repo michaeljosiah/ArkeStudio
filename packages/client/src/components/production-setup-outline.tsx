@@ -1,9 +1,11 @@
 import type { ProductionSetupDraft } from "@arke-studio/contracts";
+import { songWindowLabel } from "../lib/song.js";
 
 export function ProductionSetupOutline({ draft, sheetName }: { draft: ProductionSetupDraft; sheetName: (id: string) => string }) {
   const scene = (key: string) => {
     const item = draft.scenes.find(item => item.key === key);
-    return item ? <li key={key}><strong>{item.title}</strong>{item.synopsis && <p>{item.synopsis}</p>}
+    // A scene's place in the song sits beside its title (issue 3100), where the title used to carry it as words.
+    return item ? <li key={key}><strong>{item.title}</strong>{item.songWindow && <span> · {songWindowLabel(item.songWindow)}</span>}{item.synopsis && <p>{item.synopsis}</p>}
       {item.inherits?.location && <p>Location: {sheetName(item.inherits.location)}</p>}
       {item.inherits?.timeOfDay && <p>Time: {item.inherits.timeOfDay}</p>}
       {item.inherits?.tone && <p>Tone: {item.inherits.tone}</p>}

@@ -28,6 +28,7 @@ import {
 import { productionModel, resolveModel } from "../../components/dispatch-bar.js";
 import { initials, seconds } from "../../lib/format.js";
 import { mediaUrl } from "../../lib/media.js";
+import { sceneSongLine } from "../../lib/song.js";
 import { acceptedTakeId, takesForShot } from "../../lib/selectors.js";
 import {
   frameRunCommand,
@@ -562,7 +563,7 @@ export function SceneWorkspace({
                   </button>
                 )}
               </div>
-              <div className="fy-sw__metrics" aria-label="Scene metrics"><span><ImageMark size={16} />{aspect}</span><span><Film size={16} />{shots.length} shot{shots.length === 1 ? "" : "s"}</span><span><Timer size={16} />{seconds(totalSec)}</span></div>
+              <div className="fy-sw__metrics" aria-label="Scene metrics"><span><ImageMark size={16} />{aspect}</span><span><Film size={16} />{shots.length} shot{shots.length === 1 ? "" : "s"}</span><span data-testid="scene-length"><Timer size={16} />{sceneSongLine(production, scene) ?? seconds(totalSec)}</span></div>
               <details className="fy-sw__details" onKeyDown={(event) => {
                 if (event.key !== "Escape" || event.defaultPrevented) return;
                 event.currentTarget.open = false;
@@ -862,8 +863,12 @@ export function SceneWorkspace({
           returnFocus={generateReturnFocus}
           onClose={() => setGenerateTarget(null)}
           // A scene-wide run hands a film to the Cut to assemble; a visual novel has no cut to
-          // assemble, its pictures play as beats, so it stays on the beats (codex round 6).
-          onStarted={() => { if (generateTarget?.shotId === undefined && !playsAsBeats) navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/cut?assemble=${scene.id}`); }}
+          // assemble, its pictures play as beats, so it stays on the beats (codex round 6). A
+          // production cut to a song stays on the scene too: its shots are placed by the person at
+          // the song's times, the authority refuses to assemble them, and the hand-off showed a
+          // refusal for an edit nobody asked for and took the person off a scene they were still
+          // working through (issue 3151).
+          onStarted={() => { if (generateTarget?.shotId === undefined && !playsAsBeats && production.spine === null) navigate(`/w/${world.meta.worldId}/p/${production.meta.id}/cut?assemble=${scene.id}`); }}
         />
         {openMember === null ? null : (
           <CharacterDialog

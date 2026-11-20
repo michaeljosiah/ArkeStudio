@@ -22,6 +22,8 @@ type HostFileCommand = Extract<ClientMessage, { sourcePath?: string } | { source
 const hostFileCommands: Record<HostFileCommand["kind"], true> = {
   "world-chat-attach": true, "stage-playblast": true, "stage-animatic": true, "conversation-action-stage-playblast-complete": true,
   "upload-artifacts": true, "file-artifact": true, "genesis-attach": true, "import-folder": true,
+  // A file dropped on a main photo or character sheet (issue 3146).
+  "import-main-photo-candidate": true, "import-main-photo": true, "import-character-sheet": true,
 };
 const cookies = (req: IncomingMessage, name: string) =>
   (req.headers.cookie ?? "").split(";").map(part => part.trim()).filter(part => part.startsWith(name + "="));

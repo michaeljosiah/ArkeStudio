@@ -45,6 +45,11 @@ type AttachTarget =
   | { kind: "file-artifact"; worldId: string; production?: string | null }
   | { kind: "genesis-attach"; genesisId: string }
   | { kind: "world-chat-attach"; worldId: string; conversationId: string }
+  /**
+   * A picture dropped on a main photo or character sheet, or in the main photo dialog (issue
+   * 3146): the Upload button's import, with the path the drop already chose in place of the picker.
+   */
+  | { kind: "import-main-photo" | "import-main-photo-candidate" | "import-character-sheet"; worldId: string; sheetId: string }
   /** A playblast the Stage rendered, filed onto its shot against the scene version it saw. */
   | {
       kind: "stage-playblast";

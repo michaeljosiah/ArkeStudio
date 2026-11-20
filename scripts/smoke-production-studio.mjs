@@ -95,14 +95,16 @@ try {
     };
     await typeInComposer();
     await click("Studio"); await click("Show");
-    const metrics=await evaluate(`(()=>{const studio=document.querySelector('.fy-production-studio'), thread=document.querySelector('.fy-production-studio__thread'),canvas=document.querySelector('.fy-production-studio__canvas');return {width:innerWidth,
-      overflow:document.documentElement.scrollWidth>innerWidth, rows:canvas.querySelectorAll('[data-testid^="workspace-row-"]').length,
+    // The pending card is a review: the canvas reads its shots as compact rows, new ones dashed (issue 3145).
+    const metrics=await evaluate(`(()=>{const studio=document.querySelector('.fy-production-studio'), thread=document.querySelector('.fy-production-studio__thread'),canvas=document.querySelector('.fy-production-studio__canvas'),shots=[...canvas.querySelectorAll('[data-pending-preview] [aria-label="Resulting shot list"] > li')];return {width:innerWidth,
+      overflow:document.documentElement.scrollWidth>innerWidth, rows:shots.length, workspaceRows:canvas.querySelectorAll('[data-pending-preview] [data-testid^="workspace-row-"]').length,
+      newDashed:getComputedStyle(canvas.querySelector('[data-pending-preview] [data-review-change="inserted"]')).borderTopStyle==='dashed',
       threadVisible:getComputedStyle(thread).display!=='none',canvasVisible:getComputedStyle(canvas).display!=='none',
       composerPreserved:window.originalComposer===document.querySelector('[aria-label="Unsent words"]'),dispatches:window.dispatches.length,
-      contained:[...canvas.querySelectorAll('.fy-swrow__body')].every(b=>b.getBoundingClientRect().right<=canvas.getBoundingClientRect().right)};})()`);
-    assert.equal(metrics.overflow,false);assert.equal(metrics.rows,40);assert.equal(metrics.contained,true);assert.equal(metrics.composerPreserved,true);assert.equal(metrics.dispatches,0);assert.equal(metrics.canvasVisible,true);assert.equal(metrics.threadVisible,width>=600);
+      contained:shots.every(b=>b.getBoundingClientRect().right<=canvas.getBoundingClientRect().right)};})()`);
+    assert.equal(metrics.overflow,false);assert.equal(metrics.rows,40);assert.equal(metrics.workspaceRows,0);assert.equal(metrics.newDashed,true);assert.equal(metrics.contained,true);assert.equal(metrics.composerPreserved,true);assert.equal(metrics.dispatches,0);assert.equal(metrics.canvasVisible,true);assert.equal(metrics.threadVisible,width>=600);
     await click("Pin canvas"); await evaluate("window.addCard()");
-    assert.equal(await evaluate("document.querySelectorAll('[data-pending-preview] [data-testid^=workspace-row-]').length"),40);
+    assert.equal(await evaluate(`document.querySelectorAll('[data-pending-preview] [aria-label="Resulting shot list"] > li').length`),40);
     await cdp("Page.captureScreenshot",{format:"png"}).then(c=>writeFile(join(dir,`studio-${width}.png`),Buffer.from(c.data,"base64")));
     if(width<600){await click("Back to card");}
     await click("Open full size");

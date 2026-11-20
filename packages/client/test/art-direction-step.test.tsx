@@ -761,16 +761,25 @@ describe("location views ask in the dialog (design 66)", () => {
   });
 
   it("keeps the angle's name, which is what gates the generation", () => {
-    const html = locationHtml();
-    const dialog = html.slice(html.indexOf('<dialog class="fy-gendialog'));
-    assert.ok(dialog.includes("What is this angle called?"));
-    assert.ok(dialog.includes("An angle needs a name"), "and says so while it is empty");
+    // The first view opens already called what its dialog makes (issue 3165); as a placeholder
+    // the same words read as a name given while Generate waited for one.
+    const first = locationHtml();
+    const establishing = first.slice(first.indexOf('<dialog class="fy-gendialog'));
+    assert.ok(establishing.includes("What is this angle called?"));
+    assert.match(establishing, /value="Establishing view"/, "the first view is named as a value");
+    assert.ok(!establishing.includes('placeholder="Establishing view"'), "not as a placeholder");
+    assert.ok(!establishing.includes("An angle needs a name"), "so nothing asks for one");
+    const later = locationHtml(true);
+    const adding = later.slice(later.indexOf('<dialog class="fy-gendialog'));
+    assert.ok(adding.includes("What is this angle called?"));
+    assert.ok(adding.includes("An angle needs a name"), "a later angle says so while it is empty");
   });
 
-  it("lets the camera line be empty, because the brief is composed without it", async () => {
+  it("opens the first view ready to generate, and lets the camera line be empty", async () => {
     // The one surface where the prompt adds to a brief rather than being it. Refusing an empty
-    // box here would demand a sentence nobody needs to write. Mounted, with the angle named and
-    // the camera line left blank, Generate stays available; the hint says why.
+    // box here would demand a sentence nobody needs to write. Mounted for a place with no views,
+    // the angle is already named and the camera line blank, and Generate is available on first
+    // open (issue 3165); emptying the name is what stops it, and the hint says why.
     Object.assign(dom.HTMLElement.prototype, { showModal() {}, close() {} });
     __setStateForTest(FIXTURE_STATE);
     const container = document.createElement("div");
@@ -782,10 +791,19 @@ describe("location views ask in the dialog (design 66)", () => {
       assert.ok(dialog, "the view dialog is on the page");
       assert.ok(dialog.textContent?.includes("Optional. The place, its look and the angle's name are sent whether or not you write here."));
       const generate = () => [...dialog.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === "Generate")!;
-      assert.equal(generate().disabled, true, "an angle needs a name");
       const name = dialog.querySelector<HTMLInputElement>(".fy-locref__namefield input")!;
-      const props = (name as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[Object.keys(name).find((k) => k.startsWith("__reactProps$"))!]!;
-      await act(async () => props.onChange({ target: { value: "From the seaward stair" } }));
+      const type = (value: string) => {
+        const props = (name as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void }>)[Object.keys(name).find((k) => k.startsWith("__reactProps$"))!]!;
+        return act(async () => props.onChange({ target: { value } }));
+      };
+      assert.equal(name.value, "Establishing view", "the first view opens named");
+      assert.equal(dialog.querySelector("textarea")?.value ?? "", "", "with nothing written for the camera");
+      assert.equal(generate().disabled, false, "and Generate is ready on first open");
+      assert.ok(!dialog.textContent?.includes("An angle needs a name"));
+      await type("");
+      assert.equal(generate().disabled, true, "an emptied name stops it");
+      assert.ok(dialog.textContent?.includes("An angle needs a name"), "and says why");
+      await type("From the seaward stair");
       assert.equal(dialog.querySelector("textarea")?.value ?? "", "", "the camera line is still blank");
       assert.equal(generate().disabled, false, "and that is not what stops a generation here");
     } finally {

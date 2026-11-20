@@ -187,6 +187,18 @@ describe("the location reference tab (#243)", () => {
       `panel map missing or out of order:\n${html.slice(html.indexOf("WHAT A SHOT CARRIES"), html.indexOf("WHAT A SHOT CARRIES") + 400)}`,
     );
     assert.ok(html.includes("assembled here, not generated"));
+    // A frame takes the sheet; a clip takes the establishing view, never the labels (issue 3194).
+    const carries = [...parseHTML(html).document.querySelectorAll(".fy-locref__carries p")].map((p) => p.textContent);
+    assert.deepEqual(carries, [
+      "Frame · location sheet: panel 1 (top), Establishing view; panel 2, Reverse angle; panel 3 (bottom), Night",
+      "Clip · Establishing view",
+    ]);
+  });
+
+  it("promises a one-view place's view itself, with no panel to cite (issue 3194)", () => {
+    const html = render([kit([view(1, "Establishing view", "2026-08-01T10:00:00Z")], "lv_01")]);
+    const carries = [...parseHTML(html).document.querySelectorAll(".fy-locref__carries p")].map((p) => p.textContent);
+    assert.deepEqual(carries, ["Establishing view"]);
   });
 
   it("offers no way to generate the sheet — only the views it is made of", () => {
@@ -322,12 +334,13 @@ describe("the location reference tab (#243)", () => {
       assert.ok(html.includes("A view is waiting on you"));
       assert.ok(html.includes(CANDIDATE), "the bytes on disk are what is shown");
       assert.ok(html.includes("gpt-image-2"), "and it says what made them");
-      assert.match(html, /value="Establishing view"/, "the name the generation asked for opens the field");
+      // Read before the generation dialog, whose first view opens under the same name (issue 3165).
+      const waiting = html.slice(html.indexOf("A view is waiting on you"), html.indexOf('<dialog class="fy-gendialog'));
+      assert.match(waiting, /value="Establishing view"/, "the name the generation asked for opens the field");
       // Nothing distinguishes it from a take-backed candidate: accepting is what records the
       // take, so the recovery never has to be explained.
       assert.ok(html.includes("UNREVIEWED"));
       // Rejecting is a decision recorded against a take, and there is no take to record it on.
-      const waiting = html.slice(html.indexOf("A view is waiting on you"));
       assert.ok(!waiting.includes(">Reject<"), "no reject where there is nothing to record it against");
     });
 

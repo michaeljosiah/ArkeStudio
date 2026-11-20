@@ -1,6 +1,7 @@
-import { ModelWorldChatActionSchema, nextShotIdIn, orderedShots, sceneCommandCandidate, sceneCommandBatchCandidate,
+import { ModelWorldChatActionSchema, nextShotIdIn, orderedShots, sceneCommandCandidate, sceneCommandBatchCandidate, shotDeleteBlockers,
   turnActionGroups, type ModelWorldChatAction, type NewShotId, type SceneRecord, type WorldBundle, type WorldChatDependencyPreview } from "@arke-studio/contracts";
-import { sceneCommandFrom } from "../productions/scene-commands.js";
+import { SceneCommandRefused, sceneCommandFrom } from "../productions/scene-commands.js";
+import { applySpineCommand } from "../productions/spine.js";
 
 export function sceneActionCommands<T>(action: { command?: T; commands?: readonly T[] }): T[] {
   if ((action.command === undefined) === (action.commands === undefined)) throw new Error("A scene action needs command or commands, never both.");
@@ -46,6 +47,7 @@ export function sequenceTurnActions(bundle: WorldBundle, actions: readonly Model
         working = replaceScene(working, parent.action.productionId, parent.scene.after);
         snapshots.set(`${parent.action.productionId}:${parent.scene.after.id}`, { productionId: parent.action.productionId, scene: parent.scene.after });
       }
+      if (parent.action.kind === "audio-spine-command") working = afterSpineCommand(working, parent.action);
     }
     if (snapshots.size) group.dependencyPreview = { scenes: [...snapshots.values()], beforeBundle: working };
     const { ref: _ref, after: _after, ...withoutRefs } = group.action;
@@ -79,6 +81,8 @@ export function sequenceTurnActions(bundle: WorldBundle, actions: readonly Model
       if (member.ref) { created.set(member.ref, { productionId: action.productionId, sceneId: action.sceneId, shotIds: inserted }); allowedRefs.add(member.ref); }
     }
     const after = sceneCommandBatchCandidate(beforeBundle, action.productionId, before, commands.map(sceneCommandFrom), newShotId);
+    const blockers = shotDeletionBlockers(beforeBundle, action.productionId, before, commands);
+    if (blockers.length > 0) throw new SceneCommandRefused(blockers);
     group.scene = { before, after, beforeBundle };
     const existing = new Set(orderedShots(before).map(shot => shot.id));
     reserved.set(action.productionId, [...held, ...orderedShots(after).map(shot => shot.id).filter(id => !existing.has(id))]);
@@ -86,6 +90,61 @@ export function sequenceTurnActions(bundle: WorldBundle, actions: readonly Model
       commands, checkReceiptIds: [...new Set(group.members.flatMap(member => member.checkReceiptIds))] });
   }
   return groups;
+}
+
+/**
+ * What stands in the way of the shots a card deletes, as its authority will find it (issue 3136).
+ *
+ * A card deleted a scene's four shots, all pinned to the song. It was prepared and approved, and
+ * only then refused: a pin, an accepted take and a storyboard panel were checked nowhere before
+ * the write. They are read here off the bundle the card is prepared against, so a card that is
+ * bound to be refused is never offered, and Arke is told why while it can still do something.
+ *
+ * The scene is the one the card starts from, before its own commands, so each shot keeps the
+ * number the person sees: the dry run renumbers after every deletion, and four pinned shots
+ * deleted in turn would each be reported as shot 1. A shot the same card inserts is not in that
+ * scene, and is left to the authority. So are running dispatches: they are read from a journal
+ * at the moment of the write, and one running now may be done by the time the card is approved.
+ */
+export function shotDeletionBlockers(
+  bundle: WorldBundle,
+  productionId: string,
+  scene: SceneRecord,
+  commands: readonly { kind: string; shotId?: string }[],
+): string[] {
+  const production = bundle.productions.find(candidate => candidate.meta.id === productionId);
+  if (!production) return [];
+  const present = new Set(orderedShots(scene).map(shot => shot.id));
+  const deleted = commands.flatMap(command => command.kind === "delete-shot" && command.shotId !== undefined && present.has(command.shotId) ? [command.shotId] : []);
+  return [...new Set(deleted.flatMap(shotId => shotDeleteBlockers(production, scene, shotId)))];
+}
+
+/**
+ * The world with the song as a spine card before this one leaves it (issue 3136).
+ *
+ * "Unpin these shots, then delete them" is two cards in one turn, and the deletion is checked
+ * against the pins. Checked against the live song, it would be refused for the very pins the
+ * card before it clears. A spine card says which song it applies to by its base revision, as
+ * `spineAfterDependencies` reads it for a card already prepared: one whose revision is not the
+ * song's so far changes nothing here, and one the reducer refuses is refused on its own card.
+ *
+ * It is applied as approving it applies it, with the production's scenes read (codex on PR
+ * 3265). The bare reducer is handed no scenes, so it refused `mark-sections-from-scenes` for
+ * having none with a place in the song; the song stayed a revision behind here, the unpin card
+ * after it was passed over for its base revision, and the deletion was refused for pins the
+ * cards before it clear.
+ */
+function afterSpineCommand(bundle: WorldBundle, action: Extract<ModelWorldChatAction, { kind: "audio-spine-command" }>): WorldBundle {
+  const production = bundle.productions.find(candidate => candidate.meta.id === action.productionId);
+  if (!production || action.baseRevision !== (production.spine?.revision ?? null)) return bundle;
+  let spine: typeof production.spine;
+  try {
+    // Only the anchors are read from it, so the time it is stamped with is never seen.
+    spine = applySpineCommand(production, production.spine, action.command, production.spine?.updatedAt ?? new Date(0).toISOString());
+  } catch {
+    return bundle;
+  }
+  return { ...bundle, productions: bundle.productions.map(candidate => candidate === production ? { ...candidate, spine } : candidate) };
 }
 
 function replaceScene(bundle: WorldBundle, productionId: string, scene: SceneRecord): WorldBundle {

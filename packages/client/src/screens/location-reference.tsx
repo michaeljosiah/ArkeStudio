@@ -189,7 +189,7 @@ export function LocationReferenceScreen() {
   const [adding, setAdding] = useState(false);
   const [replacingEstablishing, setReplacingEstablishing] = useState(false);
   const [angle, setAngle] = useState("");
-  const [angleName, setAngleName] = useState("");
+  const [typedAngleName, setAngleName] = useState<string | null>(null);
   const [choice, setChoice] = useState<{ modelId?: string; tier?: SizeTier }>({});
   const [count, setCount] = useState(2);
   const addRef = useRef<HTMLButtonElement>(null);
@@ -225,6 +225,11 @@ export function LocationReferenceScreen() {
   const collides = (name: string) =>
     views.some((view) => normalizeViewName(view.name) === normalizeViewName(name));
   const establishing = views.length === 0;
+  // Until the person types, the first view of a place is already called what its dialog is titled.
+  // As a placeholder `Establishing view` read as a name given while Generate stayed disabled for
+  // the lack of one (issue 3165); as a value it is the name sent, and emptying it still asks.
+  // Every later angle opens empty for a name of its own.
+  const angleName = typedAngleName ?? (establishing ? "Establishing view" : "");
 
   return (
     <div data-screen="location-reference">
@@ -490,7 +495,7 @@ export function LocationReferenceScreen() {
                   type="text"
                   value={angleName}
                   maxLength={80}
-                  placeholder={establishing ? "Establishing view" : "Reverse angle"}
+                  {...(establishing ? {} : { placeholder: "Reverse angle" })}
                   onChange={(event) => setAngleName(event.target.value)}
                 />
               </label>
@@ -521,7 +526,7 @@ export function LocationReferenceScreen() {
               setAdding(false);
               setReplacingEstablishing(false);
               setAngle("");
-              setAngleName("");
+              setAngleName(null);
             }}
           />
 
@@ -552,10 +557,17 @@ export function LocationReferenceScreen() {
           </div>
           <p className="fy-mono">{sheetFile}</p>
           {/* The same function dispatch composes the preamble from, so what this promises and
-              what a request states cannot drift into disagreeing. */}
+              what a request states cannot drift into disagreeing. Only a frame of a place with
+              several views takes the sheet: a clip takes the establishing view, and so does
+              every shot of a place with one, whose panel label would locate nothing (issue 3194). */}
           <div className="fy-locref__carries">
             <span className="fy-mono">WHAT A SHOT CARRIES</span>
-            <p>{panelMapPhrase(views.map((view) => view.name))}</p>
+            {views.length > 1 ? (
+              <>
+                <p>Frame · {panelMapPhrase(views.map((view) => view.name))}</p>
+                <p>Clip · {views[0]!.name}</p>
+              </>
+            ) : views[0] && <p>{views[0].name}</p>}
           </div>
         </section>}
       </main>

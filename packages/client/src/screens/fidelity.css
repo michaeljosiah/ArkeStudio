@@ -883,6 +883,9 @@ button.fy-titlebar__context:hover { color: var(--foreground); }
    break read as two groups, the loose one below (issue 1007). */
 .fy-gendialog__refbuttons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .fy-gendialog__refbuttons .ui-btn { width: 100%; justify-content: center; text-align: center; }
+/* Two decisions, two rows (issue 3146): what travels with the generation, then a finished
+   picture that needs none. The rows are the grouping, so nothing wraps into a loose third. */
+.fy-gendialog__refbuttons--pairs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .fy-gendialog__refs { display: flex; gap: 10px; }
 .fy-gendialog__refs > div { position: relative; width: 72px; height: 72px; }
 .fy-gendialog__refs > div.is-dropped { opacity: 0.45; }
@@ -3768,7 +3771,8 @@ select.fy-set__pill { padding-right: 26px; }
 .fy-character-head__push { flex: 1; }
 .fy-character-tabs .fy-seg__item { padding-inline: 16px; }
 .fy-reference-grid { padding: 18px 90px 36px; display: grid; grid-template-columns: 430px 1fr; gap: 22px; height: 591px; animation: fy-fade-up .7s var(--ease-out) .16s both; }
-.fy-reference-card { border: 1px solid var(--border); border-radius: 15px; overflow: hidden; background: var(--card); box-shadow: var(--shadow-sm); display: flex; flex-direction: column; min-width: 0; }
+/* Positioned so a file held over the card draws its drop target over the whole card (issue 3146). */
+.fy-reference-card { position: relative; border: 1px solid var(--border); border-radius: 15px; overflow: hidden; background: var(--card); box-shadow: var(--shadow-sm); display: flex; flex-direction: column; min-width: 0; }
 .fy-reference-card__image { position: relative; overflow: hidden; background: var(--neutral-950); }
 .fy-reference-card__image--photo { height: 430px; flex: none; }
 .fy-reference-card__image--sheet { height: 390px; flex: none; }

@@ -29,18 +29,21 @@ import {
   retryFrameStep,
   retryFrameCell,
   abortFrameRunStart,
+  boardLanding,
   recordBoardSheetFromJob,
   startFrameRun,
   type FrameRunDriverDeps,
 } from "../../src/productions/frame-run.js";
+import { acceptLocationView, readKit } from "../../src/references/kit.js";
 import { recordFrameRunOutcome } from "../../src/productions/frame-run-outcome.js";
 import { Coordinator } from "../../src/coordinator.js";
 import type { EnqueueInput } from "../../src/queue/dispatcher.js";
 import type { WorldProvider } from "../../src/world-provider.js";
 import { ReadModel } from "../../src/read-model.js";
-import { encodePng, solidImage } from "../../src/references/png.js";
+import { decodePng, encodePng, solidImage } from "../../src/references/png.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { acceptTake } from "../../src/takes/review.js";
+import { BOARD_LANDING_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { WorldStore } from "../../src/world/store.js";
 import { readWorldMeta, WorldOpenError } from "../../src/world/scan.js";
 import { discoverConversations } from "../../src/world-chat/discover.js";
@@ -393,6 +396,56 @@ describe("frame-run coordinator service", () => {
     assert.ok(!carried.includes("references/maren-kest/looks/council-coat.png"), "the scene's look stands aside where every panel chose");
   });
 
+  /* Issue 3194 moved a place's video reference to its plain view. A still is drawn by an image
+     model, which reads the sheet's panel map, so a place with several angles keeps sending the
+     sheet here; a place with one angle sends the view, because its one label locates nothing. */
+  it("a frame run sends a place's sheet once it has two views, and its plain view while it has one", async () => {
+    const f = await fixture();
+    const vigil = f.world.sheets.find((sheet) => sheet.id === "the-vigil")!;
+    const accept = async (n: number, name: string) => {
+      const takeId = newId("tk");
+      const file = `takes/${takeId}/location-view-${n}.png`;
+      await mkdir(join(f.dir, "references", vigil.id, "takes", takeId), { recursive: true });
+      await writeFile(join(f.dir, "references", vigil.id, file), Buffer.from(encodePng(solidImage(640, 480, [40 * n, 90, 60, 255]))));
+      await acceptLocationView(f.store, vigil, {
+        id: `lv_${n}`, name, file, takeId, sheetVersion: vigil.version, artDirectionVersion: f.world.artDirection.version,
+      });
+      return `references/${vigil.id}/${file}`;
+    };
+    const withKit = async (): Promise<{ world: WorldBundle; sheet: string }> => {
+      const kit = (await readKit(f.store, vigil.id))!.kit;
+      return {
+        world: { ...f.world, referenceKits: [...f.world.referenceKits.filter((candidate) => candidate.sheetId !== vigil.id), kit] },
+        sheet: `references/${vigil.id}/${kit.designatedCompilation}`,
+      };
+    };
+    // Every step set at the scene's place carries it. A shot that cites its own place is not there
+    // (issue 3152), so the market's shot carries none of the Vigil's pictures.
+    const market = orderedShots(f.scene).find((shot) => shot.description.includes("@the-saltmarket"))!;
+    type PlaceStep = { requestShotIds: readonly string[]; request: { prompt: string; references: ReadonlyArray<{ sheetId: string; path: string }> } };
+    const atTheVigil = (step: PlaceStep) => !step.requestShotIds.includes(market.id);
+    const placePaths = (steps: readonly PlaceStep[]) =>
+      steps.map((step) => step.request.references.filter((reference) => reference.sheetId === vigil.id).map((reference) => reference.path));
+    const riding = (steps: readonly PlaceStep[], path: string) => steps.map((step) => atTheVigil(step) ? [path] : []);
+
+    const establishing = await accept(1, "Establishing view");
+    const one = await withKit();
+    const single = await compileFrameRun({
+      worldId: WORLD_ID, productionId: f.production.meta.id, scene: f.scene as SceneRecord, production: f.production,
+      world: one.world, model: IMAGE, mode: "per-shot", scope: "all", boardCapSec: 30, boardPanelCap: 6, eligible: true, clock: CLOCK,
+    });
+    assert.ok(single.steps.some(atTheVigil) && !single.steps.every(atTheVigil), "the scene has shots at its place and one elsewhere");
+    assert.deepEqual(placePaths(single.steps), riding(single.steps, establishing), "one view rides as itself");
+    assert.ok(!single.steps.some((step) => /panel 1/i.test(step.request.prompt)), "and no prompt cites its panel");
+
+    await accept(2, "From the door");
+    const two = await withKit();
+    assert.match(two.sheet, /location-sheet-[0-9a-f]{12}\.png$/);
+    const run = await start(f, "per-shot", "all", f.production, two.world);
+    assert.deepEqual(placePaths(run.steps), riding(run.steps, two.sheet), "the stacked sheet rides every frame set there");
+    assert.ok(run.steps.filter(atTheVigil).every((step) => /panel 1 \(top\), Establishing view; panel 2 \(bottom\), From the door/.test(step.request.prompt)), "with its panel map");
+  });
+
   it("refuses a quote for shot A when start asks for shot B", async () => {
     const f = await fixture();
     const [shotA, shotB] = orderedShots(f.scene);
@@ -498,6 +551,83 @@ describe("frame-run coordinator service", () => {
     await write;
     await assert.rejects(start, /stale/);
     assert.deepEqual(await listFrameRuns(f.store, f.production.meta.id), []);
+  });
+
+  describe("a start across a refresh (issue 3159)", () => {
+    /** Compiles from the store as it stands at each call, as the command handler does. */
+    const liveCompile = (f: Awaited<ReturnType<typeof fixture>>, model: ManifestModel = IMAGE) => () => {
+      const world = f.store.getBundle();
+      const production = world.productions.find((candidate) => candidate.meta.id === f.production.meta.id)!;
+      const scene = production.scenes.find((candidate) => candidate.id === f.scene.id)!;
+      return {
+        worldId: WORLD_ID,
+        productionId: production.meta.id,
+        scene,
+        production,
+        world,
+        model,
+        mode: "per-shot" as const,
+        scope: "all" as const,
+        boardCapSec: 30,
+        boardPanelCap: 6,
+        eligible: true,
+        clock: CLOCK,
+      };
+    };
+    const quoteLive = (f: Awaited<ReturnType<typeof fixture>>) => quoteFrameRun(f.store, {
+      requestId: "01J8E0000000000000000000R5",
+      quoteId: "01J8E0000000000000000000R6",
+      worldId: WORLD_ID,
+      productionId: f.production.meta.id,
+      sceneId: f.scene.id,
+      mode: "per-shot",
+      modelId: IMAGE.id,
+      scope: "all",
+      clock: CLOCK,
+      compile: liveCompile(f),
+    });
+
+    it("starts on a quote taken before another scene changed", async () => {
+      const f = await fixture();
+      const quote = await quoteLive(f);
+      const other = () => f.store.getBundle().productions.find((candidate) => candidate.meta.id === f.production.meta.id)!.scenes.find((candidate) => candidate.id === "sc_06")!;
+      const before = other().version;
+      await f.store.gateOp(async () => {
+        const path = join(f.dir, "productions", f.production.meta.id, "scenes", "06-slack-water.json");
+        const raw = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+        raw["version"] = Number(raw["version"]) + 1;
+        (raw["shots"] as Array<Record<string, unknown>>)[0]!["description"] = "another scene moved while this one was priced";
+        await writeFile(path, JSON.stringify(raw, null, 2) + "\n");
+      });
+      assert.equal(other().version, before + 1, "the world the press lands in is not the one that was priced");
+
+      const run = await startFrameRun(f.store, {
+        quotedMicroUsd: quote.estimatedMicroUsd!,
+        quoteSignature: quote.signature!,
+        jobs: () => [],
+        consumeQuote: () => quote,
+        compile: liveCompile(f),
+      });
+      assert.equal(run.sceneVersion, quote.sceneVersion);
+      assert.deepEqual(run.steps.map((step) => step.request.references), quote.steps.map((step) => step.references));
+      assert.deepEqual((await listFrameRuns(f.store, f.production.meta.id)).map((candidate) => candidate.id), [run.id]);
+    });
+
+    it("refuses a quote whose price moved before the press", async () => {
+      const f = await fixture();
+      const quote = await quoteLive(f);
+      await assert.rejects(
+        () => startFrameRun(f.store, {
+          quotedMicroUsd: quote.estimatedMicroUsd!,
+          quoteSignature: quote.signature!,
+          jobs: () => [],
+          consumeQuote: () => quote,
+          compile: liveCompile(f, { ...IMAGE, pricing: { kind: "perImage", microUsdPerImage: 2000, microUsdPerReferenceImage: 10 } }),
+        }),
+        /stale/,
+      );
+      assert.deepEqual(await listFrameRuns(f.store, f.production.meta.id), []);
+    });
   });
 
   it("serializes active-run admission so concurrent starts create only one record", async () => {
@@ -1022,6 +1152,8 @@ describe("frame-run coordinator service", () => {
     assert.ok(children.every((take) => take.panel?.parentTakeId === parent!.id));
     assert.ok(children.every((take) => take.panel?.parentHash !== take.panel?.cropSourceHash));
     assert.ok(children.every((take) => take.panel?.crop.width === 16 && take.panel.crop.height === 9));
+    assert.ok(children.every((take) => take.panel?.returnedSize === undefined), "a sheet at its frozen canvas records no resize");
+    assert.ok((await readWorldMeta(f.dir)).schemaVersion < BOARD_LANDING_SCHEMA_VERSION, "and leaves the world open to the builds that could always read it");
     for (const take of takes) {
       const bytes = await readFile(join(f.dir, "productions", f.production.meta.id, "takes", take.id, take.media!));
       const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
@@ -1051,6 +1183,166 @@ describe("frame-run coordinator service", () => {
       999,
       "existing children remain in the allocation on replay",
     );
+  });
+
+  it("lands a Codex Image board that came back 1602x981 by scaling its frozen layout (issue 3154)", async () => {
+    const f = await fixture();
+    const run = await start(f, "board", "all", f.production, f.world, CODEX_IMAGE);
+    const layout = run.steps[0]!.request.layout!;
+    assert.deepEqual([layout.canvasWidth, layout.canvasHeight], [1672, 941]);
+    const q = queue();
+    await advanceFrameRun(f.store, f.production.meta.id, run.id, q.deps);
+    const jobId = (await readFrameRun(f.store, f.production.meta.id, run.id))!.steps[0]!.jobId!;
+    const incoming = `productions/${f.production.meta.id}/incoming/${run.id}/step-0/sheet.png`;
+    await mkdir(join(f.dir, "productions", f.production.meta.id, "incoming", run.id, "step-0"), { recursive: true });
+    await writeFile(join(f.dir, incoming), Buffer.from("codex-provider-sheet"));
+    const job: Job = {
+      ...q.jobs.get(jobId)!,
+      status: "succeeded",
+      landedFiles: [incoming],
+      finalization: { status: "pending", error: null, updatedAt: CLOCK() },
+    };
+    // Drawn the way the real sheets were: every panel where the frozen layout lands once each
+    // axis is scaled by its own ratio, the rest of the canvas blank.
+    const sheet = solidImage(1602, 981, [255, 255, 255, 255]);
+    const colours: Array<[number, number, number, number]> = [[200, 40, 40, 255], [40, 200, 40, 255], [40, 40, 200, 255], [200, 200, 40, 255]];
+    for (const [index, region] of layout.regions.entries()) {
+      const left = Math.round(region.x * 1602 / 1672);
+      const top = Math.round(region.y * 981 / 941);
+      const right = Math.round((region.x + region.width) * 1602 / 1672);
+      const bottom = Math.round((region.y + region.height) * 981 / 941);
+      for (let y = top; y < bottom; y++) {
+        for (let x = left; x < right; x++) sheet.pixels.set(colours[index]!, (y * 1602 + x) * 4);
+      }
+    }
+    const sheetBytes = encodePng(sheet);
+    const converter = {
+      write: async (_input: string, output: string) => {
+        await writeFile(output, sheetBytes);
+        return { ok: true as const };
+      },
+    };
+
+    const updates = run.steps[0]!.updateShotIds;
+    assert.ok((await readWorldMeta(f.dir)).schemaVersion < BOARD_LANDING_SCHEMA_VERSION, "starting the run and enqueuing its board raise nothing");
+    const takes = await recordBoardSheetFromJob(f.store, f.production, job, 0, "included-plan", converter);
+    assert.equal(takes.length, 1 + updates.length, "the parent and every update panel land");
+    // A build before `returnedSize` drops each of these takes on scan and still opens the world,
+    // so it is refused the world by name instead (codex on PR 3265).
+    assert.equal((await readWorldMeta(f.dir)).schemaVersion, BOARD_LANDING_SCHEMA_VERSION);
+    await assert.rejects(readWorldMeta(f.dir, { supports: BOARD_LANDING_SCHEMA_VERSION - 1 }),
+      (error) => error instanceof WorldOpenError && error.reason === "schema-newer");
+    const children = takes.slice(1);
+    const sheetDigest = `sha256:${createHash("sha256").update(sheetBytes).digest("hex")}`;
+    for (const child of children) {
+      const index = child.panel!.index - 1;
+      assert.deepEqual(child.panel?.returnedSize, { width: 1602, height: 981, scaleX: 1602 / 1672, scaleY: 981 / 941 });
+      assert.ok(sheetDigest.startsWith(child.panel!.cropSourceHash), "the crop still addresses the decoded sheet's pixels");
+      const bytes = await readFile(join(f.dir, "productions", f.production.meta.id, "takes", child.id, child.media!));
+      assert.ok(`sha256:${createHash("sha256").update(bytes).digest("hex")}`.startsWith(child.panel!.hash));
+      const panel = decodePng(bytes);
+      assert.deepEqual([panel.width, panel.height], [child.panel!.crop.width, child.panel!.crop.height]);
+      assert.ok(Math.abs(panel.width / panel.height - 16 / 9) < 0.01, "centred back to the production's shape");
+      const colour = colours[index]!;
+      for (let at = 0; at < panel.pixels.length; at += 4) {
+        if (panel.pixels[at] !== colour[0] || panel.pixels[at + 1] !== colour[1] || panel.pixels[at + 2] !== colour[2]) {
+          assert.fail(`panel ${index + 1} holds a pixel that is not its own picture`);
+        }
+      }
+    }
+    // The first panel's frozen 832x468 at (4, 2) scales to 797x488 and centres to 797x448.
+    assert.deepEqual(layout.regions[0], { panel: 1, x: 4, y: 2, width: 832, height: 468 });
+    assert.deepEqual(children.find((child) => child.panel?.index === 1)?.panel?.crop, { x: 4, y: 22, width: 797, height: 448 });
+    const production = f.store.getBundle().productions.find((candidate) => candidate.meta.id === f.production.meta.id)!;
+    for (const shotId of updates) assert.match(production.selections[shotId]!.startFrameArtifactId!, /^ar_/);
+    const settled = (await readFrameRun(f.store, f.production.meta.id, run.id))!;
+    const state = await frameRunState(f.store, f.production.meta.id, settled, [{ ...job, finalization: { status: "complete", error: null, updatedAt: CLOCK() } }]);
+    assert.equal(state.steps[0]!.status, "succeeded");
+    assert.equal(state.steps[0]!.landingOutcome, "filed");
+    assert.equal(state.filedShots, updates.length);
+  });
+
+  it("refuses a board too far from its canvas's shape, says why on the run, and offers a new board (issue 3154)", async () => {
+    const layout = {
+      columns: 2 as const,
+      rows: 2,
+      canvasWidth: 1672,
+      canvasHeight: 941,
+      regions: [{ panel: 1, x: 4, y: 2, width: 832, height: 468 }],
+    };
+    assert.ok(boardLanding(layout, 1602, 981).ok, "8% narrower lands");
+    assert.ok(boardLanding(layout, 1254, 706).ok, "the frozen shape at another size lands, as it always did");
+    assert.deepEqual(boardLanding(layout, 1672, 941), { ok: true, scaleX: 1, scaleY: 1, crops: [{ x: 4, y: 2, width: 832, height: 468 }] });
+    assert.deepEqual(boardLanding(layout, 1536, 1024), { ok: false, reason: "The picture came back 1536×1024 instead of 1672×941" }, "a 3:2 sheet is 18% off");
+
+    const f = await fixture();
+    const run = await start(f, "board", "all", f.production, f.world, CODEX_IMAGE);
+    const q = queue();
+    await advanceFrameRun(f.store, f.production.meta.id, run.id, q.deps);
+    const jobId = (await readFrameRun(f.store, f.production.meta.id, run.id))!.steps[0]!.jobId!;
+    const incoming = `productions/${f.production.meta.id}/incoming/${run.id}/step-0/sheet.png`;
+    await mkdir(join(f.dir, "productions", f.production.meta.id, "incoming", run.id, "step-0"), { recursive: true });
+    await writeFile(join(f.dir, incoming), Buffer.from("square-provider-sheet"));
+    const job: Job = {
+      ...q.jobs.get(jobId)!,
+      status: "succeeded",
+      landedFiles: [incoming],
+      finalization: { status: "pending", error: null, updatedAt: CLOCK() },
+    };
+    const converter = {
+      write: async (_input: string, output: string) => {
+        await writeFile(output, encodePng(solidImage(1024, 1024, [90, 90, 90, 255])));
+        return { ok: true as const };
+      },
+    };
+    const reason = "The picture came back 1024×1024 instead of 1672×941";
+
+    // A job that holds no step of the run it names writes no refusal, and so raises nothing.
+    const elsewhere: Job = { ...job, params: { ...job.params, frameRunStep: 7 } };
+    await assert.rejects(recordBoardSheetFromJob(f.store, f.production, elsewhere, 0, "included-plan", converter), new RegExp(reason));
+    assert.equal((await readFrameRun(f.store, f.production.meta.id, run.id))!.steps[0]!.landingRefusal, undefined);
+    assert.ok((await readWorldMeta(f.dir)).schemaVersion < BOARD_LANDING_SCHEMA_VERSION);
+
+    const takes = await recordBoardSheetFromJob(f.store, f.production, job, 0, "included-plan", converter);
+    assert.equal(takes.length, 1, "the sheet is kept; no panel is guessed at");
+    assert.equal(takes[0]!.boardSheetParent, true);
+    // A build before `landingRefusal` reads this run as no run at all and still opens the world,
+    // so it is refused the world by name instead (codex on PR 3265).
+    assert.equal((await readWorldMeta(f.dir)).schemaVersion, BOARD_LANDING_SCHEMA_VERSION);
+    await assert.rejects(readWorldMeta(f.dir, { supports: BOARD_LANDING_SCHEMA_VERSION - 1 }),
+      (error) => error instanceof WorldOpenError && error.reason === "schema-newer");
+    const replayed = await recordBoardSheetFromJob(f.store, f.production, job, 0, "included-plan", converter);
+    assert.equal(replayed.length, 1, "a replay meets the same answer without failing");
+    const production = f.store.getBundle().productions.find((candidate) => candidate.meta.id === f.production.meta.id)!;
+    for (const shotId of run.steps[0]!.updateShotIds) assert.equal(production.selections[shotId]?.startFrameArtifactId, undefined);
+
+    const refused = (await readFrameRun(f.store, f.production.meta.id, run.id))!;
+    assert.equal(refused.steps[0]!.landingRefusal, reason);
+    const done = { ...job, finalization: { status: "complete" as const, error: null, updatedAt: CLOCK() } };
+    const state = await frameRunState(f.store, f.production.meta.id, refused, [done]);
+    assert.equal(state.steps[0]!.status, "failed");
+    assert.equal(state.steps[0]!.error, reason);
+    assert.equal(state.steps[0]!.canRetry, true);
+    assert.equal(state.steps[0]!.canRetryCell, false);
+    assert.equal(state.failedShots, run.steps[0]!.updateShotIds.length);
+
+    const jobById = (id: string) => id === done.id ? done : undefined;
+    await assert.rejects(
+      retryFrameCell(f.store, f.production.meta.id, run.id, 0, run.steps[0]!.updateShotIds[0]!, () => production, jobById),
+      /requires a successful board-sheet attempt/,
+      "a stale cell retry cannot borrow a sheet whose panels were never found",
+    );
+    const retried = await retryFrameStep(f.store, f.production.meta.id, run.id, 0, () => production, jobById);
+    assert.equal(retried!.steps.length, 2);
+    assert.equal(retried!.steps[1]!.grain, "step-retry");
+    assert.equal(retried!.steps[1]!.landingRefusal, undefined, "the new attempt starts unrefused");
+
+    // A sheet no run owns has nowhere to say it, so its finalization fails with the reason.
+    const { frameRun: _run, frameRunStep: _step, ...unowned } = job.params;
+    const orphanIncoming = `productions/${f.production.meta.id}/incoming/orphan.png`;
+    await writeFile(join(f.dir, orphanIncoming), Buffer.from("orphan-provider-sheet"));
+    const orphan: Job = { ...job, id: "jb_00000000000000000000000077", landedFiles: [orphanIncoming], params: unowned };
+    await assert.rejects(recordBoardSheetFromJob(f.store, f.production, orphan, 0, "included-plan", converter), new RegExp(reason));
   });
 
   it("serializes an ordinary take review with a board parent review", async () => {

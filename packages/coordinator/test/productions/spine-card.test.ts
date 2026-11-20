@@ -66,6 +66,40 @@ it("pins a shot by its number and scene, at a time in the song", async t => {
   assert.deepEqual(card.commands, [{ label: `Pin shot ${shot.number} of ${scene.title}`, detail: "0:12–0:18.5" }]);
 });
 
+// Removing a pinned scene's four shots took an unpin card for each (issue 3136).
+it("unpins several shots on one card, saying how many, of which scene and where each was", async t => {
+  const { store, song } = await songWorld(t);
+  const spine = () => store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.spine!;
+  const scenes = store.getBundle().productions.find(p => p.meta.id === PRODUCTION)!.scenes;
+  const scene = scenes.find(candidate => orderedShots(candidate).length >= 2)!;
+  const [first, second] = orderedShots(scene);
+  const elsewhere = orderedShots(scenes.find(candidate => candidate.id !== scene.id && orderedShots(candidate).length > 0)!)[0]!;
+  await applyProductionSpineCommand(store, { productionId: PRODUCTION, baseRevision: null, command: { kind: "create", trackArtifactId: song } }, { source: "test" });
+  for (const [index, shot] of [first!, second!, elsewhere].entries()) {
+    await applyProductionSpineCommand(store, { productionId: PRODUCTION, baseRevision: index + 1,
+      command: { kind: "set-anchor", shotId: shot.id, anchor: { startSec: index * 4, endSec: index * 4 + 4, clipAudio: { mode: "mute" } } } }, { source: "test" });
+  }
+  assert.equal(spine().revision, 4);
+
+  const card = preview(store, 4, { kind: "delete-anchors", shotIds: [first!.id, second!.id] });
+  assert.equal(card.title, `Unpin 2 shots of ${scene.title}`);
+  assert.deepEqual(card.commands, [
+    { label: `Unpin shot ${first!.number} of ${scene.title}`, detail: "was 0:00–0:04" },
+    { label: `Unpin shot ${second!.number} of ${scene.title}`, detail: "was 0:04–0:08" },
+  ]);
+  assert.equal(card.consequence, "Changes where shots sit in the song.");
+  assert.equal(card.expectedResult, "Saved as revision 5 of the song.");
+  assert.doesNotMatch(JSON.stringify([card.title, card.commands]), /sh_/);
+  assert.equal(preview(store, 4, { kind: "delete-anchors", shotIds: [first!.id, elsewhere.id] }).title, "Unpin 2 shots", "shots of two scenes name neither");
+  assert.equal(preview(store, 4, { kind: "delete-anchors", shotIds: [second!.id] }).title, `Unpin shot ${second!.number} of ${scene.title}`);
+
+  const written = await applyProductionSpineCommand(store, { productionId: PRODUCTION, baseRevision: 4, command: { kind: "delete-anchors", shotIds: [first!.id, second!.id] } }, { source: "test" });
+  assert.equal(written.spine?.revision, 5, "one revision for both");
+  assert.deepEqual(Object.keys(spine().anchors), [elsewhere.id]);
+  // One that is not pinned refuses the card whole, by the authority's own reason.
+  assert.throws(() => preview(store, 5, { kind: "delete-anchors", shotIds: [elsewhere.id, first!.id] }), /is not anchored/);
+});
+
 it("reads a time as a player does, to the millisecond it was given", () => {
   assert.equal(songTime(0), "0:00");
   assert.equal(songTime(16.5), "0:16.5");

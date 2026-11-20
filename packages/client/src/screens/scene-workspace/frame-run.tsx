@@ -7,6 +7,7 @@ import {
   CODEX_IMAGE_PLAN_LABEL,
   isReplayableFinalization,
   missingShotLooks,
+  namedWithoutCitation,
   orderedShots,
   resolveCast,
   sceneImageOutput,
@@ -79,6 +80,28 @@ export function finalizationRetryJobId(
   if (jobId === null || jobId === undefined) return null;
   const job = jobs.find((candidate) => candidate.id === jobId);
   return job?.finalization?.status === "failed" && isReplayableFinalization(job) ? job.id : null;
+}
+
+/**
+ * What a refused press approved that the fresh quote moved, as the label the dialog shows
+ * (issue 3159). The coordinator starts a run only on the run that was priced; when it refuses,
+ * the dialog asks again and names the price, shots or references that changed. Whatever else
+ * the signature covers — the scene's script and frames, the sheets its prompt draws on — reads
+ * as the scene. Null when nothing priced moved, so the refusal's own reason stands.
+ */
+export function quoteChange(before: FrameRunQuote, after: FrameRunQuote): string | null {
+  if (before.mode !== after.mode || before.modelId !== after.modelId || before.scope !== after.scope || before.shotId !== after.shotId) return null;
+  if (before.signature === after.signature && before.estimatedMicroUsd === after.estimatedMicroUsd) return null;
+  const shots = (quote: FrameRunQuote) => JSON.stringify(quote.steps.map((step) => [step.requestShotIds, step.updateShotIds]));
+  const references = (quote: FrameRunQuote) => JSON.stringify(quote.steps.map((step) => step.references));
+  const moved = [
+    ...(before.estimatedMicroUsd === after.estimatedMicroUsd ? [] : ["price"]),
+    ...(shots(before) === shots(after) ? [] : ["shots"]),
+    ...(references(before) === references(after) ? [] : ["references"]),
+  ];
+  if (moved.length === 0) return "Scene changed";
+  const named = moved.length === 1 ? moved[0]! : `${moved.slice(0, -1).join(", ")} and ${moved.at(-1)!}`;
+  return `${named.charAt(0).toUpperCase()}${named.slice(1)} changed`;
 }
 
 function moveRadio(event: KeyboardEvent<HTMLElement>, select: (index: number) => void): void {
@@ -236,6 +259,8 @@ function GenerateFramesDialogOpen({
   const [deliveryReason, setDeliveryReason] = useState<string | null>(null);
   const [startPending, setStartPending] = useState<{ requestId: string; quoteId: string } | null>(null);
   const [startReason, setStartReason] = useState<string | null>(null);
+  /** The quote a refused press was sent on, so the fresh quote can say what moved (issue 3159). */
+  const [refusedQuote, setRefusedQuote] = useState<FrameRunQuote | null>(null);
   const [quoteRevision, setQuoteRevision] = useState(0);
   const currentRequest = useRef<string | null>(null);
   const startSubscription = useRef<(() => void) | null>(null);
@@ -307,10 +332,13 @@ function GenerateFramesDialogOpen({
   useEffect(() => {
     if (seenRequestEpoch.current === requestEpoch) return;
     seenRequestEpoch.current = requestEpoch;
-    startSubscription.current?.();
+    // Only a reconnect moves the epoch now (issue 3159), and only a start in flight has an
+    // answer it may have lost; with none pending the quote effect simply asks again.
+    if (startSubscription.current === null) return;
+    startSubscription.current();
     startSubscription.current = null;
     setStartPending(null);
-    setStartReason("The studio refreshed before the frame run was confirmed.");
+    setStartReason("The studio reconnected before the frame run was confirmed.");
   }, [requestEpoch]);
 
   const matchingOptions = quote !== null &&
@@ -329,6 +357,7 @@ function GenerateFramesDialogOpen({
     quote.estimatedMicroUsd !== null &&
     (propIssues.length === 0 || propsAcknowledged);
   const blockedReason = matchingOptions ? quote.blockedReason : deliveryReason;
+  const changed = refusedQuote !== null && matchingOptions && quote.blockedReason === null ? quoteChange(refusedQuote, quote) : null;
   const aspectVerdict = knownModel === null ? null : aspectSupport(knownModel, aspect);
   const compatibleAlternative = aspectVerdict?.ok === false && knownModel !== null ? deliverableInstead(knownModel) : null;
   const alternativeName = compatibleAlternative === null ? null : modelLabel(compatibleAlternative);
@@ -337,7 +366,9 @@ function GenerateFramesDialogOpen({
       ? `No available image model supports ${aspect}; turn one on in AI models.`
       : `Choose ${alternativeName}, which supports ${aspect}.`}`
     : blockedReason;
-  const references = matchingOptions ? quoteReferences(quote, scene, world) : [];
+  const { tiles: references, unseen } = matchingOptions
+    ? quoteReferences(quote, scene, world)
+    : { tiles: [], unseen: [] };
   // R-16's second layer: a scope that resolves to nothing swaps the primary for the sentence
   // naming the fix. Only the all-framed case has a fix to name — a scene with no shots keeps
   // the backend's refusal, because switching scope would not change anything there.
@@ -354,6 +385,7 @@ function GenerateFramesDialogOpen({
   const start = () => {
     if (startPending !== null || !canStart || quote.signature === null || quote.estimatedMicroUsd === null) return;
     const pending = { requestId: quote.requestId, quoteId: quote.quoteId };
+    const pressed = quote;
     startSubscription.current?.();
     startSubscription.current = subscribeFrameRunStartResult(quote.requestId, quote.quoteId, (event) => {
       if (
@@ -373,10 +405,12 @@ function GenerateFramesDialogOpen({
       }
       setQuote(null);
       setStartPending(null);
+      setRefusedQuote(pressed);
       setStartReason(event.reason ?? "The frame run was refused.");
       setQuoteRevision((revision) => revision + 1);
     });
     setStartReason(null);
+    setRefusedQuote(null);
     setStartPending(pending);
     const sent = frameRunCommand({
       kind: "frame-run-start",
@@ -492,10 +526,10 @@ function GenerateFramesDialogOpen({
           {unavailable ? <p className="fy-swgen__hint">This production still names {modelLabel(knownModel!)}; it has not been replaced by another model.</p> : null}
         </section>
 
-        {references.length === 0 ? null : (
+        {references.length + unseen.length === 0 ? null : (
           <section className="fy-swgen__section">
             <h3>References</h3>
-            <div className="fy-swgen__references">
+            {references.length === 0 ? null : <div className="fy-swgen__references">
               {references.map((reference) => (
                 <article key={reference.sheet.id} data-riding={reference.ridingSteps > 0 ? "true" : "false"}>
                   <span className="fy-swgen__reference-image">
@@ -511,7 +545,10 @@ function GenerateFramesDialogOpen({
                   </span>
                 </article>
               ))}
-            </div>
+            </div>}
+            {unseen.map((entry) => (
+              <p key={entry.sheetId} className="fy-swgen__guard" role="status" data-testid="unseen-name">Names {entry.name} · no picture</p>
+            ))}
           </section>
         )}
 
@@ -558,7 +595,7 @@ function GenerateFramesDialogOpen({
                       : "Quote unavailable"}
               </span>
               <Button variant={compact ? "outline" : "ghost"} size="sm" onClick={onClose}>Cancel</Button>
-              {startReason === null ? null : <p className="fy-swgen__guard" role="status">{startReason}</p>}
+              {(changed ?? startReason) === null ? null : <p className="fy-swgen__guard" role="status">{changed ?? startReason}</p>}
               {displayedBlockedReason !== null && startPending === null ? <p className="fy-swgen__guard" role="status">{displayedBlockedReason}</p> : <Button variant="primary" size="sm" {...(styleHint === undefined ? {} : { hint: styleHint, className: "fy-tip--end" })} disabled={!canStart || startPending !== null} onClick={start}>{startPending === null ? compact ? "Generate" : "Generate frames" : "Starting..."}</Button>}
             </div>
           )}
@@ -665,6 +702,11 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
     ridingSteps: number;
     looks: string[];
   }>();
+  // Who a shot being drawn names in plain words with no tile of their own (issue 3155): only a
+  // mention brings a picture, so "Timi J on his dark set" went out with no picture of him and this
+  // dialog showed no References at all. Someone another shot on the same board cites already has
+  // a tile, and is not said twice.
+  const unseen = new Map<string, string>();
   for (const step of quote.steps) {
     const cited = new Set<string>();
     const stepShots = step.requestShotIds.flatMap((shotId) => shotById.get(shotId) ?? []);
@@ -674,6 +716,13 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
       for (const entry of resolveCast(shot.description, world.sheets).cast) cited.add(entry.sheet.id);
     }
     for (const reference of step.references) cited.add(reference.sheetId);
+    for (const shotId of step.updateShotIds) {
+      const shot = shotById.get(shotId);
+      if (shot === undefined) continue;
+      for (const { sheet, name } of namedWithoutCitation(shot.description, world.sheets, cited)) {
+        if (!unseen.has(sheet.id)) unseen.set(sheet.id, name);
+      }
+    }
     for (const sheetId of cited) {
       const sheet = sheetById.get(sheetId);
       if (sheet === undefined) continue;
@@ -689,7 +738,7 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
       });
     }
   }
-  return [...summary.values()].map(({ looks, ...entry }) => {
+  const tiles = [...summary.values()].map(({ looks, ...entry }) => {
     const gone = missing.filter((item) => item.sheetId === entry.sheet.id).map((item) => item.number);
     const detail = entry.sheet.type === "location"
       ? ["plate"]
@@ -705,6 +754,7 @@ function quoteReferences(quote: FrameRunQuote, scene: SceneRecord, world: WorldB
         : characterPortraitPath(world, entry.sheet.id)),
     };
   });
+  return { tiles, unseen: [...unseen].map(([sheetId, name]) => ({ sheetId, name })) };
 }
 
 export function FrameRunBar({ run, worldId, productionId, onReview }: { run: FrameRunState; worldId: string; productionId: string; onReview?: () => void }) {

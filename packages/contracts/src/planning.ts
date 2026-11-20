@@ -7,7 +7,9 @@ import {
   compilationIsStale,
   designatedCompilation,
   mainPhotoFor,
+  orderedLocationViews,
   type Compilation,
+  type LocationView,
   type ReferenceKit,
 } from "./reference.js";
 import { DEFAULT_AUDIO_POLICY, type AudioPolicy, type ResolvedArtDirection } from "./art-direction.js";
@@ -45,7 +47,7 @@ import { packBoards, packShotsFor } from "./boards.js";
 import type { Shot, ShotFraming } from "./scene.js";
 import type { Selections } from "./scene.js";
 import type { Take } from "./take.js";
-import type { Sheet, WorldMeta } from "./world.js";
+import { quotedNickname, type Sheet, type WorldMeta } from "./world.js";
 import type { Prop } from "./prop.js";
 
 /**
@@ -150,6 +152,87 @@ export function scenePlaceApplies(
   sheets: readonly Sheet[],
 ): boolean {
   return scene.inherits?.location !== undefined && shots.some((shot) => citedPlaceId(shot, sheets) === undefined);
+}
+
+/** One sheet a description names in plain words, and the words it is named by. */
+export interface PlainName {
+  sheet: Sheet;
+  name: string;
+}
+
+/**
+ * Who a description names in plain words and does not cite (issue 3155): each character or place
+ * with a sheet whose name stands in the text while no mention cites it.
+ *
+ * Mentions stay the one cast list (R-9, D5); this resolves nothing and sends nothing. It exists
+ * because a plain name reads as cast to a person and to Arke and as nothing to a dispatch: a music
+ * video's shots from chorus 1 on said "Timi J on his dark set" and "Ade small at the frame edge",
+ * went out with no picture of either, and every face was invented while the scene card and the
+ * frame dialog said nothing. The surfaces that show who rides say who will not from here.
+ *
+ * Deliberately narrow, because a name found wrongly is a warning about somebody nobody wrote: the
+ * sheet's full name, its written short name, the nickname its name quotes (`Ade` of `Adeyemi "Ade"
+ * Akinola`) and its authored aliases, each matched whole and with its capitals. Never the
+ * first-word default short name, which would read every "The" and "Mrs." as a person. A short name
+ * or alias two sheets share names neither. Longer names are found first and keep the words they
+ * cover, so "Timi J's Dark Set" is the place and not Timi J as well, whether or not the place is
+ * itself cited.
+ *
+ * Retired sheets and characters who are never pictured are not reported: no picture should ride
+ * for either. `riding` holds sheets that travel whatever the text says (a scene's own place, or
+ * whoever another shot on the same board brings), so naming them costs nothing.
+ */
+export function namedWithoutCitation(
+  description: string,
+  sheets: readonly Sheet[],
+  riding: ReadonlySet<string> = new Set(),
+): PlainName[] {
+  const cited = new Set(parseMentions(description));
+  // A mention is not prose: blanked rather than cut, so every later index still points into the
+  // description as written.
+  let text = description;
+  for (const span of mentionSpans(description)) {
+    text = text.slice(0, span.start) + " ".repeat(span.end - span.start) + text.slice(span.end);
+  }
+  const named = sheets.filter((sheet) => sheet.type === "character" || sheet.type === "location");
+  const formsOf = (sheet: Sheet, whole: boolean): string[] => {
+    const forms = whole
+      ? [sheet.name]
+      : [sheet.shortName ?? "", quotedNickname(sheet.name) ?? "", ...(sheet.aliases ?? [])];
+    return forms.map((form) => form.trim().replace(/\s+/g, " ")).filter((form) => form.length > 0);
+  };
+  const owners = new Map<string, Set<string>>();
+  for (const sheet of named) {
+    for (const form of [...formsOf(sheet, true), ...formsOf(sheet, false)]) {
+      owners.set(form, (owners.get(form) ?? new Set()).add(sheet.id));
+    }
+  }
+  // A full name is the sheet's own even when another sheet's short name happens to match it; a
+  // shorter form shared by two sheets says nothing about which of them is meant.
+  const candidates = named.flatMap((sheet) => [
+    ...formsOf(sheet, true).map((form) => ({ sheet, form })),
+    ...formsOf(sheet, false)
+      .filter((form) => owners.get(form)?.size === 1)
+      .map((form) => ({ sheet, form })),
+  ]);
+  candidates.sort((a, b) => b.form.length - a.form.length);
+  const taken: Array<[number, number]> = [];
+  const found = new Map<string, { at: number; entry: PlainName }>();
+  for (const { sheet, form } of candidates) {
+    const words = form.split(" ").map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("\\s+");
+    for (const match of text.matchAll(new RegExp(`(?<![\\p{L}\\p{N}])${words}(?![\\p{L}\\p{N}])`, "gu"))) {
+      const start = match.index;
+      const end = start + match[0].length;
+      if (taken.some(([from, to]) => start < to && end > from)) continue;
+      taken.push([start, end]);
+      const reported = !cited.has(sheet.id) && !riding.has(sheet.id) && sheet.retired !== true && sheet.neverDepicted !== true;
+      const earlier = found.get(sheet.id);
+      if (reported && (earlier === undefined || start < earlier.at)) {
+        found.set(sheet.id, { at: start, entry: { sheet, name: match[0].replace(/\s+/g, " ") } });
+      }
+    }
+  }
+  return [...found.values()].sort((a, b) => a.at - b.at).map(({ entry }) => entry);
 }
 
 /** The slug a prop is mentioned by: `@polaroid` for a prop named "Polaroid" (issue 536). */
@@ -1357,6 +1440,8 @@ export function attachmentFor(
   role: "primary" | "secondary" = "primary",
   /** `lookId` is a shot's own choice for this sheet (issue 3178), the narrowest scope of all. */
   scope?: { productionId?: string; sceneId?: string; lookId?: string },
+  /** What the dispatch makes. Only a place reads it: a video route never takes the location sheet. */
+  capability?: ManifestModel["capability"],
 ): AttachmentDecision {
   // Chosen by pointer, like a chapter's look (SPEC-047 R-112): the look stays unattached, and one
   // the kit no longer holds falls through to the scene's, the production's, then the main photo.
@@ -1422,17 +1507,50 @@ export function attachmentFor(
       : { sheetId: sheet.id, file: null, mode: "sketch-citation", role, staleGap: null };
   }
   const stale = compilationIsStale(kit, designated, sheet.version);
+  const staleGap = stale
+    ? `model sheet is v${designated.sheetVersion}; ${sheet.name} is at v${sheet.version}`
+    : null;
+  const view = plainLocationView(kit, designated, capability);
+  if (view !== null) {
+    // The sheet's own staleness, kept: the view is what the sheet was assembled from, so a
+    // place whose words moved on since is exactly as out of date sent either way.
+    return { sheetId: sheet.id, file: `references/${sheet.id}/${view.file}`, mode: "main-photo", role, staleGap };
+  }
   const panels = locationSheetPanels(kit, designated);
   return {
     sheetId: sheet.id,
     file: `references/${sheet.id}/${designated.file}`,
     mode: "designated",
     role,
-    staleGap: stale
-      ? `model sheet is v${designated.sheetVersion}; ${sheet.name} is at v${sheet.version}`
-      : null,
+    staleGap,
     ...(panels ? { panels } : {}),
   };
+}
+
+/**
+ * The accepted view a place sends instead of its location sheet (issue 3194), or null for the
+ * sheet.
+ *
+ * The sheet is drawn for an image model: angles stacked, each over a caption band, and the
+ * prompt's panel map citing them by position. A reference-to-video model is asked to reproduce
+ * every picture it is given, so it was handed the caption and the grey pillarbox bars as things
+ * to put in the clip. A video route takes the establishing view instead — the angle every other
+ * one was made against, and the one a scene gets unless it chose another as its plate.
+ *
+ * A one-view sheet is that same picture shrunk into the band with a label that locates nothing:
+ * the only words that cite its panel are the panel map, drawn from this decision and so gone
+ * with the sheet. Every route takes the view. Two or more views keep the sheet on image routes,
+ * where the map earns its place.
+ */
+function plainLocationView(
+  kit: ReferenceKit,
+  designated: Compilation,
+  capability: ManifestModel["capability"] | undefined,
+): LocationView | null {
+  if (designated.format !== "location-sheet") return null;
+  const views = orderedLocationViews(kit);
+  if (views.length === 0) return null;
+  return capability === "video" || views.length === 1 ? views[0]! : null;
 }
 
 /**
@@ -2183,11 +2301,13 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
         };
       }
       const lookId = groupLookId(shots, c.sheetId);
+      // The route decides which picture a place sends (issue 3194).
       return attachmentFor(
         kits.find((k) => k.sheetId === c.sheetId) ?? null,
         sheets.find((s) => s.id === c.sheetId)!,
         c.referenceRole,
         { ...(input.productionId ? { productionId: input.productionId } : {}), sceneId: scene.id, ...(lookId !== undefined ? { lookId } : {}) },
+        model.capability,
       );
     });
   const capSec = durationLimitsFor(model).maxDurationSec ?? Number.POSITIVE_INFINITY;

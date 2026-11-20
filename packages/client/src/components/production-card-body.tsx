@@ -1,9 +1,11 @@
 import { useMemo } from "react";
-import { effectiveFraming, resolveCast, orderedShots, shotChanges, shotLookId, shotLookIn, type ProductionCardPreview, type ConversationActionCard } from "@arke-studio/contracts";
+import { effectiveFraming, namedWithoutCitation, resolveCast, orderedShots, shotChanges, shotLookId, shotLookIn, type ProductionCardPreview, type ConversationActionCard } from "@arke-studio/contracts";
 import { lookTileLabel } from "../screens/character-reference.js";
 import { useWorld } from "../lib/store.js";
+import { mediaUrl } from "../lib/media.js";
 import { StoryboardRows } from "../screens/scene-workspace/rows.js";
-import { boardsForScene } from "../screens/scene-workspace/boards.js";
+import { boardsForScene, shotFramePath } from "../screens/scene-workspace/boards.js";
+import { mentionNames, scriptWords } from "../screens/scene-workspace/mentions.js";
 import { LazySceneStage as SceneStage } from "./lazy-stage.js";
 import { SelectionProvider } from "../screens/scene-workspace/selection.js";
 import { Portrait, characterPortraitPath, locationPortraitPath } from "./portrait.js";
@@ -13,24 +15,67 @@ import { ProductionExportCard } from "./production-export-card.js";
 export type ProductionCardContext = Pick<ConversationActionCard, "worldId" | "productionId" | "actionKind" | "targets" | "shown" | "authority" | "exportState">;
 
 const EMPTY = new Set<string>();
+const NO_NAMES: ReadonlyMap<string, string> = new Map();
 const nothing = () => {};
-/** The native surfaces consume a frozen scene. Their write controls remain locked in a preview. */
-export function ProductionCardBody({ preview, action, onSelectShot }: { preview: ProductionCardPreview; action: ProductionCardContext; onSelectShot?: (id: string) => void }) {
+type ShotFacts = { framing: string; cast: readonly string[]; unseen: readonly string[] };
+
+/**
+ * A review reads each shot as a line of a storyboard: its number, title, length, framing, cast and
+ * what happens. The workspace's rows are where a shot is built, and drawn in a card they gave every
+ * new shot an empty frame, a drag handle, "Needs frame" and a spend box that read "Reading
+ * history…" for ever, because the shot did not exist yet; one shot filled the card, and a verse was
+ * a long scroll in the conversation and again on the canvas (issue 3145). A picture shows only
+ * where the shot already has one. The marker is the shot's own number, as on the removed list.
+ */
+function ReviewShotList({ rows, marks, facts, names, framePath }: {
+  rows: ReturnType<typeof shotChanges>["shots"]; marks: ReadonlyMap<string, string>; facts: ReadonlyMap<string, ShotFacts> | undefined;
+  names: ReadonlyMap<string, string>; framePath: (shotId: string, inserted: boolean) => string | null;
+}) {
+  return <ol className="fy-production-preview__shots" aria-label="Resulting shot list">{rows.map(({ shot, inserted }) => {
+    const mark = marks.get(shot.id), framing = facts?.get(shot.id)?.framing, cast = facts?.get(shot.id)?.cast ?? [], src = framePath(shot.id, inserted);
+    return <li key={shot.id} value={shot.number} data-review-change={inserted ? "inserted" : mark ? "changed" : undefined}>
+      {/* Floated, so the list's marker stays on the title's line. */}
+      {src && <img src={src} alt="" draggable={false} />}
+      <p><strong>{shot.title}</strong> · {shot.durationSec ?? 4}s{framing ? ` · ${framing}` : ""}{mark ? <> · <small>{mark}</small></> : null}</p>
+      {cast.length > 0 && <p data-cast>{cast.join(", ")}</p>}
+      {/* Who the shot names with no picture going (issue 3155), said on the row the card is approved from. */}
+      {facts?.get(shot.id)?.unseen.map(name => <p className="fy-production-preview__unseen" key={name}>Names {name} · no picture</p>)}
+      {/* Read as the workspace reads an unfocused script: a mention is the thing's name, never its id. */}
+      {shot.description.trim() && <p>{scriptWords(shot.description, names, "read")}</p>}
+    </li>;
+  })}</ol>;
+}
+
+/**
+ * The native surfaces consume a frozen scene. Their write controls remain locked in a preview.
+ * `live` is the canvas drawing the scene as it stands, which is the storyboard itself (SPEC-051
+ * R-64); every other scene is a card's review and reads as the compact shot list.
+ */
+export function ProductionCardBody({ preview, action, onSelectShot, live = false }: { preview: ProductionCardPreview; action: ProductionCardContext; onSelectShot?: (id: string) => void; live?: boolean }) {
   const world = useWorld();
-  const production = world?.meta.worldId === action.worldId ? world.productions.find(p => p.meta.id === action.productionId) : undefined;
+  // The card's own world, when it is the one open. Cast and mentions are named from its sheets
+  // alone: another world's sheets could answer to the same slug.
+  const home = world?.meta.worldId === action.worldId ? world : undefined;
+  const production = home?.productions.find(p => p.meta.id === action.productionId);
   const changes = useMemo(() => preview.kind === "scene" ? shotChanges(preview.before, preview.after) : null, [preview]);
   const marks = useMemo(() => new Map(changes?.shots.map(row => [row.shot.id, [row.inserted ? "Inserted" : "", row.moved ? `Moved ↑ ${row.from} → ${row.shot.number}` : "", row.changed ? "Changed" : ""].filter(Boolean).join(" · ")]) ?? []), [changes]);
   const newShots = useMemo(() => new Set(changes?.shots.filter(row => row.inserted).map(row => row.shot.id) ?? []), [changes]);
   // Each person with the look the shot puts them in (issue 3178), so the card shows the choice it asks to approve.
+  // A shot naming someone with a sheet in plain words is said on the card before it is approved
+  // (issue 3155): only a mention sends their picture, and six sections of a music video went out
+  // with every face invented while these rows showed no cast line and nothing else. The scene's
+  // own place rides whatever a shot says, so naming it is not flagged.
   const reviewShots = useMemo(() => preview.kind === "scene" ? new Map(orderedShots(preview.after).map(shot => [shot.id, {
     framing: Object.values(effectiveFraming(preview.after, shot)).filter(Boolean).join(" · "),
-    cast: world ? resolveCast(shot.description, world.sheets).cast.filter(entry => entry.sheet.type === "character").map(entry => {
+    cast: home ? resolveCast(shot.description, home.sheets).cast.filter(entry => entry.sheet.type === "character").map(entry => {
       const lookId = shotLookId(shot, entry.sheet.id);
       if (lookId === undefined) return entry.sheet.name;
-      const look = shotLookIn(world.referenceKits.find(kit => kit.sheetId === entry.sheet.id) ?? null, lookId);
+      const look = shotLookIn(home.referenceKits.find(kit => kit.sheetId === entry.sheet.id) ?? null, lookId);
       return `${entry.sheet.name} · ${look === undefined ? "look missing" : look.name ?? lookTileLabel(look.prompt, look.kind)}`;
     }) : [],
-  }])) : undefined, [preview, world]);
+    unseen: home ? namedWithoutCitation(shot.description, home.sheets, new Set(preview.after.inherits?.location === undefined ? [] : [preview.after.inherits.location])).map(entry => entry.name) : [],
+  } satisfies ShotFacts])) : undefined, [preview, home]);
+  const names = useMemo(() => home ? mentionNames(home.sheets, home.props) : NO_NAMES, [home]);
   if (preview.kind === "production") return <div className="fy-production-preview" aria-label="Resulting production">
     <h4>{preview.title}</h4><dl>{[
       ["Medium", `${preview.medium} · ${preview.productionKind}`], ["Aspect", preview.aspect ?? "Not required"],
@@ -80,17 +125,30 @@ export function ProductionCardBody({ preview, action, onSelectShot }: { preview:
         <figcaption>{world.sheets.find(s => s.id === id)?.name ?? id}{!world.referenceKits.some(kit => kit.sheetId === id) && <small>Missing kit</small>}</figcaption></figure>)}
       {scene.inherits?.location && <figure><Portrait worldSlug={world.meta.slug} path={locationPortraitPath(world, scene.inherits.location)} label={scene.inherits.location} /><figcaption>{scene.inherits.location}</figcaption></figure>}
     </section>}
-    <p>{shots.length} shots · {shots.reduce((sum, shot) => sum + (shot.durationSec ?? 4), 0)}s</p>
-    {world && production && pack ? <div className="fy-production-preview__rows" data-screen="scene-detail" tabIndex={0} aria-label={boardChanged ? "Resulting board grid" : "Resulting shot list"}>
-      <StoryboardRows layout={boardChanged ? "grid" : "list"} scene={scene} acceptedScene={preview.before ?? scene}
-        world={world} production={production} artifacts={world.artifacts} sheets={world.sheets} slug={world.meta.slug}
-        digests={new Map()} aspect={production.meta.aspect ?? "16:9"} capSec={60} boardPack={pack} showBoards={boardChanged}
-        stagedShotIds={EMPTY} newShotIds={newShots} stagedBoards={false} locked generatorPending={false} onCommand={() => false}
-        refusalVersion={0} frameRun={null} jobs={[]} worldId={world.meta.worldId} reviewMarks={marks} reviewShots={reviewShots}
-        onViewBoardSheet={nothing} onGenerateFrame={nothing} onEditShot={onSelectShot ?? nothing} onOpenShotInGenerator={nothing}
-        onPreviewShot={onSelectShot ?? nothing} onTalkToArke={nothing} onPlanVideo={nothing} onRenderBoard={nothing} />
-    </div> : <ol aria-label="Resulting shot list">{changes?.shots.map(row => <li key={row.shot.id}><strong>{row.shot.number}. {row.shot.title}</strong> · {row.shot.durationSec ?? 4}s · {marks.get(row.shot.id)}</li>)}</ol>}
-    {changes?.removed.length ? <ol aria-label="Removed shots">{changes.removed.map(shot => <li key={shot.id} data-removed><del>{shot.number}. {shot.title}</del> · Removed</li>)}</ol> : null}
+    {/* A scene left with no shots is a result to read. The rows' own empty state is the workspace's
+        invitation to build one, and in a frozen preview its buttons did nothing: a card removing
+        every shot showed "Build this scene" over the list of what it removed (issue 3139). */}
+    {shots.length === 0 ? <p>No shots</p> : <>
+      <p>{shots.length} shots · {shots.reduce((sum, shot) => sum + (shot.durationSec ?? 4), 0)}s</p>
+      {/* A board card is about the boards, which only the grid draws (SPEC-051 R-54). */}
+      {world && production && pack && (live || boardChanged) ? <div className="fy-production-preview__rows" data-screen="scene-detail" tabIndex={0} aria-label={boardChanged ? "Resulting board grid" : "Resulting shot list"}>
+        <StoryboardRows layout={boardChanged ? "grid" : "list"} scene={scene} acceptedScene={preview.before ?? scene}
+          world={world} production={production} artifacts={world.artifacts} sheets={world.sheets} slug={world.meta.slug}
+          digests={new Map()} aspect={production.meta.aspect ?? "16:9"} capSec={60} boardPack={pack} showBoards={boardChanged}
+          stagedShotIds={EMPTY} newShotIds={newShots} stagedBoards={false} locked generatorPending={false} onCommand={() => false}
+          refusalVersion={0} frameRun={null} jobs={[]} worldId={world.meta.worldId} reviewMarks={marks} reviewShots={reviewShots}
+          onViewBoardSheet={nothing} onGenerateFrame={nothing} onEditShot={onSelectShot ?? nothing} onOpenShotInGenerator={nothing}
+          onPreviewShot={onSelectShot ?? nothing} onTalkToArke={nothing} onPlanVideo={nothing} onRenderBoard={nothing} />
+      </div> : <ReviewShotList rows={changes?.shots ?? []} marks={marks} facts={reviewShots} names={names}
+        framePath={(shotId, inserted) => {
+          const path = home && production ? shotFramePath(production, home.artifacts, shotId, inserted).path : null;
+          return home && path ? mediaUrl(home.meta.slug, path) : null;
+        }} />}
+    </>}
+    {/* The list numbers its rows, so a row that printed the shot's number as well read "1. 1. The
+        phone lights" (issue 3138). The marker is the shot's own number: a removed shot keeps the
+        one it had, wherever it falls in this list. */}
+    {changes?.removed.length ? <ol aria-label="Removed shots">{changes.removed.map(shot => <li key={shot.id} value={shot.number} data-removed><del>{shot.title}</del> · Removed</li>)}</ol> : null}
     {world && production && stageChanged.map(shot => <section key={shot.id} className="fy-production-preview__stage" aria-label={`Stage preview for shot ${shot.number}`}>
       <SelectionProvider value={{ subject: { kind: "shot", shotId: shot.id }, select: nothing }}>
         <SceneStage world={world} production={production} scene={scene} aspect={production.meta.aspect ?? "16:9"}

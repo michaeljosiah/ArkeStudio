@@ -241,6 +241,22 @@ describe("production setup interaction (issue #976)", () => {
     assert.match(m.container.textContent!, /Tone: Quiet unease/);
   });
 
+  it("shows a scene's place in the song beside its title, and nothing where it has none (issue 3100)", async () => {
+    const setup = draft();
+    setup.draft.kind = "music-video";
+    setup.draft.scenes = [
+      { key: "verse-1", title: "Verse 1: the phone", songWindow: { startSec: 16, endSec: 44 } },
+      { key: "bridge", title: "Bridge" },
+      // Off the second, and under a second: the times the draft holds, not their nearest seconds.
+      { key: "chorus", title: "Chorus", songWindow: { startSec: 44.25, endSec: 72.5 } },
+      { key: "sting", title: "Sting", songWindow: { startSec: 72.5, endSec: 72.9 } },
+    ];
+    const m = await mount(fixture(setup));
+    await answer(m.commands()[0]!, setup);
+    assert.deepEqual([...m.container.querySelectorAll("#setup-outline ol li")].map(row => row.textContent),
+      ["Verse 1: the phone · 0:16–0:44", "Bridge", "Chorus · 0:44.25–1:12.5", "Sting · 1:12.5–1:12.9"]);
+  });
+
   it("the film door opens a private conversation without sending create-production", async () => {
     const m = await mount(FIXTURE_STATE, true);
     const film = [...m.container.querySelectorAll("button")].find(button => button.textContent?.includes("Make a film"));

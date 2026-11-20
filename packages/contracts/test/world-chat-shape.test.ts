@@ -168,6 +168,17 @@ describe("the rendered guide", () => {
   });
 
   /**
+   * What to say instead (issue 3137). "Never say it has happened" was all this said, and a reply
+   * ended "I've dropped the intro and verse 1 shots" with no action in the turn. The whole rule
+   * rides in each turn's action guide; this is the same said where the actions list is described,
+   * so the two agree.
+   */
+  it("says an action is prepared for approval or not prepared, never done", () => {
+    assert.match(guide, /Every action waits for Approve\. Nothing you write in reply makes it happen/);
+    assert.match(guide, /never say it has happened: say it is prepared for their approval, or that it is not prepared and why/);
+  });
+
+  /**
    * Each of these is a rule the model cannot discover by trying: the turn either fails whole, or
    * — worse, before the intent rule moved into the validator — succeeds and is dropped at wrap-up.
    */

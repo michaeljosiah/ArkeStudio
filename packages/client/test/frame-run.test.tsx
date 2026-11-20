@@ -26,6 +26,8 @@ import { ConversationTranscript } from "../src/components/conversation.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import {
   __applyEventForTest,
+  __connectionStatusForTest,
+  __handleFrameForTest,
   __setBridgeForTest,
   __setStateForTest,
   __stateForTest,
@@ -33,6 +35,7 @@ import {
   subscribeFrameRunQuote,
 } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { quoteChange } from "../src/screens/scene-workspace/frame-run.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -535,6 +538,37 @@ describe("frame-run quote authorization", () => {
     assert.equal(one(references, '[data-testid="clips-from"]')?.textContent, `${shots.length - 1} of ${shots.length} clips from references`);
   });
 
+  /**
+   * A shot that names somebody in plain words sends no picture of them (issue 3155): the frames of
+   * six music-video sections went out with every face invented while this dialog had no
+   * References at all. Shot 13 names Maren Kest without citing her.
+   */
+  describe("a person named without a citation (issue 3155)", () => {
+    const naming = (): ClientState => {
+      const state = stateWith();
+      const scene = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!.scenes.find((candidate) => candidate.id === "sc_04")!;
+      orderedShots(scene).find((shot) => shot.id === "sh_13")!.description = "Maren Kest watches the lamps flare from The Vigil.";
+      return state;
+    };
+
+    it("says who goes with no picture, and nothing for the scene's own place", async () => {
+      const item = await mount(naming(), []);
+      const row = one(item, '[data-testid="workspace-row-sh_13"]')!;
+      await click([...row.querySelectorAll("button")].find((button) => button.textContent === "Generate frame") as HTMLElement);
+      const section = all(item, ".fy-swgen__section").find((candidate) => candidate.querySelector("h3")?.textContent === "References");
+      assert.ok(section, "a References section, though no picture rides for this shot's people");
+      assert.deepEqual(all(item, '[data-testid="unseen-name"]').map((line) => line.textContent), ["Names Maren Kest · no picture"]);
+    });
+
+    it("says nothing for someone another shot on the same board brings", async () => {
+      const item = await mount(naming(), []);
+      await click(named(item, "Generate frames"));
+      const maren = all(item, ".fy-swgen__references article").find((reference) => reference.textContent?.includes("Maren Kest"));
+      assert.match(maren?.textContent ?? "", /rides/, "shot 12 cites her, so her picture rides for the board");
+      assert.equal(all(item, '[data-testid="unseen-name"]').length, 0);
+    });
+  });
+
   it("quotes current options, displays the backend amount, and echoes the authorization on start", async () => {
     const sent: ClientMessage[] = [];
     const item = await mount(stateWith(), sent);
@@ -604,6 +638,47 @@ describe("frame-run quote authorization", () => {
     assert.equal(one(item, ".fy-swgen"), null, "the acceptance closes the dialog");
     assert.deepEqual(all(item, ".fy-sw__tab").map((tab) => tab.textContent), ["Beats", "Preview"], "still on the scene's beats");
     assert.equal(sent.some((message) => message.kind === "timeline-assemble"), false, "no film cut is assembled");
+  });
+
+  it("a film's scene-wide run opens the Cut, which asks once for the scene to be assembled (SPEC-039 R-44)", async () => {
+    const sent: ClientMessage[] = [];
+    const item = await mount(stateWith(), sent);
+    await click(named(item, "Generate frames"));
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
+    await click([...one(item, ".fy-swgen")!.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLElement);
+    await act(async () => emitStartResult({ requestId: request.requestId, quoteId: QUOTE_ID, disposition: "accepted" }));
+    assert.equal(one(item, '[data-testid="workspace-row-sh_12"]'), null, "the scene gave way to the Cut");
+    const assemblies = sent.filter((message) => message.kind === "timeline-assemble");
+    assert.equal(assemblies.length, 1);
+    assert.equal(assemblies[0]!.kind === "timeline-assemble" && assemblies[0]!.sceneId, "sc_04");
+  });
+
+  it("a production cut to a song stays on the scene and sends no timeline command (issue 3151)", async () => {
+    const sent: ClientMessage[] = [];
+    const state = stateWith();
+    const production = state.world!.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    production.meta = { ...production.meta, kind: "music-video" };
+    production.spine = {
+      schemaVersion: 1,
+      revision: 1,
+      trackArtifactId: state.world!.artifacts[0]!.id,
+      markers: [],
+      anchors: {},
+      updatedAt: "2026-11-15T10:00:00Z",
+    };
+    const item = await mount(state, sent);
+    await click(named(item, "Generate frames"));
+    const request = sent.find((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote")!;
+    await click([...one(item, ".fy-swgen")!.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLElement);
+    assert.ok(sent.some((message) => message.kind === "frame-run-start"));
+    await act(async () => emitStartResult({ requestId: request.requestId, quoteId: QUOTE_ID, disposition: "accepted" }));
+    assert.equal(one(item, ".fy-swgen"), null, "the acceptance closes the dialog");
+    assert.ok(one(item, '[data-testid="workspace-row-sh_12"]'), "still on the scene's shots");
+    assert.equal(
+      sent.some((message) => message.kind === "timeline-assemble" || message.kind === "timeline-command"),
+      false,
+      "placing the shots at the song's times is the person's",
+    );
   });
 
   it("a visual novel's run packs the shots it quotes, never a kept picture (codex round 12)", async () => {
@@ -838,6 +913,145 @@ describe("frame-run quote authorization", () => {
     assert.equal(([...dialog.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLButtonElement).disabled, false);
   });
 
+  describe("a press across a refresh (issue 3159)", () => {
+    const quoteRequests = (sent: ClientMessage[]) =>
+      sent.filter((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote");
+    const starts = (sent: ClientMessage[]) =>
+      sent.filter((message): message is Extract<ClientMessage, { kind: "frame-run-start" }> => message.kind === "frame-run-start");
+    const primary = (item: Mounted) =>
+      [...one(item, ".fy-swgen")!.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLButtonElement;
+    /** Another scene's frame landed: the studio refreshes, and nothing this run sends moved. */
+    const landedElsewhere = (): ClientState => {
+      const state = stateWith();
+      state.world!.artifacts.push({
+        id: "ar_01J8E0000000000000000000A9",
+        kind: "image",
+        file: "elsewhere.png",
+        hash: "sha256:0123456789abcdef",
+        origin: { by: "system", producedBy: `frame-run:${JOB_3}` },
+        links: ["sh_20"],
+        created: "2026-08-30T12:00:30Z",
+      });
+      return state;
+    };
+    let seq = 100;
+    const refresh = async (state: ClientState) => act(async () => __handleFrameForTest({ kind: "snapshot", seq: ++seq, state }));
+
+    it("starts on the quote it was priced on when the studio refreshes before and during the press", async () => {
+      const sent: ClientMessage[] = [];
+      const item = await mount(stateWith(), sent);
+      await click(named(item, "Generate frames"));
+      const request = quoteRequests(sent)[0]!;
+
+      await refresh(landedElsewhere());
+      assert.equal(one(item, ".fy-swgen__guard"), null, "a refresh is not a refusal");
+      assert.match(one(item, ".fy-swgen")?.textContent ?? "", /2 frames · \$0.08/, "the price still stands");
+      assert.equal(primary(item).disabled, false);
+      assert.equal(quoteRequests(sent).length, 1, "nothing to price again");
+
+      await click(primary(item));
+      assert.deepEqual(starts(sent).map((start) => ({ requestId: start.requestId, quoteId: start.quoteId, quoteSignature: start.quoteSignature })), [
+        { requestId: request.requestId, quoteId: QUOTE_ID, quoteSignature: SIGNATURE },
+      ]);
+      await refresh(landedElsewhere());
+      assert.match(one(item, ".fy-swgen")?.textContent ?? "", /Starting frame run/, "the press is still waiting on its answer");
+      assert.equal(one(item, ".fy-swgen__guard"), null);
+
+      await act(async () => emitStartResult({ requestId: request.requestId, quoteId: QUOTE_ID, disposition: "accepted" }));
+      assert.equal(one(item, ".fy-swgen"), null, "the acceptance closes it");
+    });
+
+    it("keeps a quote asked for before a refresh that answers after it", async () => {
+      const sent: ClientMessage[] = [];
+      const item = await mount(stateWith(), sent, false);
+      await click(named(item, "Generate frames"));
+      const request = quoteRequests(sent)[0]!;
+      await refresh(landedElsewhere());
+      await act(async () => emitQuote(quoteFor(request)));
+      assert.equal(quoteRequests(sent).length, 1);
+      assert.equal(primary(item).disabled, false, "the answer still arms the press");
+    });
+
+    it("names what moved when the run is no longer the one priced, and starts nothing until pressed again", async () => {
+      const sent: ClientMessage[] = [];
+      const item = await mount(stateWith(), sent, false);
+      await click(named(item, "Generate frames"));
+      const first = quoteRequests(sent)[0]!;
+      await act(async () => emitQuote(quoteFor(first)));
+      await click(primary(item));
+      await act(async () => emitStartResult({ requestId: first.requestId, quoteId: QUOTE_ID, disposition: "refused", reason: "the frame-run quote is stale; request a new quote" }));
+
+      const second = quoteRequests(sent).at(-1)!;
+      assert.notEqual(second.requestId, first.requestId, "the refusal asks again");
+      const repriced = quoteFor(second);
+      const quoteId = "01J8E0000000000000000000Q3";
+      await act(async () => emitQuote({
+        ...repriced,
+        quoteId,
+        signature: `sha256:${"b".repeat(64)}`,
+        estimatedMicroUsd: 118_234,
+        steps: repriced.steps.map((step) => ({ ...step, estimatedMicroUsd: 118_234 })),
+      }));
+      assert.equal(one(item, ".fy-swgen__guard")?.textContent, "Price changed");
+      assert.match(one(item, ".fy-swgen")?.textContent ?? "", /2 frames · \$0.12/, "the new price is offered");
+      assert.equal(starts(sent).length, 1, "nothing starts on its own");
+      assert.equal(primary(item).disabled, false);
+
+      await click(primary(item));
+      assert.deepEqual(
+        { quoteId: starts(sent).at(-1)!.quoteId, quotedMicroUsd: starts(sent).at(-1)!.quotedMicroUsd },
+        { quoteId, quotedMicroUsd: 118_234 },
+      );
+      assert.equal(one(item, ".fy-swgen__guard"), null, "a new press clears the label");
+    });
+
+    it("says a reconnect lost the answer only when a start was in flight", async () => {
+      const sent: ClientMessage[] = [];
+      const item = await mount(stateWith(), sent);
+      await click(named(item, "Generate frames"));
+      const reconnect = async () => act(async () => {
+        __connectionStatusForTest("open");
+        __handleFrameForTest({ kind: "snapshot", seq: ++seq, state: stateWith() });
+      });
+
+      await reconnect();
+      assert.equal(one(item, ".fy-swgen__guard"), null, "nothing was pressed");
+      assert.equal(quoteRequests(sent).length, 2, "the quote is asked for again");
+      assert.equal(primary(item).disabled, false);
+
+      await click(primary(item));
+      await reconnect();
+      assert.equal(one(item, ".fy-swgen__guard")?.textContent, "The studio reconnected before the frame run was confirmed.");
+    });
+
+    it("labels each thing priced that moved", () => {
+      const before = quoteFor({
+        kind: "frame-run-quote",
+        requestId: "01J8E0000000000000000000Q1",
+        worldId: FIXTURE_WORLD_ID,
+        productionId: "saltlight",
+        sceneId: "sc_04",
+        mode: "board",
+        modelId: IMAGE_MODEL.id,
+        scope: "missing",
+      });
+      const signature = `sha256:${"c".repeat(64)}`;
+      const step = before.steps[0]!;
+      assert.equal(quoteChange(before, { ...before, requestId: "01J8E0000000000000000000Q4", quoteId: "01J8E0000000000000000000Q5" }), null, "the run that was priced");
+      assert.equal(quoteChange(before, { ...before, signature, steps: [{ ...step, references: [] }] }), "References changed");
+      assert.equal(
+        quoteChange(before, { ...before, signature, includedCount: 1, estimatedMicroUsd: 37_000, steps: [{ ...step, requestShotIds: ["sh_12"], updateShotIds: ["sh_12"], estimatedMicroUsd: 37_000 }] }),
+        "Price and shots changed",
+      );
+      assert.equal(
+        quoteChange(before, { ...before, signature, estimatedMicroUsd: 1, steps: [{ ...step, requestShotIds: ["sh_12"], updateShotIds: ["sh_12"], references: [], estimatedMicroUsd: 1 }] }),
+        "Price, shots and references changed",
+      );
+      assert.equal(quoteChange(before, { ...before, signature, sceneVersion: 3 }), "Scene changed", "the script or a sheet moved under the same price");
+      assert.equal(quoteChange(before, { ...before, signature, modelId: "other-image" }), null, "another choice is a new quote, not a change");
+    });
+  });
+
   it("ignores stale quote replies after options change and supports roving radio keys", async () => {
     const sent: ClientMessage[] = [];
     const item = await mount(stateWith(), sent, false);
@@ -1007,6 +1221,24 @@ describe("durable run projections", () => {
 
     await click(retries[0]!);
     assert.deepEqual(sent.at(-1), { kind: "retry-job-finalization", jobId: JOB_1 });
+  });
+
+  it("says why a board could not be split and offers a new board, not finalization (issue 3154)", async () => {
+    const sent: ClientMessage[] = [];
+    const reason = "The picture came back 1024×1024 instead of 1536×432";
+    const run = structuredClone(frameState({ mode: "board" }).run);
+    run.steps[0]!.landingRefusal = reason;
+    const refused = FrameRunStateSchema.parse(foldFrameRun(run, [{ id: JOB_1, status: "succeeded", finalization: "complete" }]));
+    const state = stateWith({ runs: [refused] });
+    // The sheet itself finalized: nothing is owed locally, so nothing offers to replay it.
+    state.app.jobs = [{ ...failedFinalizationJob({ kind: "board-sheet", coversShots: ["sh_12", "sh_13"] }), finalization: { status: "complete", error: null, updatedAt: "2026-08-30T12:01:00Z" } }];
+    const item = await mount(state, sent);
+    const line = one(item, ".fy-swrunboards")!;
+    assert.match(line.textContent ?? "", new RegExp(`Board A.*${reason}`));
+    assert.equal(all(item, "button").some((button) => button.textContent === "Retry finalization"), false);
+    assert.match(one(item, '[data-testid="workspace-row-sh_12"]')!.textContent ?? "", new RegExp(reason), "each shot's row names it too");
+    await click([...line.querySelectorAll("button")].find((button) => button.textContent === "Retry board") as HTMLElement);
+    assert.deepEqual(sent.at(-1), { kind: "frame-run-retry-step", worldId: FIXTURE_WORLD_ID, productionId: "saltlight", runId: RUN_ID, stepIndex: 0 });
   });
 
   it("offers failed board retry only, then a cell retry only from backend per-shot facts", async () => {

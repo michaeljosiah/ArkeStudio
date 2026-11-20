@@ -114,7 +114,14 @@ try {
       bodiesContained:[...document.querySelectorAll('.fy-production-timeline__scroll,.fy-generation-card video')].every(body=>{const b=body.getBoundingClientRect();return b.left>=box.left&&b.right<=box.right;})}; })()`)
       : ["media", "audio"].includes(mode) ? await evaluate(`(() => { document.querySelectorAll('.fy-generation-card__use').forEach(d=>d.open=true); const box=document.querySelector('.fy-actioncard').getBoundingClientRect(); return {width:innerWidth,
       overflow:document.documentElement.scrollWidth>innerWidth, players:document.querySelectorAll('video,audio').length, uses:document.querySelectorAll('.fy-generation-card__use').length,
-      bodiesContained:[...document.querySelectorAll('.fy-generation-card__grid figure')].every(body=>{const b=body.getBoundingClientRect();return b.left>=box.left&&b.right<=box.right;})}; })()`) : await evaluate(`(() => { const list = document.querySelector('.fy-production-preview__rows'); const box = list.getBoundingClientRect(); list.scrollTop = list.scrollHeight;
+      bodiesContained:[...document.querySelectorAll('.fy-generation-card__grid figure')].every(body=>{const b=body.getBoundingClientRect();return b.left>=box.left&&b.right<=box.right;})}; })()`)
+      // A review's shots are compact rows (issue 3145): the list grows with the card, with no
+      // scroll of its own, and no row is the workspace's frame-sized band.
+      : mode === "shots" ? await evaluate(`(() => { const list = document.querySelector('[aria-label="Resulting shot list"]'); const box = document.querySelector('.fy-actioncard').getBoundingClientRect(); const items = [...list.children];
+      return { width:innerWidth, rows:items.length, workspaceRows:document.querySelectorAll('[data-testid^="workspace-row-"]').length,
+        overflow:document.documentElement.scrollWidth>innerWidth, nestedScroll:list.scrollHeight>list.clientHeight+1, tallest:Math.max(...items.map(li => li.getBoundingClientRect().height)),
+        bodiesContained:items.every(li => {const b=li.getBoundingClientRect(); return b.left>=box.left && b.right<=box.right;}) }; })()`)
+      : await evaluate(`(() => { const list = document.querySelector('.fy-production-preview__rows'); const box = list.getBoundingClientRect(); list.scrollTop = list.scrollHeight;
       const last = document.querySelector('[data-testid="workspace-row-sh_40"]').getBoundingClientRect();
       return { width:innerWidth, rows:document.querySelectorAll('[data-testid^="workspace-row-"]').length,
         overflow:document.documentElement.scrollWidth>innerWidth, listWidth:box.width, scrollWidth:list.scrollWidth, scrollHeight:list.scrollHeight,
@@ -128,6 +135,7 @@ try {
     else if (mode === "audio") { assert.equal(metrics.players, 3); assert.equal(metrics.uses, 2); }
     else if (mode === "timeline") { assert.equal(metrics.tracks, 4); assert.equal(metrics.ghosts, 1); }
     else if (mode === "export") { assert.equal(metrics.players, 1); assert.equal(metrics.progress, 68); }
+    else if (mode === "shots") { assert.equal(metrics.rows, 40); assert.equal(metrics.workspaceRows, 0); assert.equal(metrics.nestedScroll, false); assert.ok(metrics.tallest < 160, `a shot row is ${metrics.tallest}px at ${width}`); }
     else { assert.equal(metrics.rows, 40); assert.ok(metrics.scrollWidth <= metrics.listWidth + 1, `card body ${width} overflows`); assert.equal(metrics.lastVisible, true); }
   }
   }

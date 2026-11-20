@@ -55,9 +55,10 @@ import { createChapter, createEpisode, createProduction, openChapter, reorderSce
 import { castLines, readVoices, setVoicePins } from "../../src/productions/voices.js";
 import { addMusicTrack, editMusicTrack, ensureMusicSession, musicRecordFence, readMusicRecord } from "../../src/productions/music.js";
 import { bookAuthoringRefusal } from "../../src/world-chat/production-authoring.js";
-import { applySceneCommand } from "../../src/productions/scene-commands.js";
+import { SceneCommandRefused, applySceneCommand } from "../../src/productions/scene-commands.js";
 import { acceptCharacterLook } from "../../src/references/kit.js";
 import { productionRecord } from "../../src/world-chat/production-record.js";
+import { applyProductionSpineCommand } from "../../src/productions/spine.js";
 import { recordTakesFromJob } from "../../src/takes/arrival.js";
 import { recordUploadedShotFrameTake } from "../../src/takes/drawn-frame.js";
 import { applySceneEdits, sceneVersionFor } from "../../src/productions/scene-edits.js";
@@ -77,6 +78,8 @@ import {
 import { chapterDraftingBrief } from "../../src/world-chat/chapter-brief.js";
 import { projectHumanDecisions } from "../../src/world-chat/human-decisions.js";
 import { sequenceTurnActions } from "../../src/world-chat/action-sequencing.js";
+import { describeAction } from "../../src/world-chat/action-guide.js";
+import { preparationProblem } from "../../src/world-chat/turn-result.js";
 import { WorldChatRetrieval } from "../../src/world-chat/retrieval.js";
 import { ConversationImages } from "../../src/world-chat/images.js";
 import { QueryLeaseRegistry } from "../../src/world-chat/lease.js";
@@ -2371,6 +2374,8 @@ describe("World Chat authority adapters", () => {
       const card = (await loaded(w.log)).actions[0]!;
       assert.equal((await decide(w.lifecycle, w.log, card)).status, "failed");
       assert.ok(probed, "the command probes live plans after approval");
+      // The blocker in the authority's words, not "The authority failed while executing" (issue 3135).
+      assert.equal((await loaded(w.log)).actions[0]!.statusDetail, "A dispatch for this scene is still running (plan-live) — let it finish or cancel it.");
       const after = w.store.getBundle().productions.find((production) => production.meta.id === PRODUCTION)!
         .scenes.find((scene) => scene.id === context.sceneId)!;
       assert.deepEqual(after, before);
@@ -4488,6 +4493,181 @@ describe("Arke sets a production's song (issue 3081)", () => {
     const card = (await loaded(w.log)).actions.at(-1)!;
     assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
     assert.equal(w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.spine?.trackArtifactId, w.song);
+  });
+
+  // The card that deleted a pinned scene's shots said only "The authority failed while executing
+  // the approved action", and Arke, asked why, guessed a wrong cause and prepared it again (issue 3135).
+  it("says on the failed card which shot is pinned, and tells Arke the same, when a deletion is refused after approval", async () => {
+    const w = await songWorld();
+    const production = () => w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+    const scene = production().scenes.find((candidate) => orderedShots(candidate).length >= 2)!;
+    const shot = orderedShots(scene)[0]!;
+    await applyProductionSpineCommand(w.store, { productionId: PRODUCTION, baseRevision: null, command: { kind: "create", trackArtifactId: w.song } }, { source: "test" });
+    const receipt = currentReceipt(w.store, "scenes", `${PRODUCTION}:${scene.id}`);
+    const oneTurn = turn(w.conversationId, context, { receipts: [receipt], actions: [{ kind: "production-scene-command", productionId: PRODUCTION,
+      sceneId: scene.id, command: { kind: "delete-shot", shotId: shot.id }, checkReceiptIds: [receipt.id] }] });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    // Pinned after the card was prepared, so only the authority, at approval, is placed to refuse.
+    await applyProductionSpineCommand(w.store, { productionId: PRODUCTION, baseRevision: 1,
+      command: { kind: "set-anchor", shotId: shot.id, anchor: { startSec: 0, endSec: 4, clipAudio: { mode: "mute" } } } }, { source: "test" });
+
+    assert.equal((await decide(w.lifecycle, w.log, (await loaded(w.log)).actions[0]!)).status, "failed");
+
+    const failed = (await loaded(w.log)).actions[0]!;
+    assert.equal(failed.statusDetail, `Shot ${shot.number} is anchored to the track — move or clear the anchor first.`);
+    const outcomes = assembleContext({ candidates: [], messages: [], tombstones: [], currentUserMessage: "Why did that fail?", currentUserMessageId: newId("msg"), actions: [failed] }).actionReceipts;
+    assert.equal((JSON.parse(outcomes) as { reason?: string }).reason, failed.statusDetail);
+    assert.ok(orderedShots(production().scenes.find((candidate) => candidate.id === scene.id)!).some((candidate) => candidate.id === shot.id), "the shot is still there");
+  });
+
+  // A scene's four shots were pinned to the song. The card that deleted them was prepared and
+  // approved, and only then refused: nothing that blocks a deletion was looked at before the write
+  // (issue 3136). Removing them then took five cards: an unpin for each shot, and the deletion.
+  describe("deleting pinned shots (issue 3136)", () => {
+    const production = (w: Awaited<ReturnType<typeof songWorld>>) => w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
+    const ANCHORED = (number: number) => `shot ${number} is anchored to the track — move or clear the anchor first`;
+    /** The song, and the first two shots of a scene pinned to it: the spine is left at revision 3. */
+    async function pinnedScene(w: Awaited<ReturnType<typeof songWorld>>, pin = true) {
+      const scene = production(w).scenes.find((candidate) => orderedShots(candidate).length >= 3)!;
+      const shots = orderedShots(scene).slice(0, 2);
+      await applyProductionSpineCommand(w.store, { productionId: PRODUCTION, baseRevision: null, command: { kind: "create", trackArtifactId: w.song } }, { source: "test" });
+      if (pin) await pinShots(w, shots, 1);
+      return { scene, shots };
+    }
+    async function pinShots(w: Awaited<ReturnType<typeof songWorld>>, shots: readonly { id: string }[], baseRevision: number) {
+      for (const [index, shot] of shots.entries()) {
+        await applyProductionSpineCommand(w.store, { productionId: PRODUCTION, baseRevision: baseRevision + index,
+          command: { kind: "set-anchor", shotId: shot.id, anchor: { startSec: index * 4, endSec: index * 4 + 4, clipAudio: { mode: "mute" } } } }, { source: "test" });
+      }
+    }
+    const sceneRead = (w: Awaited<ReturnType<typeof songWorld>>, sceneId: string) => currentReceipt(w.store, "scenes", `${PRODUCTION}:${sceneId}`);
+    const deletion = (sceneId: string, shots: readonly { id: string }[], receipt: WorldChatCheckReceipt, extra: Record<string, unknown> = {}) => ModelWorldChatActionSchema.parse({
+      kind: "production-scene-command", productionId: PRODUCTION, sceneId, commands: shots.map((shot) => ({ kind: "delete-shot", shotId: shot.id })), checkReceiptIds: [receipt.id], ...extra });
+
+    it("refuses to prepare the deletion, naming each pinned shot by the number the person sees", async () => {
+      const w = await songWorld();
+      const { scene, shots } = await pinnedScene(w);
+      const receipt = sceneRead(w, scene.id);
+      let refused: unknown;
+      assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, { receipts: [receipt], actions: [deletion(scene.id, shots, receipt)] })),
+        (error) => { refused = error; return error instanceof SceneCommandRefused; });
+      // Not "shot 1" twice: the dry run renumbers after each deletion, and the person sees the scene as it is.
+      assert.deepEqual((refused as SceneCommandRefused).reasons, shots.map((shot) => ANCHORED(shot.number)));
+      // The words Arke is handed in the turn that offered the card, while it can still unpin first.
+      const told = preparationProblem(refused).safeMessage;
+      for (const shot of shots) assert.ok(told.includes(ANCHORED(shot.number)), told);
+      assert.equal((await loaded(w.log)).actions.length, 0);
+    });
+
+    it("does not bind a deletion whose shot was pinned after the dry run, and says why under the reply", async () => {
+      const w = await songWorld();
+      const { scene, shots } = await pinnedScene(w, false);
+      const receipt = sceneRead(w, scene.id);
+      const oneTurn = turn(w.conversationId, context, { receipts: [receipt], actions: [deletion(scene.id, shots, receipt)] });
+      const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+      await appendTurn(w.log, oneTurn, prepared);
+      await pinShots(w, shots.slice(0, 1), 1);
+
+      await assert.rejects(bindAll(w.lifecycle, prepared), new RegExp(`^ConversationActionPreparationError: Shot ${shots[0]!.number} is anchored to the track — move or clear the anchor first\\.$`));
+
+      const view = await loaded(w.log);
+      assert.equal(view.actions.length, 0, "no card is offered");
+      assert.ok(Object.values(view.notPrepared ?? {}).flat().some((line) => line.endsWith(`Shot ${shots[0]!.number} is anchored to the track — move or clear the anchor first.`)));
+      assert.equal(orderedShots(production(w).scenes.find((candidate) => candidate.id === scene.id)!).length, orderedShots(scene).length);
+    });
+
+    it("prepares an unpin of every shot and the deletion after it in one turn, and both land in order", async () => {
+      const w = await songWorld();
+      const { scene, shots } = await pinnedScene(w);
+      const spine = spineRead(w.store), scenes = sceneRead(w, scene.id);
+      const oneTurn = turn(w.conversationId, context, { receipts: [spine, scenes], actions: [
+        ModelWorldChatActionSchema.parse({ kind: "audio-spine-command", productionId: PRODUCTION, ref: "unpin", baseRevision: 3,
+          command: { kind: "delete-anchors", shotIds: shots.map((shot) => shot.id) }, checkReceiptIds: [spine.id] }),
+        deletion(scene.id, shots, scenes, { after: ["unpin"] }),
+      ] });
+      const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+      await appendTurn(w.log, oneTurn, prepared);
+      await bindAll(w.lifecycle, prepared);
+      const [unpin, remove] = (await loaded(w.log)).actions;
+      assert.equal(unpin!.shown.title, `Unpin 2 shots of ${scene.title}`);
+      assert.equal(production(w).spine?.revision, 3, "preparing writes nothing");
+
+      assert.equal((await decide(w.lifecycle, w.log, remove!)).reason, "dependency-blocked");
+      assert.equal((await decide(w.lifecycle, w.log, unpin!)).status, "completed");
+      assert.equal(production(w).spine?.revision, 4, "both shots are unpinned as one revision");
+      assert.deepEqual(production(w).spine?.anchors, {});
+      assert.equal((await decide(w.lifecycle, w.log, remove!)).status, "completed");
+      const left = orderedShots(production(w).scenes.find((candidate) => candidate.id === scene.id)!).map((shot) => shot.id);
+      assert.deepEqual(left, orderedShots(scene).slice(2).map((shot) => shot.id));
+    });
+
+    // Marking the song's sections from the scenes carries no markers: its authority reads the
+    // scenes. The deletion's dry run did not, so it refused that card, left the song a revision
+    // behind, passed over the unpin after it, and refused the deletion for the pins the unpin
+    // clears (codex on PR 3265).
+    it("prepares the sections from the scenes, the unpin and the deletion after them in one turn, and all three land in order", async () => {
+      const w = await songWorld();
+      const { scene, shots } = await pinnedScene(w);
+      // No fixture scene has a place in the song, and no command gives a scene one after creation.
+      const path = `productions/${PRODUCTION}/scenes/${production(w).sceneFiles[scene.id]}.json`;
+      const raw = await readFile(join(w.store.dir, path), "utf8");
+      await w.store.commit({ kind: "scene-window", source: "test", files: [{ path, action: "replace", baseHash: `sha256:${createHash("sha256").update(raw).digest("hex")}`,
+        content: `${JSON.stringify({ ...JSON.parse(raw), songWindow: { startSec: 0, endSec: 16 } }, null, 2)}\n` }] });
+      const spine = spineRead(w.store), scenes = sceneRead(w, scene.id);
+      const card = (ref: string, after: string[], baseRevision: number, command: unknown) => ModelWorldChatActionSchema.parse({
+        kind: "audio-spine-command", productionId: PRODUCTION, ref, ...(after.length > 0 ? { after } : {}), baseRevision, command, checkReceiptIds: [spine.id] });
+      const oneTurn = turn(w.conversationId, context, { receipts: [spine, scenes], actions: [
+        card("sections", [], 3, { kind: "mark-sections-from-scenes" }),
+        card("unpin", ["sections"], 4, { kind: "delete-anchors", shotIds: shots.map((shot) => shot.id) }),
+        deletion(scene.id, shots, scenes, { after: ["unpin"] }),
+      ] });
+      const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+      await appendTurn(w.log, oneTurn, prepared);
+      await bindAll(w.lifecycle, prepared);
+      const cards = (await loaded(w.log)).actions;
+      assert.equal(cards.length, 3, "the deletion is offered with the two cards it waits on");
+      assert.equal(production(w).spine?.revision, 3, "preparing writes nothing");
+
+      for (const one of cards) assert.equal((await decide(w.lifecycle, w.log, one)).status, "completed", one.shown.title);
+      assert.equal(production(w).spine?.revision, 5);
+      assert.deepEqual(production(w).spine?.markers.map((marker) => marker.kind === "section" ? [marker.label, marker.atSec] : null), [[scene.title, 0]]);
+      assert.deepEqual(production(w).spine?.anchors, {});
+      const left = orderedShots(production(w).scenes.find((candidate) => candidate.id === scene.id)!).map((shot) => shot.id);
+      assert.deepEqual(left, orderedShots(scene).slice(2).map((shot) => shot.id));
+    });
+
+    it("tells Arke to unpin several shots on one card, and to unpin before it deletes", () => {
+      const spine = describeAction("audio-spine-command")!;
+      assert.match(spine.description, /To unpin several shots use one delete-anchors \{shotIds\} card/);
+      assert.ok("fields" in spine && spine.fields!.some((field) => /delete-anchors \{[^}]*shotIds: array<string>\}/.test(field)), "the command is in the fields Arke is shown");
+      assert.match(describeAction("production-scene-command")!.description,
+        /delete-shot is refused while its shot is pinned to the song.*Unpin first: one audio-spine-command card with delete-anchors \{shotIds\}.*the deletion card after it/);
+    });
+
+    it("still refuses a shot with an accepted take, and an unpin before it clears only the pin", async () => {
+      const w = await songWorld();
+      const scene = production(w).scenes.find((candidate) => candidate.id === "sc_04")!;
+      const shot = orderedShots(scene).find((candidate) => candidate.id === "sh_12")!;
+      assert.ok(production(w).selections[shot.id]?.acceptedTakeId, "the fixture's shot has an accepted take");
+      await applyProductionSpineCommand(w.store, { productionId: PRODUCTION, baseRevision: null, command: { kind: "create", trackArtifactId: w.song } }, { source: "test" });
+      await pinShots(w, [shot], 1);
+      const spine = spineRead(w.store), scenes = sceneRead(w, scene.id);
+      const ACCEPTED = `shot ${shot.number} has an accepted take — reject it first, or the footage is left belonging to nothing`;
+      const reasons = (actions: ReturnType<typeof deletion>[]) => {
+        try { prepareWorldChatActions(w.store, w.lifecycle, turn(w.conversationId, context, { receipts: [spine, scenes], actions })); }
+        catch (error) { return error instanceof SceneCommandRefused ? error.reasons : [String(error)]; }
+        return [];
+      };
+
+      assert.deepEqual(reasons([deletion(scene.id, [shot], scenes)]), [ACCEPTED, ANCHORED(shot.number)]);
+      assert.deepEqual(reasons([
+        ModelWorldChatActionSchema.parse({ kind: "audio-spine-command", productionId: PRODUCTION, ref: "unpin", baseRevision: 2,
+          command: { kind: "delete-anchors", shotIds: [shot.id] }, checkReceiptIds: [spine.id] }),
+        deletion(scene.id, [shot], scenes, { after: ["unpin"] }),
+      ]), [ACCEPTED], "the take is not the unpin's to clear");
+    });
   });
 
   // Four set-anchor cards chained with after: the first prepared and the rest were refused, each

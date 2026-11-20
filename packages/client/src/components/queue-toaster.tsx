@@ -21,7 +21,7 @@ import {
   subscribeChapterCreateResults,
 } from "../lib/store.js";
 import { mediaUrl } from "../lib/media.js";
-import { enqueueNote, failedNote, queueNoteId, readyNote, type QueueNote } from "./queue-note.js";
+import { enqueueNote, failedNote, queueNoteId, readyNote, type NamingWorld, type QueueNote } from "./queue-note.js";
 import { followLink, openActivityPanel } from "../lib/activity-panel.js";
 import { pendingFileNotice, staleFileSettlement } from "../lib/file-problems.js";
 import { useDeviceNotifications } from "./device-notifications.js";
@@ -96,14 +96,15 @@ export function noteNow(
   result: QueueEnqueueResult,
   jobs: readonly Job[],
   manifest: ModelManifest | null,
+  world?: NamingWorld | null,
 ): QueueNote | null {
-  const seed = enqueueNote(result, jobs, manifest);
+  const seed = enqueueNote(result, jobs, manifest, world);
   if (!seed || result.acceptedJobIds.length !== 1) return seed;
   const job = jobs.find((candidate) => candidate.id === result.acceptedJobIds[0]);
   if (!job) return seed;
-  if (job.status === "succeeded") return readyNote(job, manifest, seed.id);
+  if (job.status === "succeeded") return readyNote(job, manifest, seed.id, world);
   if (job.status === "failed" || job.status === "needs-reconciliation") {
-    return failedNote(job, manifest, seed.id);
+    return failedNote(job, manifest, seed.id, world);
   }
   return seed;
 }
@@ -142,7 +143,7 @@ function LiveNote({
   onDismiss: () => void;
 }) {
   const { state } = useStore();
-  const derived = noteNow(result, state?.app.jobs ?? [], state?.app.manifest ?? null) ?? seed;
+  const derived = noteNow(result, state?.app.jobs ?? [], state?.app.manifest ?? null, state?.world) ?? seed;
   const key = JSON.stringify([derived.tone, derived.title, derived.meta, derived.reason, derived.live, derived.action?.label]);
   const note = useMemo(() => derived, [key]);
   return <ToastNote note={note} receipt={seed} onAct={() => onAct(note)} onDismiss={onDismiss} />;
@@ -196,8 +197,8 @@ export function QueueToaster() {
   // Subscriptions register once; the callbacks read the latest jobs through a ref rather than
   // re-subscribing on every store frame.
   const { pathname } = useLocation();
-  const store = useRef<{ jobs: readonly Job[]; manifest: ModelManifest | null; onCard: (job: Job) => boolean }>({ jobs: [], manifest: null, onCard: () => false });
-  store.current = { jobs: state?.app.jobs ?? [], manifest: state?.app.manifest ?? null,
+  const store = useRef<{ jobs: readonly Job[]; manifest: ModelManifest | null; world: NamingWorld | null; onCard: (job: Job) => boolean }>({ jobs: [], manifest: null, world: null, onCard: () => false });
+  store.current = { jobs: state?.app.jobs ?? [], manifest: state?.app.manifest ?? null, world: state?.world ?? null,
     onCard: (job) => /\/chat(\/|$)/.test(pathname) && (state?.worldChat?.actions ?? []).some((action) => action.generationWork?.jobKeys.includes(job.idempotencyKey)) };
 
   /** jobId → receipt for work announced by this window, retained until its outcome arrives. */
@@ -297,7 +298,7 @@ export function QueueToaster() {
       // These are internal requests of the read operation. In particular, do not depend on
       // React having rendered the new job before the immediately following queue result.
       if (result.command === "read-audiobook-chapter" || result.command === "read-audiobook-book") return;
-      const seed = enqueueNote(result, store.current.jobs, store.current.manifest);
+      const seed = enqueueNote(result, store.current.jobs, store.current.manifest, store.current.world);
       if (!seed) return;
       for (const jobId of result.acceptedJobIds) {
         noteFor.current.set(jobId, result.acceptedJobIds.length === 1 ? seed.id : `job:${jobId}`);
@@ -326,7 +327,7 @@ export function QueueToaster() {
         noteFor.current.delete(job.id);
       } else if (job.status === "failed" || job.status === "needs-reconciliation") {
         noteFor.current.delete(job.id);
-        const note = failedNote(job, store.current.manifest, existing);
+        const note = failedNote(job, store.current.manifest, existing, store.current.world);
         toast.custom((id) => (
           <ToastNote note={note} onAct={() => {
             if (note.action) followLink(navigate, note.action.to);
@@ -347,7 +348,7 @@ export function QueueToaster() {
         // under the same id replaces that row rather than stacking a second one beside it.
         const existing = noteFor.current.get(job.id);
         noteFor.current.delete(job.id);
-        const note = readyNote(job, store.current.manifest, existing);
+        const note = readyNote(job, store.current.manifest, existing, store.current.world);
         toast.custom(
           (id) => (
             <ToastNote

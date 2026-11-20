@@ -37,7 +37,7 @@
 .fy-production-studio__body { flex: 1; min-height: 0; min-width: 0; overflow: auto; padding: 18px; }
 .fy-production-studio__body .fy-production-preview__rows { max-height: none; }
 .fy-production-studio__body :is(.fy-generation-card__grid img,.fy-generation-card__grid video,.fy-production-preview__rows .fy-swrow__frame) { max-height: none; }
-.fy-production-studio__body .fy-production-preview__rows [data-review-change="inserted"] { border: 2px dashed var(--ring); }
+.fy-production-studio__body :is(.fy-production-preview__rows, .fy-production-preview__shots) [data-review-change="inserted"] { border: 2px dashed var(--ring); }
 .fy-production-studio__back { align-self: flex-start; margin: 8px 16px 0; }
 .fy-studio-card-controls { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px; }
 .fy-production-studio-owner[data-wide] .fy-production-studio-inline { position: fixed; z-index: 80; right: 20px; top: 70px; bottom: 20px; width: min(var(--studio-thread-width,560px),calc(100vw - 40px)); height: auto; background: var(--card); border: 1px solid var(--border); box-shadow: var(--shadow-lg); overflow: auto; }

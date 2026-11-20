@@ -94,6 +94,14 @@ export interface ConversationActionAuthorityAdapter {
   reconcile?(action: ConversationActionCard): Promise<ConversationActionExecutionOutcome | null>;
   /** The exact authority-owned inverse available after successful execution. */
   undo?(action: ConversationActionCard): { readonly kind: string; readonly id: string } | null;
+  /**
+   * The words of something this authority threw on purpose, for the card it refused, or null for
+   * anything else it threw (issue 3135).
+   *
+   * The authority knows which of its errors are refusals written for a person. Here every throw
+   * looks the same, and an adapter without this has every one answered with a generic line.
+   */
+  refusal?(error: unknown): string | null;
 }
 
 export interface PrepareConversationActionInput {
@@ -218,6 +226,24 @@ export interface ConversationActionLifecycleOptions {
   readonly now?: () => string;
   /** The coordinator supplies this so an approval cannot outlive the world it was reviewed in. */
   readonly isWorldOpen?: () => boolean;
+  /**
+   * Told when an authority threw something that was not a refusal (issue 3135).
+   *
+   * The card says a generic line, because an unexpected error's words are written for a log and
+   * can name a file on the disk. That line alone left a failed card with no trace anywhere of
+   * what threw. This is the same failure with its cause, for whoever is diagnosing it.
+   */
+  readonly onUnexpectedFailure?: (failure: ConversationActionFailure) => void;
+}
+
+export interface ConversationActionFailure {
+  readonly conversationId: ConversationId;
+  readonly actionId: ConversationActionId;
+  readonly actionKind: string;
+  /** `resume` is an execution continued after a restart; `host` is the host finishing its part. */
+  readonly phase: "validate" | "execute" | "resume" | "host";
+  /** The error's name and message, bounded. Never the card, its payload or the conversation. */
+  readonly cause: string;
 }
 
 export class ConversationActionLifecycle {
@@ -243,8 +269,8 @@ export class ConversationActionLifecycle {
       let outcome: ConversationActionExecutionOutcome;
       try {
         outcome = await adapter.completeHost(action, input.payload);
-      } catch {
-        outcome = { status: "failed", detail: "The host could not finish the approved action." };
+      } catch (error) {
+        outcome = { status: "failed", detail: this.thrownDetail(action, adapter, "host", error, "The host could not finish the approved action.") };
       }
       return this.appendOutcome(this.store(action.conversationId), action, outcome);
     });
@@ -587,10 +613,10 @@ export class ConversationActionLifecycle {
 
     const validation: ConversationActionValidation = obsoletePermission
       ? { ok: false, reason: "stale", detail: "The permission on this older card changed. Ask Arke to prepare a new card and review it before approving." }
-      : await adapter.validate(action).catch(() => ({
+      : await adapter.validate(action).catch((error: unknown) => ({
         ok: false as const,
         reason: "blocked" as const,
-        detail: "The action authority could not validate this action.",
+        detail: this.thrownDetail(action, adapter, "validate", error, "The action authority could not validate this action."),
       }));
     if (!validation.ok) {
       if (validation.reason === "stale") {
@@ -1050,10 +1076,10 @@ export class ConversationActionLifecycle {
         if (reconciled) return this.appendOutcome(this.store(current.conversationId), current, reconciled);
       }
 
-      const validation = await adapter.validate(current).catch(() => ({
+      const validation = await adapter.validate(current).catch((error: unknown) => ({
         ok: false as const,
         reason: "blocked" as const,
-        detail: "The action authority could not validate this action.",
+        detail: this.thrownDetail(current, adapter, "validate", error, "The action authority could not validate this action."),
       }));
       if (!validation.ok) {
         return this.appendOutcome(this.store(current.conversationId), current, {
@@ -1066,16 +1092,51 @@ export class ConversationActionLifecycle {
       let outcome: ConversationActionExecutionOutcome;
       try {
         outcome = await adapter.execute(current);
-      } catch {
+      } catch (error) {
         outcome = {
           status: "failed",
           detail: reconcileFirst
-            ? "The approved action could not be resumed after restart."
-            : "The authority failed while executing the approved action.",
+            ? this.thrownDetail(current, adapter, "resume", error, "The approved action could not be resumed after restart.")
+            : this.thrownDetail(current, adapter, "execute", error, "The authority failed while executing the approved action."),
         };
       }
       return this.appendOutcome(this.store(current.conversationId), current, outcome);
     });
+  }
+
+  /**
+   * What a card says when its authority threw (issue 3135): the authority's refusal in its own
+   * words, or the line given, with the cause reported for the log.
+   *
+   * A bare catch here once answered every throw with the one line. A scene's four shots were
+   * pinned to the song, the authority refused to delete them and said which shot and why, and
+   * the card said only that the authority had failed. Neither log held a trace of it.
+   */
+  private thrownDetail(
+    action: ConversationActionCard,
+    adapter: ConversationActionAuthorityAdapter,
+    phase: ConversationActionFailure["phase"],
+    error: unknown,
+    unexpected: string,
+  ): string {
+    try {
+      const refusal = adapter.refusal?.(error)?.trim();
+      if (refusal) return refusal;
+    } catch {
+      /* an adapter that cannot read its own error leaves it unexpected */
+    }
+    try {
+      this.options.onUnexpectedFailure?.({
+        conversationId: action.conversationId,
+        actionId: action.actionId,
+        actionKind: action.actionKind,
+        phase,
+        cause: (error instanceof Error ? `${error.name}: ${error.message}` : String(error)).slice(0, 500),
+      });
+    } catch {
+      /* a log that cannot be written must not change what the card records */
+    }
+    return unexpected;
   }
 
   private async recordDecision(
