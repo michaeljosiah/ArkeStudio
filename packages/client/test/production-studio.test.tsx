@@ -165,7 +165,9 @@ it("Show opens all forty pending shots without a decision and preserves the same
   const input = dom.document.querySelector('[aria-label="Unsent words"]') as unknown as HTMLTextAreaElement;
   await act(async () => { input.value = "Still typing"; input.dispatchEvent(new dom.window.Event("input", { bubbles: true })); });
   await click("Show");
-  assert.equal(dom.document.querySelectorAll('[data-pending-preview] [data-testid^="workspace-row-"]').length, 40);
+  // A pending card is a review, so the canvas reads its shots as the card does (issue 3145).
+  assert.equal(dom.document.querySelectorAll('[data-pending-preview] [aria-label="Resulting shot list"] > li').length, 40);
+  assert.equal(dom.document.querySelectorAll('[data-pending-preview] [data-testid^="workspace-row-"]').length, 0);
   assert.equal(made.sent.length, 0, "Show grants no authority");
   assert.equal(dom.document.querySelector('[aria-label="Unsent words"]'), input);
   assert.equal(input.value, "Still typing");
@@ -250,7 +252,7 @@ it("pinning holds a target as new cards arrive and settled previews return to li
   const next = { ...card(), conversationId: made.action.conversationId, actionKind: "world-chat-production-metadata", targets: [{ kind: "production", id: production.meta.id }] };
   await made.update([made.action, next]);
   assert.ok(dom.document.querySelector('[data-pending-preview]'));
-  assert.equal(dom.document.querySelectorAll('[data-pending-preview] [data-testid^="workspace-row-"]').length, 40);
+  assert.equal(dom.document.querySelectorAll('[data-pending-preview] [aria-label="Resulting shot list"] > li').length, 40);
   await made.update([{ ...made.action, status: "completed" }]);
   assert.equal(dom.document.querySelector('[data-pending-preview]'), null);
   assert.equal(dom.document.querySelectorAll('.fy-production-studio__canvas [data-testid^="workspace-row-"]').length, orderedShots(scene).length);

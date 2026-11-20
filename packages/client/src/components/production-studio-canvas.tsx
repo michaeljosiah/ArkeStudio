@@ -46,7 +46,7 @@ export function ProductionStudioCanvas({ world, production, focus, actions, onFo
           <TakeMediaFigure key={t.id} world={world} production={production} id={t.id} label={`Candidate · ${t.kind}`} />)}</div>
     </section>;
   }
-  if (scene && ["scene", "board", "stage"].includes(focus.view)) return <ProductionCardBody action={context} preview={{ kind: "scene", before: scene, after: scene }} onSelectShot={id => onFocus({view:"shot",sceneId:scene.id,shotId:id})} />;
+  if (scene && ["scene", "board", "stage"].includes(focus.view)) return <ProductionCardBody live action={context} preview={{ kind: "scene", before: scene, after: scene }} onSelectShot={id => onFocus({view:"shot",sceneId:scene.id,shotId:id})} />;
   return <section aria-label="Current production outline"><h2>{production.meta.title}</h2>
     <p>{[productionShape(production.meta).medium, production.meta.aspect].filter(Boolean).join(" · ")}</p>
     {production.story && <p>{production.story.logline}</p>}
