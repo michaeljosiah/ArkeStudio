@@ -6,6 +6,11 @@
 /* The Plan on the scene page: where the storyboard was, in the Stage's own work row. */
 :where([data-screen="scene-detail"]) .pl-plan { display: flex; flex-direction: column; flex: 1; min-height: 380px; margin: 12px 0 0; }
 :where([data-screen="scene-detail"]) .pl-plan--empty { align-items: flex-start; flex: none; min-height: 0; }
+/* The Stage's list lines bleed 6 px past the panel on each side, and the panel scrolls: typing in
+   the name box scrolled the whole inspector 6 px sideways, cutting the first letter off every
+   row (seen in the running app). Clipped inside each block instead, the same pixels are drawn and
+   the panel has nothing to scroll to. */
+:where([data-screen="scene-detail"]) .pl-plan .fy-swstage__block { overflow-x: clip; }
 .pl-plan__picture { position: relative; overflow: hidden; }
 .pl-plan__picture > canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
 .pl-plan__picture .fy-swstage__label { position: absolute; transform: translate(-50%, -50%); white-space: nowrap; pointer-events: none; }
