@@ -65,6 +65,7 @@ import {
   WorldChatProposalActionSchema,
   WorldChatProductionChapterActionSchema,
   WorldChatProductionChapterOrderActionSchema,
+  WorldChatProductionVoicePinsActionSchema,
   WorldChatProductionCreateActionSchema,
   WorldChatProductionEpisodeActionSchema,
   WorldChatProductionEpisodeOrderActionSchema,
@@ -150,6 +151,7 @@ import {
   type ConversationId,
   type ArkeReadObservation,
   type ArkeReadRequirement,
+  type ChapterVoicePin,
   type ArkeGenerationBody,
   type ModelWorldChatAction,
   type WorldChatArtDirectionRestoreAction,
@@ -387,6 +389,8 @@ export interface WorldChatActionAdapterDeps {
   readonly chooseMusicTake?: (productionId: string, trackId: string, sessionId: string, takeId: string, baseHash: string) => Promise<void>;
   readonly reconcileChapterReview?: (productionId: string, chapterId: string, requestId: string) => Promise<{ id: string; summary: string } | null>;
   readonly reviewChapter?: (productionId: string, chapterId: string, requestId: string) => Promise<{ id: string; summary: string }>;
+  /** Corrections to a chapter's cast (issue 3233), written one after another as the speaker menu writes each; the first refused stops the rest. */
+  readonly setVoicePins?: (productionId: string, chapterId: string, pins: readonly ChapterVoicePin[]) => Promise<{ written: number; refused?: string }>;
   readonly audioStudioOptions?: { ffmpeg?: import("../takes/export.js").FfmpegRunner };
   readonly audioStudioChanged?: (productionId: string, chapterId: string) => Promise<void>;
   readonly effectDependencies?: EditorEffectDependencies;
@@ -566,6 +570,7 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-scene": ["scenes"],
   "production-episode-order": ["episodes"],
   "chapter-review": ["chapters"],
+  "production-voice-pins": ["chapters", "sheets"],
   "production-chapter-order": ["chapters"],
   "production-scene-order": ["scenes"],
   "production-scene-delete": ["scenes"],
@@ -816,6 +821,11 @@ function productionActionTargets(
     ];
     case "production-episode-order": return [{ requirement: "episodes", target: action.productionId }];
     case "chapter-review": return [{ requirement: "chapters", target: action.productionId }];
+    // The chapter's own read carries its prose and its cast lines, which name a line as a pin does.
+    case "production-voice-pins": return [
+      { requirement: "chapters", target: `${action.productionId}:${canonicalChapterId(store, action.productionId, action.chapterId)}` },
+      { requirement: "sheets", target: worldId },
+    ];
     case "production-chapter-order": return [{ requirement: "chapters", target: action.productionId }];
     case "production-scene-order": return [{ requirement: "scenes", target: action.productionId }];
     case "production-scene-delete":
@@ -1075,6 +1085,7 @@ function preparedWorldPayload(
     case "production-scene": return WorldChatProductionSceneActionSchema.parse({ kind: "world-chat-production-scene", ...common });
     case "production-episode-order": return WorldChatProductionEpisodeOrderActionSchema.parse({ kind: "world-chat-production-episode-order", ...common });
     case "chapter-review": return WorldChatChapterReviewActionSchema.parse({ kind: "world-chat-chapter-review", ...common });
+    case "production-voice-pins": return WorldChatProductionVoicePinsActionSchema.parse({ kind: "world-chat-production-voice-pins", ...common });
     case "production-chapter-order": return WorldChatProductionChapterOrderActionSchema.parse({ kind: "world-chat-production-chapter-order", ...common });
     case "production-scene-order": return WorldChatProductionSceneOrderActionSchema.parse({ kind: "world-chat-production-scene-order", ...common });
     case "production-scene-delete": return WorldChatProductionSceneDeleteActionSchema.parse({ kind: "world-chat-production-scene-delete", ...common });
@@ -1463,7 +1474,8 @@ function worldActionTargets(
         : []),
     ];
     case "production-episode-order": return action.orderedIds.map((id) => ({ kind: "episode", id, label: id }));
-    case "chapter-review": return [{ kind: "chapter", id: action.chapterId, label: action.chapterId }];
+    case "chapter-review":
+    case "production-voice-pins": return [{ kind: "chapter", id: action.chapterId, label: action.chapterId }];
     case "production-chapter-order": {
       const titles = new Map(store.getBundle().productions.find(p => p.meta.id === action.productionId)?.chapters.map(c => [c.id, c.title]));
       return action.orderedIds.map((id) => ({ kind: "chapter", id, label: clipped(titles.get(id) ?? id, 200) ?? id }));
@@ -3307,6 +3319,20 @@ async function sharedResourceProjection(
         body: { family: "command", commands: [{ label: "Review saved chapter and selected pictures" }], expectedResult: "Evidence-backed findings and an AI tells count in Chapter review; audio delivery is not listened to.", undoAvailable: false } };
       break;
     }
+    case "world-chat-production-voice-pins": {
+      // Who speaks a chapter's lines (issue 3233): each correction as the speaker menu writes it.
+      authority = { kind: "extraction", id: intent.actionId };
+      const { productionId, chapterId, pins } = payload.action;
+      const chapter = bundle.productions.find(p => p.meta.id === productionId)?.chapters.find(c => (c.id === chapterId || c.file === chapterId) && !c.retired);
+      if (!chapter) throw new Error("The chapter is no longer available.");
+      if (!deps.setVoicePins) approvalBlockedReason = "Corrections to the cast are unavailable in this session.";
+      shown = { title: `Set who speaks ${pins.length} line${pins.length === 1 ? "" : "s"} in ${chapter.title}`.slice(0, 200),
+        consequence: "Corrects who speaks each line beside the chapter's cast, in order. The prose is unchanged; the first correction refused stops the rest.",
+        affectedTargets: [...intent.targets], ripples: ["Takes made for the old speaker go stale."], permissionReason: "authored-change",
+        body: { family: "command", commands: pins.map((pin) => ({ label: `${pin.narration === true ? "Narration" : pin.speaker}: ${pin.quote}`.slice(0, 200), detail: `Paragraph ${pin.paragraph + 1}` })),
+          expectedResult: "Each line is read by the speaker named here.", undoAvailable: false } };
+      break;
+    }
     case "world-chat-production-music": {
       // The album page's own commands (SPEC-060 R-19), checked against the album as it is now.
       authority = { kind: "production-store", id: intent.actionId };
@@ -4599,6 +4625,16 @@ async function executeSharedResource(
       const result = await deps.reviewChapter(payload.action.productionId, payload.action.chapterId, action.actionId);
       return { status: "completed", receipt: { kind: "chapter-review", id: result.id, summary: result.summary } };
     }
+    case "world-chat-production-voice-pins": {
+      const stale = precondition();
+      if (stale) throw new WorldStateStaleError(stale);
+      if (!deps.setVoicePins) throw new Error("Corrections to the cast are unavailable on this host.");
+      const { productionId, chapterId, pins } = payload.action;
+      const result = await deps.setVoicePins(productionId, chapterId, pins);
+      // Each correction is its own write, so the ones before a refusal stand and are said.
+      if (result.refused !== undefined) return { status: "failed", detail: `${result.written} of ${pins.length} corrections written; the next was refused: ${result.refused}.` };
+      return { status: "completed", receipt: { kind: "voice-pins", id: chapterId, summary: `${pins.length} correction${pins.length === 1 ? "" : "s"} written to the chapter's cast.` } };
+    }
     case "world-chat-production-chapter-order": {
       const production = store.getBundle().productions.find((candidate) => candidate.meta.id === payload.action.productionId);
       if (!production) throw new Error("That production is no longer in this world.");
@@ -5797,6 +5833,7 @@ export function worldChatActionAdapters(
     "world-chat-music-sequence-set",
     "world-chat-production-episode-order",
     "world-chat-chapter-review",
+    "world-chat-production-voice-pins",
     "world-chat-production-chapter-order",
     "world-chat-production-scene-order",
     "world-chat-production-scene-delete",

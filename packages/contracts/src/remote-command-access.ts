@@ -196,7 +196,7 @@ export function isRemoteHostCommand(message: ClientMessage): boolean {
 
 /** Conversation decisions resolve these prepared kinds from the durable card, never from the browser. */
 export const REMOTE_PREPARED_ACTION_ACCESS = {
-  "world-chat-chapter-review": "studio",
+  "world-chat-chapter-review": "studio", "world-chat-production-voice-pins": "studio",
   "world-chat-prop-authoring": "studio", "world-chat-prop-reference": "studio",
   "world-chat-proposal": "studio", "world-chat-bible-edit": "studio",
   "world-chat-scene-edit": "studio", "world-chat-editor-request": "studio", "world-chat-audio-studio-proposal": "studio", "world-chat-effect-proposal": "studio", "world-chat-transition-proposal": "studio", "world-chat-picture-proposal": "studio",

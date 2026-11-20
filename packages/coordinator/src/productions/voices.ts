@@ -480,6 +480,24 @@ async function pinVoice(store: WorldStore, productionId: string, summary: { id: 
   return record;
 }
 
+/**
+ * One chapter's corrections from Arke's card (issue 3233), each written by `setVoicePin` as the
+ * speaker menu writes it, one after another so each is checked against the record the one before
+ * left. The first refused stops the rest; those before it stand, and are counted.
+ */
+export async function setVoicePins(store: WorldStore, productionId: string, chapterId: string, pins: readonly VoicePinInput[]): Promise<{ record: ChapterVoices | null; written: number; refused?: string }> {
+  let record: ChapterVoices | null = null;
+  for (const [written, pin] of pins.entries()) {
+    try {
+      record = await setVoicePin(store, productionId, chapterId, pin);
+    } catch (error) {
+      if (error instanceof VoicePinRefusal) return { record, written, refused: error.message };
+      throw error;
+    }
+  }
+  return { record, written: pins.length };
+}
+
 /** How much of the chapter around the edited paragraphs a partial cast reads for who is speaking. */
 const AROUND_BOUND = 6_000;
 

@@ -384,7 +384,7 @@ import {
 import { attachToSandbox, sandboxAttachments } from "./artifacts/genesis-attachments.js";
 import { makeAdapterExtractor } from "./artifacts/model.js";
 import { deriveContinuity, makeAdapterContinuityDeriver, type ContinuityDeriver } from "./productions/continuity.js";
-import { castLines, makeAdapterVoicesDeriver, readVoices, setVoicePin, VoicePinRefusal, type VoicesDeriver } from "./productions/voices.js";
+import { castLines, makeAdapterVoicesDeriver, readVoices, setVoicePin, setVoicePins, VoicePinRefusal, type VoicesDeriver } from "./productions/voices.js";
 import { discardRecording, keepRecording, RECORDED_TAKE_EXTENSIONS, RecordedTakeRefusal, stageRecording, type StagedRecording } from "./productions/audiobook-recorded.js";
 import { exportScript, speakerLines, matchFiles, type MatchedFile } from "./productions/audiobook-lines.js";
 import {
@@ -20384,6 +20384,20 @@ export class Coordinator {
         const review = await this.chapterReviews().start(target, requestId);
         if (!review) throw new Error("Chapter review did not produce a durable result.");
         return { id: review.id, summary: chapterReviewSummary(review) };
+      },
+      // Arke's card of corrections (issue 3233) goes the speaker menu's way (`set-voice-pin`):
+      // refused while the chapter is cast, its directions conformed and every window told after.
+      setVoicePins: async (productionId, chapterId, pins) => {
+        const chapter = store.getBundle().productions.find((p) => p.meta.id === productionId)?.chapters.find((c) => c.id === chapterId || c.file === chapterId);
+        if (!chapter) return { written: 0, refused: "that chapter is gone" };
+        if (this.castingVoices.has(`${store.worldId}/${productionId}/${chapter.file}`)) return { written: 0, refused: "casting… · wait for the cast" };
+        const result = await setVoicePins(store, productionId, chapter.id, pins);
+        if (result.record !== null) {
+          await this.conformAudiobookDirections(store, store.worldId, [productionId]);
+          this.refreshIfStillOpen(store);
+          this.emit({ at: this.nowIso(), type: "voices.record", worldId: store.worldId, productionId, chapterId: chapter.id, record: result.record });
+        }
+        return { written: result.written, ...(result.refused !== undefined ? { refused: result.refused } : {}) };
       },
       getGenerationRouteRows: () => this.benchGenerationRoutes(),
       effectDependencies: this.effectDependencies,

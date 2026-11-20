@@ -1,4 +1,4 @@
-import { WorldChatChapterReviewActionSchema } from "@arke-studio/contracts";
+import { WorldChatChapterReviewActionSchema, WorldChatProductionVoicePinsActionSchema } from "@arke-studio/contracts";
 import { ProductionAudioStudioProposeModelActionSchema, WorldChatAudioStudioProposalActionSchema, ProductionPicturesProposeModelActionSchema, WorldChatPictureProposalActionSchema } from "@arke-studio/contracts";
 import { ProductionTimelineModelActionSchema, WorldChatProductionTimelineActionSchema, WorldChatProductionTimelineTranscribeActionSchema,
   ProductionTransitionsProposeModelActionSchema, WorldChatTransitionProposalActionSchema, ProductionEffectsProposeModelActionSchema, WorldChatEffectProposalActionSchema } from "@arke-studio/contracts";
@@ -930,6 +930,7 @@ const COMMAND_MODEL_PATHS = {
   "delete-scene": ["production-scene-delete"],
   "scene-command": ["production-scene-command"],
   "chapter-review-start": ["chapter-review"],
+  "set-voice-pin": ["production-voice-pins"],
   "create-chapter": ["production-chapter"],
   "save-chapter": ["production-chapter"],
   "edit-chapter-plan": ["production-chapter"],
@@ -1338,6 +1339,9 @@ const WORLD_CHAT_ACTION_REGISTRY = {
   },
   "world-chat-chapter-review": { kind: "world-chat-chapter-review", schema: WorldChatChapterReviewActionSchema,
     ...action("production", "command", "production-store", "external-network-action", ["chapters"]),
+  },
+  "world-chat-production-voice-pins": { kind: "world-chat-production-voice-pins", schema: WorldChatProductionVoicePinsActionSchema,
+    ...action("production", "command", "extraction", "authored-change", ["chapters", "sheets"]),
   },
   "world-chat-production-chapter-order": {
     kind: "world-chat-production-chapter-order",
