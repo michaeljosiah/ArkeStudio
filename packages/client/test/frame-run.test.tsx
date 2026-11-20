@@ -26,6 +26,8 @@ import { ConversationTranscript } from "../src/components/conversation.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import {
   __applyEventForTest,
+  __connectionStatusForTest,
+  __handleFrameForTest,
   __setBridgeForTest,
   __setStateForTest,
   __stateForTest,
@@ -33,6 +35,7 @@ import {
   subscribeFrameRunQuote,
 } from "../src/lib/store.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
+import { quoteChange } from "../src/screens/scene-workspace/frame-run.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 
 const dom = parseHTML("<!doctype html><html><body></body></html>");
@@ -908,6 +911,145 @@ describe("frame-run quote authorization", () => {
     assert.equal(quotes[1]!.modelId, first.modelId);
     assert.equal(quotes[1]!.scope, first.scope);
     assert.equal(([...dialog.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLButtonElement).disabled, false);
+  });
+
+  describe("a press across a refresh (issue 3159)", () => {
+    const quoteRequests = (sent: ClientMessage[]) =>
+      sent.filter((message): message is Extract<ClientMessage, { kind: "frame-run-quote" }> => message.kind === "frame-run-quote");
+    const starts = (sent: ClientMessage[]) =>
+      sent.filter((message): message is Extract<ClientMessage, { kind: "frame-run-start" }> => message.kind === "frame-run-start");
+    const primary = (item: Mounted) =>
+      [...one(item, ".fy-swgen")!.querySelectorAll("button")].find((button) => button.textContent?.trim() === "Generate frames") as HTMLButtonElement;
+    /** Another scene's frame landed: the studio refreshes, and nothing this run sends moved. */
+    const landedElsewhere = (): ClientState => {
+      const state = stateWith();
+      state.world!.artifacts.push({
+        id: "ar_01J8E0000000000000000000A9",
+        kind: "image",
+        file: "elsewhere.png",
+        hash: "sha256:0123456789abcdef",
+        origin: { by: "system", producedBy: `frame-run:${JOB_3}` },
+        links: ["sh_20"],
+        created: "2026-08-30T12:00:30Z",
+      });
+      return state;
+    };
+    let seq = 100;
+    const refresh = async (state: ClientState) => act(async () => __handleFrameForTest({ kind: "snapshot", seq: ++seq, state }));
+
+    it("starts on the quote it was priced on when the studio refreshes before and during the press", async () => {
+      const sent: ClientMessage[] = [];
+      const item = await mount(stateWith(), sent);
+      await click(named(item, "Generate frames"));
+      const request = quoteRequests(sent)[0]!;
+
+      await refresh(landedElsewhere());
+      assert.equal(one(item, ".fy-swgen__guard"), null, "a refresh is not a refusal");
+      assert.match(one(item, ".fy-swgen")?.textContent ?? "", /2 frames · \$0.08/, "the price still stands");
+      assert.equal(primary(item).disabled, false);
+      assert.equal(quoteRequests(sent).length, 1, "nothing to price again");
+
+      await click(primary(item));
+      assert.deepEqual(starts(sent).map((start) => ({ requestId: start.requestId, quoteId: start.quoteId, quoteSignature: start.quoteSignature })), [
+        { requestId: request.requestId, quoteId: QUOTE_ID, quoteSignature: SIGNATURE },
+      ]);
+      await refresh(landedElsewhere());
+      assert.match(one(item, ".fy-swgen")?.textContent ?? "", /Starting frame run/, "the press is still waiting on its answer");
+      assert.equal(one(item, ".fy-swgen__guard"), null);
+
+      await act(async () => emitStartResult({ requestId: request.requestId, quoteId: QUOTE_ID, disposition: "accepted" }));
+      assert.equal(one(item, ".fy-swgen"), null, "the acceptance closes it");
+    });
+
+    it("keeps a quote asked for before a refresh that answers after it", async () => {
+      const sent: ClientMessage[] = [];
+      const item = await mount(stateWith(), sent, false);
+      await click(named(item, "Generate frames"));
+      const request = quoteRequests(sent)[0]!;
+      await refresh(landedElsewhere());
+      await act(async () => emitQuote(quoteFor(request)));
+      assert.equal(quoteRequests(sent).length, 1);
+      assert.equal(primary(item).disabled, false, "the answer still arms the press");
+    });
+
+    it("names what moved when the run is no longer the one priced, and starts nothing until pressed again", async () => {
+      const sent: ClientMessage[] = [];
+      const item = await mount(stateWith(), sent, false);
+      await click(named(item, "Generate frames"));
+      const first = quoteRequests(sent)[0]!;
+      await act(async () => emitQuote(quoteFor(first)));
+      await click(primary(item));
+      await act(async () => emitStartResult({ requestId: first.requestId, quoteId: QUOTE_ID, disposition: "refused", reason: "the frame-run quote is stale; request a new quote" }));
+
+      const second = quoteRequests(sent).at(-1)!;
+      assert.notEqual(second.requestId, first.requestId, "the refusal asks again");
+      const repriced = quoteFor(second);
+      const quoteId = "01J8E0000000000000000000Q3";
+      await act(async () => emitQuote({
+        ...repriced,
+        quoteId,
+        signature: `sha256:${"b".repeat(64)}`,
+        estimatedMicroUsd: 118_234,
+        steps: repriced.steps.map((step) => ({ ...step, estimatedMicroUsd: 118_234 })),
+      }));
+      assert.equal(one(item, ".fy-swgen__guard")?.textContent, "Price changed");
+      assert.match(one(item, ".fy-swgen")?.textContent ?? "", /2 frames · \$0.12/, "the new price is offered");
+      assert.equal(starts(sent).length, 1, "nothing starts on its own");
+      assert.equal(primary(item).disabled, false);
+
+      await click(primary(item));
+      assert.deepEqual(
+        { quoteId: starts(sent).at(-1)!.quoteId, quotedMicroUsd: starts(sent).at(-1)!.quotedMicroUsd },
+        { quoteId, quotedMicroUsd: 118_234 },
+      );
+      assert.equal(one(item, ".fy-swgen__guard"), null, "a new press clears the label");
+    });
+
+    it("says a reconnect lost the answer only when a start was in flight", async () => {
+      const sent: ClientMessage[] = [];
+      const item = await mount(stateWith(), sent);
+      await click(named(item, "Generate frames"));
+      const reconnect = async () => act(async () => {
+        __connectionStatusForTest("open");
+        __handleFrameForTest({ kind: "snapshot", seq: ++seq, state: stateWith() });
+      });
+
+      await reconnect();
+      assert.equal(one(item, ".fy-swgen__guard"), null, "nothing was pressed");
+      assert.equal(quoteRequests(sent).length, 2, "the quote is asked for again");
+      assert.equal(primary(item).disabled, false);
+
+      await click(primary(item));
+      await reconnect();
+      assert.equal(one(item, ".fy-swgen__guard")?.textContent, "The studio reconnected before the frame run was confirmed.");
+    });
+
+    it("labels each thing priced that moved", () => {
+      const before = quoteFor({
+        kind: "frame-run-quote",
+        requestId: "01J8E0000000000000000000Q1",
+        worldId: FIXTURE_WORLD_ID,
+        productionId: "saltlight",
+        sceneId: "sc_04",
+        mode: "board",
+        modelId: IMAGE_MODEL.id,
+        scope: "missing",
+      });
+      const signature = `sha256:${"c".repeat(64)}`;
+      const step = before.steps[0]!;
+      assert.equal(quoteChange(before, { ...before, requestId: "01J8E0000000000000000000Q4", quoteId: "01J8E0000000000000000000Q5" }), null, "the run that was priced");
+      assert.equal(quoteChange(before, { ...before, signature, steps: [{ ...step, references: [] }] }), "References changed");
+      assert.equal(
+        quoteChange(before, { ...before, signature, includedCount: 1, estimatedMicroUsd: 37_000, steps: [{ ...step, requestShotIds: ["sh_12"], updateShotIds: ["sh_12"], estimatedMicroUsd: 37_000 }] }),
+        "Price and shots changed",
+      );
+      assert.equal(
+        quoteChange(before, { ...before, signature, estimatedMicroUsd: 1, steps: [{ ...step, requestShotIds: ["sh_12"], updateShotIds: ["sh_12"], references: [], estimatedMicroUsd: 1 }] }),
+        "Price, shots and references changed",
+      );
+      assert.equal(quoteChange(before, { ...before, signature, sceneVersion: 3 }), "Scene changed", "the script or a sheet moved under the same price");
+      assert.equal(quoteChange(before, { ...before, signature, modelId: "other-image" }), null, "another choice is a new quote, not a change");
+    });
   });
 
   it("ignores stale quote replies after options change and supports roving radio keys", async () => {

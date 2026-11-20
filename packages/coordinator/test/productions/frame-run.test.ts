@@ -501,6 +501,83 @@ describe("frame-run coordinator service", () => {
     assert.deepEqual(await listFrameRuns(f.store, f.production.meta.id), []);
   });
 
+  describe("a start across a refresh (issue 3159)", () => {
+    /** Compiles from the store as it stands at each call, as the command handler does. */
+    const liveCompile = (f: Awaited<ReturnType<typeof fixture>>, model: ManifestModel = IMAGE) => () => {
+      const world = f.store.getBundle();
+      const production = world.productions.find((candidate) => candidate.meta.id === f.production.meta.id)!;
+      const scene = production.scenes.find((candidate) => candidate.id === f.scene.id)!;
+      return {
+        worldId: WORLD_ID,
+        productionId: production.meta.id,
+        scene,
+        production,
+        world,
+        model,
+        mode: "per-shot" as const,
+        scope: "all" as const,
+        boardCapSec: 30,
+        boardPanelCap: 6,
+        eligible: true,
+        clock: CLOCK,
+      };
+    };
+    const quoteLive = (f: Awaited<ReturnType<typeof fixture>>) => quoteFrameRun(f.store, {
+      requestId: "01J8E0000000000000000000R5",
+      quoteId: "01J8E0000000000000000000R6",
+      worldId: WORLD_ID,
+      productionId: f.production.meta.id,
+      sceneId: f.scene.id,
+      mode: "per-shot",
+      modelId: IMAGE.id,
+      scope: "all",
+      clock: CLOCK,
+      compile: liveCompile(f),
+    });
+
+    it("starts on a quote taken before another scene changed", async () => {
+      const f = await fixture();
+      const quote = await quoteLive(f);
+      const other = () => f.store.getBundle().productions.find((candidate) => candidate.meta.id === f.production.meta.id)!.scenes.find((candidate) => candidate.id === "sc_06")!;
+      const before = other().version;
+      await f.store.gateOp(async () => {
+        const path = join(f.dir, "productions", f.production.meta.id, "scenes", "06-slack-water.json");
+        const raw = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+        raw["version"] = Number(raw["version"]) + 1;
+        (raw["shots"] as Array<Record<string, unknown>>)[0]!["description"] = "another scene moved while this one was priced";
+        await writeFile(path, JSON.stringify(raw, null, 2) + "\n");
+      });
+      assert.equal(other().version, before + 1, "the world the press lands in is not the one that was priced");
+
+      const run = await startFrameRun(f.store, {
+        quotedMicroUsd: quote.estimatedMicroUsd!,
+        quoteSignature: quote.signature!,
+        jobs: () => [],
+        consumeQuote: () => quote,
+        compile: liveCompile(f),
+      });
+      assert.equal(run.sceneVersion, quote.sceneVersion);
+      assert.deepEqual(run.steps.map((step) => step.request.references), quote.steps.map((step) => step.references));
+      assert.deepEqual((await listFrameRuns(f.store, f.production.meta.id)).map((candidate) => candidate.id), [run.id]);
+    });
+
+    it("refuses a quote whose price moved before the press", async () => {
+      const f = await fixture();
+      const quote = await quoteLive(f);
+      await assert.rejects(
+        () => startFrameRun(f.store, {
+          quotedMicroUsd: quote.estimatedMicroUsd!,
+          quoteSignature: quote.signature!,
+          jobs: () => [],
+          consumeQuote: () => quote,
+          compile: liveCompile(f, { ...IMAGE, pricing: { kind: "perImage", microUsdPerImage: 2000, microUsdPerReferenceImage: 10 } }),
+        }),
+        /stale/,
+      );
+      assert.deepEqual(await listFrameRuns(f.store, f.production.meta.id), []);
+    });
+  });
+
   it("serializes active-run admission so concurrent starts create only one record", async () => {
     const f = await fixture();
     const compile = {
