@@ -2799,6 +2799,51 @@ describe("block seams (design turn 198)", () => {
     assert.deepEqual({ paragraph: first.paragraph, occurrence: first.occurrence, quote: first.quote, sheet: first.sheet }, { paragraph: 0, occurrence: 0, quote: P0, sheet: "maren-kest" });
   });
 
+  it("a corrected line of a beat offers Undo correction in its own menu and takes back its own pin; the lines beside it do not (codex on PR 3237)", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { voices: { ...CAST, lines: [], pins: [{ paragraph: 1, occurrence: 0, quote: QUOTE, speaker: "Tam Rusk" }] }, audiobook: joined() });
+    const beat = q(m, '[data-block="p0.0"]')!;
+    const presses = [...beat.querySelectorAll('[data-testid="audiobook-turn-speaker"]')] as HTMLElement[];
+    assert.deepEqual(presses.map((press) => press.getAttribute("aria-label")), ["Tam Rusk", "narrator"], "the beat's second turn is the line set by hand");
+    const undo = () => ([...beat.querySelectorAll(".fy-ab__menu-opt")] as HTMLElement[]).find((option) => option.textContent === "Undo correction");
+    // The tag after the line and the beat's first turn were never corrected.
+    await act(async () => presses[1]!.click());
+    assert.equal(beat.querySelectorAll(".fy-ab__menu").length, 1);
+    assert.equal(undo(), undefined, "an uncorrected turn has nothing to take back, though the turn before it has");
+    await act(async () => (beat.querySelector("button.fy-ab__speaker") as HTMLElement).click());
+    assert.equal(beat.querySelectorAll(".fy-ab__menu").length, 1);
+    assert.equal(undo(), undefined, "nor has the beat's first turn");
+    await act(async () => presses[0]!.click());
+    assert.ok(undo(), "the corrected turn's menu offers it");
+    await act(async () => undo()!.click());
+    const cleared = m.sent.findLast((message) => message.kind === "set-voice-pin") as Extract<ClientMessage, { kind: "set-voice-pin" }>;
+    assert.deepEqual(
+      { paragraph: cleared.paragraph, occurrence: cleared.occurrence, quote: cleared.quote, clear: cleared.clear },
+      { paragraph: 1, occurrence: 0, quote: QUOTE, clear: true },
+      "the pin taken back is that turn's, in its own paragraph, not the beat's first",
+    );
+  });
+
+  it("a later line's menu opens under the name pressed, the block's still and no text in its words; the first line's opens where a block's does (codex on PR 3237)", async () => {
+    const m = await mount(inkbound());
+    await answerOpen(m, { voices: CAST, audiobook: joined() });
+    const beat = q(m, '[data-block="p0.0"]')!;
+    const press = beat.querySelectorAll('[data-testid="audiobook-turn-speaker"]')[1] as HTMLElement;
+    // linkedom lays nothing out, so the two are given places: a long beat whose head is scrolled
+    // off the top, and a name pressed far down it.
+    const at = (top: number, bottom: number) => () => ({ top, bottom }) as DOMRect;
+    Object.assign(beat, { getBoundingClientRect: at(-340, 520) });
+    Object.assign(press, { getBoundingClientRect: at(408, 428) });
+    await act(async () => press.click());
+    const menu = beat.querySelector(".fy-ab__menu") as HTMLElement;
+    assert.equal(menu.style.top, "772px", "4 under the pressed name, measured from the block's top: 428 + 340 + 4");
+    // Compared as a boolean: a failing equal on a linkedom node prints the whole document.
+    assert.equal(menu.parentElement === beat, true, "the menu is the block's child, as its own is");
+    assert.equal(beat.querySelector(".fy-ab__text")!.textContent, `${P0}\n\n${LINE}`, "open, it adds nothing to the block's words, so offsets still count them alone");
+    await act(async () => (beat.querySelector("button.fy-ab__speaker") as HTMLElement).click());
+    assert.equal((beat.querySelector(".fy-ab__menu") as HTMLElement).style.top, "", "the first turn's is left where the stylesheet stands a block's");
+  });
+
   it("joins at once even where both blocks have a picture: the join keeps the second as a mark (design turn 237, R-203)", async () => {
     const m = await mount(inkbound());
     const picture = (text: string) => ({ file: "world-art.png", source: "generated" as const, textHash: audiobookTextHash(text), at: AT });

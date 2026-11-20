@@ -35,6 +35,13 @@ describe("audiobookBlocks, one reader one block", () => {
     assert.equal(blocks[2]!.text, "Tunde laughed until his chest hurt.");
   });
 
+  it("keeps a correction on the turn it was made to: a block of several says nothing of itself (codex on ArkeStudio PR 3237)", () => {
+    const corrected = { ...CAST, pins: [{ paragraph: 0, occurrence: 0, quote: REPLY, speaker: "Ade", sheet: "ade" }] };
+    const merged = audiobookBlocks(BODY, corrected, "Chapter 1", { merge: true }).blocks[1]!;
+    assert.deepEqual(merged.rows?.map((row) => [row.speaker ?? "narration", row.pinned === true]), [["Ade", false], ["narration", false], ["Ade", true]], "so the menu on that turn can take it back, and no other");
+    assert.equal(merged.pinned, undefined);
+  });
+
   it("keeps a scene break out of every block", () => {
     const { blocks } = audiobookBlocks(BODY, CAST, "Chapter 1", { merge: true });
     assert.equal(blocks.some((block) => block.text === "* * *"), false);

@@ -1547,15 +1547,20 @@ function rawSelection(host: HTMLElement): { from: number; to: number } | null {
 }
 
 /** The speaker menu (design turn 155b, SPEC-012 R-63): a search, this chapter's speakers, the rest of the cast. */
-function SpeakerMenu({ row, turn, choices, onPick, onClose }: {
+function SpeakerMenu({ row, turn, top, choices, onPick, onClose }: {
   row: BlockRow;
   /** One turn of a block of several, whose speaker is the current one (issue 3232). */
   turn?: AudiobookTurn;
+  /** Where a later turn's menu stands in its block: under the name pressed. A block's own is the stylesheet's to place. */
+  top?: number;
   choices: SpeakerChoices;
   onPick: (pick: SpeakerPick) => void;
   onClose: () => void;
 }) {
   const current = turn === undefined ? row.speakerKey : audiobookSpeakerKey(turn);
+  // A correction is the turn's own (codex on PR 3237): a block of several carries none itself, and
+  // one turn's is not another's to take back.
+  const corrected = (turn ?? row.block).pinned === true;
   const [query, setQuery] = useState("");
   const match = (label: string) => label.toLowerCase().includes(query.trim().toLowerCase());
   const typed = query.trim();
@@ -1569,7 +1574,7 @@ function SpeakerMenu({ row, turn, choices, onPick, onClose }: {
     </button>
   );
   return (
-    <div className="fy-ab__menu" role="menu" aria-label="Speaker" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === "Escape" && onClose()}>
+    <div className="fy-ab__menu" role="menu" aria-label="Speaker" {...(top !== undefined ? { style: { top } } : {})} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.key === "Escape" && onClose()}>
       <input
         className="fy-ab__menu-search"
         placeholder="Speaker"
@@ -1591,7 +1596,7 @@ function SpeakerMenu({ row, turn, choices, onPick, onClose }: {
         option(`s:${who.sheet}`, who.label, who.colour === null ? "plain" : String(who.colour), false, { speaker: who.label, sheet: who.sheet }, who.voice ?? "no voice"),
       )}
       {typed !== "" && !known && option("typed", `“${typed}”`, "none", false, { speaker: typed }, "no sheet")}
-      {row.block.pinned === true && (
+      {corrected && (
         <>
           <div className="fy-ab__menu-sep" />
           <button type="button" role="menuitem" className="fy-ab__menu-opt" onClick={() => onPick({ clear: true })}>
@@ -1663,7 +1668,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
 }) {
   const coarse = useMediaQuery(COARSE_QUERY);
   const pressedSelection = useRef<BlockSelection | null>(null);
-  const [menu, setMenu] = useState<{ key: string; selection?: { from: number; to: number }; turn?: number } | null>(null);
+  const [menu, setMenu] = useState<{ key: string; selection?: { from: number; to: number }; turn?: number; top?: number } | null>(null);
   // The picture being dragged along the words (design turn 237, R-205), by its key.
   const [dragging, setDragging] = useState<string | null>(null);
   // A mark's chip stands level with its words at the block's end (237a); one whose sentence starts
@@ -1938,7 +1943,13 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
               data-testid="audiobook-turn-speaker"
               onClick={(event) => {
                 event.stopPropagation();
-                setMenu(open ? null : { key: row.block.key, turn });
+                // The menu stays the block's, outside its words: drawn in the rule it would be text
+                // in them, which a selection's offsets count (SPEC-047 R-111). So it is told where
+                // the name pressed stands, or a long beat's opens at its head, off the screen
+                // (codex on PR 3237): 4 under the press, which is 32 under the turn's rule, as a
+                // block's own is 32 under its top.
+                const top = event.currentTarget.getBoundingClientRect().bottom - event.currentTarget.closest(".fy-ab__block")!.getBoundingClientRect().top + 4;
+                setMenu(open ? null : { key: row.block.key, turn, top });
               }}
             />
           );
@@ -2058,6 +2069,7 @@ export function AudiobookBlocks({ rows, sounding, selected, onSelectionChange, o
               <SpeakerMenu
                 row={row}
                 {...(menu.turn !== undefined && row.block.rows?.[menu.turn] !== undefined ? { turn: row.block.rows[menu.turn] } : {})}
+                {...(menu.top !== undefined ? { top: menu.top } : {})}
                 choices={choices}
                 onClose={() => setMenu(null)}
                 onPick={(pick) => {
