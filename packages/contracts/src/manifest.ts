@@ -1251,6 +1251,35 @@ export function pricedDuration(model: ManifestModel, requestedSec: number, opts?
 }
 
 /**
+ * The lengths a production subject's clip can be asked for: the route's own, from the shortest
+ * that covers the authored length. Shorter ones are left out rather than offered, because a clip
+ * that ends before its shot files a gap the cut has no picture for.
+ */
+export function subjectClipOptions(model: ManifestModel, subjectSec: number, opts?: DurationRouteOptions): number[] {
+  return durationOptions(model, opts).filter((seconds) => seconds >= subjectSec);
+}
+
+/**
+ * What a shot's or a board's clip asks for (issue 3197). The authored length used to be the only
+ * input, rounded up here unseen: a 3s shot went to a 4s-minimum route as 4s under a chip that said
+ * 3s. `chosenSec` is the length picked on the Bench, if one was. It is held between the authored
+ * length and the route's longest and then rounded up to a length the route offers, which is what
+ * the Bench shows and what dispatch sends — bounded rather than refused, so a length picked before
+ * a reference shortened the route reads as the length that will now go, never as a refusal after
+ * the press. The authored length alone beyond the route is still `over-cap`.
+ */
+export function subjectClipDuration(
+  model: ManifestModel,
+  subjectSec: number,
+  chosenSec: number | undefined,
+  opts?: DurationRouteOptions,
+): DurationChoice {
+  const longest = durationOptions(model, opts).at(-1);
+  const wanted = Math.max(subjectSec, chosenSec ?? subjectSec);
+  return dispatchDuration(model, longest === undefined ? wanted : Math.max(subjectSec, Math.min(wanted, longest)), opts);
+}
+
+/**
  * What a model costs, in one line, in the unit the provider actually bills in. The unit is the
  * point: "$0.30" beside a video model and "$0.30" beside an image model would look like the same
  * money, and one of them is per second. A model listed with no readable price cannot be enabled

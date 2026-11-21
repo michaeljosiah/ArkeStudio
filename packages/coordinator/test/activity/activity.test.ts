@@ -9,6 +9,8 @@ import {
   computeRunning,
   jobActions,
   jobOrigin,
+  pausedLaneFor,
+  pauseReasonWords,
   REFERENCE_FINALIZATION_TARGETS,
   spendSummary,
   type ClientState,
@@ -487,6 +489,17 @@ describe("running work (R-2, D6, D7)", () => {
     assert.match(paused?.detail ?? "", /waiting · Fish Audio paused$/);
     const [moving] = computeRunning(baseState({ jobs: [held], queues: [{ provider: "fishaudio", paused: false, held: 0 }] }));
     assert.match(moving?.detail ?? "", /queued$/);
+  });
+
+  it("reads fal's exhausted balance as out of credit, and holds only queued work behind it (issue 3195)", () => {
+    // fal's own words on a 403 when the account is empty, as the dispatcher pauses the lane with them.
+    const lane = { provider: "fal", paused: true, pauseKind: "fault" as const, reason: "fal: User is locked. Reason: Exhausted balance. Top up your balance at fal.ai/dashboard/billing. (HTTP 403)", held: 1 };
+    assert.equal(pauseReasonWords(lane), "Out of credit");
+    const [paused] = computeNeedsYou(baseState({ queues: [lane] }));
+    assert.equal(paused?.detail, "Out of credit · 1 job held");
+    assert.equal(pausedLaneFor(job({ status: "queued" }), [lane]), lane);
+    assert.equal(pausedLaneFor(job({ status: "running" }), [lane]), undefined, "a request already sent still has an answer coming");
+    assert.equal(pausedLaneFor(job({ status: "queued", provider: "openai" }), [lane]), undefined, "another provider's lane holds nothing here");
   });
 
   it("shows generated work while its result is being prepared", () => {

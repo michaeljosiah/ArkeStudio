@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import {
+  estimateMicroUsd,
   newId,
   orderedShots,
   type AppSettings,
@@ -1196,6 +1197,92 @@ describe("the Stage's handoff to the bench", () => {
     assert.deepEqual(child.segment, { passTakeId: parent.id, inSec: 0, outSec: 4 });
     assert.equal(production.selections["sh_12"]?.acceptedTakeId, child.id, "the shot selects its own segment, never the parent");
     assert.deepEqual(filed.affectedShotIds, ["sh_12"]);
+  });
+
+  it("sends a shot's clip at the length its Bench shows, from the shortest that covers it (issue 3197)", async () => {
+    const { dir, store } = await openWorld();
+    // A route whose shortest clip is longer than the 4s shot, as Seedance 2.0's 4s is longer
+    // than a 3s shot: the shot alone used to go as 5s under a chip that said 4s.
+    const fiveUp: ManifestModel = {
+      ...VIDEO_MODEL,
+      limits: { ...VIDEO_MODEL.limits, maxDurationSec: 10, durations: { "5": "5", "6": "6", "8": "8", "10": "10" } },
+    };
+    const manifest = { ...MANIFEST, models: [IMAGE_MODEL, fiveUp] };
+    const prepared = await prepareBenchSubject(store.getBundle(), {
+      productionId: "saltlight",
+      sceneId: "sc_04",
+      subject: { kind: "shot", shotId: "sh_12" },
+      mode: "video",
+      settings: null,
+      manifest,
+      sources: sourceReader,
+    });
+    assert.ok(prepared.ok);
+    if (!prepared.ok) return;
+    const session = {
+      schemaVersion: 1,
+      id: newId("sess"),
+      ...prepared.prefill,
+      tokenRegistry: prepared.prefill.references,
+      subjectTokens: prepared.prefill.references.map((reference) => reference.token),
+      nextToken: { image: 2, video: 1, audio: 1 },
+      nextTake: 1,
+      takes: [],
+      createdAt: CLOCK(),
+      updatedAt: CLOCK(),
+    } as BenchSession;
+    const params = session.composer.params;
+    assert.equal(params.kind, "video");
+    if (params.kind !== "video") return;
+    assert.equal(params.durationSec, 4);
+    const sent = (clipSec?: number) => {
+      const plan = planBenchDispatch(
+        { ...session, composer: { ...session.composer, params: { ...params, ...(clipSec !== undefined ? { clipSec } : {}) } } },
+        store.getBundle(),
+        manifest,
+        { worldId: store.worldId, requestId: `clip-${clipSec ?? "shot"}`, at: CLOCK() },
+      );
+      if (!plan.ok) throw new Error(plan.reason);
+      const filing = plan.reserved[0]!.request.filing;
+      assert.equal(filing?.kind, "board");
+      if (filing?.kind !== "board") throw new Error("a shot's clip files as a board of one");
+      return {
+        duration: plan.inputs[0]!.params.duration,
+        endSec: filing.members[0]!.endSec,
+        priced: plan.inputs[0]!.estimatedMicroUsd,
+        snapshot: plan.reserved[0]!.request,
+      };
+    };
+    const priced = (seconds: number) => estimateMicroUsd(fiveUp, { durationSec: seconds });
+    const shortest = sent();
+    assert.deepEqual([shortest.duration, shortest.endSec, shortest.priced], ["5", 5, priced(5)]);
+    const picked = sent(8);
+    assert.deepEqual([picked.duration, picked.endSec, picked.priced], ["8", 8, priced(8)]);
+    const below = sent(2);
+    assert.deepEqual([below.duration, below.endSec], ["5", 5], "never shorter than the shot");
+    const beyond = sent(30);
+    assert.deepEqual([beyond.duration, beyond.endSec], ["10", 10], "held to the route's longest");
+
+    // The authored length stays what filing checks the take's timing against, so a clip longer
+    // than its shot files onto it, its paid tail on the shot's own segment.
+    const takeId = newId("tk") as BenchTake["id"];
+    const { session: filingSession, take } = sessionWithTake({
+      subject: session.subject,
+      takeId,
+      request: picked.snapshot,
+      media: "take.mp4",
+      cost: { estimatedMicroUsd: picked.priced, actualMicroUsd: null },
+    });
+    await mkdir(join(dir, sessionMediaDir(filingSession.id, take.id)), { recursive: true });
+    await writeFile(join(dir, sessionMediaDir(filingSession.id, take.id), take.media!.file), "clip bytes");
+    await writeFile(join(dir, sessionMediaDir(filingSession.id, take.id), "frame.png"), "poster bytes");
+    await fileBenchSubjectTake(store, filingSession, take);
+    const production = store.getBundle().productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const filing = picked.snapshot.filing;
+    assert.equal(filing?.kind, "board");
+    if (filing?.kind !== "board") return;
+    const child = production.takes.find((candidate) => candidate.id === filing.members[0]!.takeId)!;
+    assert.deepEqual(child.segment, { passTakeId: filing.productionTakeId, inSec: 0, outSec: 8 });
   });
 });
 

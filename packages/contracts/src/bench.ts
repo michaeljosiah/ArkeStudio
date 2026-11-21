@@ -93,6 +93,13 @@ export const BenchVideoParamsSchema = z
     resolution: z.string().min(1).optional(),
     /** Authored board totals may be fractional; the provider route decides its own wire step. */
     durationSec: z.number().positive().optional(),
+    /**
+     * Under a shot or a board, the clip length picked on the Bench (issue 3197). `durationSec`
+     * stays the authored length the clip covers, which is what filing checks a take's timing
+     * against; this is only ever longer. Absent is the shortest length the route offers that
+     * covers it. `subjectClipDuration` reads the two together, on the screen and at dispatch.
+     */
+    clipSec: z.number().positive().optional(),
     /** Present only where the model declares the control; absent is "the control does not exist". */
     sound: z.boolean().optional(),
     audioReferencesDisabled: z.boolean().optional(),
