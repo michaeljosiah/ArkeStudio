@@ -68,7 +68,7 @@ export function cutLookProblem(
       ].filter(Boolean).join("; ");
       const missing = [!read && `call read_skill for ${CUT_LOOK_SKILL}`, !looked && `look with sample_video at ${where}`]
         .filter(Boolean).join(" and ");
-      return `Shot ${shots[at]!.number} has a take or stands beside one. Before changing its picture, ${missing}, then prepare the change from what you saw. Do not rely on an earlier turn's look: takes and frames change.`;
+      return `Shot ${shots[at]!.number} has a take or stands beside one. Before changing its picture, ${missing}, then prepare the change from what you saw. Do not rely on an earlier turn's look: takes and frames change. The look is checked from this turn's receipts: in the card's checkReceiptIds cite only its scene reads.`;
     }
   }
   return null;

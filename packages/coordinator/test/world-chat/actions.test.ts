@@ -3369,6 +3369,15 @@ it("stages a chapter with only the brief's eligible receipts and keeps section r
   assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
     ...oneTurn, actions: [{ ...action, checkReceiptIds: [...action.checkReceiptIds, draws[0]!.id] }],
   }), new RegExp(`final receipt from a complete target read: ${draws[0]!.id} is a search or draw.*This change needs list_chapters, get_chapter`), "the refusal names the receipt the retry must drop, and the reads that would do");
+  // A look is evidence of looking, not a read (design turn 286): cited beside the reads, it is
+  // left out rather than refusing the change; cited alone, the reads it lacks are still required.
+  const look = await read("read_skill", { id: "continuity-across-cuts" });
+  assert.doesNotThrow(() => prepareWorldChatActions(w.store, w.lifecycle, {
+    ...oneTurn, actions: [{ ...action, checkReceiptIds: [...action.checkReceiptIds, look.receipt.id] }],
+  }));
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
+    ...oneTurn, actions: [{ ...action, checkReceiptIds: [look.receipt.id] }],
+  }));
   assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
     ...oneTurn, actions: [{ kind: "production-overview", productionId: context.productionId, changes: { logline: "Changed" }, checkReceiptIds: eligible }],
   }), /requires the complete current story read/);
