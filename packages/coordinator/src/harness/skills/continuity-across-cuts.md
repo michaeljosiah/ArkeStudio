@@ -47,6 +47,8 @@ Check each of these in the last frames of the shot going out and the first frame
 
 Words that match prove nothing about the pictures. When shots have takes, look at them:
 
+- **Look again each time.** What you saw or said in an earlier turn is not evidence now: takes, frames and the
+  cut change, and an earlier reading may have been wrong. Never repeat an earlier finding without looking.
 - **Before you write the next shot, look at the end of the take before it.** Write the new shot's opening
   from what you see there, not from what the last shot's words say it ends on.
 - **Answer from the pictures what they can show**: which hand holds the glass, which wrist the bangles are

@@ -55,6 +55,8 @@ describe("the film direction craft", () => {
     assert.match(FILM_DIRECTION_CRAFT, /first call read_skill for continuity-across-cuts/);
     assert.match(FILM_DIRECTION_CRAFT, /sample_video at the frames either side of each cut; a contact sheet's middle frames show no cut/);
     assert.match(FILM_DIRECTION_CRAFT, /never ask what a take already shows/);
+    // 0.5.128: in a long thread it repeated a wrong earlier finding instead of looking again.
+    assert.match(FILM_DIRECTION_CRAFT, /look again each time, never from an earlier turn/);
     assert.match(FILM_DIRECTION_CRAFT, /never explain it away as movement/);
     assert.match(FILM_DIRECTION_CRAFT, /Fix it or change the camera, on a card/);
     assert.ok(craftSkill("continuity-across-cuts"), "the skill it names is shipped");

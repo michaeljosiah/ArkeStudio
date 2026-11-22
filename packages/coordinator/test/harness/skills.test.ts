@@ -82,4 +82,5 @@ it("the continuity skill looks before it writes, and does not take an unmeasured
   assert.match(body, /Never ask the person what a take already shows/);
   assert.match(body, /A contact sheet shows no cut/);
   assert.match(body, /A measurement that finds no motion is not a still/);
+  assert.match(body, /Never repeat an earlier finding without looking/);
 });
