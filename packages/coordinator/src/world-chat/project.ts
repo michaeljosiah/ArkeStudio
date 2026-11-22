@@ -138,6 +138,9 @@ function wouldCarry(candidate: WorldChangeCandidate, options: ProjectOptions = {
  * Borrowed in shape from opencode's `computeStatusFromPart`, which maps the last streamed part to
  * a short present-tense phrase. The vocabulary is this product's, because the tools are.
  */
+/** Receipts kept for the record but never shown as checks: they read no world state. */
+export const HIDDEN_RECEIPT_TOOLS: ReadonlySet<string> = new Set(["describe-action", "read-skill"]);
+
 const WORKING_LABELS: Record<string, string> = {
   // The world-query tools, which arrive namespaced — see workingLabel.
   search_canon: "Searching canon",
@@ -481,9 +484,11 @@ export function projectWorkspace(
       role: m.role,
       text: m.text,
       attachmentIds: m.attachmentIds,
-      // Not a look at the world, so not a check the person is shown beside the reply.
+      // Not a look at the world, so not a check the person is shown beside the reply. Reading a
+      // craft skill is reading Arke's own notes, not inspecting a frame: shown with a tick, it
+      // would claim a check nobody made. Its versioned receipt is still kept.
       receipts: [
-        ...(receiptsByMessage.get(m.id) ?? []).filter((r) => r.tool !== "describe-action").map(wordReceipt),
+        ...(receiptsByMessage.get(m.id) ?? []).filter((r) => !HIDDEN_RECEIPT_TOOLS.has(r.tool)).map(wordReceipt),
         ...(loaded.sourceReads?.[m.id] ? [wordSourceRead(loaded.sourceReads[m.id]!, options.sourceStory)] : []),
       ],
       refusals: [...wordRefusals(loaded.refusals[m.id] ?? []), ...(loaded.notPrepared?.[m.id] ?? [])],

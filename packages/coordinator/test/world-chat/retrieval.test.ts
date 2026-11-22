@@ -23,6 +23,7 @@ import { WorldIndex } from "../../src/index-db/world-index.js";
 import { WorldQueryServer } from "../../src/harness/world-query.js";
 import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { LeaseDeniedError, QueryLeaseRegistry } from "../../src/world-chat/lease.js";
+import { HIDDEN_RECEIPT_TOOLS } from "../../src/world-chat/project.js";
 import { RetrievalError, WorldChatRetrieval, type RetrievalDeps } from "../../src/world-chat/retrieval.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
 import { assembleContext } from "../../src/world-chat/context.js";
@@ -432,6 +433,7 @@ describe("leased retrieval", () => {
     const read = result as { id: string; version: number; body: string };
     assert.equal(read.id, "continuity-across-cuts");
     assert.match(read.body, /Two still frames cannot show movement/);
+    assert.ok(HIDDEN_RECEIPT_TOOLS.has(receipt.tool), "kept, but never shown beside the reply as a check");
 
     const unknown = await h.retrieval.call(h.mint().token, "read_skill", { id: "how-to-win-an-oscar" });
     assert.equal(unknown.receipt.status, "empty");
