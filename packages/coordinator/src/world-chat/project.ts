@@ -151,6 +151,7 @@ const WORKING_LABELS: Record<string, string> = {
   fetch_url: "Reading a page online",
   get_production: "Reading the production",
   describe_action: "Checking what it can prepare",
+  read_skill: "Reading its craft notes",
   /*
    * Going online, which is the one thing here a person opted into and the one thing the screen
    * has to be honest about (2026-08-23).

@@ -409,6 +409,11 @@ export const CheckToolSchema = z.enum([
    * It reads no world state, so its receipt is never shown to the person as a check.
    */
   "describe-action",
+  /**
+   * A craft skill's body, by id (design turn 286). Like describe-action it reads no world state;
+   * its summary names the skill and version, so a judgement can be traced to the guidance behind it.
+   */
+  "read-skill",
 ]);
 
 /** One coordinator-owned observation. The model never writes these; it only cites them. */

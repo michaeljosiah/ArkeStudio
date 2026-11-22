@@ -422,6 +422,23 @@ describe("leased retrieval", () => {
     h.index?.close();
   });
 
+  it("reads a craft skill through the lease, naming its version on the receipt (design turn 286)", async () => {
+    const h = await harness();
+    const { result, receipt } = await h.retrieval.call(h.mint().token, "read_skill", { id: "continuity-across-cuts" });
+    assert.equal(receipt.tool, "read-skill");
+    assert.equal(receipt.status, "complete");
+    assert.equal(receipt.consulted.length, 0, "it read nothing in the world");
+    assert.match(receipt.querySummary ?? "", /continuity-across-cuts@v1/, "a judgement can be traced to the guidance behind it");
+    const read = result as { id: string; version: number; body: string };
+    assert.equal(read.id, "continuity-across-cuts");
+    assert.match(read.body, /Two still frames cannot show movement/);
+
+    const unknown = await h.retrieval.call(h.mint().token, "read_skill", { id: "how-to-win-an-oscar" });
+    assert.equal(unknown.receipt.status, "empty");
+    assert.deepEqual((unknown.result as { skills: string[] }).skills, ["continuity-across-cuts"], "and says which skills there are");
+    h.index?.close();
+  });
+
   it("a production that is not there is an honest empty, not a failure", async () => {
     const h = await harness();
     const { result, receipt } = await h.retrieval.call(h.mint().token, "get_production", { id: "nope" });
@@ -859,6 +876,8 @@ describe("the served surface", () => {
       (t) => t.name,
     );
     assert.ok(names.includes("describe_action"), "a collapsed action guide can be expanded (SPEC-050 R-5)");
+    assert.ok(names.includes("read_skill"), "a craft skill the brief names can be read (design turn 286)");
+    assert.ok(!ambientNames.includes("read_skill"), "the ambient surface is unchanged");
     assert.ok(!ambientNames.includes("get_attachment_text"), "attachment reads stay leased-only");
     assert.ok(!ambientNames.includes("describe_action"), "drafting agents prepare no world-chat actions");
     assert.ok(ambientNames.includes("get_production"), "drafting agents can read the production too");
