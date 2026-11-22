@@ -157,6 +157,33 @@ what changed since it last looked, and a benchmark of a faster local engine. Eac
 waits for its own measurement. Its advice against a whole-project history replay and a plugin system is
 taken.
 
+## Tested on 0.5.126, the day the craft shipped
+
+PR 3279's craft was installed as 0.5.126 and Arke was asked two questions in the film's production
+thread, naming no cut either time.
+
+1. **Review shots 1 to 10 as written, one cut at a time.** Arke kept the rules in the words. It put
+   three fixes on one card: Ade's head still bowed at the edge of shot 2; Tunde's hand coming up into
+   the finger "so the shot opens with the movement already happening"; the card machine from the aisle
+   side in both shots. It caught that the music runs through shot 10's lull, and that shot 3 was cut
+   too short for Ade's waiting beat. From the words alone it saw that the wide shot puts a wall behind
+   Ade where his close-up has the open room. It said every shot opens where the one before it stops:
+   true of the words, not of the pictures. It had not looked at the clips.
+2. **Now look at the clips at each cut.** It read two stills per cut from the export with
+   `sample_video` and said so. It found five cuts that do not match: a bowed head shown upright, a man
+   leaning in who then sits back, Ade's glass appearing from nowhere and changing size, the glass gone
+   in the next shot, and the room changing at every cut between the wide shot and Ade's close-up. Held
+   against the frames, eight of its nine calls are right. The ninth is shot 4 to 5, the owner's own
+   example: it called it "partly holds" because "the hand change reads as movement". Two stills cannot
+   show movement.
+
+What this shows for the turn:
+
+- The craft works on the words. Arke looked at the pictures only when asked. That is Fix 1.
+- Given the pictures, it finds most of what a person finds, and says what its evidence is.
+- It explained away a pose change with motion it could not see. Rule 7 now says a pose that differs
+  across a matched cut is reported as a mismatch, never explained away as movement.
+
 ## Order
 
 1. Fixes 1 and 2 together, with the cut pair check. Together these are the fix for shot 4 to 5.
