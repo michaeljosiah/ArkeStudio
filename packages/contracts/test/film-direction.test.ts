@@ -48,8 +48,13 @@ describe("the film direction craft", () => {
     // Tested on the film: right in the words, it said every shot opened where the last stopped,
     // and it had not looked; when it looked, it called a changed pose movement.
     assert.match(FILM_DIRECTION_CRAFT, /Words that match prove nothing about the pictures/);
-    assert.match(FILM_DIRECTION_CRAFT, /When a scene's shots have takes, look at its cuts before you plan, review or change them/);
-    assert.match(FILM_DIRECTION_CRAFT, /read the continuity-across-cuts skill/);
+    // Tested again on 0.5.127: planning shot 11 beside shot 10's take, it read neither the skill
+    // nor the take, and asked which wrist the bangles were on; reviewing ten shots, it looked only
+    // at the middle of each. So: a shot BESIDE one with a take, the read by name, the cut's frames.
+    assert.match(FILM_DIRECTION_CRAFT, /Before you plan, review or change a shot beside one that has a take, or review a cut/);
+    assert.match(FILM_DIRECTION_CRAFT, /first call read_skill for continuity-across-cuts/);
+    assert.match(FILM_DIRECTION_CRAFT, /sample_video at the frames either side of each cut; a contact sheet's middle frames show no cut/);
+    assert.match(FILM_DIRECTION_CRAFT, /never ask what a take already shows/);
     assert.match(FILM_DIRECTION_CRAFT, /never explain it away as movement/);
     assert.match(FILM_DIRECTION_CRAFT, /Fix it or change the camera, on a card/);
     assert.ok(craftSkill("continuity-across-cuts"), "the skill it names is shipped");

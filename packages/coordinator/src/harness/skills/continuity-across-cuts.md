@@ -1,7 +1,7 @@
 # Continuity across cuts
 
 How a director and a script supervisor keep a scene's shots playing as one scene. Read this before you
-plan, review or change shots that already have takes, and before a cut is approved.
+plan, review or change a shot beside one that has a take, and before you review a cut.
 
 ## 1 · A cut is matched or deliberate
 
@@ -47,6 +47,13 @@ Check each of these in the last frames of the shot going out and the first frame
 
 Words that match prove nothing about the pictures. When shots have takes, look at them:
 
+- **Before you write the next shot, look at the end of the take before it.** Write the new shot's opening
+  from what you see there, not from what the last shot's words say it ends on.
+- **Answer from the pictures what they can show**: which hand holds the glass, which wrist the bangles are
+  on, what is on the table. Never ask the person what a take already shows.
+- **A contact sheet shows no cut.** `cut_contact_sheet` takes one frame from the middle of each shot. Use it
+  to find where the shots are, then look at the cuts themselves.
+
 - **When the scene has been exported**, call `list_exports` for the latest export of the production, then
   `cut_contact_sheet` on it for each shot's start and end. Then call `sample_video` on the export at each
   cut, from 0.2 s before the cut to 0.2 s after it, with a count of 2: the last frame before the cut and the
@@ -63,6 +70,9 @@ How to judge:
 - **Two still frames cannot show movement.** A pose, a hand, a prop or a room that differs across a matched
   cut is a mismatch. Never explain it away as movement nobody saw.
 - Say what the frames cannot show: the movement between them, and lip sync, need the clip itself.
+- **A measurement that finds no motion is not a still.** `review_export` and `clip_quality` give no motion
+  figures for a shot that changes too little between frames to measure, and slow movement in a dark room can
+  read that way. Never say a shot does not move from that alone: look at its first and last frames.
 - Name each cut by its two shots ("shot 4 to shot 5") and say, for each, matched and holds, matched and
   does not hold, or deliberate.
 
