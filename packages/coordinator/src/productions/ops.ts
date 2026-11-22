@@ -11,6 +11,7 @@ import {
   planScene,
   pickableSheets,
   productionShape,
+  FILM_DIRECTION_CRAFT,
   sceneDeleteBlockers,
   resolveMedium,
   ulid,
@@ -1475,7 +1476,11 @@ export async function draftSceneSkeleton(
   const capability = production && productionShape(production.meta).dispatchCapability === "image" ? "image" : "video";
   const look = production?.meta.styleOverride?.trim() || bundle.artDirection.description;
   const promptInstruction = `Author each shot's promptOverride as {"text":"one complete prompt", "capability":"${capability}", "sheetVersions":{"sheet-slug":1}}. Read its characters and location through get_sheet first; record their actual versions, never the example version. Read the scene/script and respect explicit framing, duration and silence. Write for ${production?.meta.models?.[capability] ?? skill?.family ?? capability}, within that route's grammar. ${capability === "video" ? "Describe motion, camera movement, what changes across the shot and what is heard." : "Describe one visible instant, with no timing, sound or camera-movement instructions."} Translate the effective art direction into this setup; do not paste it or include backstory, other shots or absent characters. Keep @mentions in description to attach references. The application preserves the prompt and adds mechanical bindings and constraints. Effective art direction (source data for your judgment): ${JSON.stringify(look)}`;
-  return { proposalId: proposal.id, path, scope, instruction: `${instruction}\n\n${promptInstruction}`, skill };
+  // The drafting agent writes the shots, so it is the one that has to direct them (issues 3273,
+  // 3278): the same craft a film's chat threads carry, or a drafted scene comes back as a handful
+  // of shots each holding several speakers' lines, which no amount of later chat can recut.
+  const direction = production && productionShape(production.meta).medium === "video" ? `\n\n${FILM_DIRECTION_CRAFT}` : "";
+  return { proposalId: proposal.id, path, scope, instruction: `${instruction}${direction}\n\n${promptInstruction}`, skill };
 }
 
 // ---------------------------------------------------------------------------

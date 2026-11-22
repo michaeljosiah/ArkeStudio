@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { WorldBundle, WorldChatContext } from "@arke-studio/contracts";
-import { orderedShots, TURN_RESULT_BOUNDS } from "@arke-studio/contracts";
+import { FILM_DIRECTION_CRAFT, orderedShots, TURN_RESULT_BOUNDS } from "@arke-studio/contracts";
 import { MAX_PROPOSALS } from "../../src/world-chat/wrapup.js";
 import { describeEntryContext } from "../../src/world-chat/entry-context.js";
 import { scanWorld } from "../../src/world/scan.js";
@@ -319,6 +319,48 @@ describe("a production with shots is told to check the cast before planning arou
       { medium: "music", kind: "album" },
     ]) {
       assert.doesNotMatch(await threadText(meta, productionThread), /search_sheets/, JSON.stringify(meta));
+    }
+  });
+});
+
+/**
+ * Arke directs a film without being asked (issues 3273, 3278). On the Na Love or Juju film it
+ * planned a dialogue scene with no listener's face, no insert and the camera worded afresh every
+ * time, and the coverage came from outside Arke; the drafted shots then jumped at every cut.
+ */
+describe("a production with shots carries the director's craft (issues 3273, 3278)", () => {
+  type Ids = { productionId: string; sceneId: string; shotId: string };
+  async function threadText(meta: Record<string, unknown>, context: (ids: Ids) => WorldChatContext): Promise<string> {
+    const scanned = (await scanWorld(FIXTURE_WORLD)).bundle;
+    const production = scanned.productions.find((candidate) => candidate.meta.id === "saltlight")!;
+    const patched: WorldBundle = {
+      ...scanned,
+      productions: scanned.productions.map((candidate) =>
+        candidate.meta.id !== "saltlight" ? candidate : { ...candidate, meta: { ...candidate.meta, ...meta } as typeof candidate.meta },
+      ),
+    };
+    const scene = production.scenes.find((candidate) => orderedShots(candidate).length > 0)!;
+    return describeEntryContext(context({ productionId: production.meta.id, sceneId: scene.id, shotId: orderedShots(scene)[0]!.id }), patched);
+  }
+
+  it("every kind of video hears it, in the production's thread and in a scene's, a shot's and the cut's", async () => {
+    for (const kind of ["film", "microdrama", "music-video", "interactive"]) {
+      const text = await threadText({ medium: "video", kind }, ({ productionId }) => ({ kind: "production", productionId }));
+      assert.ok(text.includes(FILM_DIRECTION_CRAFT), kind);
+    }
+    assert.ok((await threadText({}, ({ productionId, sceneId }) => ({ kind: "scene", productionId, sceneId }))).includes(FILM_DIRECTION_CRAFT));
+    assert.ok((await threadText({}, (ids) => ({ kind: "shot", ...ids }))).includes(FILM_DIRECTION_CRAFT));
+    assert.ok((await threadText({}, ({ productionId }) => ({ kind: "cut", productionId }))).includes(FILM_DIRECTION_CRAFT));
+  });
+
+  it("a production with no shots does not: a book, an audio drama, an album", async () => {
+    for (const meta of [
+      { format: "story", medium: "story", kind: "book" },
+      { format: "story", medium: "story", kind: "audio-drama" },
+      { medium: "music", kind: "album" },
+    ]) {
+      const text = await threadText(meta, ({ productionId }) => ({ kind: "production", productionId }));
+      assert.doesNotMatch(text, /Direct a film's shots/, JSON.stringify(meta));
     }
   });
 });
