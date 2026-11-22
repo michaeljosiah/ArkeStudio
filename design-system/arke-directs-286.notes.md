@@ -1,4 +1,4 @@
-# Turn 286 · Arke directs: the brief, skills and checks
+# Turn 286 · Arke directs: the brief, skills and checks, and three fixes for the cut
 
 Written 22 November 2026, for the owner's approval. A decision turn with no frames. Nothing here is built
 beyond what the last section names. It answers issues 3273 (Arke does not direct a film) and 3278 (a
@@ -104,26 +104,40 @@ sheet, the review of an export). The new ones:
 The cut pair is the one that would have caught shot 4 to 5. It reads frames, so it answers what the
 frames show. Motion between them, and lip sync, need other evidence, and it says so.
 
-## Four decisions that make the checks work
+## The three fixes
 
-**Look, then write.** When a take is accepted on a matched cut, Arke reads the end of that take before
-the next shot's frame is drawn. It says what action is still going and which way each person faces.
-Then it confirms the next shot, or offers a new opening on a card with a fresh quote. It never rewrites
-a shot that has already been paid for without asking. In a scene plan that waits for review, this
-happens at the Continue pause the plan already has.
+The layers say where a rule lives. Three fixes change what Arke does at a cut. Each answers a miss from
+the film, and the checks above are how each one is held to.
 
-**A cut is matched or deliberate.** Each shot records whether the cut into it continues the action or
-jumps on purpose: in time, in place, or to a reverse that resets the action. The cut pair and the sound
-check run only on matched cuts. Within a scene, a cut is matched unless the shot says otherwise.
+| Fix | What it changes | The miss it answers |
+|---|---|---|
+| 1 · Look, then write | the next shot is set from the take before it, not only from its own words | shot 5 opened upright after shot 4 ended with Ade folded forward |
+| 2 · Matched or deliberate | each cut says whether it must match | nothing said which cuts had to match, so nothing could be checked |
+| 3 · A position carries its frame and props | every shot from a position starts from the same frame and the same table | the two-shot came back at three widths; the glasses on the table changed |
 
-**The same moment from a new angle.** A shot on a matched cut from a different camera position draws its
-first frame with the last frame of the shot before it riding as a picture for the pose and the state,
-beside the place's view for the angle. Neither option today does this. Opening on the previous shot
-keeps the old framing. Continuing it extends the old footage.
+**Fix 1 · Look, then write.** When a take is accepted on a matched cut, Arke reads the end of that take
+before the next shot's frame is drawn. It says what action is still going and which way each person
+faces. Then it confirms the next shot, or offers a new opening on a card with a fresh quote. It never
+rewrites a shot that has already been paid for without asking. In a scene plan that waits for review,
+this happens at the Continue pause the plan already has.
 
-**A set-up carries its frame and its props.** A named camera position (turn 285's positions) holds its
-accepted frame and the props in it. Every shot from that position starts from them, so the two-shot
-keeps one width and the glasses stay where they were.
+The next frame then starts from what Arke saw:
+
+- From the **same position**, it opens on the last frame, as `openOnPrevious` does today.
+- From a **new position**, it is **the same moment from a new angle**. The first frame is drawn with the
+  last frame of the shot before it riding as a picture for pose and state, beside the place's view for
+  the angle. Neither option today does this: opening on the previous shot keeps its framing, and
+  continuing it extends its footage. This is what shot 5 needed.
+
+**Fix 2 · Matched or deliberate.** Each shot records whether the cut into it continues the action or
+jumps on purpose: in time, in place, or to a reverse that resets the action. Within a scene, a cut is
+matched unless the shot says otherwise. Fix 1, the cut pair and the sound check run only on matched
+cuts, so a deliberate jump is never flagged.
+
+**Fix 3 · A position carries its frame and props.** A named camera position (turn 285's positions) holds
+its accepted frame and the props in it. Every shot from that position starts from them, so the two-shot
+keeps one width and the glasses stay where they were. A shot that changes a prop says so, and the next
+shot from that position starts from the change. It waits for turn 285's positions to be built.
 
 ## What the DreamVerse review added
 
@@ -131,9 +145,10 @@ An engineering review of Hao AI Lab's DreamVerse, given by the owner on 22 Novem
 with Arke at commit 1de466d (before PR 3279). Four points shaped this turn:
 
 - Its directing skill looks at the last stills of the shot before and describes the unfinished action
-  before it writes the next shot. That is "look, then write".
-- It separates continuity from intentional cuts. That is "matched or deliberate".
-- It locks the references a sequence keeps returning to. That is "a set-up carries its frame and props".
+  before it writes the next shot. That is Fix 1, look, then write.
+- It separates continuity from intentional cuts. That is Fix 2, matched or deliberate.
+- It locks the references a sequence keeps returning to. That is Fix 3, a position carries its frame and
+  props.
 - Prose guides the creative choice; code decides whether a request may go. That is layer 3, and the
   check before a request goes.
 
@@ -144,19 +159,25 @@ taken.
 
 ## Order
 
-1. Look, then write; matched or deliberate; the same moment from a new angle. Together these are the fix
-   for shot 4 to 5.
+1. Fixes 1 and 2 together, with the cut pair check. Together these are the fix for shot 4 to 5.
 2. Route skills for local H3 Reference and Pika H3 Flex.
 3. The check before a request goes.
-4. The other checks.
-5. The craft skills, moved out of the brief, which then keeps only the role, the rules that always
+4. Fix 3, once turn 285's positions are built.
+5. The other checks.
+6. The craft skills, moved out of the brief, which then keeps only the role, the rules that always
    apply and the list of skills.
 
 ## Not drawn
 
-Four screens change, and none is drawn here: the cut pair on a card, the cut's kind on a shot, the new
-angle as a choice for a shot's frame, and a position's frame and props. They are drawn from the app's own
-screens in a following turn, as turn 285 was, before any of them is built.
+Four screens change, and none is drawn here:
+
+- the cut pair on a card (Fix 1)
+- the new angle as a choice for a shot's frame (Fix 1)
+- the cut's kind on a shot (Fix 2)
+- a position's frame and props (Fix 3)
+
+They are drawn from the app's own screens in a following turn, as turn 285 was, before any of them is
+built.
 
 ## Built today, and reused
 
