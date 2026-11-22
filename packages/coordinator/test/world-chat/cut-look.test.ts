@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ModelWorldChatAction, WorldBundle, WorldChatCheckReceipt } from "@arke-studio/contracts";
 import { cutLookProblem } from "../../src/world-chat/cut-look.js";
+import { personLine } from "../../src/world-chat/turn-result.js";
 import { scanWorld } from "../../src/world/scan.js";
 import { FIXTURE_WORLD } from "../world/helpers.js";
 
@@ -34,8 +35,20 @@ describe("a change to a shot beside a take needs a look at the cut first (design
     assert.ok(problem);
     assert.match(problem, /^Shot 6 has a take or stands beside one/);
     assert.match(problem, /call read_skill for continuity-across-cuts/);
-    assert.match(problem, /look with sample_video at the frames either side of its cuts/);
+    // The take beside it is named exactly, so the look is one call (0.5.129: told only to look, it did not).
+    assert.match(problem, /look with sample_video at the last 0\.3 s of shot 5's take \(source \{"kind":"production-take","productionId":"saltlight","takeId":"tk_01J8F0000000000000000000C5"\}\)/);
+    assert.doesNotMatch(problem, /shot 7's take/, "only takes that exist are named");
     assert.match(problem, /Do not rely on an earlier turn's look/);
+  });
+
+  it("names the shot's own take when the shot itself has one", async () => {
+    const problem = cutLookProblem(await world(), [scene({ kind: "edit-shot", shotId: "sh_05", change: { description: "x" } })], []);
+    assert.match(problem!, /the first and last 0\.3 s of shot 5's own take/);
+  });
+
+  it("tells the person what happened in plain words, not the model's instruction", () => {
+    const line = personLine([{ code: "cut-look", safeMessage: "Shot 6 has a take … look with sample_video at …" }]);
+    assert.equal(line, "it changed a shot without first looking at the takes beside it");
   });
 
   it("asks only for what is missing", async () => {

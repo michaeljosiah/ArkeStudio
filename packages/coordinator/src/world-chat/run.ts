@@ -937,6 +937,37 @@ export class WorldChatRunner {
           revising ? "only" : undefined,
         );
       }
+      /*
+       * A change beside a take that still came back without a look gets one more attempt, to look
+       * (design turn 286). Tested on 0.5.129: the first answer was unreadable, the one corrective
+       * turn went on that, and the change it then sent had not sampled a frame — so the turn died
+       * on a check the session's own tools could satisfy. Only this problem, only once.
+       */
+      if (!outcome.ok && outcome.problems.length > 0 && outcome.problems.every((p) => p.code === "cut-look")) {
+        await store.append(
+          { type: "run.retry-started", run: { ...run, safeDetail: outcome.problems.map((p) => p.safeMessage).join(" · ").slice(0, 500) } },
+          { at: this.deps.now() },
+        );
+        progress?.("Looking at the cut");
+        raw = await askOnce(adapter, session.sessionId, correctiveMessage(outcome.problems), timeoutMs, controller.signal, progress, refused);
+        outcome = await this.applyResult(
+          store,
+          conversationId,
+          raw,
+          runId,
+          leaseToken,
+          at,
+          linked,
+          artDirectionLook,
+          bible.version,
+          sceneBaseVersion,
+          refusedTools,
+          subject,
+          replyOnly,
+          view.entryContext?.kind === "production-setup" ? view.productionSetup?.draft.revision : undefined,
+          revising ? "only" : undefined,
+        );
+      }
 
       if (!outcome.ok) {
         /*
