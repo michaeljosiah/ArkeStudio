@@ -42,6 +42,9 @@ Check each of these in the last frames of the shot going out and the first frame
   going, so the slowing is trimmed away rather than cut into.
 - **Carry the state forward.** When a take is accepted, write its end into the next shot: who is where and
   how, where each person looks, what each hand holds, what is on the table and where.
+- **Say how the seats face.** When you ask for a view of a place where people sit together, say how the
+  seats stand: "two benches facing each other across one low table". Left unsaid, the picture chooses, and
+  the next view of the same seats chooses differently.
 
 ## 5 · Look at the cuts in the pictures
 
@@ -89,8 +92,9 @@ When a matched cut does not hold, choose the cheapest fix that keeps the moment,
    pose, the same hands, the same props, seen from the next shot's own camera. Then its frame and clip are
    made again. Say what that costs.
 4. **Change the camera.**
-   - Put a reaction or an insert between the two shots: two seconds at most, and only where the story has a
-     reason to look there. An insert with no reason shows that something is being hidden.
+   - Put a reaction or an insert between the two shots: an insert about a second, a reaction two seconds at
+     most, and only where the story has a reason to look there. An insert with no reason shows that
+     something is being hidden.
    - Or move the next shot's camera to a clearly different position and size, so it reads as a new moment.
      Never move it across the line.
 5. **Make it deliberate.** Say in the shot that the cut jumps in time or resets the action.

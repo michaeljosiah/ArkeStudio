@@ -18,6 +18,7 @@ import {
   type Sheet,
   type WorldBundle,
   chapterCalled,
+  CRAFT_SKILLS,
 } from "@arke-studio/contracts";
 import { WorldIndex } from "../../src/index-db/world-index.js";
 import { WorldQueryServer } from "../../src/harness/world-query.js";
@@ -437,7 +438,7 @@ describe("leased retrieval", () => {
 
     const unknown = await h.retrieval.call(h.mint().token, "read_skill", { id: "how-to-win-an-oscar" });
     assert.equal(unknown.receipt.status, "empty");
-    assert.deepEqual((unknown.result as { skills: string[] }).skills, ["continuity-across-cuts"], "and says which skills there are");
+    assert.deepEqual((unknown.result as { skills: string[] }).skills, CRAFT_SKILLS.map((skill) => skill.id), "and says which skills there are");
     h.index?.close();
   });
 
