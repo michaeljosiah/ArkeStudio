@@ -27,6 +27,8 @@ import {
   isGraphScene,
   SceneRecordSchema,
   SceneSchema,
+  FILM_DIRECTION_CRAFT,
+  productionShape,
   type ManifestModel,
   type ReferenceKit,
   type Scene,
@@ -1659,6 +1661,15 @@ describe("SPEC-019 skills on the draft they shaped (R-19, R-20)", () => {
     // The fallback is stated but never blocking: the draft still went out.
     assert.match(draft.instruction, /Populate `flow` as one complete Entry -> shot nodes -> Exit path/);
     assert.doesNotMatch(draft.instruction, /shots array/i);
+    await store.close();
+  });
+
+  it("a film's drafted scene is directed: the drafting agent carries the director's craft (issue 3273)", async () => {
+    const { store, gate } = await open();
+    const production = store.getBundle().productions[0]!;
+    assert.equal(productionShape(production.meta).medium, "video", "the fixture's production is a film");
+    const draft = await draftSceneSkeleton(store, gate, { productionId: production.meta.id, brief: "Two men talk at a table", skill: null });
+    assert.ok(draft.instruction.includes(FILM_DIRECTION_CRAFT));
     await store.close();
   });
 });
