@@ -30,7 +30,8 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // spends a turn's 24 frames by the sixth cut of a ten-shot scene.
     // v3: look before writing the shot beside a take, answer from the pictures, and never read a
     // measurement that finds no motion as a still (tested on 0.5.127: all three went wrong).
-    version: 3,
+    // v4: look again each time (0.5.128: in a long thread it repeated a wrong earlier finding).
+    version: 4,
     title: "Continuity across cuts",
     when: "before you plan, review or change a shot beside one that has a take, and before you review a cut",
     bodyPath: "continuity-across-cuts.md",
