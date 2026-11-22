@@ -926,6 +926,11 @@ function productionActionTargets(
   }
 }
 
+/** Receipts of looking at pictures or reading a craft skill: never a target read, never cause to refuse a citation. */
+const LOOK_RECEIPT_TOOLS: ReadonlySet<string> = new Set([
+  "read-skill", "sample-video", "inspect-media", "cut-contact-sheet", "review-export", "clip-quality", "measure-sync",
+]);
+
 function worldActionObservations(
   store: WorldStore,
   receipts: readonly WorldChatCheckReceipt[],
@@ -935,6 +940,15 @@ function worldActionObservations(
   const receiptProblems: string[] = [];
   const observations = action.checkReceiptIds.flatMap((id): ArkeReadObservation[] => {
     const receipt = receipts.find((entry) => entry.id === id);
+    /*
+     * A look is evidence of looking, not a read of the target (design turn 286). The cut-look
+     * check makes a change beside a take read the continuity skill and sample frames first, and
+     * the model then cites those receipts as its grounds; refused as "a search or draw", the
+     * change failed with no attempt left (0.5.130). They are left out of the citation, not
+     * refused: the reads the action needs are still required below, and the look itself is held
+     * by the check against this turn's receipts.
+     */
+    if (receipt && LOOK_RECEIPT_TOOLS.has(receipt.tool)) return [];
     if (
       !receipt ||
       receipt.tool !== "target-read" ||
