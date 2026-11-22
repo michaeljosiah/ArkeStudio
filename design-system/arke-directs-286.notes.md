@@ -129,6 +129,23 @@ The next frame then starts from what Arke saw:
   the angle. Neither option today does this: opening on the previous shot keeps its framing, and
   continuing it extends its footage. This is what shot 5 needed.
 
+When the pair does not match, Arke **fixes it or changes the camera**, cheapest first, and never gives
+up the moment for a prop:
+
+1. Move the cut to where both shots agree.
+2. Cut inside a movement, so the change reads as motion.
+3. Redraw the next opening as the same moment from a new angle.
+4. Change the camera:
+   - put a reaction or insert between the two shots, only where the story has a reason to look there;
+   - or move the next camera to a clearly different position and size, on the same side of the line.
+5. Call the cut deliberate.
+
+Moving the cut needs room, so each shot **overlaps the action**: it starts a beat before the point where
+the shot before it will be cut. The craft skill these come from is drafted in
+[arke-directs-286.continuity-skill.md](arke-directs-286.continuity-skill.md), written from standard film
+practice (the script supervisor's checks, the line and the angle, cutting on action, buffer shots,
+Murch's order of what a cut keeps), with its sources.
+
 **Fix 2 · Matched or deliberate.** Each shot records whether the cut into it continues the action or
 jumps on purpose: in time, in place, or to a reverse that resets the action. Within a scene, a cut is
 matched unless the shot says otherwise. Fix 1, the cut pair and the sound check run only on matched
@@ -183,6 +200,9 @@ What this shows for the turn:
 - Given the pictures, it finds most of what a person finds, and says what its evidence is.
 - It explained away a pose change with motion it could not see. Rule 7 now says a pose that differs
   across a matched cut is reported as a mismatch, never explained away as movement.
+- The model is not the limit. Arke ran Claude Opus 5.5 (through GitHub Copilot, in the bundled
+  OpenCode engine) at its default effort, and found most of the mismatches when asked. What was missing
+  was being told when to look, and how strictly to judge.
 
 ## Order
 
