@@ -28,9 +28,11 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     id: "continuity-across-cuts",
     // v2: two frames per cut and at most ten cuts a turn. v1 asked for four frames a cut, which
     // spends a turn's 24 frames by the sixth cut of a ten-shot scene.
-    version: 2,
+    // v3: look before writing the shot beside a take, answer from the pictures, and never read a
+    // measurement that finds no motion as a still (tested on 0.5.127: all three went wrong).
+    version: 3,
     title: "Continuity across cuts",
-    when: "before you plan, review or change shots that already have takes, and before a cut is approved",
+    when: "before you plan, review or change a shot beside one that has a take, and before you review a cut",
     bodyPath: "continuity-across-cuts.md",
   },
 ];

@@ -73,3 +73,13 @@ it("the continuity skill holds the cut to the standard the test on the film show
   assert.match(body, /with a count of 2/);
   assert.match(body, /no more than ten cuts in\s+one turn/);
 });
+
+it("the continuity skill looks before it writes, and does not take an unmeasured shot for a still (tested on 0.5.127)", async () => {
+  // Planning shot 11 it asked which wrist the bangles were on, which shot 10's take shows; reviewing
+  // ten shots it called three slow, dark shots stills because the export review gave them no figures.
+  const body = (await loadCraftSkill("continuity-across-cuts"))!.body;
+  assert.match(body, /Before you write the next shot, look at the end of the take before it/);
+  assert.match(body, /Never ask the person what a take already shows/);
+  assert.match(body, /A contact sheet shows no cut/);
+  assert.match(body, /A measurement that finds no motion is not a still/);
+});
