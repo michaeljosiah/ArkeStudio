@@ -1,6 +1,7 @@
 import type { ProductionBundle, WorldBundle, WorldChatContext } from "@arke-studio/contracts";
 import {
   COMIC_ADAPTATION_CRAFT,
+  CRAFT_SKILLS_LINE,
   FILM_DIRECTION_CRAFT,
   orderedShots,
   orderedTrackClips,
@@ -400,6 +401,8 @@ function describeShape(production: ProductionBundle | undefined, writesTheSeason
      * the owner wanted came from outside it. Only a picture has shots, so only here.
      */
     bits.push(FILM_DIRECTION_CRAFT);
+    // The craft names when to read a skill; this line names which exist (design turn 286).
+    bits.push(CRAFT_SKILLS_LINE);
   }
   return bits.join(" ");
 }

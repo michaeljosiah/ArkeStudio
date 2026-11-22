@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { FILM_DIRECTION_CRAFT, ShotSchema } from "../src/index.js";
+import { craftSkill, FILM_DIRECTION_CRAFT, ShotSchema } from "../src/index.js";
 
 /** How Arke chooses a film's shots and keeps them continuous (issues 3273, 3278). */
 
@@ -42,6 +42,17 @@ describe("the film direction craft", () => {
   it("keeps bodies and faces to the pictures, and every person seen named", () => {
     assert.match(FILM_DIRECTION_CRAFT, /never what their body or face is like/);
     assert.match(FILM_DIRECTION_CRAFT, /Every person who is seen is @mentioned/);
+  });
+
+  it("says when to look at the pictures and how strictly to judge them (design turn 286)", () => {
+    // Tested on the film: right in the words, it said every shot opened where the last stopped,
+    // and it had not looked; when it looked, it called a changed pose movement.
+    assert.match(FILM_DIRECTION_CRAFT, /Words that match prove nothing about the pictures/);
+    assert.match(FILM_DIRECTION_CRAFT, /When a scene's shots have takes, look at its cuts before you plan, review or change them/);
+    assert.match(FILM_DIRECTION_CRAFT, /read the continuity-across-cuts skill/);
+    assert.match(FILM_DIRECTION_CRAFT, /never explain it away as movement/);
+    assert.match(FILM_DIRECTION_CRAFT, /Fix it or change the camera, on a card/);
+    assert.ok(craftSkill("continuity-across-cuts"), "the skill it names is shipped");
   });
 
   it("stays short enough to ride in every video production's thread", () => {

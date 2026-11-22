@@ -3,8 +3,8 @@ import { it } from "node:test";
 import { writeFile, copyFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { join, sep } from "node:path";
-import { sessionSkillForAgent, agentPromptFor } from "@arke-studio/contracts";
-import { loadSkillBodies } from "../../src/harness/skills.js";
+import { CRAFT_SKILLS, sessionSkillForAgent, agentPromptFor } from "@arke-studio/contracts";
+import { loadCraftSkill, loadSkillBodies } from "../../src/harness/skills.js";
 import { writeSessionFiles } from "../../src/harness/session-files.js";
 import { tempDir } from "../tmp.js";
 
@@ -47,4 +47,26 @@ it("injects review rubrics into read-only agent prompts without enabling native 
     assert.ok(prompt.includes(skill.body));
     assert.match(prompt, /cannot do/);
   }
+});
+
+it("ships every craft skill the brief names, and reads none it does not (design turn 286)", async () => {
+  for (const skill of CRAFT_SKILLS) {
+    const read = await loadCraftSkill(skill.id);
+    assert.ok(read, skill.id);
+    assert.equal(read.skill.version, skill.version);
+    assert.match(read.body, new RegExp(`^# ${skill.title}`), "the file is the skill it is registered as");
+  }
+  assert.equal(await loadCraftSkill("../seedance-storyboard"), null, "an id is looked up, never used as a path");
+  const dir = await tempDir("arke-craft-skills-");
+  await assert.rejects(loadCraftSkill("continuity-across-cuts", pathToFileURL(dir + sep)), /continuity-across-cuts@v1/, "a registered skill that is missing is a fault, not an absence");
+});
+
+it("the continuity skill holds the cut to the standard the test on the film showed it needed", async () => {
+  const body = (await loadCraftSkill("continuity-across-cuts"))!.body;
+  assert.match(body, /Two still frames cannot show movement/);
+  assert.match(body, /never explain it away as movement/i);
+  for (const fix of [/Move the cut/, /Cut inside a movement/, /Redraw the opening/, /Change the camera/, /Make it deliberate/]) assert.match(body, fix);
+  assert.match(body, /Overlap the action/);
+  assert.match(body, /cut_contact_sheet/);
+  assert.match(body, /sample_video/);
 });

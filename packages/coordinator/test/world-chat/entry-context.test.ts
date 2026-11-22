@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { WorldBundle, WorldChatContext } from "@arke-studio/contracts";
-import { FILM_DIRECTION_CRAFT, orderedShots, TURN_RESULT_BOUNDS } from "@arke-studio/contracts";
+import { CRAFT_SKILLS_LINE, FILM_DIRECTION_CRAFT, orderedShots, TURN_RESULT_BOUNDS } from "@arke-studio/contracts";
 import { MAX_PROPOSALS } from "../../src/world-chat/wrapup.js";
 import { describeEntryContext } from "../../src/world-chat/entry-context.js";
 import { scanWorld } from "../../src/world/scan.js";
@@ -347,6 +347,7 @@ describe("a production with shots carries the director's craft (issues 3273, 327
     for (const kind of ["film", "microdrama", "music-video", "interactive"]) {
       const text = await threadText({ medium: "video", kind }, ({ productionId }) => ({ kind: "production", productionId }));
       assert.ok(text.includes(FILM_DIRECTION_CRAFT), kind);
+      assert.ok(text.includes(CRAFT_SKILLS_LINE), `${kind}: and which craft skills it can read (design turn 286)`);
     }
     assert.ok((await threadText({}, ({ productionId, sceneId }) => ({ kind: "scene", productionId, sceneId }))).includes(FILM_DIRECTION_CRAFT));
     assert.ok((await threadText({}, (ids) => ({ kind: "shot", ...ids }))).includes(FILM_DIRECTION_CRAFT));
@@ -361,6 +362,7 @@ describe("a production with shots carries the director's craft (issues 3273, 327
     ]) {
       const text = await threadText(meta, ({ productionId }) => ({ kind: "production", productionId }));
       assert.doesNotMatch(text, /Direct a film's shots/, JSON.stringify(meta));
+      assert.doesNotMatch(text, /read_skill/, JSON.stringify(meta));
     }
   });
 });

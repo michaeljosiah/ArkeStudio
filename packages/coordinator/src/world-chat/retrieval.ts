@@ -23,6 +23,8 @@ import { WorldChatTargetReads, type TargetReadDeps } from "./target-reads.js";
 import type { ResolveWebHost, WebRequest } from "./safe-web.js";
 import { describeCoordinatorError } from "../errors/user-message.js";
 import { describeAction } from "./action-guide.js";
+import { loadCraftSkill } from "../harness/skills.js";
+import { CRAFT_SKILLS } from "@arke-studio/contracts";
 
 /**
  * The read-only surface a World Chat run may reach, and the record of what it read
@@ -60,6 +62,7 @@ const TOOL_BY_NAME: Record<string, RetrievalTool> = {
   fetch_url: "fetch-url",
   get_production: "get-production",
   describe_action: "describe-action",
+  read_skill: "read-skill",
   ...Object.fromEntries(TARGET_READ_TOOL_NAMES.map((name) => [name, "target-read" as const])),
 };
 
@@ -233,6 +236,17 @@ export class WorldChatRetrieval {
         return described
           ? { result: described, receipt: receipt("complete", { querySummary: summarise(kind) }) }
           : { result: { found: false, kind }, receipt: receipt("empty", { querySummary: summarise(kind) }) };
+      }
+      case "read_skill": {
+        // A craft skill (design turn 286). The summary names the version, so a judgement can be
+        // traced to the guidance it was made under after the skill has changed.
+        const id = String(args["id"] ?? "");
+        const read = await loadCraftSkill(id);
+        return read
+          ? { result: { id: read.skill.id, version: read.skill.version, title: read.skill.title, body: read.body },
+              receipt: receipt("complete", { querySummary: summarise(`${read.skill.id}@v${read.skill.version}`) }) }
+          : { result: { found: false, id, skills: CRAFT_SKILLS.map((skill) => skill.id) },
+              receipt: receipt("empty", { querySummary: summarise(id) }) };
       }
 
       case "search_canon": {
