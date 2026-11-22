@@ -48,10 +48,14 @@ Check each of these in the last frames of the shot going out and the first frame
 Words that match prove nothing about the pictures. When shots have takes, look at them:
 
 - **When the scene has been exported**, call `list_exports` for the latest export of the production, then
-  `cut_contact_sheet` on it for each shot's start and end. Then call `sample_video` on the export either
-  side of each cut, for example from 0.4 s before the cut to 0.3 s after it, with a count of 4.
-- **When the takes are not cut yet**, call `sample_video` on the accepted take of each shot: the last half
-  second of one, and the first half second of the next.
+  `cut_contact_sheet` on it for each shot's start and end. Then call `sample_video` on the export at each
+  cut, from 0.2 s before the cut to 0.2 s after it, with a count of 2: the last frame before the cut and the
+  first after it.
+- **When the takes are not cut yet**, call `sample_video` on the accepted take of each shot: the last
+  0.2 s of one and the first 0.2 s of the next, a count of 1 each.
+- **Spend frames where they decide something.** A turn can see about 24 frames in all. Look closer (a
+  count of 4, or a region round a face or a hand) only at a cut in doubt. Look at no more than ten cuts in
+  one turn, and say which cuts are left for the next.
 - Say which frames you looked at, and their times.
 
 How to judge:

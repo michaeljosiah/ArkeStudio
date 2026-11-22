@@ -26,7 +26,9 @@ export interface CraftSkill {
 export const CRAFT_SKILLS: readonly CraftSkill[] = [
   {
     id: "continuity-across-cuts",
-    version: 1,
+    // v2: two frames per cut and at most ten cuts a turn. v1 asked for four frames a cut, which
+    // spends a turn's 24 frames by the sixth cut of a ten-shot scene.
+    version: 2,
     title: "Continuity across cuts",
     when: "before you plan, review or change shots that already have takes, and before a cut is approved",
     bodyPath: "continuity-across-cuts.md",

@@ -58,7 +58,7 @@ it("ships every craft skill the brief names, and reads none it does not (design 
   }
   assert.equal(await loadCraftSkill("../seedance-storyboard"), null, "an id is looked up, never used as a path");
   const dir = await tempDir("arke-craft-skills-");
-  await assert.rejects(loadCraftSkill("continuity-across-cuts", pathToFileURL(dir + sep)), /continuity-across-cuts@v1/, "a registered skill that is missing is a fault, not an absence");
+  await assert.rejects(loadCraftSkill("continuity-across-cuts", pathToFileURL(dir + sep)), new RegExp(`continuity-across-cuts@v${CRAFT_SKILLS[0]!.version}`), "a registered skill that is missing is a fault, not an absence");
 });
 
 it("the continuity skill holds the cut to the standard the test on the film showed it needed", async () => {
@@ -69,4 +69,7 @@ it("the continuity skill holds the cut to the standard the test on the film show
   assert.match(body, /Overlap the action/);
   assert.match(body, /cut_contact_sheet/);
   assert.match(body, /sample_video/);
+  // A turn sees about 24 frames; four a cut spent them by the sixth cut of a ten-shot scene.
+  assert.match(body, /with a count of 2/);
+  assert.match(body, /no more than ten cuts in\s+one turn/);
 });

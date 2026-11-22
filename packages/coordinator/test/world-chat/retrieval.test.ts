@@ -429,7 +429,7 @@ describe("leased retrieval", () => {
     assert.equal(receipt.tool, "read-skill");
     assert.equal(receipt.status, "complete");
     assert.equal(receipt.consulted.length, 0, "it read nothing in the world");
-    assert.match(receipt.querySummary ?? "", /continuity-across-cuts@v1/, "a judgement can be traced to the guidance behind it");
+    assert.match(receipt.querySummary ?? "", /continuity-across-cuts@v\d+/, "a judgement can be traced to the guidance behind it");
     const read = result as { id: string; version: number; body: string };
     assert.equal(read.id, "continuity-across-cuts");
     assert.match(read.body, /Two still frames cannot show movement/);
