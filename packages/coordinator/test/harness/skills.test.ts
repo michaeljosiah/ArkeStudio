@@ -84,3 +84,22 @@ it("the continuity skill looks before it writes, and does not take an unmeasured
   assert.match(body, /A measurement that finds no motion is not a still/);
   assert.match(body, /Never repeat an earlier finding without looking/);
 });
+
+it("the film's notes reach the skills: the local route's habits, and the sound and pace of the cut (2026-11-22)", async () => {
+  // The local route spoke a sentence of feeling from its prompt, talked on after a line and drew a
+  // watch on both wrists; the owner found the club's music pumping, a mouth moving with no line and a
+  // two-second insert dragging.
+  const route = (await loadCraftSkill("local-h3-video"))!.body;
+  assert.match(route, /Quote only the line that is spoken/);
+  assert.match(route, /it may invent more words/);
+  assert.match(route, /transcribe_audio/);
+  assert.match(route, /his right wrist\s+bare/);
+  assert.match(route, /24 frames a second/);
+  const sound = (await loadCraftSkill("sound-and-pace"))!.body;
+  assert.match(sound, /Turn ducking off for it/);
+  assert.match(sound, /No mouth moves without a line/);
+  assert.match(sound, /An insert lasts about a second/);
+  const continuity = (await loadCraftSkill("continuity-across-cuts"))!.body;
+  assert.match(continuity, /an insert about a second/);
+  assert.match(continuity, /Say how the seats face/);
+});

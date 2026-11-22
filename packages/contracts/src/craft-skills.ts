@@ -31,10 +31,31 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // v3: look before writing the shot beside a take, answer from the pictures, and never read a
     // measurement that finds no motion as a still (tested on 0.5.127: all three went wrong).
     // v4: look again each time (0.5.128: in a long thread it repeated a wrong earlier finding).
-    version: 4,
+    // v5: an insert lasts about a second, and a view of shared seats says how they face (the owner's
+    // notes on the film, 2026-11-22: a two-second card insert dragged, and a view left to choose drew
+    // a corner seat where the next view had two benches).
+    version: 5,
     title: "Continuity across cuts",
     when: "before you plan, review or change a shot beside one that has a take, and before you review a cut",
     bodyPath: "continuity-across-cuts.md",
+  },
+  {
+    // What the local route did on the film (2026-11-21/22): it spoke a sentence of feeling written in
+    // the prompt, invented talk after a line, and put a watch on both wrists.
+    id: "local-h3-video",
+    version: 1,
+    title: "Writing for local H3 Reference Video",
+    when: "before you write or change a shot's prompt for the local H3 Reference Video route",
+    bodyPath: "local-h3-video.md",
+  },
+  {
+    // The owner's notes on the film's cut (2026-11-22): the club's music pumped with ducking, a shot
+    // left a mouth moving with no line, and an insert held too long.
+    id: "sound-and-pace",
+    version: 1,
+    title: "Sound and pace in the cut",
+    when: "before you change the Cut's music or mix, or the length of a clip",
+    bodyPath: "sound-and-pace.md",
   },
 ];
 
