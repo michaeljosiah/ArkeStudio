@@ -1,6 +1,6 @@
 # Turn 286 · Arke directs: the brief, skills and checks, and three fixes for the cut
 
-Written 22 November 2026, for the owner's approval. A decision turn with no frames. Nothing here is built
+Written 22 November 2026 and approved by the owner the same day. A decision turn with no frames. Nothing here is built
 beyond what the last section names. It answers issues 3273 (Arke does not direct a film) and 3278 (a
 scene's drafted shots play as separate clips), and follows ArkeStudio PR 3279, which put the director's
 craft in every video thread.
