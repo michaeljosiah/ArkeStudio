@@ -49,24 +49,32 @@ export function cutLookProblem(
     const scene = production.scenes.find((s) => s.id === action.sceneId);
     if (!scene) continue;
     const shots = orderedShots(scene);
-    const taken = (i: number) => i >= 0 && i < shots.length && !!production.selections[shots[i]!.id]?.acceptedTakeId;
+    const takeAt = (i: number) => (i >= 0 && i < shots.length ? production.selections[shots[i]!.id]?.acceptedTakeId ?? null : null);
     const besideTake = (shotId: string) => {
       const i = shots.findIndex((shot) => shot.id === shotId);
-      return i >= 0 && (taken(i) || taken(i - 1) || taken(i + 1)) ? shots[i]! : null;
+      return i >= 0 && (takeAt(i) || takeAt(i - 1) || takeAt(i + 1)) ? i : null;
     };
     const commands = [action.command, ...(action.commands ?? [])].filter((c): c is SceneCommand => c !== undefined);
     for (const command of commands) {
-      const shot = touchedBesideTake(command, besideTake);
-      if (!shot) continue;
-      const missing = [!read && `call read_skill for ${CUT_LOOK_SKILL}`, !looked && "look with sample_video at the frames either side of its cuts (the accepted takes, or the latest export)"]
+      const at = touchedBesideTake(command, besideTake);
+      if (at === null) continue;
+      // Named exactly, so the look costs one call each rather than a search (tested on 0.5.129:
+      // told only to look, it read the skill and still sampled nothing).
+      const source = (i: number) => `{"kind":"production-take","productionId":"${action.productionId}","takeId":"${takeAt(i)}"}`;
+      const where = [
+        takeAt(at - 1) && `the last 0.3 s of shot ${shots[at - 1]!.number}'s take (source ${source(at - 1)})`,
+        takeAt(at) && `the first and last 0.3 s of shot ${shots[at]!.number}'s own take (source ${source(at)})`,
+        takeAt(at + 1) && `the first 0.3 s of shot ${shots[at + 1]!.number}'s take (source ${source(at + 1)})`,
+      ].filter(Boolean).join("; ");
+      const missing = [!read && `call read_skill for ${CUT_LOOK_SKILL}`, !looked && `look with sample_video at ${where}`]
         .filter(Boolean).join(" and ");
-      return `Shot ${shot.number} has a take or stands beside one. Before changing its picture, ${missing}, then prepare the change from what you saw. Do not rely on an earlier turn's look: takes and frames change.`;
+      return `Shot ${shots[at]!.number} has a take or stands beside one. Before changing its picture, ${missing}, then prepare the change from what you saw. Do not rely on an earlier turn's look: takes and frames change.`;
     }
   }
   return null;
 }
 
-function touchedBesideTake(command: SceneCommand, besideTake: (shotId: string) => { number: number } | null) {
+function touchedBesideTake(command: SceneCommand, besideTake: (shotId: string) => number | null): number | null {
   switch (command.kind) {
     case "edit-shot":
       return Object.keys(command.change).some((key) => PICTURE_FIELDS.has(key)) ? besideTake(command.shotId) : null;
