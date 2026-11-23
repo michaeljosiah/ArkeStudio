@@ -1,5 +1,5 @@
 import type { ClientState } from "./client-state.js";
-import type { Job } from "./job.js";
+import type { Job, QueueStatus } from "./job.js";
 import type { LedgerEntry } from "./job.js";
 import { isReplayableFinalization } from "./job.js";
 import { balanceFaulted, PROVIDERS } from "./provider.js";
@@ -8,6 +8,28 @@ import { GENERIC_ERROR_COPY } from "./error-copy.js";
 /** A provider as a person reads it (turn 192): its display name, its id only when it has none. */
 function providerName(provider: string): string {
   return (PROVIDERS as Record<string, { displayName: string } | undefined>)[provider]?.displayName ?? provider;
+}
+
+/**
+ * The paused lane a job is held behind, if any. A pause holds queued work only: a request already
+ * sent still has an outcome to await (issue 2426). Activity's rows and the Bench's take read this
+ * one rule, so a take Activity calls held is never still `rendering…` on the Bench (issue 3195).
+ */
+export function pausedLaneFor(
+  job: Pick<Job, "status" | "provider">,
+  queues: readonly QueueStatus[],
+): QueueStatus | undefined {
+  return job.status === "queued" ? queues.find((queue) => queue.provider === job.provider && queue.paused) : undefined;
+}
+
+/**
+ * What a pause's reason adds to the provider's name, or null where it adds nothing: the account
+ * out of credit (never "key rejected", issue 2418), or the provider's own words — but not the
+ * generic failure line, which restates nothing the name had not (design turn 192).
+ */
+export function pauseReasonWords(queue: Pick<QueueStatus, "reason">): string | null {
+  if (balanceFaulted({ fault: queue.reason ?? null })) return "Out of credit";
+  return queue.reason !== undefined && queue.reason !== GENERIC_ERROR_COPY && queue.reason !== "paused" ? queue.reason : null;
 }
 import { formatMicroUsd } from "./money.js";
 import { unattendedProposalsOf } from "./proposal.js";
@@ -231,7 +253,7 @@ export function computeNeedsYou(state: ClientState): NeedsYouEntry[] {
       // title had not, and "held, not failed" explained a word the count already carries.
       title: `${providerName(queue.provider)} paused`,
       detail: [
-        ...(balanceFaulted({ fault: queue.reason ?? null }) ? ["Out of credit"] : queue.reason !== undefined && queue.reason !== GENERIC_ERROR_COPY && queue.reason !== "paused" ? [queue.reason] : []),
+        ...[pauseReasonWords(queue)].filter((words): words is string => words !== null),
         `${queue.held} job${queue.held === 1 ? "" : "s"} held`,
       ].join(" · "),
       at: "9999-12-31T00:00:00Z", // pauses have no timestamp; they sort newest within class
@@ -416,7 +438,7 @@ export function computeRunning(
     if (!RUNNING_JOB.has(job.status) && !finalizing) continue;
     const labels = activityJobLabels(state, job);
     // Behind a paused lane "queued" reads as next in line, and nothing moves until someone acts (issue 2426).
-    const paused = job.status === "queued" && state.app.queues.some(queue => queue.provider === job.provider && queue.paused);
+    const paused = pausedLaneFor(job, state.app.queues) !== undefined;
     entries.push({
       kind: "job",
       title: job.worldId === VOICE_PREVIEW_SCOPE ? `Voice preview · ${job.params["voiceLabel"] ?? job.params["voiceId"] ?? "Narrator"}` : labels.target,

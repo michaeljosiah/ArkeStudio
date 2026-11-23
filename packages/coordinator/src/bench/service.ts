@@ -35,9 +35,9 @@ import {
   orderedShots,
   productionHasScore,
   NO_BACKGROUND_MUSIC,
-  pricedDuration,
   routeFor,
   sizeParamsFor,
+  subjectClipDuration,
   unresolvedBenchMentions,
   validateReferences,
   voiceFormatForModel,
@@ -1112,19 +1112,24 @@ export function planBenchDispatch(
     return { ok: false, reason: `${model.displayName} takes no length` };
   }
 
-  const videoDuration =
-    params.kind === "video" && (params.durationSec ?? 0) > 0
-      ? dispatchDuration(model, params.durationSec!, {
-          taskMode,
-          // A clip alone lands on the reference route too (issue 852), whose ceiling can be shorter.
-          withReferences: referencePaths.length > 0 || videoPaths.length > 0,
-        })
-      : params.kind === "video"
-        ? { kind: "provider-default" as const }
-         : null;
   // A board and a shot's clip are both filed as covering an authored length, so neither can
   // ride a provider that picks its own.
   const timed = session.subject?.kind === "board" || (session.subject?.kind === "shot" && params.kind === "video");
+  const durationRoute = {
+    taskMode,
+    // A clip alone lands on the reference route too (issue 852), whose ceiling can be shorter.
+    withReferences: referencePaths.length > 0 || videoPaths.length > 0,
+  };
+  // A subject's clip is the length its Bench shows (issue 3197): the one picked, or the authored
+  // length rounded up, read through the same function the screen reads it through.
+  const videoDuration =
+    params.kind === "video" && (params.durationSec ?? 0) > 0
+      ? timed
+        ? subjectClipDuration(model, params.durationSec!, params.clipSec, durationRoute)
+        : dispatchDuration(model, params.durationSec!, durationRoute)
+      : params.kind === "video"
+        ? { kind: "provider-default" as const }
+         : null;
   if (timed && videoDuration?.kind === "provider-default") {
     return {
       ok: false,
@@ -1233,7 +1238,6 @@ export function planBenchDispatch(
       if (frame !== null && videoPaths.length > 0) {
         return { ok: false, reason: "a clip cannot ride beside a keyframe — the frame route takes no video" };
       }
-      const withReferences = referencePaths.length > 0 || videoPaths.length > 0;
       const choice = videoDuration!;
       inputs.push({
         worldId: options.worldId,
@@ -1287,11 +1291,13 @@ export function planBenchDispatch(
         },
         estimatedMicroUsd: estimateMicroUsd(model, {
           // Priced at the length that will actually be asked for, on the route it will be asked
-          // of — the estimate and the dispatch read the same function for that reason.
+          // of — the estimate and the dispatch read the same choice for that reason.
           durationSec:
-            requestedSec > 0
-              ? pricedDuration(model, requestedSec, { taskMode, withReferences })
-              : (durationLimitsFor(model, taskMode).maxDurationSec ?? 5),
+            choice.kind === "asked"
+              ? choice.seconds
+              : requestedSec > 0
+                ? requestedSec
+                : (durationLimitsFor(model, taskMode).maxDurationSec ?? 5),
           ...(params.resolution !== undefined ? { resolution: params.resolution } : {}),
         }),
         landing: { dir: sessionMediaDir(session.id, takeId) },

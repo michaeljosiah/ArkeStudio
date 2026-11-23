@@ -660,7 +660,9 @@ describe("the prompt, the chips and the dispatch row (design 142)", () => {
     const facts = all(bench, '[data-testid="bench-subject-context"] .fy-bench__chip')
       .filter((chip) => chip.className.includes("fy-bench__chip--fact"))
       .map((chip) => chip.textContent);
-    assert.deepEqual(facts, ["4s", "16:9", "sound · on"]);
+    // The length is the route's control, not a fact (issue 3197): this route's shortest is 10s,
+    // so the 4s shot rides beside it as the shot's own length.
+    assert.deepEqual(facts, ["shot 4s", "16:9", "sound · on"]);
     assert.doesNotMatch(bench.container.innerHTML, /fy-bench__chip--refs/, "the dashed tile is the add");
   });
 
@@ -777,5 +779,146 @@ describe("the wall and the strip (R-24; design 142a)", () => {
     assert.equal(q(bench, ".fy-bench__empty").textContent, "No takes yet");
     assert.doesNotMatch(text(bench), /takes land here/);
     assert.doesNotMatch(text(bench), /generate to see one here/);
+  });
+});
+
+/** A select's change, through the handler React gave it (linkedom raises no change React hears). */
+async function choose(select: HTMLElement, value: string): Promise<void> {
+  const key = Object.keys(select).find((name) => name.startsWith("__reactProps$"))!;
+  const props = (select as unknown as Record<string, { onChange(event: { target: { value: string } }): void }>)[key]!;
+  await act(async () => props.onChange({ target: { value } }));
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 400)); });
+}
+
+const lastComposed = (bench: Bench) =>
+  bench.sent.filter((message): message is Extract<ClientMessage, { kind: "bench-compose" }> => message.kind === "bench-compose").at(-1);
+
+describe("a take held behind a paused provider (issue 3195)", () => {
+  const JOB_ID = "jb_01J8F3K2QW9VZX4N7M0RTYB6HR";
+  // fal's own words on a 403 for an empty account, as the dispatcher pauses the lane with them.
+  const EXHAUSTED = "fal: User is locked. Reason: Exhausted balance. Top up your balance at fal.ai/dashboard/billing. (HTTP 403)";
+  const out = (session: BenchSession): BenchSession =>
+    ({ ...session, takes: [{ ...take("video", "running", false), jobId: JOB_ID }] }) as unknown as BenchSession;
+  const queued = (state: ClientState, lane: { paused: boolean; reason?: string }) => {
+    state.app.jobs = [{
+      id: JOB_ID, idempotencyKey: "01J8E1000000000000000000K1", worldId: FIXTURE_WORLD_ID,
+      target: { kind: "bench-take", id: `${SESSION_ID}/${TAKE_ID}` }, capability: "video", provider: "fal", model: "test-video",
+      params: {}, estimatedMicroUsd: 1_000_000, status: "queued", providerJobId: null, attempt: 1, error: lane.reason ?? null,
+      createdAt: "2026-08-16T10:00:00.000Z", updatedAt: "2026-08-16T10:00:30.000Z",
+    } as never];
+    state.app.queues = [{ provider: "fal", paused: lane.paused, ...(lane.paused ? { pauseKind: "fault" as const } : {}), ...(lane.reason !== undefined ? { reason: lane.reason } : {}), held: lane.paused ? 1 : 0 }];
+  };
+
+  it("says it is held and why, offers the way on, and never reads as rendering", async () => {
+    const bench = await openBench(out(shotSession("video")), SESSION_ID, (state) => queued(state, { paused: true, reason: EXHAUSTED }));
+    assert.equal(bench.container.querySelector('[data-testid="bench-rendering"]'), null, "no rendering… for a take nothing is making");
+    assert.equal(bench.container.querySelector('[data-testid="bench-waiting"]'), null, "and nothing moving");
+    const held = q(bench, '[data-testid="bench-held"]');
+    assert.equal(held.querySelector(".fy-bench__emptyline")?.textContent, "Held · FAL out of credit");
+    assert.doesNotMatch(held.textContent ?? "", /HTTP|locked/, "the provider's raw refusal is not the label");
+    const frame = q(bench, ".fy-bench__takeframe");
+    assert.equal(frame.getAttribute("data-inflight"), null, "not hatched as work in progress");
+    assert.equal(frame.querySelector(".fy-bench__takespin"), null);
+    assert.equal(frame.querySelector(".fy-bench__takestate")?.textContent, "held");
+    await pressLabelled(bench, "Resume FAL");
+    const resumed = bench.sent.at(-1) as unknown as { kind: string; provider: string };
+    assert.deepEqual([resumed.kind, resumed.provider], ["queue-resume", "fal"]);
+    assert.ok([...held.querySelectorAll("button")].some((button) => button.textContent === "Settings"));
+  });
+
+  it("names a pause that is not about credit in the provider's words", async () => {
+    const bench = await openBench(out(shotSession("video")), SESSION_ID, (state) => queued(state, { paused: true, reason: "fal: the credential was rejected (HTTP 401)" }));
+    const held = q(bench, '[data-testid="bench-held"]');
+    assert.equal(held.querySelector(".fy-bench__emptyline")?.textContent, "Held · FAL paused");
+    assert.match(held.textContent ?? "", /the credential was rejected/);
+  });
+
+  it("is rendering again once the lane is not paused", async () => {
+    const bench = await openBench(out(shotSession("video")), SESSION_ID, (state) => queued(state, { paused: false }));
+    assert.equal(bench.container.querySelector('[data-testid="bench-held"]'), null);
+    assert.ok(q(bench, '[data-testid="bench-rendering"]'));
+    assert.equal(q(bench, ".fy-bench__takeframe").getAttribute("data-inflight"), "true");
+  });
+});
+
+describe("references and keyframes in one Generator (issue 3196)", () => {
+  /** A start frame set in the Keyframe lane while the shot's own reference rides. */
+  const both = (): BenchSession => {
+    const session = shotSession("video");
+    return {
+      ...session,
+      tokenRegistry: [
+        ...session.tokenRegistry,
+        { token: "Image 2", kind: "image", source: { source: "world-file", path: "references/maren-kest/start.png", hash: "sha256:beadfeed" }, label: "start" },
+      ],
+      composer: { ...session.composer, keyframeTokens: ["Image 2"] },
+      nextToken: { image: 3, audio: 2, video: 2 },
+    } as unknown as BenchSession;
+  };
+
+  it("the Reference lane says a keyframe is set and clears it; Generate is held with the reason", async () => {
+    const bench = await openBench(both());
+    const notice = q(bench, '[data-testid="bench-keyframes-set"]');
+    assert.match(notice.textContent ?? "", /^1 keyframe set/);
+    assert.equal(q(bench, '[data-testid="bench-lane-clash"]').textContent, "References or keyframes, not both");
+    assert.equal((q(bench, '[data-testid="bench-generate"]') as HTMLButtonElement).disabled, true, "held before it is pressed");
+    await pressLabelled(bench, "Clear keyframes");
+    const removed = bench.sent.at(-1) as unknown as { kind: string; token: string; lane?: string };
+    assert.deepEqual([removed.kind, removed.token, removed.lane], ["bench-remove-reference", "Image 2", "keyframe"]);
+  });
+
+  it("the Keyframe lane says references are set and clears them", async () => {
+    const bench = await openBench(both());
+    await pressLabelled(bench, "Keyframe");
+    assert.equal(bench.container.querySelector('[data-testid="bench-keyframes-set"]'), null);
+    assert.match(q(bench, '[data-testid="bench-references-set"]').textContent ?? "", /^1 reference set/);
+    await pressLabelled(bench, "Clear references");
+    const removed = bench.sent.at(-1) as unknown as { kind: string; token: string; lane?: string };
+    assert.deepEqual([removed.kind, removed.token, removed.lane], ["bench-remove-reference", "Image 1", undefined]);
+  });
+
+  it("says nothing and holds nothing while only one set rides", async () => {
+    const bench = await openBench(shotSession("video"));
+    assert.equal(bench.container.querySelector('[data-testid="bench-keyframes-set"]'), null);
+    assert.equal(bench.container.querySelector('[data-testid="bench-lane-clash"]'), null);
+    assert.equal((q(bench, '[data-testid="bench-generate"]') as HTMLButtonElement).disabled, false);
+  });
+});
+
+describe("the clip's length (issue 3197)", () => {
+  it("is a control over the route's lengths, from the shortest that covers the shot, marked where it differs", async () => {
+    // The route's shortest clip is 10s and the shot is 4s: the clip goes as 10s, and says so.
+    const bench = await openBench(shotSession("video"));
+    const length = q(bench, '[data-testid="bench-clip-length"]') as HTMLSelectElement;
+    assert.deepEqual([...length.querySelectorAll("option")].map((option) => option.textContent), ["10s", "12s"]);
+    assert.equal(length.value, "10");
+    assert.equal(q(bench, '[data-testid="bench-clip-authored"]').textContent, "shot 4s");
+    assert.equal(q(bench, '[data-testid="bench-estimate"]').textContent, "~$1.00", "priced at the length that goes");
+
+    await choose(length, "12");
+    assert.deepEqual(lastComposed(bench)?.params, { kind: "video", aspect: "16:9", durationSec: 4, sound: true, clipSec: 12 }, "the shot's length stays the one it covers");
+    assert.equal(q(bench, '[data-testid="bench-estimate"]').textContent, "~$1.20");
+
+    await choose(length, "10");
+    assert.deepEqual(lastComposed(bench)?.params, { kind: "video", aspect: "16:9", durationSec: 4, sound: true }, "the shortest is no choice to keep");
+  });
+
+  it("is the shot's own length, unmarked, where the route makes it", async () => {
+    const bench = await openBench(shotSession("video"), SESSION_ID, (state) => {
+      const model = state.app.manifest!.models.find((candidate) => candidate.id === "test-video")!;
+      model.limits.durations = { "4": "4", "6": "6", "8": "8", "10": "10", "12": "12" };
+    });
+    const length = q(bench, '[data-testid="bench-clip-length"]') as HTMLSelectElement;
+    assert.equal(length.value, "4");
+    assert.deepEqual([...length.querySelectorAll("option")].map((option) => option.textContent), ["4s", "6s", "8s", "10s", "12s"]);
+    assert.equal(bench.container.querySelector('[data-testid="bench-clip-authored"]'), null);
+  });
+
+  it("holds a picked length to what the route now makes", async () => {
+    const session = shotSession("video");
+    const picked = { ...session, composer: { ...session.composer, params: { kind: "video", aspect: "16:9", durationSec: 4, sound: true, clipSec: 30 } } } as unknown as BenchSession;
+    const bench = await openBench(picked);
+    assert.equal((q(bench, '[data-testid="bench-clip-length"]') as HTMLSelectElement).value, "12");
+    assert.equal(q(bench, '[data-testid="bench-estimate"]').textContent, "~$1.20");
   });
 });
