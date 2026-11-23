@@ -113,6 +113,12 @@ it("shot 7's lessons reach the continuity skill: the Cut's end of a clip, and a 
   assert.match(continuity, /Name a hand by what it wears/);
 });
 
+it("the local route's skill knows a face the start frame hides comes out a stranger (shot 5, 2026-11-23)", async () => {
+  const route = (await loadCraftSkill("local-h3-video"))!.body;
+  assert.match(route, /So does a face the start frame hides/);
+  assert.match(route, /When a face turns or rises into view, make the shot on the reference route/);
+});
+
 it("the continuity skill fills the room the place describes, and says who is at a table (the club, 2026-11-23)", async () => {
   // "Nobody else is in the picture", written to keep strangers out of the booth, emptied a busy club in
   // every shot that saw the room.
