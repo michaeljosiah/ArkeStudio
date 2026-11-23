@@ -45,6 +45,9 @@ Check each of these in the last frames of the shot going out and the first frame
 - **Say how the seats face.** When you ask for a view of a place where people sit together, say how the
   seats stand: "two benches facing each other across one low table". Left unsaid, the picture chooses, and
   the next view of the same seats chooses differently.
+- **Name a hand by what it wears.** A picture sorts "left" and "right" by where things sit in the frame, and
+  can swap them. Tie a prop to the hand's mark: "the hand that wears the watch holds the card", not only
+  "his left hand". Then look at which hand it drew.
 
 ## 5 · Look at the cuts in the pictures
 
@@ -52,8 +55,9 @@ Words that match prove nothing about the pictures. When shots have takes, look a
 
 - **Look again each time.** What you saw or said in an earlier turn is not evidence now: takes, frames and the
   cut change, and an earlier reading may have been wrong. Never repeat an earlier finding without looking.
-- **Before you write the next shot, look at the end of the take before it.** Write the new shot's opening
-  from what you see there, not from what the last shot's words say it ends on.
+- **Before you write the next shot, look at the end of the shot before it as the Cut plays it.** The Cut
+  may use only part of a take: look where the Cut ends that clip, not where its take ends. Write the new
+  shot's opening from what you see there, not from what the last shot's words say it ends on.
 - **Answer from the pictures what they can show**: which hand holds the glass, which wrist the bangles are
   on, what is on the table. Never ask the person what a take already shows.
 - **A contact sheet shows no cut.** `cut_contact_sheet` takes one frame from the middle of each shot. Use it

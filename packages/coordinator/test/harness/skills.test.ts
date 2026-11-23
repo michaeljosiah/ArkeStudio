@@ -78,7 +78,7 @@ it("the continuity skill looks before it writes, and does not take an unmeasured
   // Planning shot 11 it asked which wrist the bangles were on, which shot 10's take shows; reviewing
   // ten shots it called three slow, dark shots stills because the export review gave them no figures.
   const body = (await loadCraftSkill("continuity-across-cuts"))!.body;
-  assert.match(body, /Before you write the next shot, look at the end of the take before it/);
+  assert.match(body, /Before you write the next shot, look at the end of the shot before it as the Cut plays it/);
   assert.match(body, /Never ask the person what a take already shows/);
   assert.match(body, /A contact sheet shows no cut/);
   assert.match(body, /A measurement that finds no motion is not a still/);
@@ -93,7 +93,8 @@ it("the film's notes reach the skills: the local route's habits, and the sound a
   assert.match(route, /Quote only the line that is spoken/);
   assert.match(route, /it may invent more words/);
   assert.match(route, /transcribe_audio/);
-  assert.match(route, /his right wrist\s+bare/);
+  assert.match(route, /Keep the other hand out of the shot/);
+  assert.doesNotMatch(route, /his right wrist\s+bare/);
   assert.match(route, /24 frames a second/);
   const sound = (await loadCraftSkill("sound-and-pace"))!.body;
   assert.match(sound, /Turn ducking off for it/);
@@ -102,4 +103,12 @@ it("the film's notes reach the skills: the local route's habits, and the sound a
   const continuity = (await loadCraftSkill("continuity-across-cuts"))!.body;
   assert.match(continuity, /an insert about a second/);
   assert.match(continuity, /Say how the seats face/);
+});
+
+it("shot 7's lessons reach the continuity skill: the Cut's end of a clip, and a hand named by what it wears", async () => {
+  // Arke matched shot 7 to the end of a take the Cut plays for one second, and two frames put the
+  // card in the wrong hand until the card was tied to the hand that wears the watch.
+  const continuity = (await loadCraftSkill("continuity-across-cuts"))!.body;
+  assert.match(continuity, /look where the Cut ends that clip, not where its take ends/);
+  assert.match(continuity, /Name a hand by what it wears/);
 });

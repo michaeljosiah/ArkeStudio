@@ -24,9 +24,14 @@ before you write or change a shot's prompt for this route.
 ## 3 · It completes what the reference hides
 
 - **What the reference shows on one side, it may draw on both.** On the film, a man with a watch on one
-  wrist came out with a watch on each when his other hand came into view.
-- **Say which side it is on and that the other is bare**: "a steel watch on his left wrist; his right wrist
-  bare". Then look for a second one in the take's frames before you accept it.
+  wrist came out with a watch on each, three takes in a row, the moment his other hand came into view.
+  Writing that the other wrist was bare did not stop it, and neither did a start frame that showed that
+  forearm.
+- **Keep the other hand out of the shot.** Let the hand that wears the mark do everything. End the shot
+  before the other hand would show, or move the action that needs it into a closer shot that cannot see it.
+  Name the mark once: every "bare" and "no watch" is one more mention of a watch.
+- **Look for a second one before you accept a take**, in the shadows too. On the film the second watch was
+  small and dark, at the man's knee.
 
 ## 4 · It makes 24 frames a second
 

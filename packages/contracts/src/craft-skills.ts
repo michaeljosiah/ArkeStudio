@@ -34,7 +34,10 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // v5: an insert lasts about a second, and a view of shared seats says how they face (the owner's
     // notes on the film, 2026-11-22: a two-second card insert dragged, and a view left to choose drew
     // a corner seat where the next view had two benches).
-    version: 5,
+    // v6: match the shot before as the Cut plays it, and name a hand by what it wears (0.5.131, shot 7:
+    // it matched the end of a take the Cut cuts at one second, and two frames put the card in the
+    // wrong hand until the card was tied to "the hand that wears the watch").
+    version: 6,
     title: "Continuity across cuts",
     when: "before you plan, review or change a shot beside one that has a take, and before you review a cut",
     bodyPath: "continuity-across-cuts.md",
@@ -42,8 +45,10 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
   {
     // What the local route did on the film (2026-11-21/22): it spoke a sentence of feeling written in
     // the prompt, invented talk after a line, and put a watch on both wrists.
+    // v2: v1 said to name the bare wrist, which take 7d had already disproved; three takes drew the second
+    // watch once the other hand showed, and what held was keeping that hand out of the shot.
     id: "local-h3-video",
-    version: 1,
+    version: 2,
     title: "Writing for local H3 Reference Video",
     when: "before you write or change a shot's prompt for the local H3 Reference Video route",
     bodyPath: "local-h3-video.md",
