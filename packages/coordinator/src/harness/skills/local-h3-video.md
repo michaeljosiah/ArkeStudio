@@ -1,7 +1,8 @@
 # Writing for local H3 Reference Video
 
-What the local H3 Reference Video route does with a prompt, learned making a film scene with it. Read this
-before you write or change a shot's prompt for this route.
+What the local H3 Reference Video route does with a prompt, learned making a film scene with it, and where its
+first-frame sibling, Local · H3 Video, differs (section 5). Read this before you write or change a shot's prompt
+for either route.
 
 ## 1 · It speaks what it can read
 
@@ -43,3 +44,15 @@ before you write or change a shot's prompt for this route.
 - Its clips run at 24 frames a second. In a Cut at 30 frames a second, movement in them judders a little.
   Say so when you place them. Redrawing does not fix it; only the Cut's own frame rate does, and that is
   the person's decision.
+
+## 5 · The first-frame route, Local · H3 Video
+
+- **It opens on the shot's start frame, exactly.** The reference route draws an opening that only looks like
+  its pictures. So a shot that must open in the pose the last shot ends on, seen from a new angle, is made
+  here: draw its start frame in that pose, then make the clip from it. On the film, a man folded over the table
+  at the end of one shot opened the next, from behind his friend, in the same fold.
+- **It takes 2,000 characters at most**; the reference route takes 8,000. A clip made from a shot's page sends
+  the shot's wording as its prompt, so keep a shot meant for this route under 2,000 characters, or it cannot be
+  sent until someone cuts it. On the film two shots ran over, at 2,007 and 2,561.
+- **It holds the frame a moment before anything moves**: about three quarters of a second on the film. Start
+  the clip in the Cut just before the movement begins, so the cut falls on it.
