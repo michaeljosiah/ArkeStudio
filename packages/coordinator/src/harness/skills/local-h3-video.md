@@ -20,6 +20,11 @@ before you write or change a shot's prompt for this route.
 - **Check before you accept a take.** Call `transcribe_audio` on the take after the line ends, and
   `sample_video` there with a region round the mouths. No words heard is not proof of silence; a mouth
   moving with no line is a failed take, not a detail.
+- **It says the line again, in its own way.** It does not play the voice you give it: it speaks the line
+  anew in that voice, and can get the words wrong. On the film, "I am enjoying the company" came out as
+  "I am in drunk-guide". Read the words `transcribe_audio` gives for the line itself, not only whether
+  speech is there. When the words are wrong but the mouth keeps the line's timing, play the shot's own
+  voice line under the picture in the Cut instead of the take's sound.
 
 ## 3 · It completes what the reference hides
 

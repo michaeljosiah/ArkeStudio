@@ -47,8 +47,9 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // the prompt, invented talk after a line, and put a watch on both wrists.
     // v2: v1 said to name the bare wrist, which take 7d had already disproved; three takes drew the second
     // watch once the other hand showed, and what held was keeping that hand out of the shot.
+    // v3: it speaks the line anew rather than playing the voice given, and garbled one (shot 8, 2026-11-23).
     id: "local-h3-video",
-    version: 2,
+    version: 3,
     title: "Writing for local H3 Reference Video",
     when: "before you write or change a shot's prompt for the local H3 Reference Video route",
     bodyPath: "local-h3-video.md",
