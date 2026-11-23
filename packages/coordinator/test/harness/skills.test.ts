@@ -125,5 +125,16 @@ it("the local route's skill knows the first-frame sibling: an exact opening, and
   const route = (await loadCraftSkill("local-h3-video"))!.body;
   assert.match(route, /It opens on the shot's start frame, exactly/);
   assert.match(route, /It takes 2,000 characters at most/);
-  assert.match(route, /Start\s+the clip in the Cut just before the movement begins/);
+  assert.match(route, /start the clip in the Cut just before it/);
+});
+
+it("the local route's skill knows who comes out a stranger, and where a crossing walks (shots 10 and 11, 2026-11-23)", async () => {
+  // Shot 10's first-frame take gave Ife another dress and build; the reference take kept her look and the
+  // glass at the cut but walked her through the foreground; a closer shot of its own kept her behind him.
+  const route = (await loadCraftSkill("local-h3-video"))!.body;
+  assert.match(route, /Someone who is not in the start frame comes out a stranger on the first-frame route/);
+  assert.match(route, /Make such a shot on the reference route/);
+  assert.match(route, /may walk through the foreground/);
+  assert.match(route, /split the shot/);
+  assert.match(route, /none on another/);
 });
