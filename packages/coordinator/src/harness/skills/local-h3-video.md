@@ -1,8 +1,8 @@
 # Writing for local H3 Reference Video
 
 What the local H3 Reference Video route does with a prompt, learned making a film scene with it, and where its
-first-frame sibling, Local · H3 Video, differs (section 5). Read this before you write or change a shot's prompt
-for either route.
+first-frame sibling, Local · H3 Video, differs (section 5), and which to use when someone comes into the shot
+(section 6). Read this before you write or change a shot's prompt for either route.
 
 ## 1 · It speaks what it can read
 
@@ -54,5 +54,24 @@ for either route.
 - **It takes 2,000 characters at most**; the reference route takes 8,000. A clip made from a shot's page sends
   the shot's wording as its prompt, so keep a shot meant for this route under 2,000 characters, or it cannot be
   sent until someone cuts it. On the film two shots ran over, at 2,007 and 2,561.
-- **It holds the frame a moment before anything moves**: about three quarters of a second on the film. Start
-  the clip in the Cut just before the movement begins, so the cut falls on it.
+- **It can hold the frame a moment before anything moves**: about three quarters of a second on one shot of the
+  film, none on another, where a hand already moving in the frame carried straight on. Look where the movement
+  begins, and start the clip in the Cut just before it, so the cut falls on it.
+
+## 6 · People who come into the shot
+
+- **Someone who is not in the start frame comes out a stranger on the first-frame route.** Only the frame rides,
+  so a person who enters later is drawn from the words alone. On the film a woman who crosses behind a man came
+  out in another dress, with another build.
+- **Make such a shot on the reference route**, where that person's own picture rides with the shot's start frame
+  and the others. It opens near the start frame, not on it: on the film once close enough to hold a matched cut,
+  the glass in the same hand at the same height, and once it lost the glass the frame showed. Compare its first
+  frames with the end of the shot before, as you would any cut.
+- **On the reference route a person crossing a medium shot may walk through the foreground**, between the camera
+  and the table, instead of behind the one you are on. On the film, a shot a step closer, where the only open
+  floor was behind his shoulder, kept her there.
+- **When the opening and the entrance pull different ways, split the shot.** End the first where it still
+  holds, before anyone comes in, and give the entrance a closer shot of its own on the reference route. The
+  step in size makes it read as the camera moving in, not a jump.
+- **Draw the start frame of an entrance shot before the person is in it.** A frame drawn from wording that
+  says someone crosses "within the first second" may show them already there, walking away.
