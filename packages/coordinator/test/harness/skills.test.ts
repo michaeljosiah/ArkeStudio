@@ -112,3 +112,9 @@ it("shot 7's lessons reach the continuity skill: the Cut's end of a clip, and a 
   assert.match(continuity, /look where the Cut ends that clip, not where its take ends/);
   assert.match(continuity, /Name a hand by what it wears/);
 });
+
+it("the local route's skill says it speaks a line anew and can garble it (shot 8, 2026-11-23)", async () => {
+  const route = (await loadCraftSkill("local-h3-video"))!.body;
+  assert.match(route, /It says the line again, in its own way/);
+  assert.match(route, /play the shot's own\s+voice line under the picture/);
+});
