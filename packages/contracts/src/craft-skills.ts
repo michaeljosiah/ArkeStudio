@@ -57,8 +57,10 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // reference route kept her look and, with the start frame riding, the glass at the cut; a tighter shot
     // kept her crossing behind him; the first-frame route does not always hold before moving (shots 10 and
     // 11, 2026-11-23).
+    // v6: a face the start frame hides comes out a stranger on the first-frame route, as an entrant does
+    // (shot 5, 2026-11-23: Ade lifted his head from the table into another man's face).
     id: "local-h3-video",
-    version: 5,
+    version: 6,
     title: "Writing for local H3 Reference Video",
     when: "before you write or change a shot's prompt for either local H3 video route (Reference Video, or the first-frame H3 Video)",
     bodyPath: "local-h3-video.md",

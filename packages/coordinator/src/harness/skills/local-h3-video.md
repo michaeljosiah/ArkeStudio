@@ -63,6 +63,9 @@ first-frame sibling, Local · H3 Video, differs (section 5), and which to use wh
 - **Someone who is not in the start frame comes out a stranger on the first-frame route.** Only the frame rides,
   so a person who enters later is drawn from the words alone. On the film a woman who crosses behind a man came
   out in another dress, with another build.
+- **So does a face the start frame hides.** A man folded over a table, face down in the frame, lifted his head
+  into a stranger's face: rounder, a fuller beard, no grey. The same route had drawn him well once, by luck.
+  When a face turns or rises into view, make the shot on the reference route.
 - **Make such a shot on the reference route**, where that person's own picture rides with the shot's start frame
   and the others. It opens near the start frame, not on it: on the film once close enough to hold a matched cut,
   the glass in the same hand at the same height, and once it lost the glass the frame showed. Compare its first
