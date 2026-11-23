@@ -48,10 +48,12 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // v2: v1 said to name the bare wrist, which take 7d had already disproved; three takes drew the second
     // watch once the other hand showed, and what held was keeping that hand out of the shot.
     // v3: it speaks the line anew rather than playing the voice given, and garbled one (shot 8, 2026-11-23).
+    // v4: the first-frame sibling opens on the start frame exactly and takes 2,000 characters (shot 5,
+    // 2026-11-23: the same moment from a new angle matched there, and Arke's wording ran to 2,007).
     id: "local-h3-video",
-    version: 3,
+    version: 4,
     title: "Writing for local H3 Reference Video",
-    when: "before you write or change a shot's prompt for the local H3 Reference Video route",
+    when: "before you write or change a shot's prompt for either local H3 video route (Reference Video, or the first-frame H3 Video)",
     bodyPath: "local-h3-video.md",
   },
   {

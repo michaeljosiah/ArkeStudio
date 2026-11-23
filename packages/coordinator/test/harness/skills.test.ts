@@ -118,3 +118,12 @@ it("the local route's skill says it speaks a line anew and can garble it (shot 8
   assert.match(route, /It says the line again, in its own way/);
   assert.match(route, /play the shot's own\s+voice line under the picture/);
 });
+
+it("the local route's skill knows the first-frame sibling: an exact opening, and 2,000 characters (shot 5, 2026-11-23)", async () => {
+  // Shot 5 matched shot 4's last pose from a new angle only because the first-frame route opens on the drawn
+  // frame; Arke's wording for it ran to 2,007 characters, which that route refuses to send.
+  const route = (await loadCraftSkill("local-h3-video"))!.body;
+  assert.match(route, /It opens on the shot's start frame, exactly/);
+  assert.match(route, /It takes 2,000 characters at most/);
+  assert.match(route, /Start\s+the clip in the Cut just before the movement begins/);
+});
