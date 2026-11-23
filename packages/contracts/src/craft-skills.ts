@@ -37,7 +37,10 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // v6: match the shot before as the Cut plays it, and name a hand by what it wears (0.5.131, shot 7:
     // it matched the end of a take the Cut cuts at one second, and two frames put the card in the
     // wrong hand until the card was tied to "the hand that wears the watch").
-    version: 6,
+    // v7: fill the room the place describes, and say who is at a table rather than who is missing (the
+    // film's club, 2026-11-23: "Nobody else is in the picture", written to keep strangers out of the booth,
+    // emptied the whole room in every shot; with the crowd written in, the same empty view drew it full).
+    version: 7,
     title: "Continuity across cuts",
     when: "before you plan, review or change a shot beside one that has a take, and before you review a cut",
     bodyPath: "continuity-across-cuts.md",

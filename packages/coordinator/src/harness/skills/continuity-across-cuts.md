@@ -20,7 +20,7 @@ Check each of these in the last frames of the shot going out and the first frame
 - **The props**: which ones, where they stand, how full, how many. A glass is the same glass, the same size.
 - **Clothes and hair**: a collar open in one shot is open in the next.
 - **The room behind them**: a camera looking the same way sees the same background. A wall behind someone
-  in the wide shot is a wall behind them in their close shot.
+  in the wide shot is a wall behind them in their close shot. A full floor in one shot is full in the next.
 - **The light**: where it comes from, and how bright.
 - **The direction of movement**: someone who leaves frame right comes in frame left.
 
@@ -48,6 +48,17 @@ Check each of these in the last frames of the shot going out and the first frame
 - **Name a hand by what it wears.** A picture sorts "left" and "right" by where things sit in the frame, and
   can swap them. Tie a prop to the hand's mark: "the hand that wears the watch holds the card", not only
   "his left hand". Then look at which hand it drew.
+- **Fill the room the place describes.** A place's views are drawn empty, so that every shot from one camera
+  position shares one room. The people in it come only from the shot's words. Write the place's crowd into
+  every shot that sees the room, and the same crowd from each position: who is on the floor, at the bar, at
+  the other tables.
+- **Say who is at the table, not who is missing.** To keep strangers out of a table, write "the only people
+  at this table are Tunde and Ade", never "nobody else is in the picture". A picture reads that as the whole
+  room: every shot of a busy club came out closed.
+- **Keep a lane where someone must be seen.** When a person has to pass behind someone and be read, keep that
+  strip clear in the words, with the crowd beyond it.
+- **A crowd brings strangers.** Look at each frame for someone near the table who wears what marks one of the
+  cast: a watch, bangles.
 
 ## 5 · Look at the cuts in the pictures
 
