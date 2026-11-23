@@ -119,6 +119,13 @@ it("the local route's skill knows a face the start frame hides comes out a stran
   assert.match(route, /When a face turns or rises into view, make the shot on the reference route/);
 });
 
+it("the continuity skill names in the first frame only who is in it (She sits, 2026-11-23)", async () => {
+  const continuity = (await loadCraftSkill("continuity-across-cuts"))!.body;
+  assert.match(continuity, /Name in the first frame only who is in it/);
+  assert.match(continuity, /Place the camera without naming him/);
+  assert.match(continuity, /leave them out of the first frame's words\s+entirely, their clothes too/);
+});
+
 it("the continuity skill fills the room the place describes, and says who is at a table (the club, 2026-11-23)", async () => {
   // "Nobody else is in the picture", written to keep strangers out of the booth, emptied a busy club in
   // every shot that saw the room.

@@ -59,6 +59,11 @@ Check each of these in the last frames of the shot going out and the first frame
   strip clear in the words, with the crowd beyond it.
 - **A crowd brings strangers.** Look at each frame for someone near the table who wears what marks one of the
   cast: a watch, bangles.
+- **Name in the first frame only who is in it.** Every person a shot's words name rides with its frame as a
+  picture, and the picture draws them in. A shot looking across the room "from Ade's seat", with him out of
+  frame, put a man in his white shirt and watch at her table. Place the camera without naming him: "from the
+  booth's end seat". When someone enters after the first frame, leave them out of the first frame's words
+  entirely, their clothes too: "the only gold in the room is what she wears" drew a woman in gold walking in.
 
 ## 5 · Look at the cuts in the pictures
 

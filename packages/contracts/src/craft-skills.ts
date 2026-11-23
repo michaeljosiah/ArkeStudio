@@ -40,7 +40,9 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // v7: fill the room the place describes, and say who is at a table rather than who is missing (the
     // film's club, 2026-11-23: "Nobody else is in the picture", written to keep strangers out of the booth,
     // emptied the whole room in every shot; with the crowd written in, the same empty view drew it full).
-    version: 7,
+    // v8: name in the first frame only who is in it ("She sits", 2026-11-23: "from Ade's seat" put a man in his
+    // white shirt and watch at her table, and her clothes in the crowd line drew her in before she entered).
+    version: 8,
     title: "Continuity across cuts",
     when: "before you plan, review or change a shot beside one that has a take, and before you review a cut",
     bodyPath: "continuity-across-cuts.md",
