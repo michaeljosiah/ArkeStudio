@@ -11,6 +11,10 @@ first-frame sibling, Local · H3 Video, differs (section 5), and which to use wh
 - **Quote only the line that is spoken**, word for word from the script. Write a feeling as what the face
   and body do: "he smiles and looks down at his glass". Never write a sentence of what someone feels or
   thinks, and never a line the script does not have, even as an example.
+- **Quote the line whole in a shot that speaks.** A voice line riding is not enough. On the film, a shot whose
+  words only said how a man delivered his line ("with total seriousness") gave him words of its own over the
+  voice line, with his lips on them. With the line quoted whole, the same shot spoke it on the voice line's
+  own timing.
 
 ## 2 · It fills silence with talk
 
@@ -26,6 +30,12 @@ first-frame sibling, Local · H3 Video, differs (section 5), and which to use wh
   "I am in drunk-guide". Read the words `transcribe_audio` gives for the line itself, not only whether
   speech is there. When the words are wrong but the mouth keeps the line's timing, play the shot's own
   voice line under the picture in the Cut instead of the take's sound.
+- **It keeps the voice line's timing, its silences too.** So a beat inside a line with no words in it, a face
+  pulled or a look, is made by cutting that silence into the voice line before the clip is made. On the film a
+  pause of 1.25 seconds after "like this" gave a man a second of a goat's face, his mouth shut, before the
+  rest of the line. It may make a small sound in that silence: play the voice line under the picture.
+- **Its sound may carry music.** On the film, a take for a lull between songs had the club's drum under it.
+  Before you play a take's own sound, listen for music and for talk; play another take's room if it has either.
 
 ## 3 · It completes what the reference hides
 

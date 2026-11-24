@@ -19,6 +19,10 @@ mix, or the length of a clip.
 - **A mouth moving with no line heard is the first thing a viewer notices.** Never leave one in the cut.
 - If a take keeps talking after its line, cut it where the line ends, or use another take. If the picture
   must run on, cut to someone listening.
+- **If a take starts talking before its line, start the line there.** A wide that opens a conversation may show
+  a mouth moving before the first line. Rather than cutting the wide to a flash, start the line under the wide
+  where the mouth starts, and cut into the close shot in the middle of the sentence. Start the close shot's
+  picture that much later into its take, so its lips stay on the words.
 - Look for it at the end of every shot with a line: `sample_video` on the last second, with a region round
   the mouths.
 

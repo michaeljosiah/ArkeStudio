@@ -47,7 +47,9 @@ Check each of these in the last frames of the shot going out and the first frame
   the next view of the same seats chooses differently.
 - **Name a hand by what it wears.** A picture sorts "left" and "right" by where things sit in the frame, and
   can swap them. Tie a prop to the hand's mark: "the hand that wears the watch holds the card", not only
-  "his left hand". Then look at which hand it drew.
+  "his left hand". Then look at which hand it drew. Seen from the side, say where the hand is too: "his near
+  hand, the one nearest the camera, which wears the watch, holds the glass". Named by the watch alone, the glass
+  went to the far hand twice, with the watch on the near wrist at his knee.
 - **Fill the room the place describes.** A place's views are drawn empty, so that every shot from one camera
   position shares one room. The people in it come only from the shot's words. Write the place's crowd into
   every shot that sees the room, and the same crowd from each position: who is on the floor, at the bar, at
