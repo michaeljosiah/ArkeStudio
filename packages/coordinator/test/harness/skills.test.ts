@@ -126,6 +126,21 @@ it("the continuity skill names in the first frame only who is in it (She sits, 2
   assert.match(continuity, /leave them out of the first frame's words\s+entirely, their clothes too/);
 });
 
+it("the owner's notes of 2026-11-24 reach the skills: a quoted line, a pause in the voice line, a near hand", async () => {
+  // Shot 4 gave Tunde words of its own until its line was quoted whole; the goat's face got its second from a pause cut
+  // into the voice line; a wide put Ade's glass in his far hand twice until the hand was named by where it is.
+  const route = (await loadCraftSkill("local-h3-video"))!.body;
+  assert.match(route, /Quote the line whole in a shot that speaks/);
+  assert.match(route, /It keeps the voice line's timing, its silences too/);
+  assert.match(route, /cutting that silence into the voice line before the clip is made/);
+  assert.match(route, /Its sound may carry music/);
+  const continuity = (await loadCraftSkill("continuity-across-cuts"))!.body;
+  assert.match(continuity, /his near\s+hand, the one nearest the camera, which wears the watch, holds the glass/);
+  const sound = (await loadCraftSkill("sound-and-pace"))!.body;
+  assert.match(sound, /If a take starts talking before its line, start the line there/);
+  assert.match(sound, /Start the close shot's\s+picture that much later into its take/);
+});
+
 it("the continuity skill fills the room the place describes, and says who is at a table (the club, 2026-11-23)", async () => {
   // "Nobody else is in the picture", written to keep strangers out of the booth, emptied a busy club in
   // every shot that saw the room.

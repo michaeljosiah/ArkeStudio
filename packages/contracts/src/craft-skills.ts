@@ -42,7 +42,9 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // emptied the whole room in every shot; with the crowd written in, the same empty view drew it full).
     // v8: name in the first frame only who is in it ("She sits", 2026-11-23: "from Ade's seat" put a man in his
     // white shirt and watch at her table, and her clothes in the crowd line drew her in before she entered).
-    version: 8,
+    // v9: seen from the side, name a hand by where it is as well as what it wears (the owner's notes, 2026-11-24: a
+    // wide put Ade's glass in his far hand twice, the watch on the near wrist, until "his near hand" was written).
+    version: 9,
     title: "Continuity across cuts",
     when: "before you plan, review or change a shot beside one that has a take, and before you review a cut",
     bodyPath: "continuity-across-cuts.md",
@@ -61,8 +63,11 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // 11, 2026-11-23).
     // v6: a face the start frame hides comes out a stranger on the first-frame route, as an entrant does
     // (shot 5, 2026-11-23: Ade lifted his head from the table into another man's face).
+    // v7: quote a spoken line whole, a silence cut into the voice line holds a wordless beat, and a take's sound
+    // may carry music (the owner's notes, 2026-11-24: shot 4 invented words until its line was quoted; the goat's
+    // face got its second from a 1.25 s pause; the lull's take had the club's drum under it).
     id: "local-h3-video",
-    version: 6,
+    version: 7,
     title: "Writing for local H3 Reference Video",
     when: "before you write or change a shot's prompt for either local H3 video route (Reference Video, or the first-frame H3 Video)",
     bodyPath: "local-h3-video.md",
@@ -70,8 +75,10 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
   {
     // The owner's notes on the film's cut (2026-11-22): the club's music pumped with ducking, a shot
     // left a mouth moving with no line, and an insert held too long.
+    // v2: a take that talks before its line gets the line started under it, and the close shot cut in mid-sentence
+    // (the owner's notes, 2026-11-24: the opening wide talked from 0.72 s; the goat line now starts there).
     id: "sound-and-pace",
-    version: 1,
+    version: 2,
     title: "Sound and pace in the cut",
     when: "before you change the Cut's music or mix, or the length of a clip",
     bodyPath: "sound-and-pace.md",
