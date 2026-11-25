@@ -1754,8 +1754,19 @@ export function modelActionFields(schema: z.ZodTypeAny): readonly ModelActionFie
   return fieldsFor(schema);
 }
 
+/**
+ * One internal preparation shape as its callers read it. Named because the type these lookups
+ * inferred, a union of every entry with its payload schema, outgrew what the engine's declaration
+ * build will write out (TS7056): main's Engine package check was red from 2026-11-20 while
+ * typecheck and every test passed.
+ */
+export type WorldChatActionDescriptor = SupportedMetadata & {
+  readonly kind: string;
+  readonly schema: z.ZodTypeAny;
+};
+
 /** The prepared-action descriptor behind one model action kind, keyed as the model sends it. */
-export function worldChatActionDescriptor(modelKind: string) {
+export function worldChatActionDescriptor(modelKind: string): WorldChatActionDescriptor | undefined {
   const key = modelKind === "production-audio-studio-propose" ? "world-chat-audio-studio-proposal" : modelKind === "production-pictures-propose" ? "world-chat-picture-proposal" : modelKind === "production-transitions-propose" ? "world-chat-transition-proposal" : modelKind === "production-audio-edit" ? "world-chat-editor-request" : modelKind === "production-effects-propose" ? "world-chat-effect-proposal" : `world-chat-${modelKind}`;
   return Object.prototype.hasOwnProperty.call(WORLD_CHAT_ACTION_REGISTRY, key)
     ? WORLD_CHAT_ACTION_REGISTRY[key as keyof typeof WORLD_CHAT_ACTION_REGISTRY]
@@ -1859,7 +1870,7 @@ export function findArkeClientCommand(kind: string): ArkeClientCommandDescriptor
     : undefined;
 }
 
-export function findArkeAction(kind: string) {
+export function findArkeAction(kind: string): ArkeClientCommandDescriptor | WorldChatActionDescriptor | undefined {
   const client = findArkeClientCommand(kind);
   if (client) return client;
   return Object.prototype.hasOwnProperty.call(WORLD_CHAT_ACTION_REGISTRY, kind)
