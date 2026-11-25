@@ -37,7 +37,26 @@ export function approveConversationGroup(port: GroupApprovalPort, turnId: string
           await port.changed(signal);
           snapshot = port.read();
         }
-        const answer = await port.decide(member, snapshot.seq, ulid());
+        let answer = await port.decide(member, snapshot.seq, ulid());
+        /*
+         * A press made as Arke's turn ends is refused for the conversation's position alone: the turn's
+         * summary is written a few seconds after its cards, and on 0.5.141 Approve all on a board card said
+         * "0 approved · 1 left. The conversation changed." with nothing on the card changed. As a single
+         * card's Approve does (PR 3309), it waits for the newer position and sends once more, only while
+         * the card is still the one shown.
+         */
+        if (answer.disposition === "refused" && answer.reason === "sequence-mismatch") {
+          const pressedAt = snapshot.seq;
+          let latest = port.read();
+          while (latest && latest.worldId === initial!.worldId && latest.conversationId === initial!.conversationId && latest.seq <= pressedAt) {
+            await port.changed(signal);
+            latest = port.read();
+          }
+          if (!latest || latest.worldId !== initial!.worldId || latest.conversationId !== initial!.conversationId) return finish("The conversation changed.");
+          const again = latest.actions.find(action => action.actionId === member.actionId);
+          if (!again || again.status !== "pending" || again.previewDigest !== member.previewDigest || !groupApprovalEligible(again)) return finish("A card changed. Review the remaining cards.");
+          answer = await port.decide(member, latest.seq, ulid());
+        }
         if (answer.disposition !== "recorded" || answer.decision !== "approve") return finish(answer.detail ?? "A card was refused.");
         approved++;
         if (answer.status === "failed" || answer.status === "stale" || answer.status === "cancelled") return finish("An approved action did not complete.");
