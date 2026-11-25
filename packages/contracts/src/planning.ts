@@ -644,16 +644,18 @@ export function assembleBoardPrompt(input: {
     }),
   );
   // A board is still imagery. The look is writer context, not a repeated cell instruction.
-  const context = [
-    location?.name,
-    input.scene.inherits?.timeOfDay,
-    input.scene.defaults?.lighting,
-    input.aspect,
-    ...contexts.flatMap((blocks) => [blocks.spatial, blocks.standing]),
-  ].filter((part, index, all): part is string =>
-    typeof part === "string" && part.trim().length > 0 && all.indexOf(part) === index,
-  );
-  const head = `${context.join(", ")}. Continuous cast, light and grade across every cell.`;
+  const unique = (parts: ReadonlyArray<string | undefined>) => parts.map((part) => part?.trim() ?? "")
+    .filter((part, index, all) => part.length > 0 && all.indexOf(part) === index);
+  const setting = unique([location?.name, input.scene.inherits?.timeOfDay, input.scene.defaults?.lighting, input.aspect]);
+  /*
+   * Who and what stands across the board, each sentence once, as a pass states it (assemblePassBlocks).
+   * A shot's standing lists its sheets in the order it cites them, so two shots naming the same people
+   * in another order were two strings: Gold on Gold's board 15–17 on 0.5.141 described the club and Ade
+   * twice over, joined to the setting with ".," and ending "Early forties..".
+   */
+  const standing = unique(contexts.flatMap((blocks) => [blocks.spatial, ...blocks.standing.split(/(?<=\.)\s+/)]));
+  const head = [setting.length > 0 ? `${setting.join(", ")}.` : "", ...standing, "Continuous cast, light and grade across every cell."]
+    .filter((part) => part.length > 0).join(" ").replace(/\.\.(?=\s|$)/g, ".");
   const beats = input.shots.map((shot, index) => {
     if (shot.promptOverride && shot.promptOverride.capability !== "video") return `${index + 1}. ${shot.promptOverride.text}`;
     const blocks = contexts[index]!;
