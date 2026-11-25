@@ -341,6 +341,40 @@ export function routingFence(production: ProductionBundle | undefined): string {
   return fence(production?.routing ?? null, production?.routing?.version ?? "absent");
 }
 
+/*
+ * A scene's shots, stage and boards reads each have their own fence, and a change that cites one
+ * is checked against it again when it is prepared. Those three had no fence to check against, so
+ * a change that cited any of them was refused as "no longer current" with nothing changed: on
+ * 0.5.140 Arke read Gold on Gold's boards, prepared the board target, a split and three shot
+ * rewrites, and lost the whole turn. Each fence is computed here, once, for the read and the check.
+ */
+export function shotsFence(production: ProductionBundle | undefined, sceneId: string): string {
+  const scene = sceneOf(production, sceneId);
+  return fence(scene ? orderedShots(scene) : [], scene?.version ?? "absent");
+}
+
+function stageRows(scene: SceneRecord | undefined): Row[] {
+  return scene ? [
+    { key: "blocking", value: { kind: "scene-blocking", blocking: scene.blocking ?? null } },
+    ...orderedShots(scene).map((shot, index) => ({ key: `shot:${padded(index)}:${shot.id}`, value: { kind: "shot-staging", shotId: shot.id, staging: shot.staging ?? null } })),
+  ] : [];
+}
+
+export function stageFence(production: ProductionBundle | undefined, sceneId: string): string {
+  const scene = sceneOf(production, sceneId);
+  return fence(stageRows(scene).map((row) => row.value), scene?.version ?? "absent");
+}
+
+/**
+ * The boards read, fenced on what is authored: the board controls, the compiled board and the
+ * storyboard, at the scene's version. Not on the packed boards, which the route's limits shape and
+ * which the check of a cited read cannot reach.
+ */
+export function boardsFence(production: ProductionBundle | undefined, sceneId: string): string {
+  const scene = sceneOf(production, sceneId);
+  return fence(scene ? { controls: scene.boards ?? null, board: scene.board ?? null, storyboard: scene.storyboard ?? null } : null, scene?.version ?? "absent");
+}
+
 export function sceneFence(production: ProductionBundle | undefined, sceneId: string): string {
   const scene = sceneOf(production, sceneId);
   return fence(scene ?? null, scene?.version ?? "absent");
@@ -1179,7 +1213,7 @@ export class WorldChatTargetReads {
         const shots = scene ? orderedShots(scene) : [];
         readTarget = target("shots", `${sceneTargetId(productionId, sceneId)}:shots`);
         rows = shots.map((shot, index) => ({ key: `${padded(index)}:${shot.id}`, value: shot }));
-        revisionOrDigest = fence(shots, scene?.version ?? "absent");
+        revisionOrDigest = shotsFence(productionOf(bundle, productionId), sceneId);
         break;
       }
       case "get_scene_stage": {
@@ -1188,13 +1222,8 @@ export class WorldChatTargetReads {
         const sceneId = requireString(args, "sceneId");
         const scene = sceneOf(productionOf(bundle, productionId), sceneId);
         readTarget = target("stage", `${sceneTargetId(productionId, sceneId)}:stage`);
-        rows = scene
-          ? [
-              { key: "blocking", value: { kind: "scene-blocking", blocking: scene.blocking ?? null } },
-              ...orderedShots(scene).map((shot, index) => ({ key: `shot:${padded(index)}:${shot.id}`, value: { kind: "shot-staging", shotId: shot.id, staging: shot.staging ?? null } })),
-            ]
-          : [];
-        revisionOrDigest = fence(rows.map((row) => row.value), scene?.version ?? "absent");
+        rows = stageRows(scene);
+        revisionOrDigest = stageFence(productionOf(bundle, productionId), sceneId);
         break;
       }
       case "get_scene_boards": {
@@ -1209,7 +1238,7 @@ export class WorldChatTargetReads {
         const limits = scene && production && this.deps.getBoardLimits ? await this.deps.getBoardLimits(productionId) : undefined;
         rows = scene ? [{ key: "boards", value: { controls: scene.boards ?? null, board: scene.board ?? null, storyboard: scene.storyboard ?? null,
           packed: production && limits !== undefined ? packedBoardsRead(scene, production, bundle.sheets, limits) : null } }] : [];
-        revisionOrDigest = fence(rows.map((row) => row.value), scene?.version ?? "absent");
+        revisionOrDigest = boardsFence(production, sceneId);
         break;
       }
       case "list_takes": {
