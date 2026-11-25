@@ -40,6 +40,17 @@ Check each of these in the last frames of the shot going out and the first frame
   stops leaves nowhere to cut.
 - **End while it is still moving.** A generated clip slows as it ends. End each shot with its movement still
   going, so the slowing is trimmed away rather than cut into.
+- **Leave room to split the cut.** Write each dialogue shot to open on the speaker listening for a beat
+  before the line, and to hold their face for a beat after it. Those beats are what the cut runs the other
+  person's words over (the sound-and-pace skill says how). A shot that starts on its first word and stops on
+  its last can only be cut straight.
+- **Move the camera as the production does.** Unless the production's look says otherwise, the camera is
+  handheld at eye level: it breathes, drifts a little, and eases a few centimetres closer on the beat that
+  matters. To stop a model moving the camera on its own, name what it must not do ("no orbit, no zoom, no
+  cut inside the shot") and keep the handheld. Never write "locked off" or "does not move" to do it: on the
+  film, about fifty clips made that way drifted a few pixels, never breathed, and the owner asked where the
+  camera movement was. Hold the camera still only where stillness is the point: a composed wide, an empty
+  room, a screen to be read.
 - **Carry the state forward.** When a take is accepted, write its end into the next shot: who is where and
   how, where each person looks, what each hand holds, what is on the table and where.
 - **Say how the seats face.** When you ask for a view of a place where people sit together, say how the
@@ -97,6 +108,10 @@ How to judge:
 - **Two still frames cannot show movement.** A pose, a hand, a prop or a room that differs across a matched
   cut is a mismatch. Never explain it away as movement nobody saw.
 - Say what the frames cannot show: the movement between them, and lip sync, need the clip itself.
+- **Say whether each camera does what its shot asked**: still, handheld, easing closer. Look at frames
+  spread across the shot, not only its first and last: a handheld can sway and come back to where it
+  began. A shot whose frames all frame the room alike did not move; one asked to ease closer that ends no
+  closer did not.
 - **A measurement that finds no motion is not a still.** `review_export` and `clip_quality` give no motion
   figures for a shot that changes too little between frames to measure, and slow movement in a dark room can
   read that way. Never say a shot does not move from that alone: look at its first and last frames.

@@ -1,7 +1,7 @@
 # Sound and pace in the cut
 
-How a picture editor and a sound mixer finish a scene's cut. Read this before you change the Cut's music or
-mix, or the length of a clip.
+How a picture editor and a sound mixer finish a scene's cut. Read this before you change the Cut's music,
+mix or effects, or where a clip starts and ends.
 
 ## 1 · Music the room plays
 
@@ -32,3 +32,41 @@ mix, or the length of a clip.
   shows, then back to the people. Two seconds is the most, and only when the thing shown changes.
 - **A shot holds while it is telling something.** Cut out when its beat has landed: the line said and
   answered, the look given, the movement finished. A shot that runs on after that is where a scene slows.
+
+## 4 · Split the cuts in a conversation
+
+A line need not stop at its own cut. The voice sits on its own track: trim the picture, never the line.
+
+- **Run the last words over the listener.** Cut to the person hearing a line on its last two or three
+  words, so their face takes it in (an L-cut). Leave at least a quarter of a second before they answer.
+- **Start an interruption under the shot before.** When someone cuts in, or a line is about the person on
+  screen, start it under that picture and cut to the speaker mid-sentence (a J-cut). Start the speaker's
+  picture that much later into its take, so its lips stay on the words.
+- **Cut the waiting.** A generated take holds a second or more before its line and after it. Trim both to
+  the beat the moment needs. A pause before a deadpan answer is a choice; a model's run-up is not.
+- **Cut straight on the beats that land**: a punchline, a name, a look held a beat too long.
+
+On the film (2026-11-25), no line crossed a cut. Every shot waited 0.5 to 1.7 s before its line and up to 2.4 s
+after it, and the scene played as stitched. Splitting the cuts and trimming the waits took about 20 s out of
+each two-minute part, and no line was lost.
+
+## 5 · One room under every take
+
+- **Each take makes its own room tone, and it changes at every cut.** Lay one room tone for each place
+  under the whole of it: the club, the car, the house.
+- **Keep a take's own sound only for what it does well**: its voice, and an action sound that lands on its
+  action and stands clear of its room by about 10 dB. Gate the rest of it away, so the shared room runs
+  beneath.
+- **Lay an effect where the take's own sound is faint or off its action.** Place it by its peak on the
+  frame where the thing happens. Find that frame in the pictures, not in the sound.
+- **Measure a made room tone before you use it.** One came back silent, and one made for a club can carry
+  words: check its level and transcribe it.
+
+## 6 · A laid line sits on the take's voice
+
+- **When a take speaks the line in its own reading** and the recorded line is laid instead, place the
+  recording by the take's voice, not by where it was sent. The lips follow the take's voice. Compare the
+  two with `transcribe_audio` word times. On the film, five such lines sat 60 to 120 ms off, and one
+  drifted.
+- **Check the sync at the end of a cut as well as at its start.** Drift adds up cut by cut: a picture one
+  frame short at each cut put the voices 0.7 s off the lips by the end of a two-minute part.

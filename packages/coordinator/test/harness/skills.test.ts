@@ -141,6 +141,24 @@ it("the owner's notes of 2026-11-24 reach the skills: a quoted line, a pause in 
   assert.match(sound, /Start the close shot's\s+picture that much later into its take/);
 });
 
+it("the owner's notes of 2026-11-25 reach the skills: a moving camera, split cuts, one room, a line on the take's voice", async () => {
+  // Fifty clips made "locked off" never breathed; no line crossed a cut; every take brought its own room tone; five
+  // re-read lines sat 60 to 120 ms off the lips, and a frame lost at each cut slid the voices 0.7 s off by a part's end.
+  const continuity = (await loadCraftSkill("continuity-across-cuts"))!.body;
+  assert.match(continuity, /Leave room to split the cut/);
+  assert.match(continuity, /Move the camera as the production does/);
+  assert.match(continuity, /Never write "locked off" or "does not move" to do it/);
+  assert.match(continuity, /Say whether each camera does what its shot asked/);
+  const sound = (await loadCraftSkill("sound-and-pace"))!.body;
+  assert.match(sound, /Run the last words over the listener/);
+  assert.match(sound, /Start an interruption under the shot before/);
+  assert.match(sound, /trim the picture, never the line/);
+  assert.match(sound, /One room under every take/);
+  assert.match(sound, /Gate the rest of it away/);
+  assert.match(sound, /place the\s+recording by the take's voice/);
+  assert.match(sound, /Check the sync at the end of a cut as well as at its start/);
+});
+
 it("the continuity skill fills the room the place describes, and says who is at a table (the club, 2026-11-23)", async () => {
   // "Nobody else is in the picture", written to keep strangers out of the booth, emptied a busy club in
   // every shot that saw the room.
