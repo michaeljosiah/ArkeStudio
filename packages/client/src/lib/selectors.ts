@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { ProductionBundle, Sheet, WorldBundle } from "@arke-studio/contracts";
+import { orderedShots, type ProductionBundle, type Sheet, type WorldBundle } from "@arke-studio/contracts";
 import { openWorld, useConnection, useWorld } from "./store.js";
 import type { TakeDecision } from "../domain/domain.js";
 
@@ -121,6 +121,34 @@ export function takesForShot(production: ProductionBundle, shotId: string): Take
     takesByShot.set(production.takes, index);
   }
   return index.get(shotId) ?? [];
+}
+
+type Scenes = ProductionBundle["scenes"];
+const numbersByScenes = new WeakMap<Scenes, Map<string, number>>();
+
+/**
+ * A shot's number as its scene shows it, its place in the scene's order; null for a shot the
+ * production no longer holds. An id is not a number: Gold on Gold's fifteenth shot is `sh_499`, and
+ * the Generate bench, the dashboard and the editor's inspector called it "Shot 499" (0.5.141).
+ */
+export function shotNumberOf(production: Pick<ProductionBundle, "scenes"> | null | undefined, shotId: string): number | null {
+  if (!production) return null;
+  let index = numbersByScenes.get(production.scenes);
+  if (index === undefined) {
+    index = new Map();
+    for (const scene of production.scenes) {
+      let shots;
+      try { shots = orderedShots(scene); } catch { continue; }
+      shots.forEach((shot, at) => index!.set(shot.id, at + 1));
+    }
+    numbersByScenes.set(production.scenes, index);
+  }
+  return index.get(shotId) ?? null;
+}
+
+/** "shot 15" by its place in its scene, or by its id's own digits for a shot no scene holds. */
+export function shotLabel(production: Pick<ProductionBundle, "scenes"> | null | undefined, shotId: string, word = "shot"): string {
+  return `${word} ${shotNumberOf(production, shotId) ?? shotId.replace(/^sh_/, "")}`;
 }
 
 /** The ordered takes the review grid can show, shared with the editor's take numbering. */

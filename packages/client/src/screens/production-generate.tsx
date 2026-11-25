@@ -46,7 +46,7 @@ import { EmptyState } from "../components/layout.js";
 import { Portrait, sheetPortraitPath } from "../components/portrait.js";
 import { Button, Select } from "../components/ui.js";
 import { seconds, usd } from "../lib/format.js";
-import { acceptedTakeId, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
+import { acceptedTakeId, shotLabel, shotNumberOf, takeDecisions, takesForShot, useProduction } from "../lib/selectors.js";
 import {
   acceptTake,
   setProductionModel,
@@ -314,11 +314,17 @@ export function GenerateScreen() {
               color: "inherit",
             }}
           >
-            {shots.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.id.replace("sh_", "shot ")} · {s.title}
-              </option>
-            ))}
+            {/* Each shot by its number in its scene, under its scene: ids are not numbers (0.5.141). */}
+            {(production?.scenes ?? []).map((scene) => {
+              const options = orderedShots(scene).map((s) => (
+                <option key={s.id} value={s.id}>
+                  {shotLabel(production, s.id)} · {s.title}
+                </option>
+              ));
+              return (production?.scenes.length ?? 0) > 1
+                ? <optgroup key={scene.id} label={`Scene ${scene.number} · ${scene.title}`}>{options}</optgroup>
+                : options;
+            })}
           </Select>
         </div>
         <div className="fy-gen__label">
@@ -329,7 +335,7 @@ export function GenerateScreen() {
             <Portrait
               worldSlug={slug}
               path={scene?.board ? `productions/${production!.meta.id}/${scene.board.image}` : ""}
-              label={shot ? `${shot.id.replace("sh_", "Shot ")} frame` : "frame"}
+              label={shot ? `${shotLabel(production, shot.id, "Shot")} frame` : "frame"}
               radius={0}
             />
           </div>
@@ -350,7 +356,7 @@ export function GenerateScreen() {
         </div>
         <div className="fy-mono" style={{ marginTop: 6 }}>
           {shot
-            ? `${shot.id.replace("sh_", "shot ")}${citedSheets.length > 0 ? ` · ${citedSheets.map((s) => `${s.name} model sheet v${s.version}`).join(" · ")}` : ""}`
+            ? `${shotLabel(production, shot.id)}${citedSheets.length > 0 ? ` · ${citedSheets.map((s) => `${s.name} model sheet v${s.version}`).join(" · ")}` : ""}`
             : ""}
         </div>
         <div className="fy-gen__label" style={{ marginTop: 16 }}>
@@ -402,7 +408,7 @@ export function GenerateScreen() {
             <div className="fy-frame">
               <Portrait worldSlug={slug} path={prevFrame} label="Start frame" radius={0} />
               <span className="fy-frame__tag">
-                START · {prevShot!.id.replace("sh_", "SHOT ")}, LAST FRAME (PREVIEW)
+                START · {shotLabel(production, prevShot!.id, "SHOT")}, LAST FRAME (PREVIEW)
               </span>
             </div>
           ) : (
@@ -662,7 +668,7 @@ function ContactSheet({
                 </div>
                 <div className="fy-shotcard__body">
                   <div className="fy-shotcard__head">
-                    <span className="fy-shotcard__num">{shotId?.replace("sh_", "") ?? "—"}</span>
+                    <span className="fy-shotcard__num">{shotId ? shotNumberOf(production, shotId) ?? shotId.replace("sh_", "") : "—"}</span>
                     <span className="fy-shotcard__title" title={take.media ?? take.id}>{title}</span>
                     <span className={`fy-dot fy-dot--${decisionTone(decision)}`} />
                   </div>
