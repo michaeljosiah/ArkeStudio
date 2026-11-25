@@ -1,13 +1,18 @@
 import { currentTakeChecks, takeChecksCount, takeIsCheckable, TAKE_CHECK_NAMES, type ProductionBundle, type Take } from "@arke-studio/contracts";
 import { useEffect, useState } from "react";
 import { checkTake, subscribeCommandFailures } from "../lib/store.js";
+import { isRemoteSession } from "../lib/remote-session.js";
 import { usePopover } from "./menu.js";
 import { Button } from "./ui.js";
+
+/** Takes this window has already asked to check unprompted, so a refusal is never asked again on its own. */
+const checkedOnSight = new Set<string>();
 
 /**
  * A take's checks (design turns 287 and 288c): the count beside its verdicts, drawn as the shot
  * chips are, and the list it opens over the take. A take with none, or with checks of other media,
- * has Check. The list labels and gives its figure; it explains nothing.
+ * is checked the first time it is shown, and has Check if that did not come back. The list labels
+ * and gives its figure; it explains nothing.
  */
 export function TakeChecks({ worldId, production, take }: { worldId: string; production: ProductionBundle; take: Take }) {
   const record = currentTakeChecks(production, take);
@@ -19,7 +24,20 @@ export function TakeChecks({ worldId, production, take }: { worldId: string; pro
   useEffect(() => subscribeCommandFailures((failure) => { if (failure.command === "check-take") setChecking(false); }), []);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setOpen(false); setChecking(false); }, [take.id]);
-  if (!takeIsCheckable(production.takes, take)) return null;
+  const checkable = takeIsCheckable(production.takes, take);
+  /*
+   * Only clips that land are checked by themselves; the takes a film already has were made before
+   * the checks, and on Gold on Gold that meant pressing Check on each of seventy-five. So a take with
+   * no checks is checked the first time the bench shows it, once a window. Not from a browser on
+   * another device, where the press is the desktop's (a refusal there would say so on every take).
+   */
+  const unchecked = checkable && record === null;
+  useEffect(() => {
+    if (!unchecked || isRemoteSession() || checkedOnSight.has(take.id)) return;
+    checkedOnSight.add(take.id);
+    setChecking(checkTake(worldId, production.meta.id, take.id));
+  }, [unchecked, take.id, worldId, production.meta.id]);
+  if (!checkable) return null;
   const check = () => setChecking(checkTake(worldId, production.meta.id, take.id));
   if (!record) {
     return <Button variant="ghost" disabled={checking} onClick={check}>{checking ? "Checking…" : "Check"}</Button>;

@@ -249,6 +249,17 @@ describe("a take checked when it lands", () => {
     assert.deepEqual(record.items.find(item => item.id === "cuts-inside"), { id: "cuts-inside", result: "fix", says: "at 1.0 s" }, "the pass's cut at 3 s is 1 s into the segment that starts at 2");
   });
 
+  it("hears a take nobody speaks in as nothing heard, not as unavailable (0.5.136)", async () => {
+    const { store, take, ports, takeId } = await landed();
+    const quiet = { ...ports, speech: async (bytes: Uint8Array) => ({ text: "", seconds: (bytes.length - 44) / 2 / 16000,
+      engine: { id: MEASURED_WORD_TIMING_ENGINE, version: "1", model: "base-en" }, words: [] }) };
+    assert.equal(await checkTake(store, "saltlight", takeId, quiet, new AbortController().signal), "checked");
+    const record = currentTakeChecks(store.getBundle().productions.find(p => p.meta.id === "saltlight")!, take)!;
+    const by = Object.fromEntries(record.items.map(item => [item.id, item]));
+    assert.deepEqual(by["words"], { id: "words", result: "fix", says: "nothing heard" }, "shot 12's line was never said");
+    assert.deepEqual(by["unwritten-voice"], { id: "unwritten-voice", result: "pass", says: "none" });
+  });
+
   it("keeps the picture's checks when the sound cannot be read", async () => {
     const { store, take, tools, ports, takeId } = await landed();
     const refused = { ...ports, tools: { ...tools, speechAudio: async () => { throw new Error("decoder refused"); } } };
