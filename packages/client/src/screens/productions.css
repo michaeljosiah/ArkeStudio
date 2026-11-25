@@ -101,6 +101,11 @@
 .fy-takechecks__result { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: var(--weight-regular) var(--text-2xs)/1.4 var(--font-mono); color: var(--muted-foreground); }
 .fy-takechecks__row[data-result="fix"] .fy-takechecks__result { color: var(--foreground); }
 .fy-takechecks__foot { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; padding: 6px 2px 0; border-top: 1px solid var(--border); }
+.fy-takechecks__row .ui-btn { margin-left: auto; height: 22px; min-height: 22px; padding-inline: 8px; font: var(--type-label); }
+/* Design turn 288b: the shot's checks before it is made, in the bench's press row under the model. The
+   list opens up from the count into the bench, clear of the column's edge. */
+.fy-gen__cta.fy-gen__cta--press { margin-top: 8px; }
+.fy-shotchecks__panel { right: auto; left: 0; min-width: 340px; }
 .fy-production-settings-sheet .fy-page-sheet__body { display: flex; flex-direction: column; gap: 20px; }
 .fy-production-switch-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 0; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--foreground); text-align: left; cursor: pointer; font: var(--type-ui); }
 .fy-production-switch-row__mark { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; background: var(--muted); flex: none; }

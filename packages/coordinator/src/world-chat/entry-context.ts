@@ -33,6 +33,14 @@ const EPISODE_RUN = 8;
 const TAKE_CHECKS_LINE = "Each clip's checks in list_takes say what was measured when it landed; answer a fix there first: end a take that runs on at its endAtSec on the Cut, or remake it with production-take-generation, naming the failed checks in its instruction.";
 
 /**
+ * Before a shot is made (design turn 287), and how many to make at once. The owner, 2026-11-25:
+ * the video model takes a board as its reference, so shots made together hold each other's faces
+ * and light; Gold on Gold's shots were made one by one and drifted. The how of seams and targets is
+ * the board-seams skill; this is the when, said with the craft in every video production's thread.
+ */
+const BEFORE_SHOT_LINE = "Before preparing a clip, check each shot as the bench's before-the-shot list does and fix a failure on a card first: its line the script's word for word with its speaker; everyone seen @mentioned and no words about a body's build; camera words matching the production's look (never locked off in a handheld film); its light named; a beat before and after its line; a start frame where clips come from frames. Make video as boards, not shot by shot: consecutive shots in one place with the same people go in one board of about ten seconds, often three shots, made as one clip (production-take-generation with a board target) so faces, light and grade hold across them. Make a shot alone only when it must stand alone: longer than the board's target, a sung slice of the song, a deliberate jump, or a remake of that one shot. Read the board-seams skill before setting a target or moving a seam.";
+
+/**
  * What the conversation was opened about, in a sentence the model can use (#70 phase 6).
  *
  * A conversation started from a refusal already has its question; one started from a sheet
@@ -418,6 +426,8 @@ function describeShape(production: ProductionBundle | undefined, writesTheSeason
     // Without one, say where it goes: asked to "set this film's look" on 0.5.132, Arke rewrote the
     // free production style, which no shot's framing inherits, and the look reached no shot.
     bits.push(look ?? "This production has no look yet. When the person says how the film is shot, set its look with production-metadata look (a preset, camera, light, lens and focus, grade, cutting, sound, performance and its own checks), not the production style: shots inherit the look's camera, light, lens and grade.");
+    // Before a clip is made, and how many shots go in one (design turn 287; the owner, 2026-11-25).
+    bits.push(BEFORE_SHOT_LINE);
     // The craft names when to read a skill; this line names which exist (design turn 286).
     bits.push(CRAFT_SKILLS_LINE);
   }

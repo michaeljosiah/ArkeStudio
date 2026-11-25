@@ -7,15 +7,35 @@ import { useGlobalChat } from "../components/global-chat-context.js";
 import { ModelsCard } from "../components/models-card.js";
 import { downloadMedia } from "../lib/download.js";
 import {
+  BEFORE_SHOT_NAMES,
+  beforeShotChecks,
+  beforeShotCount,
   frameDispatchFor,
+  LOOK_PRESET_NAMES,
+  lookLine,
   modelCapabilityCopy,
   orderedShots,
   productionAspect,
   takeMediaFacts,
+  type BeforeShotCheck,
+  type BeforeShotCheckId,
   type CompiledPass,
   type TakeMediaMeasurements,
   type Take,
 } from "@arke-studio/contracts";
+import { BeforeShotChecks } from "../components/before-shot-checks.js";
+import { boardsForScene, shotHasFrame } from "./scene-workspace/boards.js";
+
+/** What Fix asks Arke for, an item at a time: the change, in the words the person would use. */
+const FIX_ASKS: Record<BeforeShotCheckId, string> = {
+  line: "Make its line the script's, word for word, said by its speaker.",
+  named: "Cite everyone seen with their @mention, and take out any words about a body's build.",
+  camera: "Write its camera as the film's look says; never locked off in a handheld film.",
+  light: "Name its light: where it comes from and on which side.",
+  beats: "Give it a beat before and after the line, or make the shot longer.",
+  frame: "It needs a start frame before its clip is made.",
+  board: "Make it with the other shots of its board, as one clip.",
+};
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { productionModel } from "../components/dispatch-bar.js";
@@ -139,7 +159,8 @@ export function GenerateScreen() {
     setGeneratorPending(false);
     setGeneratorError(null);
   }, [ownerKey]);
-  const openGenerator = (targetShotId: string) => {
+  /** A shot's session, or its board's when `board` names the board's shots: one clip for them all. */
+  const openGenerator = (targetShotId: string, board?: readonly string[]) => {
     if (!worldId || !prodId || pendingGenerator.current !== null) return;
     const targetScene = production?.scenes.find((candidate) => orderedShots(candidate).some((candidate) => candidate.id === targetShotId));
     if (targetScene === undefined) return;
@@ -147,7 +168,7 @@ export function GenerateScreen() {
       worldId,
       productionId: prodId,
       sceneId: targetScene.id,
-      subject: { kind: "shot", shotId: targetShotId },
+      subject: board !== undefined && board.length > 1 ? { kind: "board", memberShotIds: [...board] as never } : { kind: "shot", shotId: targetShotId },
     });
     if (requestId === null) {
       setGeneratorError("Not connected - try again.");
@@ -220,6 +241,35 @@ export function GenerateScreen() {
     const id = production.selections[shot.id]?.startFrameArtifactId ?? null;
     return id !== null ? (world.artifacts.find((a) => a.id === id) ?? null) : null;
   })();
+
+  /*
+   * The shot's checks before it is made (design turns 287 and 288b), read from its own words, the
+   * film's look and its board for the production's video route. Hard items hold the press until
+   * they are fixed or passed over with Open anyway.
+   */
+  const shotBoard = (() => {
+    if (!shot || !found || !production || !world) return null;
+    const pack = boardsForScene({ scene: found, production, artifacts: world.artifacts, sheets: world.sheets, capSec: model?.limits.maxDurationSec ?? 10,
+      ...(model?.limits.storyboardPanels !== undefined ? { panelCap: model.limits.storyboardPanels } : {}) });
+    const board = pack.ok ? pack.boards.find((candidate) => candidate.memberShotIds.includes(shot.id)) : undefined;
+    return board && board.memberShotIds.length > 1 ? board : null;
+  })();
+  const shotNumber = (id: string) => (found ? orderedShots(found).findIndex((candidate) => candidate.id === id) + 1 : 0);
+  const shotChecks = shot && found && production && world ? beforeShotChecks({
+    scene: found, shot, look: production.meta.look,
+    clipsFrom: shot.continuity?.clipsFrom ?? production.meta.clipsFrom ?? "frames",
+    hasFrame: shotHasFrame(production, world.artifacts, shot.id),
+    characters: world.sheets.filter((sheet) => sheet.type === "character").map((sheet) => ({ id: sheet.id, name: sheet.name, ...(sheet.aliases ? { aliases: sheet.aliases } : {}) })),
+    board: shotBoard ? { numbers: shotBoard.memberShotIds.map(shotNumber), seconds: shotBoard.durationSec } : null,
+  }) : [];
+  const held = beforeShotCount(shotChecks).hardToFix;
+  // Fix hands Arke the item as the person would say it, in the composer for them to send.
+  const fixWithArke = (item: BeforeShotCheck) => {
+    const surface = global?.forPage();
+    if (!global || !surface || !shot) return;
+    global.setValue(surface.key, "draft", `Before shot ${shotNumber(shot.id)}, "${shot.title}", is made: ${BEFORE_SHOT_NAMES[item.id].toLowerCase()} — ${item.says}. ${FIX_ASKS[item.id]} Propose the change; don't make anything.`);
+    global.open(surface);
+  };
 
   const citedSheets = (() => {
     if (!shot || !world) return [];
@@ -311,18 +361,24 @@ export function GenerateScreen() {
         </div>
         {world && production && (
           <div className="fy-worldlook-line">
+            {/* Design turn 288b: the production's look and its preset, its choices as data. Before
+                the look this line named only the free style, as "Production look". */}
             <span>
               {shot?.promptOverride
                 ? "Shot prompt override"
+                : production.meta.look
+                ? `Production look · ${production.meta.look.preset ? LOOK_PRESET_NAMES[production.meta.look.preset] : "own"}`
                 : production.meta.styleOverride?.trim()
-                ? "Production look"
+                ? "Production style"
                 : `World look · v${world.artDirection.version}`}
             </span>
             <small>
-              {/* The look is never pasted into a shot's prompt; Arke reads it when it writes one
+              {/* The style is never pasted into a shot's prompt; Arke reads it when it writes one
                   (SPEC-012 R-14). "carries as text" told a music video's owner otherwise (issue 3188). */}
               {shot?.promptOverride
                 ? "edited by you · carries as text"
+                : production.meta.look
+                ? lookLine(production.meta.look)
                 : `${production.meta.styleOverride?.trim() || "inherited"} · Arke writes it into shot prompts`}
             </small>
           </div>
@@ -368,13 +424,19 @@ export function GenerateScreen() {
               <span className="fy-mono">{modelCapabilityCopy(model)}</span>
             </span>
           )}
+        </div>
+        {/* Design turn 288b: the count beside the press it holds. */}
+        <div className="fy-gen__cta fy-gen__cta--press">
           <span className="fy-h1row__push" />
+          <BeforeShotChecks items={shotChecks} onFix={global ? fixWithArke : undefined}
+            onBoard={shotBoard && shotId !== null ? () => openGenerator(shotId, shotBoard.memberShotIds) : undefined}
+            onAnyway={() => shotId !== null && openGenerator(shotId)} />
           <Button
             variant="primary"
-            disabled={generatorPending || shotId === null}
+            disabled={generatorPending || shotId === null || held > 0}
             onClick={() => shotId !== null && openGenerator(shotId)}
           >
-            {generatorPending ? "Opening…" : "Open generation session"}
+            {generatorPending ? "Opening…" : held > 0 ? `Open generation session · ${held} to fix` : "Open generation session"}
           </Button>
           {generatorError === null ? null : <span role="alert" className="fy-mono">{generatorError}</span>}
         </div>
