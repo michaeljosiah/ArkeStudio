@@ -25,7 +25,7 @@ import {
   type TimelineTrack,
   type ArtifactSidecar,
 } from "@arke-studio/contracts";
-import { reviewableTakesForShot } from "../lib/selectors.js";
+import { reviewableTakesForShot, shotLabel } from "../lib/selectors.js";
 import {
   PictureClipTiming,
   DetachAudio,
@@ -257,7 +257,7 @@ export function CutInspector({
         <h2>{compact && selectedClip?.source.kind === "shot" ? `Shot ${selectedClip.source.shotNumber} · ` : ""}{title}</h2>
         <div className="fy-cutinspect__rows">
           {sceneNumber > 0 && <InspectorRow label="Scene">SC {sceneNumber}</InspectorRow>}
-          {selectedShotId && <InspectorRow label="Shot">{selectedShotId.replace("sh_", "shot ")}</InspectorRow>}
+          {selectedShotId && <InspectorRow label="Shot">{shotLabel(production, selectedShotId)}</InspectorRow>}
           <InspectorRow label="Take"><span title={selectedTakeId ?? undefined}>{takeLabel}</span></InspectorRow>
           <InspectorRow label={selectedSpine ? "Window" : "Shot length"}>{duration.toFixed(1)}s</InspectorRow>
           {takeSec !== undefined && <InspectorRow label="Take length">{takeSec.toFixed(1)}s</InspectorRow>}
@@ -275,7 +275,7 @@ export function CutInspector({
             worldId={worldId}
             prodId={prodId}
             shotId={selectedShotId}
-            heading={`SC ${sceneNumber} · ${selectedShotId.replace("sh_", "shot ")}`}
+            heading={`SC ${sceneNumber} · ${shotLabel(production, selectedShotId)}`}
             title={title}
             figures={`${takeLabel} · ${selectedSpine ? "budget" : "shot"} ${duration.toFixed(1)}s${takeSec !== undefined && !selectedSpine ? ` · take ${takeSec.toFixed(1)}s` : ""}`}
             trim={trim}

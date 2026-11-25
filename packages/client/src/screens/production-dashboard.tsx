@@ -32,7 +32,7 @@ import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES } from "../components/models-
 import { ProductionLookCard } from "./production-look.js";
 import { seconds } from "../lib/format.js";
 import { wantsSong } from "../lib/song.js";
-import { acceptedTakeId, isDayOne, takeDecisions, useProduction } from "../lib/selectors.js";
+import { acceptedTakeId, isDayOne, shotLabel, takeDecisions, useProduction } from "../lib/selectors.js";
 import {
   attachHostFiles,
   attachHostText,
@@ -322,14 +322,14 @@ export function ProductionDashboardScreen() {
                         ? `productions/${production.meta.id}/${nextGap.scene.board.image}`
                         : (world.keyArt ?? "")
                     }
-                    label={`${nextGap.shot.id.replace("sh_", "Shot ")}: frame`}
+                    label={`${shotLabel(production, nextGap.shot.id, "Shot")}: frame`}
                     fallbackSrc={productionPlate(production.meta)}
                     radius={0}
                   />
                 </div>
                 <div className="fy-nextcard__body">
                   <div className="fy-nextcard__title">
-                    {nextGap.shot.id.replace("sh_", "Shot ")} has no {beats ? "picture" : "clip"} yet
+                    {shotLabel(production, nextGap.shot.id, "Shot")} has no {beats ? "picture" : "clip"} yet
                     <span className="fy-dot fy-dot--warn" />
                   </div>
                   <div className="fy-nextcard__sub">
@@ -370,7 +370,7 @@ export function ProductionDashboardScreen() {
                   className="fy-clip"
                   role="link"
                   tabIndex={0}
-                  aria-label={`Review ${t.coversShots.join(", ") || t.id}`}
+                  aria-label={`Review ${t.coversShots.map((s) => shotLabel(production, s, beats ? "beat" : "shot")).join(", ") || t.id}`}
                   onKeyDown={event => { if (event.key === "Enter") navigate(generatePath(t.coversShots[0])); }}
                   onClick={() => navigate(generatePath(t.coversShots[0]))}
                 >
@@ -378,7 +378,7 @@ export function ProductionDashboardScreen() {
                     <Portrait
                       worldSlug={world.meta.slug}
                       path={takeMediaPath(production, t) ?? ""}
-                      label={t.coversShots[0]?.replace("sh_", beats ? "beat " : "shot ") ?? t.id}
+                      label={t.coversShots[0] ? shotLabel(production, t.coversShots[0], beats ? "beat" : "shot") : t.id}
                     />
                   </div>
                   <div className="fy-clip__meta">
@@ -392,7 +392,7 @@ export function ProductionDashboardScreen() {
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {t.coversShots.map((s) => s.replace("sh_", beats ? "beat " : "shot ")).join(", ")}
+                      {t.coversShots.map((s) => shotLabel(production, s, beats ? "beat" : "shot")).join(", ")}
                     </span>
                     <span className="fy-mono">
                       {seconds(
@@ -416,7 +416,7 @@ export function ProductionDashboardScreen() {
                 <div key={t.id} className="fy-listrow">
                   <span className={`fy-dot fy-dot--${decisions[t.id] === "accepted" ? "ok" : "sketch"}`} />
                   <span className="fy-listrow__text">
-                    {t.coversShots.map((s) => s.replace("sh_", beats ? "beat " : "shot ")).join(", ")} · {decisions[t.id]}
+                    {t.coversShots.map((s) => shotLabel(production, s, beats ? "beat" : "shot")).join(", ")} · {decisions[t.id]}
                   </span>
                   <span className="fy-mono">{takeCostCopy(t.cost)}</span>
                 </div>
