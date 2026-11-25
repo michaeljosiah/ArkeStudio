@@ -91,6 +91,35 @@ describe("the production's look (design turn 288a)", () => {
     assert.equal(looks().at(-1)?.preset, "thriller");
   });
 
+  it("a late answer to an earlier write does not undo a newer one (0.5.133: seven words typed, two kept)", async () => {
+    const { container, looks } = await mount(undefined);
+    const rerender = async (look: ProductionLook | undefined) => act(async () => {
+      root!.render(<ProductionLookCard look={look} worldId={FIXTURE_WORLD_ID} prodId="the-film" />);
+    });
+    await press(container, "Naturalistic drama");
+    const first = looks().at(-1)!;
+    const grade = container.querySelector<HTMLInputElement>('input[aria-label="Grade words"]')!;
+    grade.value = "35 mm, grain";
+    await act(async () => grade.dispatchEvent(new dom.Event("focusout", { bubbles: true })));
+    // The app answers the preset only now, its keys in another order, after the words were written.
+    await rerender(Object.fromEntries(Object.entries(first!).reverse()) as ProductionLook);
+    const light = container.querySelector<HTMLInputElement>('input[aria-label="Light words"]')!;
+    light.value = "purple from above";
+    await act(async () => light.dispatchEvent(new dom.Event("focusout", { bubbles: true })));
+    const written = looks().at(-1)!;
+    assert.equal(written?.grade?.words, "35 mm, grain", "the grade written before the late answer is kept");
+    assert.equal(written?.light?.words, "purple from above");
+    // A look the card did not write (Arke's card) is taken as it comes.
+    await rerender({ camera: { kind: "steady" } });
+    assert.equal(container.querySelector('[aria-label="Camera"] .fy-seg__item--active')?.textContent, "Steady");
+  });
+
+  it("a line added with Add stays to be written", async () => {
+    const { container } = await mount(undefined);
+    await press(container, "Add");
+    assert.equal(container.querySelectorAll('input[aria-label="Own check"]').length, 1);
+  });
+
   it("shows a saved insert length the list does not hold", async () => {
     const { container } = await mount(applyLookPreset(undefined, "thriller"));
     const inserts = container.querySelector<HTMLSelectElement>('select[aria-label="Inserts"]')!;

@@ -33,15 +33,33 @@ export function ProductionLookCard({ look, worldId, prodId }: {
   /*
    * The look as last written, not as last received. Each change is the whole look, and the app's
    * answer arrives after a round trip: composed from the received look, a preset pressed just after
-   * leaving a words field would write the old words back over the new (codex on PR 3302). A received
-   * look replaces it, so a refused write shows the look as it is.
+   * leaving a words field would write the old words back over the new (codex on PR 3302). And the
+   * answers can arrive late, out of step with the writes: typing seven words fields on Gold on Gold
+   * (0.5.133) kept two, because each late answer to an earlier write replaced the newer one. So an
+   * answer that is one of this card's own writes is an echo: the newest means the app has caught up,
+   * an older one is late and is not shown. A look the card did not write (Arke's card, another
+   * window) is taken as it comes.
    */
   const [shown, setShown] = useState<ProductionLook>(look ?? {});
   const latest = useRef<ProductionLook>(look ?? {});
-  useEffect(() => { latest.current = look ?? {}; setShown(look ?? {}); }, [look]);
+  const echoes = useRef<string[]>([]);
+  const received = canonical(look ?? {});
+  useEffect(() => {
+    const sent = echoes.current;
+    if (sent.includes(received)) {
+      if (received === sent[sent.length - 1]) echoes.current = [];
+      return;
+    }
+    echoes.current = [];
+    latest.current = look ?? {};
+    setShown(look ?? {});
+    // `received` stands for `look`: a new object with the same look is not a new look.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [received]);
   const write = (next: ProductionLook) => {
     latest.current = next;
     setShown(next);
+    echoes.current = [...echoes.current, canonical(next)];
     if (worldId && prodId) setProductionLook(worldId, prodId, Object.keys(next).length > 0 ? next : null);
   };
   const current = shown;
@@ -134,6 +152,14 @@ export function ProductionLookCard({ look, worldId, prodId }: {
   );
 }
 
+/** A look as text with its keys in order, so the same look written and read back compares equal. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, inner: unknown) =>
+    inner && typeof inner === "object" && !Array.isArray(inner)
+      ? Object.fromEntries(Object.entries(inner as Record<string, unknown>).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b)))
+      : inner);
+}
+
 function Row({ name, children }: { name: string; children: React.ReactNode }) {
   return <div className="fy-models__row"><span className="fy-models__what">{name}</span>{children}</div>;
 }
@@ -179,7 +205,11 @@ function Words({ part, value, wide = false, onCommit }: {
 /** The production's own checks: a line each, emptied to remove, and Add for one more. */
 function OwnChecks({ checks, onChange }: { checks: readonly string[]; onChange: (checks: string[]) => void }) {
   const [lines, setLines] = useState<string[]>([...checks]);
-  useEffect(() => setLines([...checks]), [checks]);
+  // By content, not by identity: an empty list is a new array on every draw, and resetting on it
+  // took away the line Add had just put there (0.5.133).
+  const said = JSON.stringify(checks);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => setLines([...checks]), [said]);
   const commit = (next: string[]) => {
     const kept = next.map((line) => line.trim()).filter(Boolean);
     if (JSON.stringify(kept) !== JSON.stringify(checks)) onChange(kept);
