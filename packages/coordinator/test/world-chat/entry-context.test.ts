@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { WorldBundle, WorldChatContext } from "@arke-studio/contracts";
-import { CRAFT_SKILLS_LINE, FILM_DIRECTION_CRAFT, orderedShots, TURN_RESULT_BOUNDS } from "@arke-studio/contracts";
+import { CRAFT_SKILLS_LINE, FILM_DIRECTION_CRAFT, orderedShots, TURN_RESULT_BOUNDS, WORLD_ACTION_DESCRIPTIONS } from "@arke-studio/contracts";
 import { MAX_PROPOSALS } from "../../src/world-chat/wrapup.js";
 import { describeEntryContext } from "../../src/world-chat/entry-context.js";
 import { scanWorld } from "../../src/world/scan.js";
@@ -379,8 +379,14 @@ describe("a production with shots carries the director's craft (issues 3273, 327
       assert.match(text, /Its own checks, to hold in every shot: Ade's watch on his near wrist\./);
       assert.ok(text.indexOf("The production's look") > text.indexOf(FILM_DIRECTION_CRAFT), "after the craft");
     }
-    assert.doesNotMatch(await threadText({ medium: "video", kind: "film" }, ({ productionId }) => ({ kind: "production", productionId })),
-      /The production's look/, "no look, no line");
+    const none = await threadText({ medium: "video", kind: "film" }, ({ productionId }) => ({ kind: "production", productionId }));
+    assert.doesNotMatch(none, /The production's look/, "no look, no look's line");
+    // 0.5.132: asked to set the film's look, Arke rewrote the free production style instead.
+    assert.match(none, /This production has no look yet\. When the person says how the film is shot, set its look with production-metadata look/);
+  });
+
+  it("the production style says that how a film is shot is its look (0.5.132)", () => {
+    assert.match(WORLD_ACTION_DESCRIPTIONS["production-style"], /is its look, set with production-metadata look, which every shot's framing inherits: set that for those, not this/);
   });
 });
 

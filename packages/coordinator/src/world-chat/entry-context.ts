@@ -409,7 +409,9 @@ function describeShape(production: ProductionBundle | undefined, writesTheSeason
      * the film is shot.
      */
     const look = lookBrief(production.meta.look);
-    if (look) bits.push(look);
+    // Without one, say where it goes: asked to "set this film's look" on 0.5.132, Arke rewrote the
+    // free production style, which no shot's framing inherits, and the look reached no shot.
+    bits.push(look ?? "This production has no look yet. When the person says how the film is shot, set its look with production-metadata look (a preset, camera, light, lens and focus, grade, cutting, sound, performance and its own checks), not the production style: shots inherit the look's camera, light, lens and grade.");
     // The craft names when to read a skill; this line names which exist (design turn 286).
     bits.push(CRAFT_SKILLS_LINE);
   }
