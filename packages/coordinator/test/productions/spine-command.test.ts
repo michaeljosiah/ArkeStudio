@@ -47,7 +47,7 @@ async function harness(options: { measured: boolean }) {
     mediaProbe: null, runtimeStop: new AbortController().signal, backgroundWork: new Set(), shownWorldId: () => WORLD_ID,
     scheduleProductionSpend: async () => {}, broadcastSnapshot: () => {}, worldOpensSettled: async () => {},
     worldChatRunner: () => { throw new Error("no World Chat here"); }, refreshConversations: async () => {},
-    openWorldChat: async () => {}, stillOpen: () => true, worldChat: () => null, setWorldChat: () => {},
+    openWorldChat: async () => {}, stillOpen: () => true, worldChat: () => null, setWorldChat: () => {}, checkTake: async () => "not-checkable",
     songSections: async () => ({ status: "unavailable", reason: "Not measured in this test." }),
   });
   const router = new CommandRouter(ctx, [module]);

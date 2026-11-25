@@ -166,7 +166,7 @@ describe("song-sections, the Cut's ask (issue 3099)", () => {
       mediaProbe: null, runtimeStop: never, backgroundWork: new Set(), shownWorldId: () => WORLD_ID,
       scheduleProductionSpend: async () => {}, broadcastSnapshot: () => {}, worldOpensSettled: async () => {},
       worldChatRunner: () => { throw new Error("no World Chat here"); }, refreshConversations: async () => {},
-      openWorldChat: async () => {}, stillOpen: () => true, worldChat: () => null, setWorldChat: () => {},
+      openWorldChat: async () => {}, stillOpen: () => true, worldChat: () => null, setWorldChat: () => {}, checkTake: async () => "not-checkable",
       songSections: (store, productionId) => service.read(store, productionId),
     });
     const router = new CommandRouter(ctx, [module]);

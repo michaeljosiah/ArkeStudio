@@ -838,6 +838,7 @@ const CLIENT_COMMAND_METADATA = {
   "prepare-performance-audio-reference": humanOnly("The audio panel owns explicit source audition, rights, review and spend decisions."),
   "cancel-key-art-prompt": humanOnly(HUMAN_DECISION),
   "record-dialogue-feedback": humanOnly(HUMAN_DECISION),
+  "check-take": readOnly("Checking a take measures it and records what was found beside it; it changes no take, shot or choice, and Arke reads the result with list_takes."),
   "propose-shot-visual-facts": humanOnly("The user confirms authored on-screen facts; citations and generated inference cannot establish them."),
 } as const satisfies Record<ClientMessageKind, CommandMetadata>;
 

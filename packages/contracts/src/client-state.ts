@@ -10,6 +10,7 @@ import { StageReviewSchema } from "./human-decision.js";
 import { AdapterLibraryStateSchema } from "./adapters.js";
 import { BorrowedImageOriginSchema } from "./take.js";
 import { TakeDialogueFeedbackSchema } from "./take-feedback.js";
+import { TakeChecksRecordSchema } from "./take-checks.js";
 import { RehearsalSessionSchema } from "./rehearsal.js";
 import { PerformanceBibleStateSchema } from "./performance-bible.js";
 import { PerformanceRecordSchema, PerformanceReviewStateSchema, emptyPerformanceReviewState } from "./performance.js";
@@ -253,6 +254,13 @@ export const ProductionBundleSchema = valueSchema(z
      * without anything having rewritten an immutable take to put it there.
      */
     takeMediaInfo: z.record(TakeIdSchema, TakeMediaInfoRecordSchema).default({}),
+    /**
+     * Each take's newest checks (design turn 287, after a take), read from `take-checks.jsonl`.
+     * Keyed by take, as the media facts are; `currentTakeChecks` says whether they are of the
+     * media the take has now. Optional, as `feedback` is: a production nobody has checked a take
+     * of carries none.
+     */
+    takeChecks: z.record(TakeIdSchema, TakeChecksRecordSchema).optional(),
   })
   .strict());
 export type ProductionBundle = z.infer<typeof ProductionBundleSchema>;

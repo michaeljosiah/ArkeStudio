@@ -1,5 +1,6 @@
 import { useCompact, usePhone } from "../lib/media-query.js";
 import { RejectTakeChoice } from "../components/reject-take-choice.js";
+import { TakeChecks } from "../components/take-checks.js";
 import { PageSheet } from "../components/page-sheet.js";
 import { ProductionConversation } from "../components/conversation.js";
 import { useGlobalChat } from "../components/global-chat-context.js";
@@ -442,6 +443,8 @@ export function GenerateScreen() {
             </div>
             <div className="fy-bench__wallactions">
               <span style={{ flex: 1 }} />
+              {/* Design turn 288c: the take's checks beside its verdicts. */}
+              {worldId && production && <TakeChecks worldId={worldId} production={production} take={take} />}
               <Button
                 variant="outline"
                 disabled={

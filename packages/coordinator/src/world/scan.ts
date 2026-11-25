@@ -3,7 +3,7 @@ import { ProductionSetupOriginSchema } from "@arke-studio/contracts";
 import { ComicPageRecordSchema, ComicScriptSchema, ComicSettingsSchema, type ComicPageRecord, type ComicScript } from "@arke-studio/contracts";
 import { parseDesignedVoices, type WorldDesignedVoice } from "@arke-studio/contracts";
 import { isWorldImagePath } from "@arke-studio/contracts";
-import { BorrowedImageOriginSchema, type BorrowedImageOrigin, TakeDialogueFeedbackSchema, type TakeDialogueFeedback } from "@arke-studio/contracts";
+import { BorrowedImageOriginSchema, type BorrowedImageOrigin, TakeDialogueFeedbackSchema, type TakeDialogueFeedback, TakeChecksRecordSchema } from "@arke-studio/contracts";
 import { RehearsalSessionSchema, deriveRehearsalLines, PerformanceBibleEventSchema, foldPerformanceBible } from "@arke-studio/contracts";
 import { PerformanceReviewDecisionSchema, PerformanceSelectionsSchema } from "@arke-studio/contracts";
 import { PerformanceRecordSchema } from "@arke-studio/contracts";
@@ -1159,6 +1159,22 @@ export async function scanWorld(
       if (raw && !raw.endsWith("\n")) problems.push({ path: feedbackPath, message: "Incomplete dialogue feedback tail. Repair before adding feedback." });
       return feedback;
     });
+    // The checks after each take (design turn 287): one file for the production, not one beside
+    // every take, so a world with hundreds of takes opens with one more read rather than hundreds.
+    // The newest line for a take is its checks; a damaged line is reported and the rest stand.
+    const checksPath = `productions/${id}/take-checks.jsonl`;
+    const takeChecks: NonNullable<ProductionBundle["takeChecks"]> = {};
+    if (await exists(join(pdir, "take-checks.jsonl"))) await tryParse(checksPath, raw => {
+      raw.split("\n").forEach((line, index) => {
+        if (!line.trim()) return;
+        try {
+          const record = TakeChecksRecordSchema.parse(JSON.parse(line));
+          takeChecks[record.takeId] = record;
+        } catch { problems.push({ path: checksPath, message: `Malformed take checks at line ${index + 1}. Valid records remain available.` }); }
+      });
+      if (raw && !raw.endsWith("\n")) problems.push({ path: checksPath, message: "Incomplete take checks tail. Repair before more takes are checked." });
+      return takeChecks;
+    });
     const performanceReviewPath = `productions/${id}/performance-reviews.jsonl`;
     const performanceSelectionPath = `productions/${id}/performance-selections.json`;
     const performanceReviews = (await exists(join(pdir, "performance-reviews.jsonl"))) ? await tryParse(performanceReviewPath, raw => {
@@ -1262,6 +1278,7 @@ export async function scanWorld(
       pictureFamilies,
       editorRequestState,
       takeMediaInfo,
+      ...(Object.keys(takeChecks).length > 0 ? { takeChecks } : {}),
     });
   }
 

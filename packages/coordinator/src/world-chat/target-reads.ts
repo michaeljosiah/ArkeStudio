@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
+  currentTakeChecks,
   migrateLegacyCut,
   deriveProductionReadiness,
   episodeScriptFile,
@@ -347,8 +348,10 @@ export function sceneFence(production: ProductionBundle | undefined, sceneId: st
 
 function takeRows(production: ProductionBundle | undefined): Row[] {
   return [
+    // A take's checks (design turn 287) ride with it, when they are of the media it has now, so
+    // Arke reads what was measured on arrival rather than measuring the take again.
     ...(production?.takes ?? []).map((take) => ({ key: `take:${take.id}`, value: { kind: "take", take, mediaInfo: production?.takeMediaInfo[take.id] ?? null,
-      imageSources: productionTakeImageSources(production!, take) } })),
+      imageSources: productionTakeImageSources(production!, take), checks: currentTakeChecks(production?.takeChecks, take) } })),
     ...(production?.reviews ?? []).map((review, index) => ({ key: `review:${review.ts}:${padded(index)}`, value: { kind: "review", review } })),
     ...Object.entries(production?.selections ?? {}).map(([shotId, selection]) => ({ key: `selection:${shotId}`, value: { kind: "selection", shotId, selection } })),
   ].sort((a, b) => a.key.localeCompare(b.key));
