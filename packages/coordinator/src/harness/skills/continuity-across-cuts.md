@@ -108,8 +108,10 @@ How to judge:
 - **Two still frames cannot show movement.** A pose, a hand, a prop or a room that differs across a matched
   cut is a mismatch. Never explain it away as movement nobody saw.
 - Say what the frames cannot show: the movement between them, and lip sync, need the clip itself.
-- **Say whether each camera does what its shot asked**: still, handheld, easing closer. Look at its first
-  and last frames: a handheld that ends exactly where it began did not move.
+- **Say whether each camera does what its shot asked**: still, handheld, easing closer. Look at frames
+  spread across the shot, not only its first and last: a handheld can sway and come back to where it
+  began. A shot whose frames all frame the room alike did not move; one asked to ease closer that ends no
+  closer did not.
 - **A measurement that finds no motion is not a still.** `review_export` and `clip_quality` give no motion
   figures for a shot that changes too little between frames to measure, and slow movement in a dark room can
   read that way. Never say a shot does not move from that alone: look at its first and last frames.
