@@ -1355,6 +1355,23 @@ describe("SPEC-019 prompt structure (R-5..R-8, D5..D7)", () => {
     await store.close();
   });
 
+  it("describes each place and person once at the head of a board, whatever order its shots cite them in (0.5.141)", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    // Gold on Gold's board 15–17: Tunde's shots cite him before Ade, Ade's shot the other way round.
+    const one = shot(1, 3, "@maren-kest watches @bray-half-hitch across the table");
+    const two = shot(2, 3, "@bray-half-hitch answers @maren-kest");
+    const board = assembleBoardPrompt({ world: bundle.meta, sheets: bundle.sheets, scene: scene([one, two, one]), shots: [one, two], aspect: "16:9" });
+    const head = board.split("\n\n")[0]!;
+    for (const name of ["Maren Kest —", "Bray Half-Hitch —", "The Vigil —"]) {
+      assert.equal(head.split(name).length - 1, 1, `${name} is described once in: ${head}`);
+    }
+    assert.match(head, /^The Vigil, night, 16:9\. /, "the setting, then who stands in it");
+    assert.ok(!/\.,|\.\.(\s|$)/.test(head), `no ".," or ".." joins: ${head}`);
+    assert.match(head, /Continuous cast, light and grade across every cell\.$/);
+    await store.close();
+  });
+
   it("omits an empty camera heading when camera is absent", async () => {
     const { store } = await open();
     const bundle = store.getBundle();
