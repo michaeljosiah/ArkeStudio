@@ -27,6 +27,7 @@ export function beforeShotNotes(bundle: WorldBundle, productionId: string, scene
       hasFrame: hasOwnFrame(selection, bundle.artifacts) || accepted?.kind === "frame" || accepted?.kind === "still",
       characters, board: null, lineSec: recordedLineSec(production, shot),
     }).filter((item) => item.result === "fix" && (mode === "video" || IMAGE_ITEMS.has(item.id)));
-    return fixes.length === 0 ? [] : [`Shot ${index + 1} before it is made: ${fixes.map((item) => `${BEFORE_SHOT_NAMES[item.id].toLowerCase()} ${item.says}`).join("; ")}.`];
+    // The shot's own number, as the scene and Arke's reads name it, not its place in the list.
+    return fixes.length === 0 ? [] : [`Shot ${shot.number} before it is made: ${fixes.map((item) => `${BEFORE_SHOT_NAMES[item.id].toLowerCase()} ${item.says}`).join("; ")}.`];
   });
 }

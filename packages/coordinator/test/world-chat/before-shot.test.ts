@@ -16,14 +16,15 @@ describe("a generation card's before-the-shot notes", () => {
       ...candidate, meta: { ...candidate.meta, look: { camera: { kind: "handheld" } } },
       scenes: candidate.scenes.map((s) => s.id !== scene.id ? s : { ...s, defaults: undefined,
         shots: (s as { shots?: Array<Record<string, unknown>> }).shots?.map((shot) => shot["id"] === shots[1]!.id ? edit(shot) : shot) } as typeof s) }) };
-    return { bundle: patched, sceneId: scene.id, first: shots[0]!.id, second: shots[1]!.id };
+    return { bundle: patched, sceneId: scene.id, first: shots[0]!.id, second: shots[1]!.id, secondNumber: shots[1]!.number };
   }
 
-  it("names the shot by its place in the scene and what it has to fix", async () => {
-    const { bundle, sceneId, second } = await world((shot) => ({ ...shot, camera: "the camera is locked off" }));
+  it("names the shot by its number, as the scene shows it, and what it has to fix", async () => {
+    const { bundle, sceneId, second, secondNumber } = await world((shot) => ({ ...shot, camera: "the camera is locked off" }));
     const [note] = beforeShotNotes(bundle, "saltlight", sceneId, [second], "video");
     assert.ok(note, "a shot with something to fix has a note");
-    assert.match(note!, /^Shot 2 before it is made: /);
+    assert.notEqual(secondNumber, 2, "the fixture's numbers are not places in the list, so this tells them apart");
+    assert.match(note!, new RegExp(`^Shot ${secondNumber} before it is made: `));
     assert.match(note!, /camera says locked off/);
     assert.match(note!, /light none named/);
   });
