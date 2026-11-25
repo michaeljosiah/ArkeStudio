@@ -131,6 +131,19 @@ describe("conversation image inspection — SPEC-050 R-31..R-34", () => {
     const image = await h.retrieval.call(h.lease.token, "view_image", { kind: "bench-take", sessionId, takeId });
     assert.ok(image.imageContent); assert.equal(image.receipt.image!.sourceHash, digest(bytes));
   });
+  it("reads one shot's takes, reviews and chosen take, as a read of that shot alone (0.5.137)", async () => {
+    // Asked for shot 3's chosen take, Arke met 749 rows twenty at a time and gave up.
+    const h = await harness();
+    const read = await h.retrieval.call(h.lease.token, "list_takes", { productionId: "saltlight", shotId: "sh_12" });
+    const rows = (read.result as { items: Array<{ kind: string; take?: Take; review?: { shotId: string }; shotId?: string }> }).items;
+    assert.ok(rows.length > 0);
+    assert.ok(rows.every(row => row.kind === "take" ? row.take!.coversShots.includes("sh_12") : row.kind === "review" ? row.review!.shotId === "sh_12" : row.shotId === "sh_12"));
+    assert.ok(rows.some(row => row.kind === "selection"), "the shot's chosen take is in it");
+    assert.deepEqual(read.receipt.target, { requirement: "takes", id: "saltlight:sh_12" }, "never the whole read a take card is fenced on");
+    const whole = await h.retrieval.call(h.lease.token, "list_takes", { productionId: "saltlight" });
+    assert.deepEqual(whole.receipt.target, { requirement: "takes", id: "saltlight" });
+  });
+
   it("discovers production images, reads a frozen seed and seeks a pass segment's own poster", async () => {
     const positions: number[] = [], red = encodePng(solidImage(2, 2, [255, 0, 0, 255])), blue = encodePng(solidImage(2, 2, [0, 0, 255, 255]));
     const h = await harness({ maker: { render: async (bytes, extension, _signal, atSec = 0) => {

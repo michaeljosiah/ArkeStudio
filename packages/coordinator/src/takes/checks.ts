@@ -59,18 +59,21 @@ const SURE = .5;
  * The words heard against the line, and any voice nobody wrote: words outside the line's run, two
  * or more of them, which is what 69 and 72 did after their lines ended. A voice after the line
  * says where the take could end. A shot with no line has no words to compare; any voice in it is
- * one nobody wrote.
+ * one nobody wrote. Words heard without times (the recogniser's text alone, when it could not
+ * place a word) still judge the line; a voice nobody wrote then says where it is, not when.
  */
-export function judgeWords(line: string | null, heard: readonly AcousticWord[]): { words: TakeCheck | null; voice: TakeCheck } {
+export type HeardWord = { text: string; startSec: number | null; probability: number };
+export function judgeWords(line: string | null, heard: readonly HeardWord[]): { words: TakeCheck | null; voice: TakeCheck } {
   const spoken = heard.flatMap(word => spokenWords(word.text).map(text => ({ text, startSec: word.startSec, probability: word.probability })));
-  const voiceAt = (words: typeof spoken, trimmable: boolean): TakeCheck => {
+  const voiceAt = (words: typeof spoken, trimmable: boolean, where: string): TakeCheck => {
     const sure = words.filter(word => word.probability >= SURE);
     if (sure.length < 2) return { id: "unwritten-voice", result: "pass", says: "none" };
     const at = sure[0]!.startSec;
+    if (at === null) return { id: "unwritten-voice", result: "fix", says: where };
     return { id: "unwritten-voice", result: "fix", says: `at ${sec(at)}`, ...(trimmable && at - .15 >= .5 ? { endAtSec: round1(at - .15) } : {}) };
   };
   const lineWords = line === null ? [] : spokenWords(line);
-  if (lineWords.length === 0) return { words: null, voice: voiceAt(spoken, true) };
+  if (lineWords.length === 0) return { words: null, voice: voiceAt(spoken, true, "heard") };
   if (spoken.length === 0) return { words: { id: "words", result: "fix", says: "nothing heard" }, voice: { id: "unwritten-voice", result: "pass", says: "none" } };
   const used = matchedHeard(lineWords, spoken.map(word => word.text));
   const share = used.length / lineWords.length;
@@ -78,9 +81,9 @@ export function judgeWords(line: string | null, heard: readonly AcousticWord[]):
   const words: TakeCheck = share === 1 ? { id: "words", result: "pass", says: "as written" }
     : share >= .6 ? { id: "words", result: "pass", says: `${used.length} of ${lineWords.length} words` }
     : { id: "words", result: "fix", says: `heard “${heardText.length > 48 ? `${heardText.slice(0, 47)}…` : heardText}”` };
-  if (used.length === 0) return { words, voice: voiceAt(spoken, false) };
-  const after = voiceAt(spoken.slice(used[used.length - 1]! + 1), true);
-  return { words, voice: after.result === "fix" ? after : voiceAt(spoken.slice(0, used[0]!), false) };
+  if (used.length === 0) return { words, voice: voiceAt(spoken, false, "heard") };
+  const after = voiceAt(spoken.slice(used[used.length - 1]! + 1), true, "after the line");
+  return { words, voice: after.result === "fix" ? after : voiceAt(spoken.slice(0, used[0]!), false, "before the line") };
 }
 
 // ---------- Cuts inside ----------
@@ -257,6 +260,8 @@ export interface TakeCheckPorts {
   tools: AgentMediaTools;
   speech?: AgentSpeechReader;
   speechReady?: (signal: AbortSignal) => Promise<boolean>;
+  /** The same local recogniser's text alone, for a take whose words it cannot place in time. */
+  transcribe?: (wav: Uint8Array, signal: AbortSignal) => Promise<string>;
   now: () => string;
 }
 
@@ -388,9 +393,19 @@ export async function measureTake(store: WorldStore, productionId: string, takeI
         return answer;
       };
       const derivative = await quietly(tools.speechAudio(snapshot.path, audio, start, soundStop, signal));
-      const heard = derivative === null ? null : await quietly(recognizeAgentSpeech({ bytes: derivative.bytes, durationSec: derivative.durationSec,
+      let heard: HeardWord[] | null = derivative === null ? null : await quietly(recognizeAgentSpeech({ bytes: derivative.bytes, durationSec: derivative.durationSec,
         streamIndex: audio.index, sourceStartSec: 0, viewStartSec: 0, read, signal }).then(transcript => transcript.words as AcousticWord[]))
         .then(words => (words === null && silent ? [] : words));
+      /*
+       * The recogniser refuses a take when it cannot place a word in time ("a word has no usable
+       * timing or an unresolved pause"): on 0.5.137 that was shot 4 of Gold on Gold, a Pidgin line
+       * with a beat in it, and its words read "unavailable". Its text alone still says whether the
+       * line was spoken, so the words are judged from it; a voice nobody wrote then says where.
+       */
+      if (heard === null && derivative !== null && ports.transcribe) {
+        const text = await quietly(ports.transcribe(derivative.bytes, signal));
+        if (text !== null) heard = spokenWords(text).map(word => ({ text: word, startSec: null, probability: 1 }));
+      }
       if (heard === null) {
         skipped.push({ id: "unwritten-voice", reason: "unavailable" });
         if (line !== null) skipped.push({ id: "words", reason: "unavailable" });
