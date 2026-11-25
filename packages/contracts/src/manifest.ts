@@ -4,7 +4,7 @@ import { quoteSpeech, SpeechTokenPricingSchema } from "./speech-pricing.js";
 import { z } from "zod";
 import { IsoDateSchema } from "./ids.js";
 import { formatMicroUsd } from "./money.js";
-import { CapabilitySchema, ProviderIdSchema, type Capability } from "./provider.js";
+import { CapabilitySchema, ProviderIdSchema, type Capability, type ModelChoices } from "./provider.js";
 import type { RoutingDefaults } from "./settings.js";
 import { ModelSamplingSchema } from "./local-sampling.js";
 
@@ -570,6 +570,20 @@ export function modelForCapability(
     if (model) return model;
   }
   return manifest.models.find((candidate) => candidate.capability === capability && candidate.upscale === undefined) ?? null;
+}
+
+/**
+ * The video route a production's boards are packed for (SPEC-035): the one it names, else the
+ * routed default. The frame run and Arke's board read each worked this out in their own copy; one
+ * answer keeps the seams Arke reads the seams the frame sheets are cut at.
+ */
+export function productionVideoModel(
+  manifest: ModelManifest,
+  production: { meta: { models?: ModelChoices | undefined } },
+  routing: RoutingDefaults | null | undefined,
+): ManifestModel | undefined {
+  const id = production.meta.models?.video ?? modelForCapability(manifest, routing, "video")?.id;
+  return manifest.models.find((candidate) => candidate.id === id);
 }
 
 // ---------------------------------------------------------------------------

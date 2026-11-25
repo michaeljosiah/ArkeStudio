@@ -440,11 +440,6 @@ function rowBeat(beats: BeatsView, shotId: string, newShotIds: ReadonlySet<strin
 
 /** 9:16 stands up; 16:9, 1:1 and anything wider lies down. An aspect that does not parse lies down too. */
 
-/** A seam the packer made from a length (the route's cap, the scene's target or the panel count): no merge undoes it. */
-function derivedLimit(reason: PackedBoard["reason"]): boolean {
-  return reason === "clip limit" || reason === "target length" || reason === "panel limit";
-}
-
 export function aspectIsPortrait(aspect: string): boolean {
   const [w, h] = aspect.split(":").map(Number);
   return Number.isFinite(w) && Number.isFinite(h) && h! > 0 && w! > 0 && w! < h!;
@@ -501,6 +496,11 @@ function Divider({
       )}
     </div>
   );
+}
+
+/** A seam the packer made from a length (the route's cap, the scene's target or the panel count): no merge undoes it. */
+function derivedLimit(reason: PackedBoard["reason"]): boolean {
+  return reason === "clip limit" || reason === "target length" || reason === "panel limit";
 }
 
 function BoardBand({

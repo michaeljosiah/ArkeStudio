@@ -11,7 +11,8 @@ board target, split or merge its boards, or plan its video.
 - **Only consecutive shots.** A board is one continuous clip cut at its shots' boundaries. Shots far apart
   in the scene, such as all of one person's close shots, cannot share a board.
 - **Read the boards before you change them.** `get_scene_boards` gives `packed`: each board's shots,
-  its seconds, and `startsBecause`. It also gives the route's `capSec` and the scene's `targetSec`.
+  its seconds, and `startsBecause`. It also gives the route's `capSec` and the scene's `targetSec`. When
+  `packed` says no video route is chosen, choose one before you plan seams.
 
 ## 2 · Set a length
 
@@ -37,12 +38,14 @@ move any seam that falls in the wrong place.
   automatic one with `merge`. A seam that starts for `clip limit`, `target length` or `panel limit` cannot
   be merged away. To move it, split earlier, or change the target.
 
-## 4 · Seams you cannot remove
+## 4 · Seams the shots make
 
 - A seam that starts for `cast changes` or `time of day changes` is a real change. Merge across it only
   when the shots truly continue, and the board will carry a warning that says so.
-- A shot that sings the production's song is a clip of its own.
-- A shot made from references rather than a start frame opens its own clip.
+- **The video plan can cut a board again; the boards do not show it.** A shot that sings the production's
+  song is made as a clip of its own. Shots that do not meet on the Cut's clock are made apart. A clip that
+  carries references may have a shorter limit than the route's cap. Once a plan is prepared, `list_plans`
+  shows the clips it makes; say "at least" a number of clips until then.
 
 ## 5 · Check before you finish
 

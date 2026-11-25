@@ -159,10 +159,9 @@ export function packBoards(
   targetSec?: number,
 ): BoardPack {
   const capMs = ms(capSec);
-  const targetMs = targetSec !== undefined && Number.isFinite(targetSec) && targetSec > 0 && ms(targetSec) < capMs
-    ? ms(targetSec)
-    : undefined;
-  const fillMs = targetMs ?? capMs;
+  // A target rounding to no time at all, or not under the cap, leaves the cap alone.
+  const targetMs = targetSec !== undefined && Number.isFinite(targetSec) ? ms(targetSec) : 0;
+  const fillMs = targetMs > 0 && targetMs < capMs ? targetMs : capMs;
 
   // R-5: refuse before walking. Nothing downstream can rescue a shot no cap can hold.
   for (const shot of shots) {
@@ -251,8 +250,10 @@ export function packBoards(
   let current: Working | null = null;
   let previous: PackShot | null = null;
 
-  // The walk (R-5). The order of these tests is the specification: cap, then target, then panel limit, then
-  // a hand split, then a merge (which carries what it suppressed), then the automatic breaks.
+  // The walk (R-5). The order of these tests is the specification: cap, then target, then panel
+  // limit, then a hand split, then a merge (which carries what it suppressed), then the automatic
+  // breaks. The cap is tested first so a board that would overrun both names the limit no target
+  // can lift.
   for (const shot of shots) {
     let reason: BoardReason | null = null;
     if (current !== null && previous !== null) {

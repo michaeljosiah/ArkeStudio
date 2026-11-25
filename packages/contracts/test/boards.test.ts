@@ -5,6 +5,9 @@ import {
   boardPackKey,
   packBoards,
   packShotsFor,
+  productionVideoModel,
+  type ManifestModel,
+  type ModelManifest,
   type PackShot,
   type Take,
 } from "../src/index.js";
@@ -680,5 +683,25 @@ describe("assembling the packer's input (T-18)", () => {
       defaultDurationSec: 4,
     });
     assert.deepEqual(packed[0]!.cast, ["maren-kest", "sereth"]);
+  });
+});
+
+describe("the video route boards are packed for", () => {
+  const video = (id: string, maxDurationSec: number): ManifestModel => ({
+    id, provider: "fal", capability: "video", displayName: id,
+    accepts: { referenceImages: 0, startFrame: true, endFrame: false },
+    limits: { maxDurationSec },
+    pricing: { kind: "perSecond", microUsdPerSecond: 1000 },
+  });
+  const manifest = { models: [video("first", 10), video("routed", 15), video("named", 12)] } as unknown as ModelManifest;
+
+  it("is the production's own choice, else the routed default, else the first video route", () => {
+    assert.equal(productionVideoModel(manifest, { meta: { models: { video: "named" } } }, { video: "routed" })?.id, "named");
+    assert.equal(productionVideoModel(manifest, { meta: {} }, { video: "routed" })?.id, "routed");
+    assert.equal(productionVideoModel(manifest, { meta: {} }, null)?.id, "first");
+  });
+
+  it("is nothing when the production names a route the manifest no longer has", () => {
+    assert.equal(productionVideoModel(manifest, { meta: { models: { video: "gone" } } }, null), undefined);
   });
 });

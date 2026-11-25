@@ -1,4 +1,4 @@
-import { modelEligible, modelForCapability, ulid, type ClientState, type FrameRunQuote, type ModelManifest } from "@arke-studio/contracts";
+import { modelEligible, productionVideoModel, ulid, type ClientState, type FrameRunQuote, type ModelManifest } from "@arke-studio/contracts";
 import type { AppSettingsFile } from "../app-settings.js";
 import { describeCoordinatorError } from "../errors/user-message.js";
 import {
@@ -103,8 +103,7 @@ export function frameRunCommands(ctx: CommandContext, deps: {
         const production = bundle.productions.find((candidate) => candidate.meta.id === msg.productionId);
         const scene = production?.scenes.find((candidate) => candidate.id === msg.sceneId);
         if (!production || !scene) throw new Error("The production or scene is no longer available.");
-        const videoModelId = production.meta.models?.video ?? modelForCapability(manifest, settings?.routing, "video")?.id;
-        const videoModel = manifest.models.find((candidate) => candidate.id === videoModelId);
+        const videoModel = productionVideoModel(manifest, production, settings?.routing);
         const localIdentity = deps.freezeLocalIdentity({
           worldId: msg.worldId,
           productionId: msg.productionId,

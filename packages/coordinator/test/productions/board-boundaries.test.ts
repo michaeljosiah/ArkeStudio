@@ -174,7 +174,20 @@ describe("Arke reads the boards as they are packed", () => {
     assert.deepEqual(packed.boards.flatMap((board) => board.shots.map((entry) => entry.shotId)), ["sh_12", "sh_13", "sh_14", "sh_15"]);
     assert.ok(packed.boards.slice(1).some((board) => board.startsBecause === "target length"));
 
-    const unrouted = await new WorldChatTargetReads().call(lease(), bundle, "get_scene_boards", { productionId: "saltlight", sceneId: "sc_04" });
-    assert.equal((unrouted.result.items[0] as { packed: unknown }).packed, null, "no route known, no packing guessed");
+    const bare = await new WorldChatTargetReads().call(lease(), bundle, "get_scene_boards", { productionId: "saltlight", sceneId: "sc_04" });
+    assert.equal((bare.result.items[0] as { packed: unknown }).packed, null, "no host routes, no packing guessed");
+    const unrouted = await new WorldChatTargetReads({ getBoardLimits: async () => null })
+      .call(lease(), bundle, "get_scene_boards", { productionId: "saltlight", sceneId: "sc_04" });
+    assert.match((unrouted.result.items[0] as { packed: { unavailable: string } }).packed.unavailable, /No video route/);
+  });
+
+  it("packs to the route's sheet panel count, as the frame run cuts its sheets", async () => {
+    const { store } = await sceneOf();
+    const reads = new WorldChatTargetReads({ getBoardLimits: async () => ({ model: MODEL.id, capSec: 30, panelCap: 2 }) });
+    const page = await reads.call(lease(), store.getBundle(), "get_scene_boards", { productionId: "saltlight", sceneId: "sc_04" });
+    const packed = (page.result.items[0] as { packed: Packed & { panelCap?: number } }).packed;
+    assert.equal(packed.panelCap, 2);
+    assert.ok(packed.boards!.every((board) => board.shots.length <= 2));
+    assert.equal(packed.boards![1]!.startsBecause, "panel limit");
   });
 });
