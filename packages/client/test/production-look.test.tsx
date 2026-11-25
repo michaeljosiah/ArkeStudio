@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { applyLookPreset, type ClientMessage, type ProductionLook } from "@arke-studio/contracts";
 import { ProductionLookCard } from "../src/screens/production-look.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -112,6 +112,24 @@ describe("the production's look (design turn 288a)", () => {
     // A look the card did not write (Arke's card) is taken as it comes.
     await rerender({ camera: { kind: "steady" } });
     assert.equal(container.querySelector('[aria-label="Camera"] .fy-seg__item--active')?.textContent, "Steady");
+  });
+
+  it("a refused write goes back to the look as it is (codex on PR 3304)", async () => {
+    const { container, looks } = await mount({ grade: { words: "35 mm" } });
+    const grade = container.querySelector<HTMLInputElement>('input[aria-label="Grade words"]')!;
+    grade.value = "35 mm, grain";
+    await act(async () => grade.dispatchEvent(new dom.Event("focusout", { bubbles: true })));
+    assert.equal(looks().at(-1)?.grade?.words, "35 mm, grain");
+    // The world is unchanged, so its snapshot reads as before; only the refusal says so.
+    await act(async () => __applyEventForTest({ at: "2026-11-25T12:00:00.000Z", type: "command.failed", command: "set-production-look", requestId: null, reason: "No." }));
+    assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Grade words"]')!.value, "35 mm");
+    await press(container, "Thriller");
+    assert.equal(looks().at(-1)?.grade?.words, "35 mm", "the next write starts from the saved look");
+    // Another command's refusal is not this card's.
+    grade.value = "35 mm, grain";
+    await act(async () => grade.dispatchEvent(new dom.Event("focusout", { bubbles: true })));
+    await act(async () => __applyEventForTest({ at: "2026-11-25T12:00:00.000Z", type: "command.failed", command: "set-production-clips", requestId: null, reason: "No." }));
+    assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Grade words"]')!.value, "35 mm, grain");
   });
 
   it("a line added with Add stays to be written", async () => {

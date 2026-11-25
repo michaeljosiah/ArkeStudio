@@ -10,7 +10,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { Button, Checkbox, Input, Select } from "../components/ui.js";
 import { Plus } from "../components/icons.js";
-import { setProductionLook } from "../lib/store.js";
+import { setProductionLook, subscribeCommandFailures } from "../lib/store.js";
 
 /**
  * The production's look (design turns 287 and 288a): a card in Production settings, after Clips and
@@ -56,6 +56,19 @@ export function ProductionLookCard({ look, worldId, prodId }: {
     // `received` stands for `look`: a new object with the same look is not a new look.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [received]);
+  /*
+   * A refused write changes nothing in the world, so its snapshot carries the look as it was, which
+   * reads the same as before and runs nothing above: the card would go on showing what was refused
+   * (codex on PR 3304). A refusal of this command puts the card back to the look as received.
+   */
+  const saved = useRef(look);
+  saved.current = look;
+  useEffect(() => subscribeCommandFailures((failure) => {
+    if (failure.command !== "set-production-look") return;
+    echoes.current = [];
+    latest.current = saved.current ?? {};
+    setShown(saved.current ?? {});
+  }), []);
   const write = (next: ProductionLook) => {
     latest.current = next;
     setShown(next);
