@@ -1764,14 +1764,14 @@ export function prepareWorldChatActions(
     if (group.dependencyPreview && "action" in payload) {
       const projected = Object.create(store) as WorldStore;
       projected.getBundle = () => group.dependencyPreview!.beforeBundle;
-      const expectedObservations = baseObservations.map(observation => observation.requirement !== "scenes" ? observation :
+      const expectedObservations = baseObservations.map(observation => !SCENE_SCOPED_READS.has(observation.requirement) ? observation :
         { ...observation, revisionOrDigest: currentWorldObservation(projected, observation.requirement, observation.target, deps)!.fence });
       payload = WorldChatPreparedActionSchema.parse({ ...payload, dependencyPreview: { scenes: group.dependencyPreview.scenes, expectedObservations } });
     }
     if (payload.kind === "world-chat-production-scene-command" && group.scene) {
       const projected = Object.create(store) as WorldStore;
       projected.getBundle = () => group.scene!.beforeBundle;
-      const expectedObservations = baseObservations.map(observation => observation.requirement !== "scenes" ? observation :
+      const expectedObservations = baseObservations.map(observation => !SCENE_SCOPED_READS.has(observation.requirement) ? observation :
         { ...observation, revisionOrDigest: currentWorldObservation(projected, observation.requirement, observation.target, deps)!.fence });
       payload = WorldChatProductionSceneCommandActionSchema.parse({ ...payload,
         scenePlan: { before: group.scene.before, after: group.scene.after, expectedObservations } });
@@ -2203,11 +2203,18 @@ function observationsCurrent(
   return { ok: true };
 }
 
+/**
+ * The reads fenced on a scene's contents, which a card waiting on another scene card checks against
+ * the scene its dependencies leave, not the one it read (ArkeStudio PR 3316's review): the scene
+ * itself, and its shots, stage and boards since those reads gained fences of their own.
+ */
+const SCENE_SCOPED_READS: ReadonlySet<string> = new Set(["scenes", "shots", "stage", "boards"]);
+
 /** A dependent scene's future fence is validated at approval. Its original read was checked
  * before the turn completed; preparation must also survive partially completed dependencies. */
 function preparationObservations(payload: WorldChatPreparedAction, intent: ConversationActionPrepareIntent) {
   const dependent = (payload.kind === "world-chat-production-scene-command" && payload.scenePlan) || ("dependencyPreview" in payload && payload.dependencyPreview);
-  const observed = dependent ? { baseObservations: intent.baseObservations.filter(observation => observation.requirement !== "scenes") } : intent;
+  const observed = dependent ? { baseObservations: intent.baseObservations.filter(observation => !SCENE_SCOPED_READS.has(observation.requirement)) } : intent;
   // A media fence taken against the scenes the dependencies leave is checked at approval, as
   // their scene reads are.
   return withoutChainedSpineRead(payload, intent, observed, Boolean(dependent));

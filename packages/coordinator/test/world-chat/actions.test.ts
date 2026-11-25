@@ -69,6 +69,7 @@ import { WorldStore } from "../../src/world/store.js";
 import { readWorldMeta } from "../../src/world/scan.js";
 import { GUIDE_THEMES_SCHEMA_VERSION } from "../../src/world/commit.js";
 import {
+  currentWorldObservation,
   prepareWorldChatActions,
   worldChatActionAdapters,
   savedStoryProposalPrecondition,
@@ -3805,6 +3806,32 @@ describe("turn-local scene action sequencing (#1417)", () => {
     assert.equal((await decide(w.lifecycle, w.log, card!)).status, "completed");
     assert.deepEqual(orderedShots(scene(w)).map(one => one.title), [...orderedShots(before).map(one => one.title), "The lagoon", "The phone", "The door"]);
     assert.equal(scene(w).version, before.version + 1);
+  });
+  it("lands a card that waits on another and cites the scene's boards, shots or stage read (PR 3316's review)", async () => {
+    // Arke reads the boards, sets the target on one card and rewrites a shot on the next: the second
+    // card's reads are of the scene before the first, so they are checked against the scene it leaves.
+    for (const requirement of ["boards", "shots", "stage"] as const) {
+      const w = await setup(context), before = structuredClone(scene(w));
+      const sceneRead = currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`);
+      const target = `${PRODUCTION}:${context.sceneId}:${requirement}`;
+      const scoped = { ...currentReceipt(w.store, "scenes", target), target: { requirement, id: target },
+        observedRevisionOrDigest: currentWorldObservation(w.store, requirement, target)!.fence };
+      const input = turn(w.conversationId, context, { receipts: [sceneRead, scoped], actions: [
+        ModelWorldChatActionSchema.parse({ kind: "production-scene-command", productionId: PRODUCTION, sceneId: context.sceneId,
+          ref: "first", command: { kind: "edit-scene", synopsis: "The bell, rung once." }, checkReceiptIds: [sceneRead.id] }),
+        ModelWorldChatActionSchema.parse({ kind: "production-scene-command", productionId: PRODUCTION, sceneId: context.sceneId,
+          ref: "second", after: ["first"], command: { kind: "set-prompt-override", shotId: orderedShots(before)[0]!.id, text: "Low, from the floor." },
+          checkReceiptIds: [sceneRead.id, scoped.id] }),
+      ] });
+      const prepared = prepareWorldChatActions(w.store, w.lifecycle, input);
+      await appendTurn(w.log, input, prepared); await bindAll(w.lifecycle, prepared);
+      const cards = (await loaded(w.log)).actions;
+      assert.equal(cards.length, 2, requirement);
+      assert.equal((await decide(w.lifecycle, w.log, cards[0]!)).status, "completed", requirement);
+      assert.equal((await decide(w.lifecycle, w.log, cards[1]!)).status, "completed", `${requirement}: not stale for its own dependency`);
+      assert.equal(orderedShots(scene(w))[0]!.promptOverride?.text, "Low, from the floor.");
+      assert.equal(scene(w).version, before.version + 2);
+    }
   });
   function shotPrompt(before: ReturnType<typeof scene>) { return orderedShots(before)[0]!.promptOverride?.text; }
   for (const parentCompleted of [false, true]) it(`recovers an interrupted dependent binding with its parent ${parentCompleted ? "completed" : "pending"}`, async () => {
