@@ -1,4 +1,4 @@
-import { BEFORE_SHOT_NAMES, beforeShotChecks, hasOwnFrame, orderedShots, type BeforeShotCheckId, type WorldBundle } from "@arke-studio/contracts";
+import { BEFORE_SHOT_NAMES, beforeShotChecks, hasOwnFrame, orderedShots, recordedLineSec, type BeforeShotCheckId, type WorldBundle } from "@arke-studio/contracts";
 
 /** A still only needs its people cited and its light named: the rest is a clip's. */
 const IMAGE_ITEMS: ReadonlySet<BeforeShotCheckId> = new Set(["named", "light"]);
@@ -25,7 +25,7 @@ export function beforeShotNotes(bundle: WorldBundle, productionId: string, scene
       scene, shot, look: production.meta.look,
       clipsFrom: shot.continuity?.clipsFrom ?? production.meta.clipsFrom ?? "frames",
       hasFrame: hasOwnFrame(selection, bundle.artifacts) || accepted?.kind === "frame" || accepted?.kind === "still",
-      characters, board: null,
+      characters, board: null, lineSec: recordedLineSec(production, shot),
     }).filter((item) => item.result === "fix" && (mode === "video" || IMAGE_ITEMS.has(item.id)));
     return fixes.length === 0 ? [] : [`Shot ${index + 1} before it is made: ${fixes.map((item) => `${BEFORE_SHOT_NAMES[item.id].toLowerCase()} ${item.says}`).join("; ")}.`];
   });
