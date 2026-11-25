@@ -32,8 +32,19 @@ export function productionCommands(ctx: CommandContext, deps: {
   songSections(store: WorldStore, productionId: string): Promise<SongSectionsResult>;
   worldChat: () => ClientState["worldChat"];
   setWorldChat(worldChat: ClientState["worldChat"]): void;
+  checkTake(store: WorldStore, productionId: string, takeId: string): Promise<"checked" | "not-checkable" | "changed">;
 }) {
   return {
+    "check-take": {
+      scope: "open-world",
+      async handle(msg, store) {
+        // Design turn 287: the take's checks, run again or for a take that landed without them (one
+        // filed from the Bench). A refusal throws to the router, which says it under the take's press.
+        const status = await deps.checkTake(store, msg.productionId, msg.takeId);
+        if (status === "not-checkable") throw new Error("Only a clip of one shot is checked.");
+        if (status === "changed") throw new Error("The take changed while it was checked. Check it again.");
+      },
+    },
     "production-spend-refresh": {
       scope: "any-world",
       async handle(msg) {

@@ -269,6 +269,7 @@ import {
   isComfyUiWeightsComponent,
   orderedShots,
   characterAudioRoute,
+  takeIsCheckable,
 } from "@arke-studio/contracts";
 import { BenchStore, sessionDir as benchSessionDir, sessionMediaDir } from "./bench/store.js";
 import { benchImageResult, type BenchImageSource } from "./world-chat/bench-image-result.js";
@@ -441,6 +442,7 @@ import { exportManuscript, importManuscript, readManuscript } from "./production
 import { manuscriptChapters, productionShape, type StructuredDocument } from "@arke-studio/contracts";
 import { voicedBlocks, type ChapterContinuity, type ChapterVoices } from "@arke-studio/contracts";
 import { recordTakesFromJob } from "./takes/arrival.js";
+import { checkTake, type TakeCheckPorts } from "./takes/checks.js";
 import { readContinuationSource } from "./productions/continuation.js";
 
 import type { TakeQcAnalyzer } from "./takes/qc.js";
@@ -1972,6 +1974,7 @@ export class Coordinator {
         songSections: (store, productionId) => this.songSections.read(store, productionId),
         worldChat: () => this.readModel.getState().worldChat,
         setWorldChat: worldChat => this.readModel.setWorldChat(worldChat),
+        checkTake: (store, productionId, takeId) => this.checkTakeNow(store, productionId, takeId),
       }),
       worldLifecycleCommands(ctx, {
         provider: this.opts.provider,
@@ -7345,6 +7348,9 @@ export class Coordinator {
             productionId: job.productionId,
             take,
           });
+          // Design turn 287: a clip is checked as it lands, in the background, so its list is there
+          // when the person comes to judge it. A take the checks do not measure is passed over.
+          this.checkTakeInBackground(store, job.productionId, take.id);
         }
       }
       if (job.target.kind === "voice-preview" && job.landedFiles?.[0] !== undefined) {
@@ -21199,6 +21205,58 @@ export class Coordinator {
 
   private stillOpen(store: WorldStore): boolean {
     return this.opts.provider.openStore?.() === store;
+  }
+
+  /**
+   * What the checks after a take measure with (design turn 287): the media tools and local speech
+   * seam Arke's own reads use, so a take is measured the way Arke would measure it. Null on a host
+   * without picture tools; speech is left out where local recognition is not set up, and the
+   * words are then skipped as unavailable rather than guessed.
+   */
+  private takeCheckPorts(): TakeCheckPorts | null {
+    const tools = this.opts.agentMediaTools;
+    if (!tools?.grayFrames) return null;
+    return {
+      tools,
+      now: () => this.nowIso(),
+      speech: (bytes, signal) => {
+        if (!this.voiceService?.localSpeechConfigured) throw new Error("Local speech recognition is unavailable");
+        return this.voiceService.transcribeWords(bytes, signal);
+      },
+      speechReady: async signal => {
+        const voice = this.voiceService;
+        if (!voice?.localSpeechConfigured) return false;
+        const ready = await voice.wordTimingAvailability(signal);
+        return this.voiceService === voice && ready.ready;
+      },
+    };
+  }
+
+  /** Check one take now, for the take's own press: the result, or why it could not be checked. */
+  private async checkTakeNow(store: WorldStore, productionId: string, takeId: string): Promise<"checked" | "not-checkable" | "changed"> {
+    const ports = this.takeCheckPorts();
+    if (ports === null) throw new Error("This Studio has no media tools to check takes with.");
+    const work = checkTake(store, productionId, takeId, ports, AbortSignal.any([this.runtimeStop.signal, store.closingSignal]));
+    this.backgroundWork.add(work);
+    try {
+      const status = await work;
+      if (status === "checked" && this.stillOpen(store)) await this.refreshWorldSnapshot(store.worldId);
+      return status;
+    } finally { this.backgroundWork.delete(work); }
+  }
+
+  /**
+   * A landed take checked without anyone waiting: a failure is logged by reason only (no path, no
+   * prompt), and a host without the tools simply leaves the take unchecked, with Check on it.
+   */
+  private checkTakeInBackground(store: WorldStore, productionId: string, takeId: string): void {
+    if (this.takeCheckPorts() === null) return;
+    const production = store.getBundle().productions.find(p => p.meta.id === productionId);
+    const take = production?.takes.find(candidate => candidate.id === takeId);
+    if (!take || !takeIsCheckable(take)) return;
+    void this.checkTakeNow(store, productionId, takeId).catch(() => {
+      void this.appLog?.append({ kind: "take.checks-unavailable", takeId, reason: store.closingSignal.aborted || this.runtimeStop.signal.aborted ? "cancelled" : "failed" }).catch(() => {});
+    });
   }
 
   /**

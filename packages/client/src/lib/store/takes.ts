@@ -22,6 +22,11 @@ export function acceptTake(worldId: string, productionId: string, takeId: string
   send({ kind: "accept-take", worldId, productionId, takeId, shotId });
 }
 
+/** Measure a take as on arrival (design turn 287); false when the frame could not be sent. */
+export function checkTake(worldId: string, productionId: string, takeId: string): boolean {
+  return send({ kind: "check-take", worldId, productionId, takeId });
+}
+
 /**
  * File a Stage export. The host encodes its fixed RGBA frames, then sends that MP4 and the
  * opening PNG in one frame; a browser session has no encoder and refuses before rendering.

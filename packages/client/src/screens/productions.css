@@ -86,6 +86,21 @@
 .fy-production-settings-sheet .fy-look .fy-look__lines { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 .fy-production-settings-sheet .fy-look .fy-look__line { flex: none; width: auto; field-sizing: content; min-width: 120px; max-width: 100%; }
 .fy-production-settings-sheet .fy-tip::after { left: auto; right: 0; transform: none; }
+/* Design turn 288c: a take's checks, the count beside its verdicts and the list opened over the take.
+   A result is the app's dot and its figure the app's mono; a fix row carries the warning ground. */
+.fy-takechecks { position: relative; display: inline-flex; flex: none; }
+.fy-takechecks__count { white-space: nowrap; }
+.fy-takechecks__panel { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 40; box-sizing: border-box; min-width: 300px; padding: 6px; border: 1px solid var(--border); border-radius: 10px; background: var(--popover); box-shadow: var(--shadow-md); color: var(--foreground); text-align: left; }
+.fy-takechecks__head { padding: 5px 8px 7px; font: var(--type-label); color: var(--muted-foreground); }
+.fy-takechecks__list { display: grid; }
+/* Rows run down two columns once there are more than three, so the take stays in view. */
+.fy-takechecks__list--two { grid-auto-flow: column; grid-template-rows: repeat(3, auto); column-gap: 10px; }
+.fy-takechecks__row { display: flex; align-items: center; gap: 8px; min-height: 27px; padding: 0 8px; border-radius: 6px; font: var(--type-ui); white-space: nowrap; }
+.fy-takechecks__row[data-result="fix"] { background: var(--warning-bg); }
+.fy-takechecks__label { flex: none; }
+.fy-takechecks__result { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: var(--weight-regular) var(--text-2xs)/1.4 var(--font-mono); color: var(--muted-foreground); }
+.fy-takechecks__row[data-result="fix"] .fy-takechecks__result { color: var(--foreground); }
+.fy-takechecks__foot { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; padding: 6px 2px 0; border-top: 1px solid var(--border); }
 .fy-production-settings-sheet .fy-page-sheet__body { display: flex; flex-direction: column; gap: 20px; }
 .fy-production-switch-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 0; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--foreground); text-align: left; cursor: pointer; font: var(--type-ui); }
 .fy-production-switch-row__mark { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; background: var(--muted); flex: none; }

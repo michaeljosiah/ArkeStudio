@@ -27,6 +27,12 @@ import { MAX_PROPOSALS } from "./wrapup.js";
 const EPISODE_RUN = 8;
 
 /**
+ * The checks after a take (design turn 287), for the places takes are judged. Measured when a
+ * clip lands; a fix is the first thing to answer, and a remake asks for what the last take missed.
+ */
+const TAKE_CHECKS_LINE = "Each clip's checks in list_takes say what was measured when it landed; answer a fix there first: end a take that runs on at its endAtSec on the Cut, or remake it with production-take-generation, naming the failed checks in its instruction.";
+
+/**
  * What the conversation was opened about, in a sentence the model can use (#70 phase 6).
  *
  * A conversation started from a refusal already has its question; one started from a sheet
@@ -73,8 +79,8 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
       const subject = "shotId" in context && context.shotId !== undefined ? `shot ${context.shotId} in scene ${context.sceneId}`
         : "sceneId" in context && context.sceneId !== undefined ? `scene ${context.sceneId}` : `production ${context.productionId}`;
       const first = context.kind === "stage" ? "Start with production-stage-construct for blocking, camera and motion, and production-scene-command for authored shot changes. Read get_scene_stage and get_scene."
-        : context.kind === "takes" ? "Start with production-take-review, production-take-trim and production-take-generation. Read list_takes and get_scene; inspect the take's imageSources.poster and imageSources.startFrame through view_image where present. Posters reveal no motion or audio. A review based only on records must say metadata-only in its reason; do not claim unseen pixels or unheard audio."
-        : context.kind === "generate" ? "Start with production-frame-run-start, its pause/resume/cancel/retry controls, and production-scene-dispatch. Read list_frame_runs, list_plans, get_scene and list_takes. Resume and retry that may spend need a fresh generation approval."
+        : context.kind === "takes" ? `Start with production-take-review, production-take-trim and production-take-generation. Read list_takes and get_scene; inspect the take's imageSources.poster and imageSources.startFrame through view_image where present. Posters reveal no motion or audio. A review based only on records must say metadata-only in its reason; do not claim unseen pixels or unheard audio. ${TAKE_CHECKS_LINE}`
+        : context.kind === "generate" ? `Start with production-frame-run-start, its pause/resume/cancel/retry controls, and production-scene-dispatch. Read list_frame_runs, list_plans, get_scene and list_takes. Resume and retry that may spend need a fresh generation approval. ${TAKE_CHECKS_LINE}`
         : context.kind === "cut" ? "Start with editorRequests for timeline picture, text, audio and subtitle commands, audio-spine-command and production-cut-export. Before an editorRequest, page get_timeline to complete=true this turn. Read list_editor_requests for pending decisions and history, and get_audio_cut for legacy audio placements."
         : "Start with production-scene-command, production-take-generation and production-stage-construct. Read get_scene, get_scene_shots, get_scene_stage and list_takes.";
       const base = "sceneId" in context && context.sceneId !== undefined

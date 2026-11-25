@@ -1840,6 +1840,8 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
     modelId: z.literal("eleven_multilingual_sts_v2"), retention: z.enum(["provider-history", "zero-retention"]),
     confirmedMicroUsd: z.number().int().nonnegative(), cloudBasis: z.enum(["self", "authorized", "licensed"]),
     warningCodes: z.array(z.string()).max(20), singleSpeaker: z.boolean(), wordingConfirmed: z.boolean() }).strict(),
+  /** Design turn 287: measure a take as it would be on arrival (a take filed from the Bench, or one checked before). */
+  z.object({ kind: z.literal("check-take"), worldId: UlidSchema, productionId: SlugSchema, takeId: TakeIdSchema }).strict(),
   z.object({ kind: z.literal("record-dialogue-feedback"), worldId: UlidSchema, requestId: UlidSchema, productionId: SlugSchema,
     takeId: TakeIdSchema, shotId: ShotIdSchema, tags: z.array(DialogueFailureTagSchema).min(1), recommendationIds: z.array(z.string().min(1)), note: z.string().max(1000).optional() }).strict(),
   z.object({ kind: z.literal("propose-shot-visual-facts"), worldId: UlidSchema, requestId: UlidSchema, productionId: SlugSchema,

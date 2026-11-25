@@ -178,7 +178,7 @@ export {
   setMusicSequence, readMusicTakes, readMusicWaveform,
 } from "./store/music.js";
 export {
-  sendEffectProposalCommand, acceptTake, beginStageExport, writeStageExportFrame, cancelStageExport,
+  sendEffectProposalCommand, acceptTake, checkTake, beginStageExport, writeStageExportFrame, cancelStageExport,
   stagePlayblast, failStagePlayblastAction, importShotFrame, clearShotFrame, setShotTrim,
   moveTimelinePictureClip, sendTimelineCommands, moveTimelineHistory, uploadArtifacts,
   restoreArtifact, retireArtifact, importEditorMedia, rejectTake, exportCut, sendTimelineTranscribe,
