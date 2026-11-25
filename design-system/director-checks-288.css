@@ -1,0 +1,54 @@
+/* Turn 288 · Director's checks, drawn. What the turn adds to screens that are otherwise the app's
+   own, which director-checks-288.app.css styles (the client's rules, scoped to .app288). The count
+   is the shot chips' own pill (fy-takechip), a result is the app's dot (fy-dot--ok, --warn,
+   --sketch) and its figure the app's mono, a press is ui-btn; these rules only place them and draw
+   the list's panel, which the app has no part for yet. Type through the tokens only
+   (check-master's rule from turn 139). */
+
+/* ---------- The count ---------- */
+.app288 .dc288-chip{flex:none;white-space:nowrap}
+/* The bench's press row, in two: the model where it was, then the count and the press. */
+.app288 .fy-gen__cta.dc288-cta{margin-top:8px}
+/* The master's face is the app's at a hair's difference in width; the bench's Shot · Contact sheet
+   fills its row to the pixel and would wrap here where the app does not. */
+.app288 .fy-gen__left .fy-seg__item{white-space:nowrap}
+/* The Cut's head keeps its presses on one line beside the count; its title gives way, as it does today. */
+.app288.dc288f-d .fy-cuthead > :not(.fy-cuthead__title):not(.fy-h1row__push){flex:none;white-space:nowrap}
+
+/* ---------- The list, opened at its count ---------- */
+.app288 .dc288-panel{position:absolute;z-index:40;box-sizing:border-box;padding:6px;border:1px solid var(--border);border-radius:10px;background:var(--popover);box-shadow:var(--shadow-md);color:var(--foreground);text-align:left}
+.app288 .dc288-head{display:flex;align-items:baseline;gap:8px;padding:5px 8px 7px;font:var(--type-label);color:var(--muted-foreground)}
+.app288 .dc288-list{display:grid}
+/* Over a take the panel is as wide as the take and its rows run down two columns, so the take stays in view. */
+.app288 .dc288-panel--wide .dc288-list{grid-auto-flow:column;grid-template-rows:repeat(5,auto);column-gap:10px}
+.app288 .dc288-row{display:flex;align-items:center;gap:8px;min-height:27px;padding:0 8px;border-radius:6px;font:var(--type-ui);font-weight:var(--weight-regular);white-space:nowrap}
+.app288 .dc288-row[data-result="fix"]{background:var(--warning-bg)}
+.app288 .dc288-label{flex:none}
+.app288 .dc288-result{min-width:0;overflow:hidden;text-overflow:ellipsis;font:var(--weight-regular) var(--text-2xs)/1.4 var(--font-mono);color:var(--muted-foreground)}
+.app288 .dc288-row[data-result="fix"] .dc288-result{color:var(--foreground)}
+.app288 .dc288-row .ui-btn{margin-left:auto;height:22px;min-height:22px;padding-inline:8px;font:var(--type-label)}
+.app288 .dc288-foot{display:flex;justify-content:flex-end;gap:6px;margin-top:6px;padding:6px 2px 0;border-top:1px solid var(--border)}
+
+/* ---------- The look, in Production settings ---------- */
+.app288 .dc288-look.fy-models{margin:0}
+.app288 .dc288-look .fy-models__head{margin-bottom:8px}
+/* The Models card pushes its last head child (its gear) to the right; the Look's head is its title alone. */
+.app288 .dc288-look .fy-models__head > h3{margin-left:0}
+.app288 .dc288-look .fy-models__row{display:flex;align-items:center;gap:10px;min-height:36px;padding:3px 0}
+.app288 .dc288-look .ui-input{padding-block:6px}
+.app288 .dc288-look .fy-models__what{flex:none;width:112px;color:var(--muted-foreground)}
+.app288 .dc288-look .fy-seg{flex:none}
+.app288 .dc288-look .fy-takechips{display:flex;flex-wrap:wrap;gap:6px}
+.app288 .dc288-look .ui-check{flex:none;align-items:center}
+.app288 .dc288-look .ui-check__box{margin-top:0}
+.app288 .dc288-look .ui-select{flex:none}
+.app288 .dc288-look select{min-height:0}
+.app288 .dc288-look .dc288-words{flex:1;min-width:160px;max-width:300px}
+.app288 .dc288-look .dc288-words--wide{max-width:420px}
+.app288 .dc288-look .dc288-line{flex:none;width:auto;field-sizing:content;min-width:120px}
+.app288 .dc288-look .dc288-lines{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+
+/* ---------- A take, as the bench shows a 16:9 one ---------- */
+/* The take's picture is a portrait still of the sample's Tunde; a 16:9 take letterboxes in the bench's
+   black wall, so it is drawn as the 16:9 band it would be, cut from the still. */
+.app288.dc288f-c .fy-bench__media video{width:100%;height:auto;aspect-ratio:16/9;object-fit:cover;object-position:50% 26%}

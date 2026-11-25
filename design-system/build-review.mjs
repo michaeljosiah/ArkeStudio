@@ -28,6 +28,13 @@ const TOKENS = "_ds/specone-design-system-b87656f3-7e74-4657-8cc8-d1409352969e/t
  * (drawn, not built). `checked` dates the notes — a note is as good as its date.
  */
 const SCREENS = [
+  // BEGIN DIRECTOR CHECKS 288
+  { group: "Director’s checks · turn 288", screen: "The look, on the production. Production settings gains a Look between Clips and Models: a preset, each field a choice and its words, and the production’s own checks.", frame: "288a", route: "Production / Dashboard / Production settings", status: "drawn", checked: "2026-11-25", controls: [], notes: ["Drawn 25 November 2026 from turn 287. Drafted, not yet approved. Not built."] },
+  { group: "Director’s checks · turn 288", screen: "Before a shot. Shot 13 on Generate: its count beside its press, the list open, two to fix, and the press held until they are.", frame: "288b", route: "Production / Generate (bench) / a shot", status: "drawn", checked: "2026-11-25", controls: [], notes: ["Drawn 25 November 2026 from turn 287. Drafted, not yet approved. Not built."] },
+  { group: "Director’s checks · turn 288", screen: "After a take. Take 1 of shot 13: its count beside its verdicts, the list open over the take, one to fix, and the take’s two fixes.", frame: "288c", route: "Production / Generate (bench) / a take", status: "drawn", checked: "2026-11-25", controls: [], notes: ["Drawn 25 November 2026 from turn 287. Drafted, not yet approved. Not built."] },
+  { group: "Director’s checks · turn 288", screen: "On the cut. The Cut: its count beside Export film and the list open, two to fix.", frame: "288d", route: "Production / Cut", status: "drawn", checked: "2026-11-25", controls: [], notes: ["Drawn 25 November 2026 from turn 287. Drafted, not yet approved. Not built."] },
+  // END DIRECTOR CHECKS 288
+
   // BEGIN LOCATION PLAN 285
   { group: "The Plan · turn 285", screen: "The Plan on a scene. The scene page gains a view: the place’s set from straight above in Greybox, each person on a mark in their colour, the two walks dashed, each position a numbered wedge as wide as its lens. The inspector lists the positions with their shots, then the pairs and the side their cameras keep.", frame: "285a", route: "Scene / Plan", status: "drawn", checked: "2026-11-20", controls: [], notes: ["Drawn 20 November 2026 for issue 2302. Approved by the owner the same day. Not built."] },
   { group: "The Plan · turn 285", screen: "A position selected. The list folds to it and its form follows: its name, the camera in words as the Stage writes it, the grey view the Stage renders from it and the picture drawn from that view, and one press that draws the picture again.", frame: "285b", route: "Scene / Plan / a position", status: "drawn", checked: "2026-11-20", controls: [], notes: ["Drawn 20 November 2026 for issue 2302. Approved by the owner the same day. Not built."] },
@@ -1205,6 +1212,7 @@ const SCREENS = [
 
 /** Standalone pages in this folder and where they stand. Listed here so it is findable at all. */
 const PAGES = [
+  { file: "director-checks-288.review.html", what: "Turn 288: Director’s checks, drawn. The production’s look as a card in Production settings, and the three lists of turn 287, each opened at a count beside the control it answers to: before a shot beside its press, which a hard failure holds; after a take beside its verdicts, with Trim and Remake; on the cut beside Export film.", state: "drafted 25 November 2026, not yet approved; not built" },
   { file: "location-plan-285.review.html", what: "Turn 285: the Plan. A place owns its set, its numbered camera positions and each position’s picture; a scene set there sees them from above with its cast on their marks, and each pair’s cameras held to one side of the line between them, a crossing flagged and never refused. On the scene page, on a location’s sheet, on the Stage’s Start from, and on a phone.", state: "approved 20 November 2026; not built (issue 2302)" },
   { file: "world-cleanup-278.review.html", what: "Turn 278: Clean up. Studio Storage gains Held and Clean up world; the sheet shows a plan of eight classes with their sizes now and after hold, problems apart with Put back on shelf, the confirm, the run with Stop, the result measured on the drive, held plans with Restore and Empty now, the refusals, and a paired phone that shows and does not run.", state: "proposed; owner design review pending (SPEC-066, issue 3044)" },
   { file: "cut-text-277.review.html", what: "Turn 277: text clips in the Cut. One press adds a title at the playhead; the Inspector holds its words and its look; the clip shows its first line on its track; the typeface menu draws each name in its own face. Desktop and phone.", state: "proposed; owner design review pending (issue 2990)" },
@@ -1445,6 +1453,8 @@ const page = `<!doctype html>
 <link rel="stylesheet" href="renderer-recovery-284.css">
 <link rel="stylesheet" href="location-plan-285.app.css">
 <link rel="stylesheet" href="location-plan-285.css">
+<link rel="stylesheet" href="director-checks-288.app.css">
+<link rel="stylesheet" href="director-checks-288.css">
 <link rel="stylesheet" href="${TOKENS}/fonts.css">
 <link rel="stylesheet" href="${TOKENS}/colors.css">
 <link rel="stylesheet" href="${TOKENS}/typography.css">
