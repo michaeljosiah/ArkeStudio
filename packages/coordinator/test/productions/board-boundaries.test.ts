@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { legacySceneView, newId, planScene, type ManifestModel, type Scene } from "@arke-studio/contracts";
 import { QueryLeaseRegistry } from "../../src/world-chat/lease.js";
 import { WorldChatTargetReads } from "../../src/world-chat/target-reads.js";
+import { currentWorldObservation } from "../../src/world-chat/actions.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld, WORLD_ID } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
@@ -179,6 +180,25 @@ describe("Arke reads the boards as they are packed", () => {
     const unrouted = await new WorldChatTargetReads({ getBoardLimits: async () => null })
       .call(lease(), bundle, "get_scene_boards", { productionId: "saltlight", sceneId: "sc_04" });
     assert.match((unrouted.result.items[0] as { packed: { unavailable: string } }).packed.unavailable, /No video route/);
+  });
+
+  it("a change that cites the boards, shots or stage read is checked against the same fence (0.5.140)", async () => {
+    // Arke read Gold on Gold's boards, prepared the target, a split and three shot rewrites, and lost
+    // the turn: nothing could say whether a cited boards, shots or stage read was still current.
+    const { store } = await sceneOf();
+    const reads = new WorldChatTargetReads({ getBoardLimits: async () => ({ model: MODEL.id, capSec: 30 }) });
+    for (const tool of ["get_scene_boards", "get_scene_shots", "get_scene_stage"] as const) {
+      const read = (await reads.call(lease(), store.getBundle(), tool, { productionId: "saltlight", sceneId: "sc_04" })).result;
+      const now = currentWorldObservation(store, read.target.requirement, read.target.id);
+      assert.ok(now, `${tool} has a fence to check against`);
+      assert.equal(now!.target, read.target.id);
+      assert.equal(now!.fence, read.observedRevisionOrDigest, `${tool}: unchanged, so current`);
+    }
+    // The route's limits shape the packed boards, not the fence: a cap the check cannot see changes nothing.
+    const narrower = (await new WorldChatTargetReads({ getBoardLimits: async () => ({ model: MODEL.id, capSec: 8 }) })
+      .call(lease(), store.getBundle(), "get_scene_boards", { productionId: "saltlight", sceneId: "sc_04" })).result;
+    assert.equal(currentWorldObservation(store, "boards", narrower.target.id)!.fence, narrower.observedRevisionOrDigest);
+    assert.equal(currentWorldObservation(store, "boards", "saltlight:sc_04:shots"), null, "a target of another kind is not this one");
   });
 
   it("packs to the route's sheet panel count, as the frame run cuts its sheets", async () => {

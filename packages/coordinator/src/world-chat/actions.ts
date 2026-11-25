@@ -309,6 +309,9 @@ import {
   referencesFence,
   routingFence,
   sceneFence,
+  shotsFence,
+  stageFence,
+  boardsFence,
   sceneOrderFence,
   sceneScriptFence,
   scenesFence,
@@ -638,7 +641,7 @@ function actionRequirements(action: ModelWorldChatAction): readonly ArkeReadRequ
   return WORLD_ACTION_REQUIREMENTS[action.kind];
 }
 
-function currentWorldObservation(
+export function currentWorldObservation(
   store: WorldStore,
   requirement: ArkeReadRequirement,
   target?: string,
@@ -703,6 +706,17 @@ function currentWorldObservation(
       // A one-scene card's scene-order fence (issue 3149); never a read's target.
       if (targetId === `${productionId}${SCENE_ORDER_TARGET_SUFFIX}`) return { target: targetId, fence: sceneOrderFence(production) };
       return { target: targetId, fence: scenesFence(production) };
+    }
+    // A scene's shots, stage and boards reads (`production:scene:shots` and so on), each on its own fence.
+    case "shots":
+    case "stage":
+    case "boards": {
+      const targetId = target ?? store.worldId;
+      const [productionId, sceneId, suffix, ...rest] = targetId.split(":");
+      if (!productionId || !sceneId || suffix !== requirement || rest.length > 0) return null;
+      const production = bundle.productions.find((candidate) => candidate.meta.id === productionId);
+      const fenceOf = requirement === "shots" ? shotsFence : requirement === "stage" ? stageFence : boardsFence;
+      return { target: targetId, fence: fenceOf(production, sceneId) };
     }
     case "timeline": {
       const productionId = target ?? store.worldId;
