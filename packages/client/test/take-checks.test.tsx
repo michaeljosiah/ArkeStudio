@@ -74,16 +74,22 @@ describe("a take's checks on the bench (design turn 288c)", () => {
     assert.equal(container.querySelector(".fy-takechecks__panel small, .fy-takechecks__panel p"), null, "no caption");
   });
 
-  it("offers Check where the take has no checks of its media now, and waits until they come or are refused", async () => {
+  it("checks a take without checks of its media the first time it is shown, and offers Check if that is refused", async () => {
     const stale = { ...RECORD, sourceHash: "sha256:ffffffffffffffff" };
-    const { container, sent } = await mount({ ...SALTLIGHT, takeChecks: { [CLIP.id]: stale } }, CLIP);
+    const production = { ...SALTLIGHT, takeChecks: { [CLIP.id]: stale } };
+    const { container, sent } = await mount(production, CLIP);
     assert.equal(container.querySelector(".fy-takechecks__count"), null, "checks of other media are not this take's");
-    const check = [...container.querySelectorAll("button")].find((button) => button.textContent === "Check")!;
-    await click(check);
-    assert.deepEqual(sent.at(-1), { kind: "check-take", worldId: FIXTURE_WORLD_ID, productionId: "saltlight", takeId: CLIP.id });
+    const asked = (messages: ClientMessage[]) => messages.filter((message) => message.kind === "check-take");
+    assert.deepEqual(asked(sent), [{ kind: "check-take", worldId: FIXTURE_WORLD_ID, productionId: "saltlight", takeId: CLIP.id }], "checked on sight, once");
     assert.equal(container.querySelector("button")!.textContent, "Checking…");
     await act(async () => __applyEventForTest({ at: "2026-11-25T12:00:00.000Z", type: "command.failed", command: "check-take", requestId: null, reason: "No tools." }));
     assert.equal(container.querySelector("button")!.textContent, "Check");
+    await click(container.querySelector("button"));
+    assert.equal(asked(sent).length, 2, "the press asks again");
+    // Shown again later in the same window, a take already asked about is not asked again on its own.
+    await act(async () => root!.unmount()); root = null;
+    const again = await mount(production, CLIP);
+    assert.equal(asked(again.sent).length, 0);
   });
 
   it("is not on a still or a take of several shots", async () => {

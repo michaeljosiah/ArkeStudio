@@ -374,9 +374,23 @@ export async function measureTake(store: WorldStore, productionId: string, takeI
       skipped.push({ id: "unwritten-voice", reason: "unavailable" });
       if (line !== null) skipped.push({ id: "words", reason: "unavailable" });
     } else {
-      const read = ports.speech, derivative = await quietly(tools.speechAudio(snapshot.path, audio, start, soundStop, signal));
+      /*
+       * A take nobody speaks in comes back from the recogniser with no words, which the speech
+       * profile (a transcript of at least one word) refuses. On 0.5.136 that read three silent
+       * Gold on Gold takes as "unavailable" when the answer was "nothing heard": a pass for a
+       * voice nobody wrote, a fix for a line that was never said. The empty answer is kept as such.
+       */
+      let silent = false;
+      const speech = ports.speech;
+      const read: AgentSpeechReader = async (bytes, readSignal) => {
+        const answer = await speech(bytes, readSignal);
+        if (Array.isArray(answer?.words) && answer.words.length === 0) silent = true;
+        return answer;
+      };
+      const derivative = await quietly(tools.speechAudio(snapshot.path, audio, start, soundStop, signal));
       const heard = derivative === null ? null : await quietly(recognizeAgentSpeech({ bytes: derivative.bytes, durationSec: derivative.durationSec,
-        streamIndex: audio.index, sourceStartSec: 0, viewStartSec: 0, read, signal }).then(transcript => transcript.words as AcousticWord[]));
+        streamIndex: audio.index, sourceStartSec: 0, viewStartSec: 0, read, signal }).then(transcript => transcript.words as AcousticWord[]))
+        .then(words => (words === null && silent ? [] : words));
       if (heard === null) {
         skipped.push({ id: "unwritten-voice", reason: "unavailable" });
         if (line !== null) skipped.push({ id: "words", reason: "unavailable" });
