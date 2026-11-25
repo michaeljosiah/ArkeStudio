@@ -89,6 +89,16 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     when: "before you change the Cut's music, mix or effects, or where a clip starts and ends",
     bodyPath: "sound-and-pace.md",
   },
+  {
+    // The owner's question (2026-11-25): whether Arke could choose which shots go into each clip, aimed at
+    // a length shorter than the route's cap. The packer filled every board to the cap and cut wherever
+    // the seconds ran out, in the middle of an exchange as often as not.
+    id: "board-seams",
+    version: 1,
+    title: "Boards and their seams",
+    when: "before you set a scene's board target, split or merge its boards, or plan its video",
+    bodyPath: "board-seams.md",
+  },
 ];
 
 export function craftSkill(id: string): CraftSkill | null {

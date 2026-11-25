@@ -441,6 +441,7 @@ function boardFor(
     new Set(scene.boards?.merges ?? []),
     (shotId) => subjectShotHasFrame(production, world, shotId),
     packing?.maxMembers,
+    scene.boards?.targetSec,
   );
   if (!packed.ok) return null;
   return packed.boards.find((candidate) => candidate.memberShotIds.join("\n") === memberShotIds.join("\n")) ?? null;

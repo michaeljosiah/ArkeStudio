@@ -57,6 +57,7 @@ export interface ConversationRunDependencies {
   audioStudio?: NonNullable<RetrievalDeps["getAudioStudio"]>;
   /** Where a production's song changes (issue 3099), for get_spine: measured once and kept by the coordinator. */
   songSections?: NonNullable<RetrievalDeps["getSongSections"]>;
+  boardLimits?: NonNullable<RetrievalDeps["getBoardLimits"]>;
   /** The host's audio tools, so a take that is not WAV can still be measured for get_chapter's audiobook section. */
   audioMediaTools?: AudioMediaTools;
   adapter: RunDeps["adapter"];
@@ -134,6 +135,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     getAudioRights: () => readAudioRights(store),
     getPlans: async (productionId) => readPlanRecords(store, productionId, deps.jobs()),
     ...(deps.songSections ? { getSongSections: deps.songSections } : {}),
+    ...(deps.boardLimits ? { getBoardLimits: deps.boardLimits } : {}),
     getJobs: () => deps.jobs(),
     getBuildItems: () => deps.buildItems?.() ?? [],
     getExports: () => deps.exports(),

@@ -92,6 +92,43 @@ describe("the clip limit is never overridable (T-2)", () => {
   });
 });
 
+describe("the scene's board target fills boards short of the cap", () => {
+  const five = [1, 2, 3, 4, 5].map((n) => shot({ id: `sh_${n}`, number: n, durationSec: 3 }));
+
+  it("packs to the target, and names the seam it makes as the target's", () => {
+    assert.equal(shape(packBoards(five, 15, NONE, NONE, framed)), "A:sh_1,sh_2,sh_3,sh_4,sh_5");
+    const aimed = packBoards(five, 15, NONE, NONE, framed, undefined, 10);
+    assert.equal(shape(aimed), "A:sh_1,sh_2,sh_3 | B:sh_4,sh_5");
+    assert.equal(boardsOf(aimed)[1]!.reason, "target length");
+    assert.equal(
+      shape(packBoards(five, 15, NONE, new Set(["sh_4"]), framed, undefined, 10)),
+      shape(aimed),
+      "a merge cannot undo a seam the length made",
+    );
+  });
+
+  it("lets a shot longer than the target stand alone rather than refusing it", () => {
+    const shots = [
+      shot({ id: "sh_1", number: 1, durationSec: 4 }),
+      shot({ id: "sh_2", number: 2, durationSec: 12 }),
+      shot({ id: "sh_3", number: 3, durationSec: 4 }),
+    ];
+    const pack = packBoards(shots, 15, NONE, NONE, framed, undefined, 10);
+    assert.equal(shape(pack), "A:sh_1 | B:sh_2 | C:sh_3", "no neighbour has room under the target, so none folds");
+  });
+
+  it("changes nothing at or over the cap, which stays the provider's", () => {
+    const bare = shape(packBoards(five, 10, NONE, NONE, framed));
+    assert.equal(shape(packBoards(five, 10, NONE, NONE, framed, undefined, 10)), bare);
+    assert.equal(shape(packBoards(five, 10, NONE, NONE, framed, undefined, 30)), bare);
+    assert.equal(boardsOf(packBoards(five, 10, NONE, NONE, framed, undefined, 30))[1]!.reason, "clip limit");
+  });
+
+  it("moves the memo key", () => {
+    assert.notEqual(boardPackKey(five, 15, NONE, NONE, "11111", undefined, 10), boardPackKey(five, 15, NONE, NONE, "11111"));
+  });
+});
+
 describe("a suppressed break is carried (T-3)", () => {
   it("warns on the surviving board when a merge spans a time-of-day change", () => {
     const shots = [

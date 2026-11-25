@@ -20914,6 +20914,15 @@ export class Coordinator {
       shutdownSignal: this.runtimeStop.signal,
       audioStudio: (productionId, chapterFile) => audioStudioSnapshot(store, productionId, chapterFile, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}),
       songSections: productionId => this.songSections.read(store, productionId),
+      // The cap the scene workspace and the frame run pack boards to, so Arke reads the same seams.
+      boardLimits: async productionId => {
+        const settings = this.appSettings ? await this.appSettings.load().catch(() => null) : null;
+        const production = store.getBundle().productions.find(p => p.meta.id === productionId);
+        if (!production || !this.opts.manifest) return null;
+        const videoModelId = production.meta.models?.video ?? modelForCapability(this.opts.manifest, settings?.routing, "video")?.id;
+        const video = this.opts.manifest.models.find(candidate => candidate.id === videoModelId);
+        return video ? { model: video.id, capSec: video.limits.maxDurationSec ?? 10 } : null;
+      },
       ...(this.opts.audioMediaTools ? { audioMediaTools: this.opts.audioMediaTools } : {}),
       generationRoutes: () => this.benchGenerationRoutes(),
       voiceCatalogue: () => this.benchVoiceCatalogue(store),

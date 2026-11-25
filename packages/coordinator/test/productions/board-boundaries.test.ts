@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { legacySceneView, planScene, type ManifestModel, type Scene } from "@arke-studio/contracts";
+import { legacySceneView, newId, planScene, type ManifestModel, type Scene } from "@arke-studio/contracts";
+import { QueryLeaseRegistry } from "../../src/world-chat/lease.js";
+import { WorldChatTargetReads } from "../../src/world-chat/target-reads.js";
 import { WorldStore } from "../../src/world/store.js";
-import { makeTempWorld } from "../world/helpers.js";
+import { makeTempWorld, WORLD_ID } from "../world/helpers.js";
 import { closeOnCleanup } from "../tmp.js";
 
 /**
@@ -123,6 +125,20 @@ describe("board boundaries reach the dispatch plan", () => {
     }
   });
 
+  it("cuts the passes to the scene's board target under a longer cap", async () => {
+    // 19.5s under a 30s cap is one pass; a 10s target is the author asking for shorter clips, and
+    // the passes follow the boards it packs rather than the route's cap.
+    const { base, scene } = await sceneOf();
+    const aimed: Scene = { ...scene, boards: { splits: [], merges: [], targetSec: 10 } };
+    const passes = passShots(planScene({ ...base, scene: aimed }, "whole-scene"));
+    assert.ok(passes.length >= 2, `a 10s target splits a 19.5s scene, got ${passes.length}`);
+    const seconds = new Map(scene.shots.map((s) => [s.id, s.durationSec ?? 4]));
+    for (const pass of passes) {
+      const length = pass.reduce((sum, id) => sum + seconds.get(id)!, 0);
+      assert.ok(pass.length === 1 || length <= 10, `pass ${pass.join(",")} runs ${length}s`);
+    }
+  });
+
   it("still refuses a scene holding a shot no cap can carry", async () => {
     const { base, scene } = await sceneOf();
     const shots = scene.shots.map((s) => (s.id === "sh_13" ? { ...s, durationSec: 45 } : s));
@@ -130,5 +146,35 @@ describe("board boundaries reach the dispatch plan", () => {
     assert.equal(plan.pack.ok, false);
     assert.ok(!plan.pack.ok);
     assert.equal(plan.pack.oversizeShot.shotId, "sh_13");
+  });
+});
+
+describe("Arke reads the boards as they are packed", () => {
+  type Packed = { model: string; capSec: number; targetSec: number | null;
+    boards?: Array<{ letter: string; shots: Array<{ shotId: string; number: number | null }>; seconds: number; startsBecause: string | null }> };
+  const lease = () => new QueryLeaseRegistry(() => WORLD_ID).mint({ worldId: WORLD_ID, conversationId: newId("cv"), runId: newId("run") });
+
+  it("shows each board's shots, seconds and reason under the scene's target", async () => {
+    const { store } = await sceneOf();
+    const bundle = store.getBundle();
+    // The record on disk is untouched: the read is handed a bundle whose scene carries a target.
+    const aimed = {
+      ...bundle,
+      productions: bundle.productions.map((p) => p.meta.id !== "saltlight" ? p : {
+        ...p,
+        scenes: p.scenes.map((s) => s.id === "sc_04" ? { ...s, boards: { splits: [], merges: [], targetSec: 10 } } : s),
+      }),
+    };
+    const reads = new WorldChatTargetReads({ getBoardLimits: async () => ({ model: MODEL.id, capSec: 30 }) });
+    const page = await reads.call(lease(), aimed, "get_scene_boards", { productionId: "saltlight", sceneId: "sc_04" });
+    const packed = (page.result.items[0] as { packed: Packed }).packed;
+    assert.equal(packed.capSec, 30);
+    assert.equal(packed.targetSec, 10);
+    assert.ok(packed.boards && packed.boards.length >= 2, "a 10s target splits the 19.5s scene");
+    assert.deepEqual(packed.boards.flatMap((board) => board.shots.map((entry) => entry.shotId)), ["sh_12", "sh_13", "sh_14", "sh_15"]);
+    assert.ok(packed.boards.slice(1).some((board) => board.startsBecause === "target length"));
+
+    const unrouted = await new WorldChatTargetReads().call(lease(), bundle, "get_scene_boards", { productionId: "saltlight", sceneId: "sc_04" });
+    assert.equal((unrouted.result.items[0] as { packed: unknown }).packed, null, "no route known, no packing guessed");
   });
 });
