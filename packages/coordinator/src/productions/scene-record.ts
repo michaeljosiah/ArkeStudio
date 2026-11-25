@@ -1,4 +1,4 @@
-import { orderedShots, VISUAL_NOVEL_KIND, type StageConstructionDraft } from "@arke-studio/contracts";
+import { orderedShots, PLACE_PLAN_SCHEMA_VERSION, VISUAL_NOVEL_KIND, type StageConstructionDraft } from "@arke-studio/contracts";
 import {
   isGraphScene,
   linearizeSceneFlow,
@@ -434,6 +434,7 @@ export function stageDraftSchemaVersion(draft: StageConstructionDraft): number |
     draft.staging.keys.some(key => key.frame !== undefined) ? STAGE_WORDS_SCHEMA_VERSION : 0,
     draft.staging.performances?.some(track => track.keys.some(key =>
       key.hand !== undefined || key.look !== undefined || (key.pose !== undefined && key.pose !== "stand" && key.pose !== "sit" && key.pose !== "lie"))) ? STAGE_POSE_SCHEMA_VERSION : 0,
+    draft.staging.position !== undefined ? PLACE_PLAN_SCHEMA_VERSION : 0,
   );
   return needed === 0 ? null : needed;
 }
@@ -477,6 +478,16 @@ export function carriesStagePlate(raw: string): boolean {
 export const SCENE_SONG_WINDOW_SCHEMA_VERSION = 145;
 export function carriesSongWindow(raw: string): boolean {
   try { return parseSceneRecord(raw).songWindow !== undefined; }
+  catch { return false; }
+}
+
+/**
+ * A shot that names the place's position its camera started from (design turn 285, issue 2302)
+ * carries a strict staging field a build before the Plan drops the whole scene over, so the world
+ * is raised with the first scene written carrying one. The boundary is the plan file's own.
+ */
+export function carriesStagePosition(raw: string): boolean {
+  try { return orderedShots(parseSceneRecord(raw)).some(shot => shot.staging?.position !== undefined); }
   catch { return false; }
 }
 

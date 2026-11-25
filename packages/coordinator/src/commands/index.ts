@@ -14,6 +14,7 @@ import type { inboxCommands } from "./inbox.js";
 import type { jobCommands } from "./jobs.js";
 import type { localEngineCommands } from "./local-engines.js";
 import type { musicCommands } from "./music.js";
+import type { placePlanCommands } from "./place-plan.js";
 import type { planCommands } from "./plans.js";
 import type { productionCommands } from "./productions.js";
 import type { promptToolsCommands } from "./prompt-tools.js";
@@ -50,5 +51,6 @@ export type RoutedMessage = Extract<ClientMessage, {
     | keyof ReturnType<typeof settingsCommands> | keyof ReturnType<typeof worldLibraryCommands>
     | keyof ReturnType<typeof worldLifecycleCommands> | keyof ReturnType<typeof productionCommands>
     | keyof ReturnType<typeof answeredElsewhereCommands> | keyof ReturnType<typeof genesisCommands>
-    | keyof ReturnType<typeof benchCommands> | keyof ReturnType<typeof worldChatCommands>;
+    | keyof ReturnType<typeof benchCommands> | keyof ReturnType<typeof worldChatCommands>
+    | keyof ReturnType<typeof placePlanCommands>;
 }>;

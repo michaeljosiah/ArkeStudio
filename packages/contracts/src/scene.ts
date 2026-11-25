@@ -432,6 +432,12 @@ const ShotRigShape = {
   rig: StageRigSchema.optional(),
   seed: z.number().int().min(0).optional(),
   rigIntensity: z.number().min(0).max(2).optional(),
+  /**
+   * The place's camera position this shot's camera started from (design turn 285, issue 2302), by
+   * its number on the place's plan. The camera is still the shot's keys: a shot that moves them
+   * has nudged it, and the position stays where the place keeps it.
+   */
+  position: z.number().int().min(1).optional(),
 };
 
 const ShotBlockingOverrideShape = {

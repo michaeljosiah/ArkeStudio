@@ -577,7 +577,7 @@ describe("a visual novel's scene reads as beats (turn 174)", () => {
     const sent: ClientMessage[] = [];
     __setBridgeForTest(capture(sent));
     const mounted = await mountState(FIXTURE_STATE, SCENE_PATH);
-    assert.deepEqual(all(mounted, ".fy-sw__tab").map((tab) => tab.textContent), ["Storyboard", "Flow", "Preview"]);
+    assert.deepEqual(all(mounted, ".fy-sw__tab").map((tab) => tab.textContent), ["Storyboard", "Flow", "Plan", "Preview"]);
     assert.equal(q(mounted, '[data-testid="beat-lines"]'), null);
     assert.equal(q(mounted, ".fy-swvoice"), null);
     assert.equal(sent.some((message) => message.kind === "plan-table-read"), false, "nothing asks a film's table read on the storyboard");

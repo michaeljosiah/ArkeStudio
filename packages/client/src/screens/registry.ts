@@ -56,6 +56,8 @@ export const SCREENS: ScreenEntry[] = [
   { id: "locations", samplePath: `${W}/locations` },
   { id: "location-detail", samplePath: `${W}/locations/the-vigil` },
   { id: "location-reference", samplePath: `${W}/locations/the-vigil/reference` },
+  // A place's set from above and its camera positions (design turn 285).
+  { id: "location-plan", samplePath: `${W}/locations/the-vigil/plan` },
   { id: "location-edit", samplePath: `${W}/locations/the-vigil/edit` },
   { id: "faction-edit", samplePath: `${W}/factions/the-ebb-council/edit` },
   { id: "new-faction", samplePath: `${W}/factions/new` },

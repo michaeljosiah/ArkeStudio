@@ -104,7 +104,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "list-provider-calls": "studio", "retry-job-finalization": "studio", "delete-job": "studio",
   "resolve-held-job": "studio", "queue-resume": "studio", "establish-look": "studio",
   "choose-anchor": "studio", "generate-location-view": "studio", "accept-location-view": "studio",
-  "create-prop": "studio", "add-prop-state": "studio", "accept-prop-state": "studio",
+  "create-prop": "studio", "add-prop-state": "studio", "accept-prop-state": "studio", "place-plan": "studio",
   "generate-main-photo": "studio", "convert-performance": "studio", "record-dialogue-feedback": "studio",
   "propose-shot-visual-facts": "studio", "plan-table-read": "studio", "prepare-table-read": "studio",
   "save-rehearsal-note": "studio", "designate-performance-bible": "studio", "clear-performance-bible": "studio",

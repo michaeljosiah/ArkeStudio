@@ -1487,8 +1487,8 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
     );
   }
   // Locations and factions (prototype 23b): full-height establishing view, facts to the right.
-  // A location also carries a Reference tab (issue 243, turn 57); a faction has no view set, so the
-  // tabs appear only where there is a second place to go.
+  // A location also carries a Reference tab (issue 243, turn 57) and a Plan tab (turn 285); a
+  // faction has no view set and no set, so the tabs appear only where there is a second place to go.
   const locationTabs = sheet.type === "location" && (
     <nav className="fy-seg fy-location-tabs">
       <span className="fy-seg__item fy-seg__item--active">Overview</span>
@@ -1498,6 +1498,13 @@ function SheetDetail({ screenId, kindLabel }: { screenId: string; kindLabel: str
         onClick={() => navigate(`/w/${worldId}/locations/${sheet.id}/reference`)}
       >
         Reference
+      </button>
+      <button
+        type="button"
+        className="fy-seg__item"
+        onClick={() => navigate(`/w/${worldId}/locations/${sheet.id}/plan`)}
+      >
+        Plan
       </button>
     </nav>
   );

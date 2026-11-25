@@ -80,6 +80,7 @@ import { SetupStatusSchema } from "./setup.js";
 import { VendorAuthStatusSchema, vendorAuthUnavailable } from "./vendor-auth.js";
 import { ReferenceKitSchema } from "./reference.js";
 import { PropSchema } from "./prop.js";
+import { PlacePlanSchema } from "./place-plan.js";
 import { RoutingSchema, TraversalEvidenceSchema } from "./routing.js";
 import { SelectionsSchema } from "./scene.js";
 import { SceneRecordSchema } from "./scene-flow.js";
@@ -361,6 +362,8 @@ export const WorldBundleSchema = valueSchema(z
     performanceBibles: z.array(PerformanceBibleStateSchema).optional(),
     /** Prop records, references/<propId>/prop.json (design turn 105; issue 535). Defaulted: a read path. */
     props: z.array(PropSchema).default([]),
+    /** Each place's plan, references/<sheetId>/plan.json (design turn 285; issue 2302). Defaulted: a read path. */
+    placePlans: z.array(PlacePlanSchema).default([]),
     referenceTakes: z.array(TakeSchema).default([]),
     referenceReviews: z.array(ReviewDecisionSchema).default([]),
     /** Unaccepted candidates found on disk, grouped by sheet id — or by prop id (issue 535), which is no slug. */

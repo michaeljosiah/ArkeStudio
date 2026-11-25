@@ -11,7 +11,9 @@ import { fileURLToPath } from "node:url";
 // it. Since screens load on demand (issue 2797) the entry file alone is a fraction of that, and
 // code moved into a chunk the entry imports would leave it unchanged while start-up grew.
 
-const BUDGET = { script: 3_506_016, stylesheet: 1_255_621 };
+// Raised 2026-11-25 for the Plan (PR 3270) and the production's look (PR 3302): main stood at 3,660,474 B
+// (104.4%), the Plan adds 23 KB that start-up shares with its own chunk, and the owner chose to merge both.
+const BUDGET = { script: 3_683_551, stylesheet: 1_255_621 };
 const TOLERANCE = 1.05;
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
