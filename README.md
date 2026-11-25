@@ -10,7 +10,7 @@ because they share it.
 [![Latest release](https://img.shields.io/github/v/release/michaeljosiah/ArkeStudio?label=release)](https://github.com/michaeljosiah/ArkeStudio/releases/latest)
 [![Licence](https://img.shields.io/badge/licence-AGPL--3.0-black)](LICENSE)
 
-**[Write](#write-in-a-room-that-knows-your-world) · [Talk](#one-chat-from-anywhere) · [Listen](#the-book-reads-itself-aloud) · [Mix](#audio-studio) · [Publish](#publish-a-private-edition) · [Film](#from-script-to-screen) · [Anywhere](#on-every-screen-you-use)**
+**[Write](#write-in-a-room-that-knows-your-world) · [Talk](#one-chat-from-anywhere) · [Listen](#the-book-reads-itself-aloud) · [Mix](#audio-studio) · [Publish](#publish-a-private-edition) · [Film](#from-script-to-screen) · [Drama](#audio-drama) · [Draw](#graphic-novels) · [Music](#music) · [Player](#arke-player-and-the-worlds-guide) · [Anywhere](#on-every-screen-you-use)**
 
 </div>
 
@@ -18,6 +18,24 @@ because they share it.
 
 ## What's new
 
+- **Audio Drama.** A story adapted for the ear: a script of lines, sound and silence with the
+  novel beside it, takes heard in context, an episode mixed in Audio Studio and an edition
+  published as a podcast or an archive. [See it →](#audio-drama)
+- **Graphic novels.** A book planned and drawn page by page, each panel's picture and
+  lettering checked before you accept it, then read in the app or exported as CBZ, PDF and
+  EPUB. [See it →](#graphic-novels)
+- **Arke directs the film.** A place keeps its set and camera positions on a Plan, the
+  production keeps one Look, and every shot, take and cut carries a list of checks.
+  [See it →](#direct-the-film-with-arke)
+- **Music.** Albums, singles and soundtracks made from the world's music takes, sequenced
+  with gaps and crossfades. Music videos are cut to the song. [See it →](#music)
+- **Arke Player and the Guide.** Export a book, a story, a comic or an album as a package
+  for the phone app, with a Guide to the world that reveals only what a reader has reached.
+  [See it →](#arke-player-and-the-worlds-guide)
+- **More in the cut.** Text clips, clip speed and reverse, sound fades, a film grade and
+  grain, and accepted shots brought in from another production. [See it →](#text-speed-and-shots-from-elsewhere)
+- **Clean up.** A world's duplicate copies, old mixes and unused takes, sized and held
+  before anything is removed. [See it →](#clean-up-a-world)
 - **A Stage that builds the shot with you.** Arke blocks a scene in small steps you watch land:
   a room from the kit, lights, posed figures and a camera matched to a photo of the place. It
   then writes the video prompt as timed cuts, with the blockout attached. [See it →](#block-it-out-with-arke)
@@ -399,6 +417,42 @@ furniture, cars, streets and trees, each sized with numbers rather than modelled
 area and sun lights sit under one Look for the production, which sets the time of day, the sky
 and the haze.
 
+### Direct the film with Arke
+
+Arke keeps a film consistent between shots as well as inside them. The place, the look and the
+checks are each written once and carried into every generation.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-direct-plan.webp" alt="Scene 2, Gold on Gold, on its Plan view: The Club from straight above with the bar, booth and dance floor, each person on a mark in their colour, numbered camera positions drawn as wedges, and position 5, The wide, selected with its size, angle, side and lens.">
+<br><b>The Plan.</b> A place owns its set and its camera positions. A scene shows them from
+above with the cast on their marks, and a shot that crosses the line is drawn in the warning
+colour before it is made.
+</td>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-direct-look.webp" alt="Production settings with a Look card: presets Naturalistic drama, Romance, Thriller, Found footage and Music video, then rows for camera, light, lens and focus, grade, cutting, sound and performance, each a choice with its own words, and the production's own checks.">
+<br><b>One Look for the production.</b> Choose a preset, then say how the camera moves, how it
+is lit and how it cuts. The look rides beneath every scene's camera and reaches the paid
+request.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-direct-take.webp" alt="Take 1 of shot 13 on the Bench with After the take open: lip sync, words, face, hands, light, joins, camera and effects each marked, one flagged, Voice nobody wrote at 7.6 seconds, with Trim to 7.4 s and Remake.">
+<br><b>Checks after a take.</b> A clip is measured when it lands: lip sync, the words spoken,
+the face against the sheet, hands, light and the camera. A fault comes with its fix, here a
+trim or a remake.
+</td>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-direct-cut.webp" alt="The cut with Checks 5 of 7 open beside Export film: matched cuts, sync at the end, room tone, mouth without a line, inserts, lines over a listener and waiting, two of them with Fix.">
+<br><b>And on the cut.</b> Matched cuts, room tone, sync and shots that wait too long are
+counted beside Export film. Arke can look at a scene's cuts, a whole film on one contact
+sheet, or a finished export before it is shared.
+</td>
+</tr>
+</table>
+
 ### Atmosphere, crossfades and particles
 
 The cut is also where a film gets its air. Effects are layers with their own placement and
@@ -425,6 +479,26 @@ a whole arrangement of effects or transitions, which you review in Current and S
 adjust with the ordinary controls and apply as one undoable change — and any setting you
 protect is one its suggestions leave alone.
 
+### Text, speed and shots from elsewhere
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-cut-text.webp" alt="A text clip, Harbour lights, selected on an overlay track over a harbour at dusk, with its words, typeface, weight, size, tracking, line distance and place in the Inspector.">
+<br><b>Text on the picture.</b> Add text as a clip of its own: typeface, weight, size, colour,
+edge and shadow, placed and timed like any other clip.
+</td>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-cut-library.webp" alt="The cut's Library set to another production, Saltlight: its shots with an accepted take listed by scene and shot with their length, one picked with Add to Library.">
+<br><b>Shots from another production.</b> The Library reaches the world's other productions,
+so an accepted take made for one film can be placed in another.
+</td>
+</tr>
+</table>
+
+A video clip can play at another speed or backwards, a sound clip fades in and out, and a
+film grade and grain can sit over the whole picture.
+
 ## On every screen you use
 
 Arke Studio runs on your PC, and your phone reaches it. Turn on **Settings → Remote access**
@@ -448,7 +522,13 @@ same rules:
 - **Story** · novels, novellas, short fiction, screenplays and audio-first scripts, written
   chapter by chapter with the canon as editor, imported from and exported to `.docx` and EPUB,
   read aloud as a cast audiobook, mixed in Audio Studio, and published as an EPUB and M4B edition
-- **Video** · *Microdrama* (short-form episodic drama), films, music videos, and interactive
+- **Audio drama** · a story for the ear, adapted from a book in the world or started from an
+  idea, scripted, performed and mixed episode by episode
+- **Graphic novel** · a book in pages and panels, adapted or original, exported as CBZ, PDF
+  and EPUB
+- **Music** · albums, singles and soundtracks, with a track able to stand as a character's or
+  a place's theme
+- **Video** · *Microdrama* (short-form episodic drama), films, music videos cut to a song, and interactive
   branching narratives with a drawn branch map and their own player, with boards and shots
   dispatched to video models with references attached
 - **Visual novel** · an interactive story told in pictures, text and voices, authored as beats
@@ -460,29 +540,147 @@ with every production as they develop.
 
 A change to a character lands in all of them.
 
-## Coming next: Audio Drama
+## Audio Drama
 
-Audio Studio is also the start of something larger. **Audio Drama** — a production written for
-the ear, adapted from a story in the world or started from an idea — is drawn in the design
-master as a proposal awaiting review. It is not built, and these screens are a design, not
-the app.
+An audio drama is a production written for the ear. Adapt a story from the world or start
+from an idea; Arke reads the whole source before it plans, and you choose how many episodes,
+how long, and who narrates.
+
+<div align="center">
+
+<img src=".github/assets/readme-audio-drama.webp" alt="Low Water, an audio drama of six episodes from the novel: a hero picture with Play episode 1, Publish and Export, the cast as portraits with their voices, one marked no voice, and the episodes listed with Script, Cast, Performed and Mixed for each." width="100%">
+
+*The drama as listeners meet it: the cast and their voices, and each episode's way from
+script to mix.*
+
+</div>
 
 <table>
 <tr>
 <td width="50%" valign="top">
-<img src=".github/assets/readme-audio-drama-adapt.webp" alt="New production: Make it heard. Adapt a story into scenes written for voices and sound — a title, Audio Drama as the format, Adapt from Northline, a story of 18 chapters, an episode target of 20 to 30 minutes, and three approaches: Narrated drama, Ensemble drama and In-world recordings.">
-<br><b>Adapt a story for the ear.</b> Choose the source, an episode length and how it should
-sound — narrated, ensemble or in-world recordings — and plan the adaptation before a single
-voice is spent.
+<img src=".github/assets/readme-audio-drama-script.webp" alt="Episode 1's script, scene 4, The tide turns: character lines, sound, silence and music cues down the page, one line selected, and the Source panel showing the novel's paragraphs it came from and why it changed.">
+<br><b>A script that can be performed.</b> Lines, narration, sound, ambience, music and
+silence are cues on one page. Select a line and the passage of the novel it came from sits
+beside it, with the decision that was made.
 </td>
 <td width="50%" valign="top">
-<img src=".github/assets/readme-audio-drama-script.webp" alt="Scene 2, The last marker: an audio script with ambience, narrator, character lines, sound and silence cues, beside a Source drawer showing the novel passage it came from and what changed for audio.">
-<br><b>A script that can be performed.</b> Narration, dialogue, sound, ambience and silence as
-cues in the writing room, with the source passage beside every scene and nothing about the
-novel rewritten.
+<img src=".github/assets/readme-audio-drama-takes.webp" alt="The same script after an audition of ten lines: each line marked new or kept, one asking new or kept, one flagged as misheard, and a bar reading Audition 1, 10 lines, 8 kept, 2 to decide.">
+<br><b>Hear it in context.</b> Select lines and hear them in the cast's voices, priced first.
+A take that does not say its line is flagged, and a replacement waits for your choice.
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-audio-drama-adaptation.webp" alt="Adaptation: the novel's eighteen chapters on the left flowing into six episodes on the right, each chapter marked Keep, Hear, Merge or Cut, and chapter 5 opened with its verdict, where it goes and what it leaves out.">
+<br><b>The adaptation is a map.</b> Every chapter is kept, shown, merged, cut, expanded or
+invented from, and says where it went. When the novel changes, the scenes adapted from it
+are named.
+</td>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-audio-drama-edition.webp" alt="Publish an edition of Low Water: delivery as Podcast stereo or Archive WAV, episode 1 ready and two held back with their reasons, and what goes with it: episode audio, a listener transcript, credits, the production script as PDF and stems.">
+<br><b>Publish an edition.</b> Each episode is mixed in Audio Studio, then delivered as a
+podcast or an archive, with a listener transcript, credits and the script. An episode that
+is not ready says why.
 </td>
 </tr>
 </table>
+
+Sound effects, ambience loops and music for a cue can be generated in place, recorded or
+uploaded, and the whole of it works on a phone.
+
+## Graphic novels
+
+A graphic novel is a book in pages and panels. Adapt a story or plan an original one with
+Arke, pick a style, and work a chapter a page at a time or panel by panel.
+
+<div align="center">
+
+<img src=".github/assets/readme-comic-pages.webp" alt="Pages on chapter 1 of Low Water, drawn: the page strip, page 2's layout and its three panels with who and where they show and each line's words, the drawn page beside them, and a review under it finding panel 2's left eye lower than the right, with Make again, Accept anyway and Change with Arke." width="100%">
+
+*Pages: the script of each panel on the left, the drawn page on the right, and the review
+directly under it.*
+
+</div>
+
+A take is read back before you accept it. The lettering is compared with the script word for
+word and the picture is checked against the cast and the page before, with each finding drawn
+where it is on the page. Asked to make a chapter, Arke answers with one priced card and
+reports page by page.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-comic-read.webp" alt="Read: page 3 of 24 of Low Water, drawn, a lettered three-panel page, with Left to right, Right to left and Scroll.">
+<br><b>Read it as a reader will.</b> The accepted pages turn left to right or right to left,
+or run as one vertical scroll.
+</td>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-comic-export.webp" alt="Export of Low Water, drawn: CBZ, PDF, EPUB and Arke Player, 23 of 24 pages accepted, lettering checked, reading direction, credits, and a notice that page 17 has no accepted take with Go to.">
+<br><b>Export what is accepted.</b> CBZ for comic readers, PDF, fixed-layout EPUB and an Arke
+Player package. A page that is not accepted holds the export and says which.
+</td>
+</tr>
+</table>
+
+## Music
+
+The world's music is a production of its own: an album, a single or a soundtrack, built from
+the music takes you kept on the Bench or from files you import.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-music-album.webp" alt="Songs of the Drowned Quarter, an album of nine tracks: a square cover with Make cover, Play all and Export, and the tracks in order with the take each came from, where it is heard and its length.">
+<br><b>An album from the world.</b> Each track keeps its takes, its lyrics and where it is
+heard, and can be the theme a character or a place is known by.
+</td>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-music-sequence.webp" alt="Sequence: the nine tracks as waveforms, a gap or a crossfade chosen between each pair, a loudness target of minus 14 LUFS and Play through.">
+<br><b>Sequenced to play through.</b> A gap or a crossfade between each pair of tracks, and
+one loudness target for the whole album.
+</td>
+</tr>
+</table>
+
+A **music video** starts from the song. Choose one from the world or make one, mark its
+sections or let Arke propose them from the sound, and each scene keeps its place on the
+song's clock. A singer's shot carries its own slice of the song to the video model.
+
+## Arke Player and the world's Guide
+
+Arke Player is the phone app a world is read, heard and played in. Export → Arke Player
+makes one package from a book and its narration, an interactive story, a graphic novel or an
+album, and reads it back before naming it.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-guide.webp" alt="The Undersong's Guide: characters, places and lore, each with a switch for public, and each shown from the start or after a chapter.">
+<br><b>A Guide that keeps its secrets.</b> Choose which characters, places and lore are
+public, and whether each shows from the start or only after a chapter. Teasers and themes
+are chosen here too.
+</td>
+<td width="50%" valign="top">
+<img src=".github/assets/readme-player-export.webp" alt="Export audiobook, The Ledger of Nights, with Arke Player chosen beside Audiobook player, Chapter files and Video: the world, the book, the narration read whole, 131 pictures fitted for a phone, timed text, loops and an edition date, about 228 MB.">
+<br><b>One package for the phone.</b> The book, the narration, pictures fitted for a phone and
+timed text, sized before it is made. New chapters can follow later as a part.
+</td>
+</tr>
+</table>
+
+## Clean up a world
+
+A world gathers copies as it is worked on. **Clean up** measures them by kind and shows what
+each would free before anything goes.
+
+<div align="center">
+
+<img src=".github/assets/readme-cleanup.webp" alt="Clean up for Na Love or Juju, 19.2 GiB: Bench copies, reference copies, old chapter mixes, current mixes, old exports, unkept Bench takes, unused artifacts and unkept narration, each with its count, its size now and after the hold, three ticked, and Problems listed beneath." width="100%">
+
+*Duplicate copies become one file at once. Anything that could be wanted back goes to a hold
+with a date, and can be put back until then.*
+
+</div>
 
 ## Models, voices and harnesses
 
@@ -496,11 +694,12 @@ own, and a production its own again, each inheriting whatever it leaves unset.
 - **Text** · local models through Ollama, among them Gemma 4 12B, or your own cloud accounts.
 - **Images** · cloud image and video models with references attached, or local recipes run on
   your own graphics card through a managed ComfyUI: Krea 2, and Qwen Image 2.1 as a research
-  recipe whose licence allows noncommercial use only.
+  recipe whose licence allows noncommercial use only. Local video runs the same way, through
+  H3 recipes including Pika H3 Flex.
 - **Voice** · Kokoro on your machine, or Google's Gemini voices, ElevenLabs, Mistral's Voxtral,
   BreezeBlue's Breeze TTS 2 and Fish Audio's S2.1-Pro as hosted readers. A voice can be designed
   from a character's sheet. A read longer than a reader's limit is split at sentence ends and
-  plays as the pieces arrive.
+  plays as the pieces arrive. Sound effects and music for a cue come from ElevenLabs.
 
 ## Get it
 
@@ -573,7 +772,7 @@ drawn the same way, in a versioned design master
 ([`design-system/Arke Studio.dc.html`](design-system/Arke%20Studio.dc.html)), before a line of
 the screen's own code exists. The screenshots in this README are rendered from that master: the
 approved drawings the app is built against. The running app follows them closely but not pixel
-for pixel, and the Audio Drama screens are a proposal that has not been built.
+for pixel.
 
 The specification set is not published with the code. It is the design record rather than the
 product, and it stays private. That is worth knowing before you read far, because the code cites
@@ -646,18 +845,33 @@ chapter mix; and private EPUB and M4B editions.
 
 **The cut has effects and transitions.** Atmosphere presets with optional audio reaction, Air
 Particles with physics, blend modes and crossfades at fixed cuts, each with Arke suggestions
-reviewed before they apply.
+reviewed before they apply; text clips, clip speed and reverse, sound fades, and a grade and
+grain over the picture.
 
 **Video publications compile and play.** A cut becomes a portable, verified edition with
 selectable captions, delivered as a folder or ZIP and played from Publications. Interactive
-video is not yet a publication profile.
+video is not yet a publication profile; it exports as a web package or an Arke Player package.
 
 **The reusable engine and standalone Node host are available from source.** Desktop and browser
 hosts share Studio's application services; the public engine exposes a bounded set of those
 capabilities for other Node products.
 
-**Audio Drama is a design proposal.** It is drawn in the design master for review and is not
-in the app.
+**Audio Drama is built through to an edition.** Setup from a story, the episode script with its
+source, takes and generated sound, cast, review, the adaptation map, the episode in Audio
+Studio, and podcast and archive editions.
+
+**Graphic novels are built through to export.** Planning and drafting with Arke, Pages with
+lettering and picture review, Read, and CBZ, PDF, EPUB and Arke Player export.
+
+**Music productions and music videos are built.** Albums, singles and soundtracks with a
+sequence and a loudness target; a music video's song, its sections and each scene's place on it.
+
+**Arke directs a film's shots.** A place's Plan, a production's Look, and checks before a shot,
+after a take and on the cut.
+
+**Arke Player packages are made from source.** Books, parts, interactive stories, graphic novels
+and albums export as packages, with the world's Guide. Listing a world in the Player is a
+separate, owner-run step.
 
 **Cloud experience is named but not yet connected.** The launch screen already offers "Arke Studio
 Cloud — access your worlds anywhere. Sync, collaborate, create" but integration with Aonik
