@@ -39,6 +39,30 @@ export interface BeforeShotInput {
   characters: ReadonlyArray<{ id: string; name: string; aliases?: readonly string[] }>;
   /** The shot's board when it shares one with other shots, by their numbers in the scene, and its seconds. */
   board: { numbers: readonly number[]; seconds: number } | null;
+  /** How long the shot's line runs as recorded (`recordedLineSec`), when it has been; else it is estimated from its words. */
+  lineSec?: number | undefined;
+}
+
+/** Just what `recordedLineSec` reads of a production, so the client's and the coordinator's both fit. */
+interface RecordedLines {
+  takes: ReadonlyArray<{ id: string; kind: string; coversShots: readonly string[]; prompt?: string | undefined; media?: unknown; completedAt?: string | undefined }>;
+  takeMediaInfo: Readonly<Record<string, { mediaInfo: { durationSec?: number | undefined } } | undefined>>;
+}
+
+/**
+ * How long the shot's line runs as recorded: the newest finished voice take of the shot whose words are still its
+ * line's. Gold on Gold on 0.5.141 is why it is read rather than estimated: at 2.6 words a second shot 17's line fitted
+ * its 6 s with 0.2 s to spare and shot 16's 3 s was short of a beat, but recorded, 17's runs 7.6 s and 16's 1.8 s.
+ */
+export function recordedLineSec(production: RecordedLines, shot: Shot): number | undefined {
+  const line = shot.audio?.line?.trim();
+  if (!line) return undefined;
+  const said = words(line).join(" ");
+  const take = production.takes.filter((candidate) => candidate.kind === "voice" && candidate.media !== undefined && candidate.completedAt !== undefined
+    && candidate.coversShots.includes(shot.id) && words(candidate.prompt ?? "").join(" ") === said)
+    .sort((a, b) => (a.completedAt! < b.completedAt! ? -1 : a.completedAt! > b.completedAt! ? 1 : 0)).at(-1);
+  const seconds = take ? production.takeMediaInfo[take.id]?.mediaInfo.durationSec : undefined;
+  return seconds !== undefined && seconds > 0 ? seconds : undefined;
 }
 
 /** Words as compared: one case, apostrophes kept inside a word, nothing else but letters and digits. */
@@ -145,11 +169,14 @@ export function beforeShotChecks(input: BeforeShotInput): BeforeShotCheck[] {
   const lighting = shot.framing?.lighting ?? input.scene.defaults?.lighting ?? lookFraming(input.look).lighting;
   items.push(lighting?.trim() ? { id: "light", result: "pass", says: clip(lighting.trim()) } : { id: "light", result: "fix", says: "none named" });
 
-  // A beat before and after the line, so a cut can come on either side of it: about a second in all.
+  // A beat before and after the line, so a cut can come on either side of it: about a second in all. The
+  // recording's own length once there is one; until then the words at 2.6 a second.
   if (spoken !== null && shot.durationSec !== undefined) {
-    const spare = shot.durationSec - words(spoken).length / 2.6;
-    items.push(spare >= 1 ? { id: "beats", result: "pass", says: `${spare.toFixed(1)} s spare` }
-      : { id: "beats", result: "fix", says: spare <= 0 ? "the line overruns" : `${spare.toFixed(1)} s spare` });
+    const recorded = input.lineSec !== undefined;
+    const spare = shot.durationSec - (input.lineSec ?? words(spoken).length / 2.6);
+    const says = spare <= 0 ? (recorded ? `recorded line runs ${input.lineSec!.toFixed(1)} s` : "the line overruns")
+      : `${spare.toFixed(1)} s spare${recorded ? ", recorded" : ""}`;
+    items.push({ id: "beats", result: spare >= 1 ? "pass" : "fix", says });
   }
 
   // A clip made from frames needs its first frame.

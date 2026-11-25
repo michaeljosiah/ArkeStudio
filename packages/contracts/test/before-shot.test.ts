@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { beforeShotChecks, beforeShotCount, type BeforeShotInput, type Shot } from "../src/index.js";
+import { beforeShotChecks, beforeShotCount, recordedLineSec, type BeforeShotInput, type Shot } from "../src/index.js";
 
 /*
  * A shot read before it is made (design turns 287 and 288b), each item the fault Gold on Gold's
@@ -69,6 +69,33 @@ describe("a shot read before it is made", () => {
     assert.deepEqual(item(checks, "beats"), { id: "beats", result: "fix", says: "0.3 s spare" }, "seven words take 2.7 s of 3");
     assert.deepEqual(item(beforeShotChecks(input({ shot: shot({ durationSec: 2.5 }) })), "beats"), { id: "beats", result: "fix", says: "the line overruns" });
     assert.equal(beforeShotCount(checks).hardToFix, 0, "neither holds the press");
+  });
+
+  it("times the line by its recording once there is one (0.5.141)", () => {
+    // Gold on Gold: estimated, shot 17's line fitted its 6 s and shot 16's 3 s was short; recorded, the other way round.
+    const bar = "Ah, the bar. Yes. The bar is very fine tonight. The bar's leg is long.";
+    const seventeen = shot({ id: "sh_379", durationSec: 6, audio: { kind: "dialogue", speaker: "tunde", line: bar } });
+    assert.deepEqual(item(beforeShotChecks(input({ shot: seventeen })), "beats"), { id: "beats", result: "fix", says: "0.2 s spare" });
+    assert.deepEqual(item(beforeShotChecks(input({ shot: seventeen, lineSec: 7.6 })), "beats"), { id: "beats", result: "fix", says: "recorded line runs 7.6 s" });
+    assert.deepEqual(item(beforeShotChecks(input({ shot: shot({ durationSec: 3 }), lineSec: 1.84 })), "beats"),
+      { id: "beats", result: "pass", says: "1.2 s spare, recorded" });
+  });
+
+  it("finds the newest finished recording of the shot's own words", () => {
+    const line = shot().audio!.line!;
+    const voice = (id: string, completedAt: string | undefined, prompt = line, coversShots = ["sh_13"]) =>
+      ({ id, kind: "voice", coversShots, prompt, media: "speech.wav", ...(completedAt ? { completedAt } : {}) });
+    const production = {
+      takes: [voice("tk_old", "2026-11-24T10:00:00.000Z"), voice("tk_new", "2026-11-25T10:00:00.000Z"),
+        voice("tk_running", undefined), voice("tk_reworded", "2026-11-25T11:00:00.000Z", "The goat was in the car, Tunde."),
+        voice("tk_other", "2026-11-25T12:00:00.000Z", line, ["sh_14"]), { ...voice("tk_clip", "2026-11-25T13:00:00.000Z"), kind: "clip" }],
+      takeMediaInfo: { tk_old: { mediaInfo: { durationSec: 3.1 } }, tk_new: { mediaInfo: { durationSec: 2.2 } }, tk_reworded: { mediaInfo: { durationSec: 9 } },
+        tk_other: { mediaInfo: { durationSec: 9 } }, tk_clip: { mediaInfo: { durationSec: 9 } } },
+    };
+    assert.equal(recordedLineSec(production, shot()), 2.2, "the newest of its own, words matched case and stops aside");
+    assert.equal(recordedLineSec(production, shot({ audio: { kind: "dialogue", speaker: "ade", line: "THE GOAT was in the boot, Tunde!" } })), 2.2);
+    assert.equal(recordedLineSec({ ...production, takeMediaInfo: {} }, shot()), undefined, "unmeasured, so estimated");
+    assert.equal(recordedLineSec(production, shot({ audio: { kind: "dialogue", speaker: "ade", line: "Something else entirely." } })), undefined);
   });
 
   it("needs a first frame only where clips are made from frames", () => {

@@ -10,6 +10,7 @@ import {
   BEFORE_SHOT_NAMES,
   beforeShotChecks,
   beforeShotCount,
+  recordedLineSec,
   frameDispatchFor,
   LOOK_PRESET_NAMES,
   lookLine,
@@ -261,6 +262,7 @@ export function GenerateScreen() {
     hasFrame: shotHasFrame(production, world.artifacts, shot.id),
     characters: world.sheets.filter((sheet) => sheet.type === "character").map((sheet) => ({ id: sheet.id, name: sheet.name, ...(sheet.aliases ? { aliases: sheet.aliases } : {}) })),
     board: shotBoard ? { numbers: shotBoard.memberShotIds.map(shotNumber), seconds: shotBoard.durationSec } : null,
+    lineSec: recordedLineSec(production, shot),
   }) : [];
   const held = beforeShotCount(shotChecks).hardToFix;
   // Fix hands Arke the item as the person would say it, in the composer for them to send.
