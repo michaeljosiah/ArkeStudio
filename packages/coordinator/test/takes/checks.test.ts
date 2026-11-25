@@ -260,6 +260,17 @@ describe("a take checked when it lands", () => {
     assert.deepEqual(by["unwritten-voice"], { id: "unwritten-voice", result: "pass", says: "none" });
   });
 
+  it("judges the line from the recogniser's text when it cannot place a word in time (0.5.137)", async () => {
+    const { store, take, ports, takeId } = await landed();
+    const refusing = { ...ports, speech: async () => { throw new Error("a word has no usable timing or an unresolved pause"); },
+      transcribe: async () => "The verse, under the water. Listen here." };
+    assert.equal(await checkTake(store, "saltlight", takeId, refusing, new AbortController().signal), "checked");
+    const record = currentTakeChecks(store.getBundle().productions.find(p => p.meta.id === "saltlight")!, take)!;
+    const by = Object.fromEntries(record.items.map(item => [item.id, item]));
+    assert.deepEqual(by["words"], { id: "words", result: "pass", says: "as written" });
+    assert.deepEqual(by["unwritten-voice"], { id: "unwritten-voice", result: "fix", says: "after the line" }, "where, with no time to end at");
+  });
+
   it("keeps the picture's checks when the sound cannot be read", async () => {
     const { store, take, tools, ports, takeId } = await landed();
     const refused = { ...ports, tools: { ...tools, speechAudio: async () => { throw new Error("decoder refused"); } } };

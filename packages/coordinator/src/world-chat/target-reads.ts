@@ -1213,9 +1213,26 @@ export class WorldChatTargetReads {
         break;
       }
       case "list_takes": {
-        assertArgs(args, ["productionId"]);
+        assertArgs(args, ["productionId", "shotId"]);
         const productionId = requireString(args, "productionId");
         const production = productionOf(bundle, productionId);
+        const shotId = optionalString(args, "shotId");
+        /*
+         * One shot's takes, its reviews and its choice. Asked for shot 3's chosen take on 0.5.137,
+         * Arke met 749 rows twenty at a time, reviews first, and gave up and transcribed an export
+         * instead. A shot's read is its own target, so it never stands in for the whole read that
+         * a take card is fenced on.
+         */
+        if (shotId !== undefined) {
+          const covers = (take: { coversShots: readonly string[] }) => take.coversShots.includes(shotId);
+          rows = takeRows(production).filter(({ value }) => {
+            const row = value as { kind: string; take?: { coversShots: readonly string[] }; review?: { shotId?: string }; shotId?: string };
+            return row.kind === "take" ? covers(row.take!) : row.kind === "review" ? row.review?.shotId === shotId : row.shotId === shotId;
+          });
+          readTarget = target("takes", `${productionId}:${shotId}`);
+          revisionOrDigest = fence(rows.map((row) => row.value));
+          break;
+        }
         readTarget = target("takes", productionId);
         rows = takeRows(production);
         revisionOrDigest = takesFence(production);

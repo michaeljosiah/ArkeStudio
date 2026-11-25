@@ -21236,6 +21236,10 @@ export class Coordinator {
         const ready = await voice.wordTimingAvailability(signal);
         return this.voiceService === voice && ready.ready;
       },
+      transcribe: (wav, signal) => {
+        if (!this.voiceService?.localSpeechConfigured) throw new Error("Local speech recognition is unavailable");
+        return this.voiceService.transcribe(wav, "audio/wav", signal);
+      },
     };
   }
 
