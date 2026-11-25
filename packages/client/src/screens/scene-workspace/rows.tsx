@@ -293,7 +293,7 @@ export function StoryboardRows({
                   locked={locked}
                   generatorPending={generatorPending}
                   staged={stagedBoards || board.memberShotIds.some((id) => stagedShotIds.has(id))}
-                  movable={board.reason !== null && board.reason !== "clip limit" && board.reason !== "panel limit"}
+                  movable={board.reason !== null && !derivedLimit(board.reason)}
                   refusalVersion={refusalVersion}
                   selected={subjectMatchesBoard(subject, board.memberShotIds)}
                   onSelect={() => select({ kind: "board", memberShotIds: [...board.memberShotIds] })}
@@ -498,6 +498,11 @@ function Divider({
   );
 }
 
+/** A seam the packer made from a length (the route's cap, the scene's target or the panel count): no merge undoes it. */
+function derivedLimit(reason: PackedBoard["reason"]): boolean {
+  return reason === "clip limit" || reason === "target length" || reason === "panel limit";
+}
+
 function BoardBand({
   board,
   scene,
@@ -683,9 +688,9 @@ function BoardBand({
         {board.reason === null ? null : (
           <button
             type="button"
-            disabled={locked || board.reason === "clip limit" || board.reason === "panel limit"}
+            disabled={locked || derivedLimit(board.reason)}
             title={
-              board.reason === "clip limit" || board.reason === "panel limit"
+              derivedLimit(board.reason)
                 ? `Cannot merge across the ${board.reason}`
                 : board.reason === "by hand"
                   ? "Remove this hand split"

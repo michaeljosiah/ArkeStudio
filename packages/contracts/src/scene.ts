@@ -816,6 +816,13 @@ export const SceneBaseShape = {
       .object({
         splits: z.array(ShotIdSchema),
         merges: z.array(ShotIdSchema),
+        /**
+         * How long each board's clip should run, in seconds, where that is shorter than the video
+         * route allows (SPEC-035). The packer fills a board to this instead of the route's cap; a
+         * shot longer than it stands alone rather than being refused, and a target at or over the
+         * cap changes nothing. Absent fills to the cap, as every scene before it did.
+         */
+        targetSec: z.number().positive().max(600).optional(),
         prompts: z
           .array(z.object({ members: z.array(ShotIdSchema).min(1), text: z.string().min(1) }).strict())
           .optional(),

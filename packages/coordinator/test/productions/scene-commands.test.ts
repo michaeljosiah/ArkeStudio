@@ -12,7 +12,7 @@ import {
 } from "../../src/productions/scene-commands.js";
 import { acceptCharacterLook, attachCharacterLook, readKit } from "../../src/references/kit.js";
 import { WorldStore } from "../../src/world/store.js";
-import { VISUAL_NOVEL_SCHEMA_VERSION } from "../../src/productions/scene-record.js";
+import { BOARD_TARGET_SCHEMA_VERSION, VISUAL_NOVEL_SCHEMA_VERSION } from "../../src/productions/scene-record.js";
 import { createProduction } from "../../src/productions/ops.js";
 import { SUPPORTED_SCHEMA_VERSION } from "../../src/world/scan.js";
 import { SHOT_LOOKS_SCHEMA_VERSION } from "../../src/world/commit.js";
@@ -1222,4 +1222,26 @@ it(`refuses ${action} shared blocking that would strand another shot's camera (#
     assert.equal(orderedShots(await sceneOnDisk(store))[0]!.staging!.keys[0]!.anchor, "missing-private-group",
       "unrelated invalid private staging does not block shared editing or get rewritten");
   }
+});
+
+describe("a scene's board target fences the builds that cannot read it (SPEC-035 R-4)", () => {
+  it("raises the world with the first target written, and not for a hand seam or a cleared target", async () => {
+    const { store } = await open();
+    const base = { productionId: PRODUCTION, sceneFile: SCENE, sceneId: SCENE_ID };
+    const first = await sceneOnDisk(store);
+    await applySceneCommand(store, { ...base, baseVersion: first.version,
+      command: { kind: "set-board-override", shotId: shotIds(first)[2]!, override: "split" } });
+    assert.ok(store.getBundle().meta.schemaVersion < BOARD_TARGET_SCHEMA_VERSION, "a hand seam is a field every build reads");
+
+    await applySceneCommand(store, { ...base, baseVersion: (await sceneOnDisk(store)).version,
+      command: { kind: "set-board-target", targetSec: 10 } });
+    const aimed = await sceneOnDisk(store);
+    assert.equal(aimed.boards?.targetSec, 10);
+    assert.equal(store.getBundle().meta.schemaVersion, BOARD_TARGET_SCHEMA_VERSION);
+    assert.ok(BOARD_TARGET_SCHEMA_VERSION <= SUPPORTED_SCHEMA_VERSION, "this build reads what it writes");
+
+    await applySceneCommand(store, { ...base, baseVersion: aimed.version, command: { kind: "set-board-target", targetSec: null } });
+    assert.equal((await sceneOnDisk(store)).boards?.targetSec, undefined);
+    assert.equal(store.getBundle().meta.schemaVersion, BOARD_TARGET_SCHEMA_VERSION, "a world is never lowered");
+  });
 });

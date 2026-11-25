@@ -5,6 +5,9 @@ import {
   boardPackKey,
   packBoards,
   packShotsFor,
+  productionVideoModel,
+  type ManifestModel,
+  type ModelManifest,
   type PackShot,
   type Take,
 } from "../src/index.js";
@@ -89,6 +92,43 @@ describe("the clip limit is never overridable (T-2)", () => {
     const merged = packBoards(shots, 10, NONE, new Set(["sh_2", "sh_3"]), framed);
     assert.equal(shape(merged), shape(bare), "a merge cannot buy a request the provider refuses");
     assert.equal(boardsOf(merged)[1]!.reason, "clip limit");
+  });
+});
+
+describe("the scene's board target fills boards short of the cap", () => {
+  const five = [1, 2, 3, 4, 5].map((n) => shot({ id: `sh_${n}`, number: n, durationSec: 3 }));
+
+  it("packs to the target, and names the seam it makes as the target's", () => {
+    assert.equal(shape(packBoards(five, 15, NONE, NONE, framed)), "A:sh_1,sh_2,sh_3,sh_4,sh_5");
+    const aimed = packBoards(five, 15, NONE, NONE, framed, undefined, 10);
+    assert.equal(shape(aimed), "A:sh_1,sh_2,sh_3 | B:sh_4,sh_5");
+    assert.equal(boardsOf(aimed)[1]!.reason, "target length");
+    assert.equal(
+      shape(packBoards(five, 15, NONE, new Set(["sh_4"]), framed, undefined, 10)),
+      shape(aimed),
+      "a merge cannot undo a seam the length made",
+    );
+  });
+
+  it("lets a shot longer than the target stand alone rather than refusing it", () => {
+    const shots = [
+      shot({ id: "sh_1", number: 1, durationSec: 4 }),
+      shot({ id: "sh_2", number: 2, durationSec: 12 }),
+      shot({ id: "sh_3", number: 3, durationSec: 4 }),
+    ];
+    const pack = packBoards(shots, 15, NONE, NONE, framed, undefined, 10);
+    assert.equal(shape(pack), "A:sh_1 | B:sh_2 | C:sh_3", "no neighbour has room under the target, so none folds");
+  });
+
+  it("changes nothing at or over the cap, which stays the provider's", () => {
+    const bare = shape(packBoards(five, 10, NONE, NONE, framed));
+    assert.equal(shape(packBoards(five, 10, NONE, NONE, framed, undefined, 10)), bare);
+    assert.equal(shape(packBoards(five, 10, NONE, NONE, framed, undefined, 30)), bare);
+    assert.equal(boardsOf(packBoards(five, 10, NONE, NONE, framed, undefined, 30))[1]!.reason, "clip limit");
+  });
+
+  it("moves the memo key", () => {
+    assert.notEqual(boardPackKey(five, 15, NONE, NONE, "11111", undefined, 10), boardPackKey(five, 15, NONE, NONE, "11111"));
   });
 });
 
@@ -643,5 +683,25 @@ describe("assembling the packer's input (T-18)", () => {
       defaultDurationSec: 4,
     });
     assert.deepEqual(packed[0]!.cast, ["maren-kest", "sereth"]);
+  });
+});
+
+describe("the video route boards are packed for", () => {
+  const video = (id: string, maxDurationSec: number): ManifestModel => ({
+    id, provider: "fal", capability: "video", displayName: id,
+    accepts: { referenceImages: 0, startFrame: true, endFrame: false },
+    limits: { maxDurationSec },
+    pricing: { kind: "perSecond", microUsdPerSecond: 1000 },
+  });
+  const manifest = { models: [video("first", 10), video("routed", 15), video("named", 12)] } as unknown as ModelManifest;
+
+  it("is the production's own choice, else the routed default, else the first video route", () => {
+    assert.equal(productionVideoModel(manifest, { meta: { models: { video: "named" } } }, { video: "routed" })?.id, "named");
+    assert.equal(productionVideoModel(manifest, { meta: {} }, { video: "routed" })?.id, "routed");
+    assert.equal(productionVideoModel(manifest, { meta: {} }, null)?.id, "first");
+  });
+
+  it("is nothing when the production names a route the manifest no longer has", () => {
+    assert.equal(productionVideoModel(manifest, { meta: { models: { video: "gone" } } }, null), undefined);
   });
 });

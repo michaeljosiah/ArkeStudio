@@ -88,6 +88,7 @@ export function boardsForScene(input: {
     new Set(input.scene.boards?.merges ?? []),
     (shotId) => shotHasFrame(input.production, input.artifacts, shotId, input.stagedShotIds),
     input.panelCap,
+    input.scene.boards?.targetSec,
   );
   return packed.ok
     ? packed

@@ -194,3 +194,10 @@ it("the local route's skill knows who comes out a stranger, and where a crossing
   assert.match(route, /split the shot/);
   assert.match(route, /none on another/);
 });
+
+it("the board skill names the read, the length and each seam command Arke can send (2026-11-25)", async () => {
+  const body = (await loadCraftSkill("board-seams"))!.body;
+  for (const term of [/get_scene_boards/, /set-board-target/, /move-board-boundary/, /set-board-override/, /target length/, /Only consecutive shots/]) {
+    assert.match(body, term);
+  }
+});

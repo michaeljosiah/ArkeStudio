@@ -169,6 +169,7 @@ import {
   comfyUiRecoveryDecision,
   modelEligible,
   modelForCapability,
+  productionVideoModel,
   harnessModelReference,
   ROSTER,
   inheritsWriterModel,
@@ -18359,8 +18360,7 @@ export class Coordinator {
         const scene = production?.scenes.find(s => s.id === action.sceneId);
         if (!production || !scene) throw new Error("The production scene is unavailable.");
         const model = modelFor(production, "image", action.modelId, settings);
-        const videoModelId = production.meta.models?.video ?? (this.opts.manifest && modelForCapability(this.opts.manifest, settings?.routing, "video")?.id);
-        const video = this.opts.manifest?.models.find(candidate => candidate.id === videoModelId);
+        const video = this.opts.manifest && productionVideoModel(this.opts.manifest, production, settings?.routing);
         const identity = this.freezeLocalIdentity({ worldId: store.worldId, productionId: action.productionId, target: { kind: "shot", id: scene.id },
           capability: "image", provider: model.provider, model: model.id, params: {}, estimatedMicroUsd: 0 });
         return { worldId: store.worldId, productionId: action.productionId, production, scene, world: bundle, model, mode: action.mode, scope: action.scope,
@@ -20914,6 +20914,13 @@ export class Coordinator {
       shutdownSignal: this.runtimeStop.signal,
       audioStudio: (productionId, chapterFile) => audioStudioSnapshot(store, productionId, chapterFile, this.opts.ffmpeg ? { ffmpeg: this.opts.ffmpeg } : {}),
       songSections: productionId => this.songSections.read(store, productionId),
+      // The cap and panel count the frame run packs boards to, so Arke reads the seams its sheets are cut at.
+      boardLimits: async productionId => {
+        const settings = this.appSettings ? await this.appSettings.load().catch(() => null) : null;
+        const production = store.getBundle().productions.find(p => p.meta.id === productionId);
+        const video = production && this.opts.manifest ? productionVideoModel(this.opts.manifest, production, settings?.routing) : undefined;
+        return video ? { model: video.id, capSec: video.limits.maxDurationSec ?? 10, panelCap: video.limits.storyboardPanels } : null;
+      },
       ...(this.opts.audioMediaTools ? { audioMediaTools: this.opts.audioMediaTools } : {}),
       generationRoutes: () => this.benchGenerationRoutes(),
       voiceCatalogue: () => this.benchVoiceCatalogue(store),

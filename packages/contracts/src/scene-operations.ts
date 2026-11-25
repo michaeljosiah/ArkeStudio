@@ -182,6 +182,13 @@ export const SceneCommandSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
+      kind: z.literal("set-board-target"),
+      // A board's clip length in seconds; null clears it and boards fill to the route's cap again.
+      targetSec: z.number().min(1).max(600).nullable(),
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal("move-board-boundary"),
       fromShotId: ShotIdSchema,
       toShotId: ShotIdSchema,
@@ -581,7 +588,8 @@ function prune(boards: Boards | undefined, shotId: string): Boards | undefined {
 /** An empty override block is absent, not `{splits: [], merges: []}` — one answer, not two. */
 function normalise(boards: Boards): Boards | undefined {
   const empty =
-    boards.splits.length === 0 && boards.merges.length === 0 && (boards.prompts ?? []).length === 0 && (boards.animatics ?? []).length === 0;
+    boards.splits.length === 0 && boards.merges.length === 0 && (boards.prompts ?? []).length === 0 && (boards.animatics ?? []).length === 0 &&
+    boards.targetSec === undefined;
   return empty ? undefined : boards;
 }
 
@@ -653,6 +661,27 @@ export function clearBoardOverride(
       splits: input.override === "split" ? boards.splits.filter((id) => id !== input.shotId) : boards.splits,
       merges: input.override === "merge" ? boards.merges.filter((id) => id !== input.shotId) : boards.merges,
     }),
+  );
+}
+
+/**
+ * Set or clear the scene's board target (SPEC-035): the clip length each board is filled to,
+ * where that is shorter than the route allows. Every seam the target makes is derived, so a
+ * changed target repacks the scene; the hand splits and merges stay where they were authored.
+ */
+export function setBoardTarget(record: SceneRecord, input: { targetSec: number | null }): GraphScene {
+  const shots = shotsOf(record);
+  const boards: Boards = record.boards ?? { splits: [], merges: [] };
+  if (input.targetSec === null && boards.targetSec === undefined) {
+    throw new SceneOperationRefused(["this scene has no board target to clear"]);
+  }
+  if (input.targetSec !== null && boards.targetSec === input.targetSec) {
+    throw new SceneOperationRefused([`the board target is already ${input.targetSec}s`]);
+  }
+  const { targetSec: _cleared, ...rest } = boards;
+  return withBoards(
+    complete(record, shots),
+    normalise(input.targetSec === null ? rest : { ...rest, targetSec: input.targetSec }),
   );
 }
 

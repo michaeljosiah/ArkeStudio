@@ -2533,6 +2533,10 @@ export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene
       new Set(boardOverrides?.merges ?? []),
       // Frame coverage does not move a seam; it only counts, and nothing here reads the count.
       () => true,
+      undefined,
+      // The board target moves seams like any other, and a pass never spans a seam: this is what
+      // makes a 10-second target give 10-second clips on a route that takes 15.
+      boardOverrides?.targetSec,
     );
     // A refusal is `packScene`'s to report, in its own shape, from its own oversize check.
     if (!packed.ok) return new Set();

@@ -446,6 +446,7 @@ export async function compileFrameRunEvidence(input: CompileFrameRunInput): Prom
       new Set(input.scene.boards?.merges ?? []),
       (shotId) => frameByShot.get(shotId) !== null,
       input.boardPanelCap,
+      input.scene.boards?.targetSec,
     );
     if (!packed.ok) {
       throw new Error(
