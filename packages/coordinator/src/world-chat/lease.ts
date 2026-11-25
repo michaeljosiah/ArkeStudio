@@ -101,6 +101,8 @@ export const LEASED_OPERATIONS = [
   // An action's fields and example when the turn's guide only lists it (SPEC-050 R-5). It reads
   // nothing in the world, and is leased only because it is served on the same surface.
   "describe_action",
+  // A craft skill's body by id (design turn 286): shipped guidance, no world state.
+  "read_skill",
   ...TARGET_READ_TOOL_NAMES,
 ] as const;
 

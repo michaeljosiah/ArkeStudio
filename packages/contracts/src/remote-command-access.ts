@@ -132,7 +132,7 @@ export const REMOTE_COMMAND_ACCESS = {
   "music-set-cover": "studio", "music-draft-lyrics": "studio", "read-music-heard-in": "studio", "render-music": "studio",
   "music-track-make": "studio", "music-track-choose": "studio", "music-track-edit": "studio", "music-sequence-set": "studio",
   "read-music-takes": "studio", "read-music-waveform": "studio",
-  "reorder-chapters": "studio", "reorder-scenes": "studio", "set-production-aspect": "studio", "set-production-clips": "studio",
+  "reorder-chapters": "studio", "reorder-scenes": "studio", "set-production-aspect": "studio", "set-production-clips": "studio", "set-production-look": "studio",
   "set-world-model": "studio", "set-world-image-inspection": "studio", "set-image-inspection": "studio", "set-production-model": "studio", "frame-run-quote": "studio",
   "frame-run-start": "studio", "frame-run-pause": "studio", "frame-run-resume": "studio",
   "frame-run-cancel": "studio", "frame-run-retry-step": "studio", "frame-run-retry-cell": "studio",

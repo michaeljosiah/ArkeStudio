@@ -1,6 +1,7 @@
 import { productionSetupBrief } from "../productions/setup-brief.js";
 import { assertAdaptableSource, assertSourceReadForPlan, fenceAdaptableSource } from "../productions/setup.js";
 import { validateProductionPlan } from "../world-chat/production-readiness.js";
+import { cutLookProblem } from "../world-chat/cut-look.js";
 import { createPreparedSession } from "../harness/session-files.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -337,6 +338,7 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
       }, budgetChars,
     ),
     receiptsFor: (runId) => receipts.get(runId) ?? [],
+    cutLookProblem: (actions, runReceipts) => cutLookProblem(store.getBundle(), actions, runReceipts),
     resolveLanguageModel: deps.resolveLanguageModel,
     assertVoiceOwnership: () => store.assertOwnership(),
     createSession: async ({ cwd, runId, model, variant, signal, agent, voiceContext }) => {

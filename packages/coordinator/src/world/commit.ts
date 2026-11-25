@@ -709,6 +709,14 @@ export const EDITOR_PICTURE_LOOK_SCHEMA_VERSION = 134;
  */
 export const CLIPS_FROM_SCHEMA_VERSION = 136;
 const CLIPS_FROM_KEY = /"clipsFrom"\s*:/;
+/**
+ * Design turn 287: a production's look is a strict field of production.json. An older build would
+ * refuse the production over it, so the world is raised with the first look written. (147 is PR
+ * 3270's; renumber at merge if they land in another order.) `look` is no other key of
+ * production.json, so the key is the fence.
+ */
+export const PRODUCTION_LOOK_SCHEMA_VERSION = 148;
+const PRODUCTION_LOOK_KEY = /"look"\s*:/;
 /** Issue 3186: a shot's `audio.lipSync` opt-out is a strict sound field an older scene reader refuses. */
 export const LIP_SYNC_SCHEMA_VERSION = 137;
 const LIP_SYNC_KEY = /"lipSync"\s*:/;
@@ -1236,6 +1244,7 @@ export class Committer {
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesSoundFade(f.newContent)) ? EDITOR_SOUND_FADE_SCHEMA_VERSION : 0,
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesPictureLook(f.newContent)) ? EDITOR_PICTURE_LOOK_SCHEMA_VERSION : 0,
       files.some(f => (classify(f.path).track === "production-meta" || classify(f.path).track === "scene") && f.newContent != null && CLIPS_FROM_KEY.test(f.newContent)) ? CLIPS_FROM_SCHEMA_VERSION : 0,
+      files.some(f => classify(f.path).track === "production-meta" && f.newContent != null && PRODUCTION_LOOK_KEY.test(f.newContent)) ? PRODUCTION_LOOK_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && LIP_SYNC_KEY.test(f.newContent)) ? LIP_SYNC_SCHEMA_VERSION : 0,
       // `looks` is a shot field and nothing else in a scene record, so the key is the fence; an
       // empty list is still a key an older reader refuses.

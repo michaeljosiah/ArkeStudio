@@ -16,8 +16,10 @@ export function productionCardPreview(world: WorldBundle, payload: WorldChatPrep
   if (payload.kind === "world-chat-production-metadata") {
     const current = world.productions.find(p => p.meta.id === payload.action.productionId);
     if (!current) throw new Error("The production preview is unavailable.");
-    const changes = payload.action.changes;
-    const meta = { ...current.meta, ...changes, ...(changes.productionKind !== undefined ? { kind: changes.productionKind ?? undefined } : {}) };
+    // A look cleared with null is absent on the record (design turn 287).
+    const { look, ...changes } = payload.action.changes;
+    const meta = { ...current.meta, ...changes, ...(changes.productionKind !== undefined ? { kind: changes.productionKind ?? undefined } : {}),
+      ...(look !== undefined ? { look: look ?? undefined } : {}) };
     const series = changes.seriesId === undefined ? world.series.find(s => s.seasons.includes(meta.id)) : world.series.find(s => s.id === changes.seriesId);
     return metadataPreview(world, meta, series?.title ?? null, current.season ? "Season" : null, current.episodes.length);
   }

@@ -195,6 +195,17 @@ const WORLD_CHAT_TOOLS = [
     },
   },
   {
+    name: "read_skill",
+    description:
+      "Read one of your craft skills by id: how a director does one task, such as keeping a scene continuous across its cuts. This thread's brief lists the ids and when to read each. It reads nothing in the world.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string", description: "The skill's id, exactly as listed" } },
+      required: ["id"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "get_attachment_text",
     description:
       "Read a bounded range of text from a document attached to this conversation. Only attachments explicitly linked to this turn are readable, and only if they are text. Images, audio and video cannot be read.",

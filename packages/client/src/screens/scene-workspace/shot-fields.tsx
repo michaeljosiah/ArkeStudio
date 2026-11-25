@@ -12,6 +12,7 @@ import {
   sceneBeats,
   overrideStaleAgainst,
   promptFor,
+  sceneUnderLook,
   productionShape,
   propSlug,
   resolveCast,
@@ -110,8 +111,10 @@ export function ShotFields({
   // ---- Frame prompt -------------------------------------------------------------------------
   const style = production.meta.styleOverride?.trim() || world.artDirection.description;
   const capability = "image" as const;
-  const assembledPrompt = assemblePrompt(world.meta, sheets, scene, shot, style, undefined, capability);
-  const currentPrompt = promptFor(world.meta, sheets, scene, shot, style, undefined, capability);
+  // The production's look lies beneath the scene's camera, as it does where the plan assembles it.
+  const looked = sceneUnderLook(scene, production.meta.look);
+  const assembledPrompt = assemblePrompt(world.meta, sheets, looked, shot, style, undefined, capability);
+  const currentPrompt = promptFor(world.meta, sheets, looked, shot, style, undefined, capability);
   // A still-image editor must not replace the video override it cannot display.
   const videoOverride = shot.promptOverride !== undefined && (shot.promptOverride.capability === "video" ||
     (shot.promptOverride.capability === undefined && productionShape(production.meta).dispatchCapability === "video"));

@@ -11,6 +11,9 @@ import {
   planScene,
   pickableSheets,
   productionShape,
+  FILM_DIRECTION_CRAFT,
+  lookBrief,
+  type ProductionLook,
   sceneDeleteBlockers,
   resolveMedium,
   ulid,
@@ -1475,7 +1478,14 @@ export async function draftSceneSkeleton(
   const capability = production && productionShape(production.meta).dispatchCapability === "image" ? "image" : "video";
   const look = production?.meta.styleOverride?.trim() || bundle.artDirection.description;
   const promptInstruction = `Author each shot's promptOverride as {"text":"one complete prompt", "capability":"${capability}", "sheetVersions":{"sheet-slug":1}}. Read its characters and location through get_sheet first; record their actual versions, never the example version. Read the scene/script and respect explicit framing, duration and silence. Write for ${production?.meta.models?.[capability] ?? skill?.family ?? capability}, within that route's grammar. ${capability === "video" ? "Describe motion, camera movement, what changes across the shot and what is heard." : "Describe one visible instant, with no timing, sound or camera-movement instructions."} Translate the effective art direction into this setup; do not paste it or include backstory, other shots or absent characters. Keep @mentions in description to attach references. The application preserves the prompt and adds mechanical bindings and constraints. Effective art direction (source data for your judgment): ${JSON.stringify(look)}`;
-  return { proposalId: proposal.id, path, scope, instruction: `${instruction}\n\n${promptInstruction}`, skill };
+  // The drafting agent writes the shots, so it is the one that has to direct them (issues 3273,
+  // 3278): the same craft a film's chat threads carry, or a drafted scene comes back as a handful
+  // of shots each holding several speakers' lines, which no amount of later chat can recut.
+  // And the production's look (design turn 287): a drafted scene of a handheld film was written
+  // "locked off" when nothing said how the film is shot.
+  const lookLine = production ? lookBrief(production.meta.look) : null;
+  const direction = production && productionShape(production.meta).medium === "video" ? `\n\n${FILM_DIRECTION_CRAFT}${lookLine ? `\n\n${lookLine}` : ""}` : "";
+  return { proposalId: proposal.id, path, scope, instruction: `${instruction}${direction}\n\n${promptInstruction}`, skill };
 }
 
 // ---------------------------------------------------------------------------
@@ -1785,6 +1795,13 @@ export interface ProductionMetadataChanges {
   aspect?: string;
   frameRate?: FrameRate;
   clipsFrom?: "frames" | "references";
+  /** Design turn 287: the production's look, whole; null clears it. */
+  look?: ProductionLook | null;
+}
+
+/** A look with nothing in it is no look: an empty object would raise the world for nothing. */
+function storedLook(look: ProductionLook | null): ProductionLook | undefined {
+  return look === null || Object.keys(look).length === 0 ? undefined : look;
 }
 
 export function validateProductionMetadataChanges(
@@ -1866,6 +1883,7 @@ export async function updateProductionMetadata(
     ...(canonicalAspect ? { aspect: canonicalAspect } : {}),
     ...(changes.frameRate !== undefined ? { frameRate: changes.frameRate } : {}),
     ...(changes.clipsFrom !== undefined ? { clipsFrom: changes.clipsFrom } : {}),
+    ...(changes.look !== undefined ? { look: storedLook(changes.look) } : {}),
     updated: store.now(),
   });
   ProductionSchema.parse(doc.value);
@@ -1958,6 +1976,34 @@ export async function setProductionClipsFrom(
   const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
   const doc = JsonFile.parse(raw);
   doc.set({ clipsFrom, updated: store.now() });
+  ProductionSchema.parse(doc.value);
+  await store.commit(
+    {
+      kind: "production-edit",
+      source: options.source ?? "form",
+      files: [{ path, action: "replace", content: doc.serialize(), baseHash: sha256(raw) }],
+      ...(options.requestId !== undefined ? { requestId: options.requestId } : {}),
+    },
+    undefined,
+    options.precondition,
+  );
+}
+
+/**
+ * The production's look (design turn 288a), written whole from Production settings, through the
+ * same commit as the clip source. `null` or an empty look clears it, so the world is only raised
+ * (schema 148) by a look that says something.
+ */
+export async function setProductionLook(
+  store: WorldStore,
+  productionId: string,
+  look: ProductionLook | null,
+  options: { source?: string; requestId?: string; precondition?: WorldStatePrecondition } = {},
+): Promise<void> {
+  const path = `productions/${productionId}/production.json`;
+  const raw = await readFile(toExtendedLength(join(store.dir, fromPortable(path))), "utf8");
+  const doc = JsonFile.parse(raw);
+  doc.set({ look: storedLook(look), updated: store.now() });
   ProductionSchema.parse(doc.value);
   await store.commit(
     {
@@ -2078,7 +2124,8 @@ export function composeDispatches(
   acknowledgedRecommendationIds?: string[],
   assessedAt?: string,
 ): EnqueueInput[] {
-  return compilePasses({ productionId, scene, plan, model, world, manifest, acknowledgedRecommendationIds, assessedAt }).map((pass) => ({
+  const look = world.productions.find((production) => production.meta.id === productionId)?.meta.look;
+  return compilePasses({ productionId, scene, plan, model, world, manifest, acknowledgedRecommendationIds, assessedAt, look }).map((pass) => ({
     worldId,
     productionId,
     target: pass.target,

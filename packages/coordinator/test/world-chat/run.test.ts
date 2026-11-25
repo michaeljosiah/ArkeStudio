@@ -110,6 +110,7 @@ async function setup(
     raiseSchemaBoundary?: RunDeps["raiseSchemaBoundary"];
     validateProductionPlan?: RunDeps["validateProductionPlan"];
     receiptsFor?: RunDeps["receiptsFor"];
+    cutLookProblem?: RunDeps["cutLookProblem"];
     /** Narrates the entry context, which is where a reply-only turn is told to propose nothing. */
     describeEntry?: boolean;
     /** Every preparation the runner asked for, as it asked for it. */
@@ -149,6 +150,7 @@ async function setup(
       : {}),
     ...(options.raiseSchemaBoundary ? { raiseSchemaBoundary: options.raiseSchemaBoundary } : {}),
     ...(options.validateProductionPlan ? { validateProductionPlan: options.validateProductionPlan } : {}),
+    ...(options.cutLookProblem ? { cutLookProblem: options.cutLookProblem } : {}),
     prepare: async (input) => {
       options.prepared?.push(input);
       return { cwd: worldPath, leaseToken: "t".repeat(64) };
@@ -414,6 +416,32 @@ describe("taking a turn", () => {
     types = (await store.read()).events.map((e) => e.event.type);
     assert.equal(types.filter((type) => type === "turn.constraints").length, 2);
     assert.deepEqual(raised, [12, 12]);
+  });
+
+  it("a change beside a take that comes back without a look gets one more attempt to look (design turn 286)", async () => {
+    // 0.5.129: the first answer was unreadable, the corrective turn went on that, and the change
+    // it then sent had not looked, so the turn died on a check its own tools could satisfy.
+    const valid = JSON.stringify({ reply: "Done.", candidateOperations: [], groupOperations: [] });
+    const prompts: string[] = [];
+    let checks = 0;
+    const h = await setup(fakeAdapter(["not json at all", valid, valid], { prompts }), {
+      cutLookProblem: () => (++checks === 1 ? "Shot 6 has a take or stands beside one. Before changing its picture, look with sample_video at …" : null),
+    });
+    assert.equal((await h.runner.send(h.store, h.conversationId, "Let Tunde hold his glass.")).status, "completed");
+    assert.equal(prompts.length, 3, "the unreadable answer, its correction, and one look");
+    assert.match(prompts[2]!, /look with sample_video/, "the extra attempt is told what to look at");
+    assert.equal((await h.store.read()).events.filter((e) => e.event.type === "run.retry-started").length, 2);
+  });
+
+  it("the extra attempt is one, and a failure is told to the person in plain words (design turn 286)", async () => {
+    const valid = JSON.stringify({ reply: "Done.", candidateOperations: [], groupOperations: [] });
+    const prompts: string[] = [];
+    const h = await setup(fakeAdapter([valid, valid, valid], { prompts }), { cutLookProblem: () => "Shot 6 … look with sample_video at …" });
+    assert.equal((await h.runner.send(h.store, h.conversationId, "Let Tunde hold his glass.")).status, "failed");
+    assert.equal(prompts.length, 3, "the answer, the corrective turn, and one look: never a fourth");
+    const finished = (await h.store.read()).events.map((e) => JSON.stringify(e.event)).find((e) => e.includes("rejected:"));
+    assert.match(finished ?? "", /it changed a shot without first looking at the takes beside it/);
+    assert.doesNotMatch(finished ?? "", /sample_video/, "the model's instruction stays off the screen");
   });
 
   it("the page's rewrite spends the corrective turn on a revision, and keeps a reply that says why not (issue 1827)", async () => {

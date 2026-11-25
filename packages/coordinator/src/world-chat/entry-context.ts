@@ -1,6 +1,9 @@
 import type { ProductionBundle, WorldBundle, WorldChatContext } from "@arke-studio/contracts";
 import {
   COMIC_ADAPTATION_CRAFT,
+  CRAFT_SKILLS_LINE,
+  FILM_DIRECTION_CRAFT,
+  lookBrief,
   orderedShots,
   orderedTrackClips,
   productionAspect,
@@ -392,6 +395,23 @@ function describeShape(production: ProductionBundle | undefined, writesTheSeason
     bits.push(
       "A shot draws a person from their character sheet and its pictures, so someone without a sheet is a different person in every shot. When the direction or a request names a person the work is to be built around (a lead, a singer, a dancer), look for their sheet with search_sheets before planning shots around them. If there is none, say so in that same reply and offer to make the sheet first. This is for the people the work is built around, not every name in the story.",
     );
+    /*
+     * The director's craft, said wherever shots are planned (issue 3273). On the Na Love or Juju
+     * film Arke directed well when asked "you are the director", and planned a dialogue scene
+     * with no listener's face, no insert and two speakers to a shot when it was not; the coverage
+     * the owner wanted came from outside it. Only a picture has shots, so only here.
+     */
+    bits.push(FILM_DIRECTION_CRAFT);
+    /*
+     * The production's look (design turn 287), after the craft it qualifies: the craft says the
+     * camera is handheld "unless the production's look says otherwise", and this says what it says.
+     * On the film, about fifty clips were written locked off with nothing in the thread to say how
+     * the film is shot.
+     */
+    const look = lookBrief(production.meta.look);
+    if (look) bits.push(look);
+    // The craft names when to read a skill; this line names which exist (design turn 286).
+    bits.push(CRAFT_SKILLS_LINE);
   }
   return bits.join(" ");
 }

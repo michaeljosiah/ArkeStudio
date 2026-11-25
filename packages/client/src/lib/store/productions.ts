@@ -1,7 +1,7 @@
 import {
   type TraversalEvidence, type GuideSheetKind, type SetGuideEntry, type SetGuideTeasers,
   type RoutingCommand, type ClientMessage, type DramaChapterDecision, type DramaRole,
-  type EpisodeScriptBlock, type SizeTier, ulid,
+  type EpisodeScriptBlock, type SizeTier, type ProductionLook, ulid,
 } from "@arke-studio/contracts";
 import { current, emitChange, send } from "./core.js";
 import { useStoreSelector } from "./hooks.js";
@@ -438,6 +438,11 @@ export function setProductionAspect(worldId: string, productionId: string, aspec
 /** What the production's clips are made from (issue 3185): frames, or the cast and place pictures. */
 export function setProductionClips(worldId: string, productionId: string, clipsFrom: "frames" | "references"): void {
   send({ kind: "set-production-clips", worldId, productionId, clipsFrom });
+}
+
+/** The production's look (design turn 288a), written whole; null clears it. */
+export function setProductionLook(worldId: string, productionId: string, look: ProductionLook | null): void {
+  send({ kind: "set-production-look", worldId, productionId, look });
 }
 
 /**

@@ -1,0 +1,203 @@
+import {
+  applyLookPreset,
+  LOOK_CHECK_MAX,
+  LOOK_CHECKS_MAX,
+  LOOK_PRESET_NAMES,
+  LOOK_PRESETS,
+  LOOK_WORDS_MAX,
+  type ProductionLook,
+} from "@arke-studio/contracts";
+import { useEffect, useRef, useState } from "react";
+import { Button, Checkbox, Input, Select } from "../components/ui.js";
+import { Plus } from "../components/icons.js";
+import { setProductionLook } from "../lib/store.js";
+
+/**
+ * The production's look (design turns 287 and 288a): a card in Production settings, after Clips and
+ * before Models, drawn as the Models card is. A preset fills the choices and nothing else; each part
+ * is a choice and a few words; the production's own checks are lines. Every change writes the look
+ * whole (`set-production-look`), so what is written is what the card shows.
+ *
+ * A screen labels; it never explains: no caption under a row, and the words fields carry their
+ * part's name only as an accessible label.
+ */
+type Part = "camera" | "light" | "lens" | "grade" | "cutting" | "sound" | "performance";
+
+const INSERTS = [0.5, 1, 1.5, 2] as const;
+
+export function ProductionLookCard({ look, worldId, prodId }: {
+  look: ProductionLook | undefined;
+  worldId: string | undefined;
+  prodId: string | undefined;
+}) {
+  /*
+   * The look as last written, not as last received. Each change is the whole look, and the app's
+   * answer arrives after a round trip: composed from the received look, a preset pressed just after
+   * leaving a words field would write the old words back over the new (codex on PR 3302). A received
+   * look replaces it, so a refused write shows the look as it is.
+   */
+  const [shown, setShown] = useState<ProductionLook>(look ?? {});
+  const latest = useRef<ProductionLook>(look ?? {});
+  useEffect(() => { latest.current = look ?? {}; setShown(look ?? {}); }, [look]);
+  const write = (next: ProductionLook) => {
+    latest.current = next;
+    setShown(next);
+    if (worldId && prodId) setProductionLook(worldId, prodId, Object.keys(next).length > 0 ? next : null);
+  };
+  const current = shown;
+  // A choice changed after a preset is the person's own: the preset no longer describes the look.
+  const choose = <K extends Part>(part: K, change: Partial<NonNullable<ProductionLook[K]>>) => {
+    const { preset: _preset, ...rest } = latest.current;
+    write({ ...rest, [part]: { ...latest.current[part], ...change } });
+  };
+  const words = <K extends Part>(part: K, value: string) => {
+    const kept = { ...latest.current[part] } as Record<string, unknown>;
+    const trimmed = value.trim();
+    if (trimmed) kept.words = trimmed;
+    else delete kept.words;
+    write({ ...latest.current, [part]: kept });
+  };
+  return (
+    <section className="fy-models fy-look" aria-label="Look">
+      <div className="fy-models__head"><h3>Look</h3></div>
+      <Row name="Preset">
+        <span className="fy-takechips">
+          {LOOK_PRESETS.map((preset) => (
+            <button
+              key={preset}
+              type="button"
+              className={`fy-takechip${current.preset === preset ? " fy-takechip--on" : ""}`}
+              aria-pressed={current.preset === preset}
+              onClick={() => write(applyLookPreset(latest.current, preset))}
+            >
+              {LOOK_PRESET_NAMES[preset]}
+            </button>
+          ))}
+        </span>
+      </Row>
+      <Row name="Camera">
+        <Seg label="Camera" values={["handheld", "steady", "locked", "shaky"]} names={["Handheld", "Steady", "Locked", "Shaky"]}
+          value={current.camera?.kind} onChange={(kind) => choose("camera", { kind })} />
+        <Seg label="Camera strength" values={["gentle", "strong"]} names={["Gentle", "Strong"]}
+          value={current.camera?.strength} onChange={(strength) => choose("camera", { strength })} />
+        <Checkbox label="Push in on a beat" checked={current.camera?.pushOnBeat === true}
+          onChange={(e) => choose("camera", { pushOnBeat: e.target.checked })} />
+        <Words part="Camera" value={current.camera?.words} onCommit={(value) => words("camera", value)} />
+      </Row>
+      <Row name="Light">
+        <Seg label="Light" values={["low", "high"]} names={["Low key", "High key"]}
+          value={current.light?.key} onChange={(key) => choose("light", { key })} />
+        <Words part="Light" wide value={current.light?.words} onCommit={(value) => words("light", value)} />
+      </Row>
+      <Row name="Lens and focus">
+        <Seg label="Lens" values={["wide", "normal", "long"]} names={["Wide", "Normal", "Long"]}
+          value={current.lens?.length} onChange={(length) => choose("lens", { length })} />
+        <Seg label="Focus" values={["shallow", "deep"]} names={["Shallow", "Deep"]}
+          value={current.lens?.focus} onChange={(focus) => choose("lens", { focus })} />
+        <Words part="Lens and focus" value={current.lens?.words} onCommit={(value) => words("lens", value)} />
+      </Row>
+      <Row name="Grade">
+        <Words part="Grade" wide value={current.grade?.words} onCommit={(value) => words("grade", value)} />
+      </Row>
+      <Row name="Cutting">
+        <Checkbox label="Split cuts" checked={current.cutting?.splitCuts === true}
+          onChange={(e) => choose("cutting", { splitCuts: e.target.checked })} />
+        <Select label="Inserts" value={String(current.cutting?.insertSec ?? "")}
+          onChange={(e) => e.target.value && choose("cutting", { insertSec: Number(e.target.value) })}>
+          {current.cutting?.insertSec === undefined && <option value="">Inserts</option>}
+          {/* A length a preset or Arke wrote that the list does not hold (Thriller's 0.8 s) is still shown as it is. */}
+          {[...new Set([...INSERTS, ...(current.cutting?.insertSec !== undefined ? [current.cutting.insertSec] : [])])]
+            .sort((a, b) => a - b)
+            .map((sec) => <option key={sec} value={sec}>{`Inserts ${sec} s`}</option>)}
+        </Select>
+        <Words part="Cutting" value={current.cutting?.words} onCommit={(value) => words("cutting", value)} />
+      </Row>
+      <Row name="Sound">
+        <Checkbox label="One room tone a place" checked={current.sound?.roomTonePerPlace === true}
+          onChange={(e) => choose("sound", { roomTonePerPlace: e.target.checked })} />
+        <Checkbox label="Keep the model’s clear effects" checked={current.sound?.keepModelEffects === true}
+          onChange={(e) => choose("sound", { keepModelEffects: e.target.checked })} />
+        <Words part="Sound" value={current.sound?.words} onCommit={(value) => words("sound", value)} />
+      </Row>
+      <Row name="Performance">
+        <Seg label="Performance" values={["naturalistic", "heightened", "deadpan"]} names={["Naturalistic", "Heightened", "Deadpan"]}
+          value={current.performance?.style} onChange={(style) => choose("performance", { style })} />
+        <Words part="Performance" value={current.performance?.words} onCommit={(value) => words("performance", value)} />
+      </Row>
+      <Row name="Own checks">
+        <OwnChecks checks={current.checks ?? []} onChange={(checks) => {
+          const { checks: _checks, ...rest } = latest.current;
+          write(checks.length > 0 ? { ...rest, checks } : rest);
+        }} />
+      </Row>
+    </section>
+  );
+}
+
+function Row({ name, children }: { name: string; children: React.ReactNode }) {
+  return <div className="fy-models__row"><span className="fy-models__what">{name}</span>{children}</div>;
+}
+
+/** The app's segmented control (fy-seg), one choice of a few. */
+function Seg<V extends string>({ label, values, names, value, onChange }: {
+  label: string;
+  values: readonly V[];
+  names: readonly string[];
+  value: V | undefined;
+  onChange: (value: V) => void;
+}) {
+  return (
+    <span className="fy-seg" role="group" aria-label={label}>
+      {values.map((option, i) => (
+        <button key={option} type="button" className={`fy-seg__item${value === option ? " fy-seg__item--active" : ""}`}
+          aria-pressed={value === option} onClick={() => value !== option && onChange(option)}>
+          {names[i]}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+/** A part's few words: written when the field is left or Enter is pressed, never on each key. */
+function Words({ part, value, wide = false, onCommit }: {
+  part: string;
+  value: string | undefined;
+  wide?: boolean;
+  onCommit: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState(value ?? "");
+  useEffect(() => setDraft(value ?? ""), [value]);
+  // Read from the field itself when it is left: what is in the box is what is written.
+  const commit = (typed: string) => { if (typed.trim() !== (value ?? "")) onCommit(typed); };
+  return (
+    <Input className={`fy-look__words${wide ? " fy-look__words--wide" : ""}`} aria-label={`${part} words`} value={draft}
+      maxLength={LOOK_WORDS_MAX} onChange={(e) => setDraft(e.target.value)} onBlur={(e) => commit(e.currentTarget.value)}
+      onKeyDown={(e) => { if (e.key === "Enter") commit(e.currentTarget.value); }} />
+  );
+}
+
+/** The production's own checks: a line each, emptied to remove, and Add for one more. */
+function OwnChecks({ checks, onChange }: { checks: readonly string[]; onChange: (checks: string[]) => void }) {
+  const [lines, setLines] = useState<string[]>([...checks]);
+  useEffect(() => setLines([...checks]), [checks]);
+  const commit = (next: string[]) => {
+    const kept = next.map((line) => line.trim()).filter(Boolean);
+    if (JSON.stringify(kept) !== JSON.stringify(checks)) onChange(kept);
+  };
+  return (
+    <span className="fy-look__lines">
+      {lines.map((line, i) => {
+        const withTyped = (typed: string) => lines.map((old, j) => (j === i ? typed : old));
+        return (
+          <Input key={i} className="fy-look__line" aria-label="Own check" value={line} maxLength={LOOK_CHECK_MAX}
+            onChange={(e) => setLines(withTyped(e.target.value))}
+            onBlur={(e) => commit(withTyped(e.currentTarget.value))}
+            onKeyDown={(e) => { if (e.key === "Enter") commit(withTyped(e.currentTarget.value)); }} />
+        );
+      })}
+      {lines.length < LOOK_CHECKS_MAX && (
+        <Button variant="ghost" size="sm" onClick={() => setLines([...lines, ""])}><Plus size={14} />Add</Button>
+      )}
+    </span>
+  );
+}

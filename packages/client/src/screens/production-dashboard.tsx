@@ -10,6 +10,7 @@ import {
   targetWords,
   takeCostCopy,
   type ModelChoices,
+  type ProductionLook,
   publishedChapterTitle,
   chapterCalled,
   chapterNumber,
@@ -28,6 +29,7 @@ import { ComicDashboard } from "./comic-dashboard.js";
 import { useCompact } from "../lib/media-query.js";
 import { productionPlate } from "../lib/production-plate.js";
 import { ModelsCard, PRODUCTION_MODEL_CAPABILITIES } from "../components/models-card.js";
+import { ProductionLookCard } from "./production-look.js";
 import { seconds } from "../lib/format.js";
 import { wantsSong } from "../lib/song.js";
 import { acceptedTakeId, isDayOne, takeDecisions, useProduction } from "../lib/selectors.js";
@@ -465,7 +467,7 @@ function NoShotsCard({ beats, onOpen }: { beats: boolean; onOpen: () => void }) 
 }
 
 function ProductionSetup({ production, worldId, prodId }: {
-  production: { meta: { aspect?: string; models?: ModelChoices; clipsFrom?: "frames" | "references" }; scenes: readonly unknown[] };
+  production: { meta: { aspect?: string; models?: ModelChoices; clipsFrom?: "frames" | "references"; look?: ProductionLook }; scenes: readonly unknown[] };
   worldId: string | undefined;
   prodId: string | undefined;
 }) {
@@ -477,6 +479,8 @@ function ProductionSetup({ production, worldId, prodId }: {
   }).filter(Boolean).join(" · ") || "Models";
   const controls = <><DeliveryAspect production={production} worldId={worldId} prodId={prodId} />
     {production.scenes.length > 0 && <ClipSource production={production} worldId={worldId} prodId={prodId} />}
+    {/* Design turn 288a: the look sits after Clips and before Models, where a picture has shots. */}
+    {production.scenes.length > 0 && <ProductionLookCard look={production.meta.look} worldId={worldId} prodId={prodId} />}
     <ProductionModels production={production} worldId={worldId} prodId={prodId} /></>;
   return <>
     <button className="fy-production-setup-row" type="button" aria-label="Delivery and models" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(true)}><b>{productionAspect(production.meta)}</b><span>· {models}</span><ChevronRight size={16} /></button>

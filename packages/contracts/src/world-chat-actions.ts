@@ -7,6 +7,7 @@ import { COMIC_LIMITS, ComicChapterPlanSchema, ComicModeSchema, ComicScriptReadS
 import { PropAuthoringChangeSchema, PropIdSchema, PropStateIdSchema } from "./prop.js";
 export { ProductionCreationPlanSchema, type ProductionCreationPlan } from "./production-creation.js";
 import { ProductionCreationPlanSchema } from "./production-creation.js";
+import { ProductionLookInputSchema } from "./production-look.js";
 import { ArkeReadObservationSchema, ConversationActionSemanticIdSchema, type ArkeReadObservation } from "./arke-actions.js";
 import { AudioPolicySchema, FailureModesSchema, KeyArtIntentSchema } from "./art-direction.js";
 import { BenchModeSchema, BenchParamsSchema } from "./bench.js";
@@ -600,6 +601,8 @@ const ProductionMetadataChangesSchema = z
     frameRate: FrameRateSchema.optional(),
     /** Issue 3185: whether clips open on frames or are made from the cast and place pictures. */
     clipsFrom: z.enum(["frames", "references"]).optional(),
+    /** Design turn 287: the production's look, whole; null clears it. */
+    look: ProductionLookInputSchema.nullable().optional(),
   })
   .strict()
   .refine((changes) => Object.keys(changes).length > 0, "a production metadata action must change at least one field");

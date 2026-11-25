@@ -18,11 +18,13 @@ import {
   type Sheet,
   type WorldBundle,
   chapterCalled,
+  CRAFT_SKILLS,
 } from "@arke-studio/contracts";
 import { WorldIndex } from "../../src/index-db/world-index.js";
 import { WorldQueryServer } from "../../src/harness/world-query.js";
 import { WorldChatAttachmentStore } from "../../src/world-chat/attachments.js";
 import { LeaseDeniedError, QueryLeaseRegistry } from "../../src/world-chat/lease.js";
+import { HIDDEN_RECEIPT_TOOLS } from "../../src/world-chat/project.js";
 import { RetrievalError, WorldChatRetrieval, type RetrievalDeps } from "../../src/world-chat/retrieval.js";
 import { WorldChatService } from "../../src/world-chat/service.js";
 import { assembleContext } from "../../src/world-chat/context.js";
@@ -419,6 +421,24 @@ describe("leased retrieval", () => {
 
     const unknown = await h.retrieval.call(h.mint().token, "describe_action", { kind: "delete-everything" });
     assert.equal(unknown.receipt.status, "empty");
+    h.index?.close();
+  });
+
+  it("reads a craft skill through the lease, naming its version on the receipt (design turn 286)", async () => {
+    const h = await harness();
+    const { result, receipt } = await h.retrieval.call(h.mint().token, "read_skill", { id: "continuity-across-cuts" });
+    assert.equal(receipt.tool, "read-skill");
+    assert.equal(receipt.status, "complete");
+    assert.equal(receipt.consulted.length, 0, "it read nothing in the world");
+    assert.match(receipt.querySummary ?? "", /continuity-across-cuts@v\d+/, "a judgement can be traced to the guidance behind it");
+    const read = result as { id: string; version: number; body: string };
+    assert.equal(read.id, "continuity-across-cuts");
+    assert.match(read.body, /Two still frames cannot show movement/);
+    assert.ok(HIDDEN_RECEIPT_TOOLS.has(receipt.tool), "kept, but never shown beside the reply as a check");
+
+    const unknown = await h.retrieval.call(h.mint().token, "read_skill", { id: "how-to-win-an-oscar" });
+    assert.equal(unknown.receipt.status, "empty");
+    assert.deepEqual((unknown.result as { skills: string[] }).skills, CRAFT_SKILLS.map((skill) => skill.id), "and says which skills there are");
     h.index?.close();
   });
 
@@ -859,6 +879,8 @@ describe("the served surface", () => {
       (t) => t.name,
     );
     assert.ok(names.includes("describe_action"), "a collapsed action guide can be expanded (SPEC-050 R-5)");
+    assert.ok(names.includes("read_skill"), "a craft skill the brief names can be read (design turn 286)");
+    assert.ok(!ambientNames.includes("read_skill"), "the ambient surface is unchanged");
     assert.ok(!ambientNames.includes("get_attachment_text"), "attachment reads stay leased-only");
     assert.ok(!ambientNames.includes("describe_action"), "drafting agents prepare no world-chat actions");
     assert.ok(ambientNames.includes("get_production"), "drafting agents can read the production too");

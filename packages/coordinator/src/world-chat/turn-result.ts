@@ -157,6 +157,9 @@ export function personLine(problems: readonly TurnProblem[]): string {
         ? p.safeMessage.replace(/\. If a read is missing[\s\S]*$/, "")
       : p.code === "schema"
         ? "the reply was not in the shape the studio needs"
+      : p.code === "cut-look"
+        // The instruction (which tool, which take) is the model's; the person gets what happened.
+        ? "it changed a shot without first looking at the takes beside it"
         : p.safeMessage.replace(/[.!?\s]+$/, "") || p.code,
   );
   return [...new Set(lines)].join(" · ");

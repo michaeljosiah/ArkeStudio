@@ -51,7 +51,7 @@ import { ConversationActionLifecycle, conversationActionDigest } from "../../src
 import { ARKE_CLIENT_COMMAND_REGISTRY, worldChatActionDescriptor } from "../../src/arke-actions/registry.js";
 import { acceptDecided, ProposalManager } from "../../src/gate/proposals.js";
 import { readEditorRequest } from "../../src/productions/editor-requests.js";
-import { createChapter, createEpisode, createProduction, openChapter, reorderScenes, setProductionStyle } from "../../src/productions/ops.js";
+import { createChapter, createEpisode, createProduction, openChapter, reorderScenes, setProductionStyle, updateProductionMetadata } from "../../src/productions/ops.js";
 import { castLines, readVoices, setVoicePins } from "../../src/productions/voices.js";
 import { addMusicTrack, editMusicTrack, ensureMusicSession, musicRecordFence, readMusicRecord } from "../../src/productions/music.js";
 import { bookAuthoringRefusal } from "../../src/world-chat/production-authoring.js";
@@ -1981,6 +1981,37 @@ describe("World Chat authority adapters", () => {
     assert.equal(production.meta.frameRate, 25);
   });
 
+  it("shows a look change on its own row beside another field's, and writes it on approval (design turn 287)", async () => {
+    // A title and a look's grade words changed on one card: the look's summary reads alike before
+    // and after, so its row must be added whatever else changes (codex on PR 3302).
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    await updateProductionMetadata(w.store, PRODUCTION, { look: { camera: { kind: "handheld" }, grade: { words: "35 mm" } } },
+      { source: "test", requestId: "act_01J8E0000000000000000000F1", precondition: () => null });
+    const metadata = currentReceipt(w.store, "production-metadata", PRODUCTION);
+    const series = currentReceipt(w.store, "series");
+    const timeline = currentReceipt(w.store, "timeline", PRODUCTION);
+    const oneTurn = turn(w.conversationId, context, {
+      receipts: [metadata, series, timeline],
+      actions: [{
+        kind: "production-metadata",
+        productionId: PRODUCTION,
+        changes: { title: "Saltlight: Bell Watch", look: { camera: { kind: "handheld" }, grade: { words: "35 mm, a little under, grain" } } },
+        checkReceiptIds: [metadata.id, series.id, timeline.id],
+      }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, oneTurn);
+    await appendTurn(w.log, oneTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    const body = card.shown.body as { family: string; fields: Array<{ label: string; before: string; after: string }> };
+    assert.deepEqual(body.fields.map((field) => field.label).sort(), ["Look", "Title"]);
+    assert.match(body.fields.find((field) => field.label === "Look")!.after, /details changed/);
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    assert.equal(w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.meta.look?.grade?.words,
+      "35 mm, a little under, grain");
+  });
+
   it("restores a scene snapshot through the existing version authority", async () => {
     const w = await setup();
     const production = w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!;
@@ -3369,6 +3400,15 @@ it("stages a chapter with only the brief's eligible receipts and keeps section r
   assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
     ...oneTurn, actions: [{ ...action, checkReceiptIds: [...action.checkReceiptIds, draws[0]!.id] }],
   }), new RegExp(`final receipt from a complete target read: ${draws[0]!.id} is a search or draw.*This change needs list_chapters, get_chapter`), "the refusal names the receipt the retry must drop, and the reads that would do");
+  // A look is evidence of looking, not a read (design turn 286): cited beside the reads, it is
+  // left out rather than refusing the change; cited alone, the reads it lacks are still required.
+  const look = await read("read_skill", { id: "continuity-across-cuts" });
+  assert.doesNotThrow(() => prepareWorldChatActions(w.store, w.lifecycle, {
+    ...oneTurn, actions: [{ ...action, checkReceiptIds: [...action.checkReceiptIds, look.receipt.id] }],
+  }));
+  assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
+    ...oneTurn, actions: [{ ...action, checkReceiptIds: [look.receipt.id] }],
+  }));
   assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, {
     ...oneTurn, actions: [{ kind: "production-overview", productionId: context.productionId, changes: { logline: "Changed" }, checkReceiptIds: eligible }],
   }), /requires the complete current story read/);
