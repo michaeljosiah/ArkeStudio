@@ -175,6 +175,38 @@ it("stops at refusal and retains every later pending card", async () => {
   assert.equal(sent, 1); assert.equal(result.left, 2); assert.equal(second.status, "pending");
 });
 
+it("sends again once at the newer position when the turn's summary moved the conversation on (0.5.141)", async () => {
+  const first = card();
+  const snapshot: GroupApprovalSnapshot = { worldId: world.meta.worldId, conversationId: first.conversationId, seq: 5, actions: [first] };
+  const seqs: number[] = [];
+  const answer = (requestId: string, refused: boolean) => ({ worldId: world.meta.worldId, conversationId: first.conversationId, actionId: first.actionId, requestId,
+    ...(refused ? { disposition: "refused" as const, reason: "sequence-mismatch" as const, detail: "The conversation changed. Review the latest card and try again." }
+      : { disposition: "recorded" as const, decision: "approve" as const, status: "approved" as const }), deduplicated: false });
+  const result = await approveConversationGroup({ read: () => snapshot,
+    decide: async (_action, seq, requestId) => { seqs.push(seq);
+      // The server is already at 6: the summary written after the turn. The client hears of it a moment later.
+      if (seq < 6) return answer(requestId, true);
+      first.status = "approved"; return answer(requestId, false);
+    },
+    changed: async () => { if (snapshot.seq < 6) snapshot.seq = 6; else first.status = "completed"; } }, first.turnId, new AbortController().signal);
+  assert.deepEqual(seqs, [5, 6]);
+  assert.deepEqual(result, { approved: 1, left: 0, detail: "Eligible cards approved." });
+
+  // Once only, and never for a card that changed meanwhile.
+  const second = card(), moved: GroupApprovalSnapshot = { worldId: world.meta.worldId, conversationId: second.conversationId, seq: 5, actions: [second] };
+  let sent = 0;
+  const changed = await approveConversationGroup({ read: () => moved,
+    decide: async (_action, _seq, requestId) => { sent++; return { ...answer(requestId, true), actionId: second.actionId, conversationId: second.conversationId }; },
+    changed: async () => { moved.seq = 6; moved.actions = [{ ...second, previewDigest: "c".repeat(64) }]; } }, second.turnId, new AbortController().signal);
+  assert.equal(sent, 1); assert.equal(changed.detail, "A card changed. Review the remaining cards.");
+  const third = card(), still: GroupApprovalSnapshot = { worldId: world.meta.worldId, conversationId: third.conversationId, seq: 5, actions: [third] };
+  sent = 0;
+  const twice = await approveConversationGroup({ read: () => still,
+    decide: async (_action, _seq, requestId) => { sent++; return { ...answer(requestId, true), actionId: third.actionId, conversationId: third.conversationId }; },
+    changed: async () => { still.seq++; } }, third.turnId, new AbortController().signal);
+  assert.equal(sent, 2); assert.equal(twice.left, 1); assert.match(twice.detail, /conversation changed/);
+});
+
 it("shows the frozen target Stage before host approval and only the correlated completed video", () => {
   const copy = structuredClone(state), shot = orderedStageShot();
   __setStateForTest(copy);
