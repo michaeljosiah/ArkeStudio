@@ -1284,7 +1284,9 @@ const WORLD_CHAT_ACTION_REGISTRY = {
   "world-chat-production-metadata": {
     kind: "world-chat-production-metadata",
     schema: WorldChatProductionMetadataActionSchema,
-    ...action("production", "authored-diff", "production-store", "authored-change", ["production-metadata", "series", "timeline"]),
+    // The timeline is read only for a frame-rate change (world-chat/actions.ts `actionRequirements`):
+    // a cut's timeline runs to thousands of entries, and a look or a title must not wait on it.
+    ...action("production", "authored-diff", "production-store", "authored-change", ["production-metadata", "series"]),
   },
   "world-chat-production-model": {
     kind: "world-chat-production-model",

@@ -553,7 +553,7 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "world-archive": ["world-metadata"],
   "world-export": ["world-metadata", "artifacts"],
   "production-create": ["production-metadata", "series"],
-  "production-metadata": ["production-metadata", "series", "timeline"],
+  "production-metadata": ["production-metadata", "series"],
   "production-model": ["production-metadata"],
   "music-track-choose": ["production-metadata", "bench"],
   "music-track-edit": ["production-metadata"],
@@ -622,6 +622,20 @@ const WORLD_ACTION_REQUIREMENTS: Record<ModelWorldChatAction["kind"], readonly A
   "production-audio-cue": ["timeline"],
   "production-music": ["production-metadata"],
 };
+
+/**
+ * What an action needs read, by what it changes. A production-metadata card reads the timeline
+ * only to refuse a frame-rate change once a timeline exists; a cut's timeline can run to thousands
+ * of entries read twenty at a time, so a look, a title or a status must not wait on it (0.5.133,
+ * Gold on Gold: asked to set the film's look, Arke stopped at the first of about 160 pages of its
+ * 3,171-entry timeline and could not write the card).
+ */
+function actionRequirements(action: ModelWorldChatAction): readonly ArkeReadRequirement[] {
+  if (action.kind === "production-metadata" && action.changes.frameRate !== undefined) {
+    return [...WORLD_ACTION_REQUIREMENTS[action.kind], "timeline"];
+  }
+  return WORLD_ACTION_REQUIREMENTS[action.kind];
+}
 
 function currentWorldObservation(
   store: WorldStore,
@@ -763,7 +777,7 @@ function productionActionTargets(
     case "production-metadata": return [
       { requirement: "production-metadata", target: action.productionId },
       { requirement: "series", target: worldId },
-      { requirement: "timeline", target: action.productionId },
+      ...(action.changes.frameRate !== undefined ? [{ requirement: "timeline" as const, target: action.productionId }] : []),
     ];
     case "production-model":
     case "music-track-edit":
@@ -972,7 +986,7 @@ function worldActionObservations(
         : "is not a complete read";
       // Which reads would do (issue 1888): told only that a drama's get_production receipt was a
       // search or draw, Arke cited it again; the read this action needs is named, not guessed.
-      const needs = receipt && receipt.tool !== "target-read" ? readToolsFor(WORLD_ACTION_REQUIREMENTS[action.kind] ?? []) : [];
+      const needs = receipt && receipt.tool !== "target-read" ? readToolsFor(actionRequirements(action)) : [];
       receiptProblems.push(`A world action requires the final receipt from a complete target read: ${id} ${why}. Cite only those receipts.${needs.length ? ` This change needs ${needs.join(", ")}.` : ""}`);
       return [];
     }
@@ -1006,7 +1020,7 @@ function worldActionObservations(
       if (observation.target !== expected) receiptProblems.push("This scoped inventory read does not cover the action's exact prop and image. Read its target or the complete inventory.");
     }
   }
-  const missing = WORLD_ACTION_REQUIREMENTS[action.kind].filter((requirement) => !observed.has(requirement));
+  const missing = actionRequirements(action).filter((requirement) => !observed.has(requirement));
   const wrongTargets = productionActionTargets(store, action).filter((required) =>
     !missing.includes(required.requirement) &&
     !observations.some((observation) =>
