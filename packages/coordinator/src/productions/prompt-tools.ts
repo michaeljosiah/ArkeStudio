@@ -2,7 +2,7 @@ import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import {
-  BenchSessionMetaSchema, BenchEventEnvelopeSchema, JobSchema, foldBenchSession, editShot, orderedShots, productionShape, promptFor, assemblePrompt,
+  BenchSessionMetaSchema, BenchEventEnvelopeSchema, JobSchema, foldBenchSession, editShot, orderedShots, productionShape, promptFor, assemblePrompt, sceneUnderLook,
   PromptOverrideSnapshotSchema, ShotPromptHistorySchema, PromptInspectionSchema, referenceAudioMediaPath, referenceAudioAsset,
   type PromptTarget, type ShotPromptHistory, type PromptInspection, type BenchSession, type BenchTake,
   type BenchRequestSnapshot, type WorldBundle, type Job,
@@ -59,9 +59,9 @@ export async function readShotPromptHistory(store: WorldStore, target: PromptTar
     if (budget <= 0) { partial = true; break; }
   }
   if (previousVersion > 1) partial = true;
-  const assembledBody = assemblePrompt(world.meta, world.sheets, scene, shot, owner.production.meta.styleOverride?.trim() || world.artDirection.description, undefined, target.capability);
+  const assembledBody = assemblePrompt(world.meta, world.sheets, sceneUnderLook(scene, owner.production.meta.look), shot, owner.production.meta.styleOverride?.trim() || world.artDirection.description, undefined, target.capability);
   return ShotPromptHistorySchema.parse({ assembledBody, assembledHash: sha256(assembledBody), target, currentVersion: scene.version, currentHash: sha256(raw), currentOverride: current, partial, entries,
-    currentBody: promptFor(world.meta, world.sheets, scene, shot, owner.production.meta.styleOverride?.trim() || world.artDirection.description, undefined, target.capability).text });
+    currentBody: promptFor(world.meta, world.sheets, sceneUnderLook(scene, owner.production.meta.look), shot, owner.production.meta.styleOverride?.trim() || world.artDirection.description, undefined, target.capability).text });
 }
 
 /** A direct semantic edit under the same owner/gate as every scene command. No history rewrite. */
@@ -86,7 +86,7 @@ export async function restoreShotPrompt(store: WorldStore, target: PromptTarget,
     if (historical.id !== scene.id || historical.version !== input.sourceVersion || !oldShot) throw Error("That version does not contain this shot.");
     const override = oldShot.promptOverride ? PromptOverrideSnapshotSchema.parse(oldShot.promptOverride) : undefined;
     if (override && (override.capability ?? inferred) !== target.capability) throw Error("This historical prompt belongs to the other capability.");
-    if (!override && sha256(assemblePrompt(world.meta, world.sheets, scene, shot, owner.production.meta.styleOverride?.trim() || world.artDirection.description, undefined, target.capability)) !== input.assembledHash) throw Error("The sources changed. Review today’s assembled prompt again.");
+    if (!override && sha256(assemblePrompt(world.meta, world.sheets, sceneUnderLook(scene, owner.production.meta.look), shot, owner.production.meta.styleOverride?.trim() || world.artDirection.description, undefined, target.capability)) !== input.assembledHash) throw Error("The sources changed. Review today’s assembled prompt again.");
     if (isDeepStrictEqual(shot.promptOverride, override)) throw Error("This prompt is already current. Nothing was saved.");
     const after = editShot(scene, { shotId: target.shotId, change: { promptOverride: override } });
     const committed = await store.commitUnserialised({ kind: "scene-command", source: "restore-shot-prompt", requestId: input.requestId,

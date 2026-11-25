@@ -365,6 +365,23 @@ describe("a production with shots carries the director's craft (issues 3273, 327
       assert.doesNotMatch(text, /read_skill/, JSON.stringify(meta));
     }
   });
+
+  it("and the production's look, after the craft it qualifies, in every thread with shots (design turn 287)", async () => {
+    // Gold on Gold's clips were written "locked off" with nothing in the thread to say the film is handheld.
+    const look = { preset: "naturalistic-drama", camera: { kind: "handheld", strength: "gentle" }, checks: ["Ade's watch on his near wrist"] };
+    for (const context of [
+      ({ productionId }: Ids) => ({ kind: "production", productionId }) as WorldChatContext,
+      ({ productionId, sceneId }: Ids) => ({ kind: "scene", productionId, sceneId }) as WorldChatContext,
+      (ids: Ids) => ({ kind: "shot", ...ids }) as WorldChatContext,
+    ]) {
+      const text = await threadText({ medium: "video", kind: "film", look }, context);
+      assert.match(text, /The production's look \(Naturalistic drama\): camera handheld, gently breathing/);
+      assert.match(text, /Its own checks, to hold in every shot: Ade's watch on his near wrist\./);
+      assert.ok(text.indexOf("The production's look") > text.indexOf(FILM_DIRECTION_CRAFT), "after the craft");
+    }
+    assert.doesNotMatch(await threadText({ medium: "video", kind: "film" }, ({ productionId }) => ({ kind: "production", productionId })),
+      /The production's look/, "no look, no line");
+  });
 });
 
 describe("a scene thread is told it may name the scene (SPEC-036 R-38)", () => {

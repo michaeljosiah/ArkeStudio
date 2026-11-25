@@ -297,6 +297,7 @@ export async function compileDispatchPlan(store: WorldStore, input: CreatePlanIn
     model: input.model,
     world: input.world,
     chainWholeSceneFrames: chainFrames,
+    look: input.world.productions.find((production) => production.meta.id === input.productionId)?.meta.look,
     manifest: input.manifest, acknowledgedRecommendationIds: input.acknowledgedRecommendationIds, assessedAt: input.clock(),
   });
   for (const pass of compiled) {
