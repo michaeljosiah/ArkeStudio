@@ -350,10 +350,42 @@ export function ConversationPermissionCard({
   const onPC = isRemoteSession() && isRemoteHostConversationAction(action.actionKind);
   const terminal = ["completed", "failed", "cancelled", "denied", "stale", "superseded"].includes(action.status);
 
+  /*
+   * A press made as Arke's turn ends is refused for the conversation's position alone: the turn's
+   * completion and receipts land just after its card does, and on 0.5.134 the first Approve of a
+   * look card said "The conversation changed" with nothing on the card changed. Such a refusal
+   * waits for the newer conversation and sends the same decision once more, only while the card
+   * is still the one pressed (same status, same shown content); otherwise it says so.
+   */
+  const pressed = useRef<{ decision: "approve" | "deny"; seq: number; status: string; shown: string; retried: boolean } | null>(null);
+  const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  const shownKey = JSON.stringify(action.shown);
+  useEffect(() => {
+    if (retryAfter === null) return;
+    const press = pressed.current;
+    const changed = "The conversation changed. Review the latest card and try again.";
+    if (!press || shownKey !== press.shown || action.status !== press.status) {
+      setRetryAfter(null); setBusy(false); setAnnouncement(changed); return;
+    }
+    if (conversationSeq <= retryAfter) {
+      // The newer conversation normally follows within a moment; past that, the person decides again.
+      const timer = setTimeout(() => { setRetryAfter(null); setBusy(false); setAnnouncement(changed); }, 5000);
+      return () => clearTimeout(timer);
+    }
+    setRetryAfter(null);
+    send(press.decision, conversationSeq);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [retryAfter, conversationSeq, shownKey, action.status]);
+
   useEffect(
     () => subscribeConversationActionDecision((answer) => {
       if (answer.requestId !== request.current || answer.actionId !== action.actionId) return;
       request.current = null;
+      if (answer.disposition === "refused" && answer.reason === "sequence-mismatch" && pressed.current && !pressed.current.retried) {
+        pressed.current.retried = true;
+        setRetryAfter(pressed.current.seq);
+        return;
+      }
       setBusy(false);
       setRecorded(answer.disposition === "recorded");
       setProposalReviewNeeded(answer.disposition === "refused" && answer.reason === "validation-refused");
@@ -367,23 +399,29 @@ export function ConversationPermissionCard({
     [action.actionId, action.shown.title],
   );
 
-  const decide = (decision: "approve" | "deny") => {
+  function send(decision: "approve" | "deny", seq: number) {
     const expectedStatus = action.status === "stale" ? "stale" : "pending";
     const sent = decideConversationAction(
       action.worldId,
       action.conversationId,
       action.actionId,
-      conversationSeq,
+      seq,
       expectedStatus,
       decision,
     );
     if (sent === null) {
+      setBusy(false);
       setAnnouncement("The decision could not be sent.");
       return;
     }
+    if (pressed.current) pressed.current.seq = seq;
     request.current = sent;
     setBusy(true);
     setAnnouncement("");
+  }
+  const decide = (decision: "approve" | "deny") => {
+    pressed.current = { decision, seq: conversationSeq, status: action.status, shown: shownKey, retried: false };
+    send(decision, conversationSeq);
   };
 
   const body = <ConversationActionBody action={action} supported={supported} terminal={terminal} />;
