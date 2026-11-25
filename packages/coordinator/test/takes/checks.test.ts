@@ -105,6 +105,13 @@ describe("the checks after a take: cuts, camera, light, sync", () => {
     assert.ok(Math.abs(step!.dy) < .35);
   });
 
+  it("reads a black hold or a fade as a camera that did not move (codex on PR 3306)", () => {
+    const width = 256, height = 144, flat = Array.from({ length: 60 }, () => new Uint8Array(width * height).fill(30));
+    const steps = cameraPath(flat, width, height);
+    assert.ok(steps.every(step => step.dx === 0 && step.dy === 0));
+    assert.deepEqual(judgeCamera(steps, width, "still"), { id: "camera", result: "pass", says: "still" });
+  });
+
   it("holds the light against the shots either side", () => {
     assert.equal(judgeLight({ first: 100, last: 100 }, null, null), null);
     assert.deepEqual(judgeLight({ first: 100, last: 104 }, { number: 12, last: 96 }, { number: 14, first: 110 }),
@@ -133,9 +140,19 @@ const swayFrame = (i: number) => {
   return frame;
 };
 
-describe("a take checked when it lands", () => {
-  it("measures a clip of a shot with a line, records it beside the take, and the scan reads it back", async () => {
-    const dir = await makeTempWorld(), store = await WorldStore.open(dir); closeOnCleanup(() => store.close());
+/**
+ * Shot 12 of the fixture's Saltlight (a voice-over line) with a new clip, and shot 13 after it
+ * with a chosen take that opens dark. The clip's sound stops at 5.5 s of its 6 s picture, and a
+ * read of it past there is refused, as the native decoder refuses one (codex on PR 3306).
+ */
+async function landed(options: { soundKind?: string } = {}) {
+  const dir = await makeTempWorld();
+  const store = await WorldStore.open(dir); closeOnCleanup(() => store.close());
+  const scenePath = "productions/saltlight/scenes/04-the-verse-rises.json", sceneRaw = await readFile(join(dir, scenePath));
+  const scene = JSON.parse(sceneRaw.toString("utf8"));
+  scene.shots = scene.shots.map((shot: { id: string; audio?: object }) => (shot.id === "sh_12" && options.soundKind ? { ...shot, audio: { ...shot.audio, kind: options.soundKind } } : shot));
+  const sceneEdit = options.soundKind ? [{ path: scenePath, action: "replace" as const, baseHash: sha(sceneRaw), content: JSON.stringify(scene, null, 2) }] : [];
+  {
     const clip = Buffer.from("CLIP fixture"), next = Buffer.from("NEXT fixture");
     const base = JSON.parse(await readFile(join(dir, "productions/saltlight/takes/tk_01J8C0000000000000000000C3/take.json"), "utf8"));
     const takeId = "tk_01M8CHECK00000000000000001", nextId = "tk_01M8CHECK00000000000000002";
@@ -149,17 +166,22 @@ describe("a take checked when it lands", () => {
       { path: `productions/saltlight/takes/${nextId}/clip.mp4`, action: "create", baseHash: null, encoding: "base64", content: next.toString("base64") },
       { path: "productions/saltlight/selections.json", action: "replace", baseHash: sha(selectionsRaw),
         content: JSON.stringify({ ...selections, sh_13: { acceptedTakeId: nextId } }) },
+      ...sceneEdit,
     ] });
+    const SOUND_SEC = 5.5;
     const inventory: AgentMediaInventory = { durationSec: 6, streams: [
       { index: 0, kind: "video", codec: "fixture", width: 1280, height: 720, frameRate: "24/1", durationSec: 6, startTimeSec: 0 },
-      { index: 1, kind: "audio", codec: "fixture", sampleRate: 32000, channels: 2, durationSec: 6, startTimeSec: 0 },
+      { index: 1, kind: "audio", codec: "fixture", sampleRate: 32000, channels: 2, durationSec: SOUND_SEC, startTimeSec: 0 },
     ] };
     const isNext = async (path: string) => (await readFile(path)).equals(next);
     const tools: AgentMediaTools = {
       version: async () => "fixture", probeVersion: async () => "fixture", probe: async () => inventory,
       frame: async () => { throw new Error("no stills in this fixture"); },
       audio: async () => { throw new Error("no channel QC in this fixture"); },
-      speechAudio: async (_path, _stream, startSec, endSec) => ({ bytes: writeSpeechWav({ rate: 16000, samples: new Float32Array(Math.round((endSec - startSec) * 16000)) }), durationSec: Math.round((endSec - startSec) * 16000) / 16000 }),
+      speechAudio: async (_path, _stream, startSec, endSec) => {
+        if (endSec > SOUND_SEC + .025) throw new Error("decoded audio fell short of the interval");
+        return { bytes: writeSpeechWav({ rate: 16000, samples: new Float32Array(Math.round((endSec - startSec) * 16000)) }), durationSec: Math.round((endSec - startSec) * 16000) / 16000 };
+      },
       grayFrames: async (path, _stream, startSec, endSec, options) => {
         const count = Math.max(1, Math.round((endSec - startSec) * (options.fps ?? 10)));
         // The next shot opens dark: a level the take's last frame is well above.
@@ -167,12 +189,20 @@ describe("a take checked when it lands", () => {
         return { frames: Array.from({ length: count }, (_, i) => swayFrame(Math.round(startSec * 10) + i)), width: W, height: H, fps: options.fps };
       },
     };
-    const heard = ["the", "verse", "under", "the", "water"].map((w, i) => word(w, .5 + i * .3)).concat([word("listen", 5.2), word("here", 5.5)]);
-    const result = await checkTake(store, "saltlight", takeId, {
+    const heard = ["the", "verse", "under", "the", "water"].map((w, i) => word(w, .5 + i * .3)).concat([word("listen", 4.8), word("here", 5.1)]);
+    const ports = {
       tools, now: () => "2026-11-25T12:00:00.000Z",
-      speech: async (bytes) => ({ text: heard.map(w => w.text).join(" "), seconds: (bytes.length - 44) / 2 / 16000,
+      speech: async (bytes: Uint8Array) => ({ text: heard.map(w => w.text).join(" "), seconds: (bytes.length - 44) / 2 / 16000,
         engine: { id: MEASURED_WORD_TIMING_ENGINE, version: "1", model: "base-en" }, words: heard }),
-    }, new AbortController().signal);
+    };
+    return { store, take, tools, ports, takeId };
+  }
+}
+
+describe("a take checked when it lands", () => {
+  it("measures a clip of a shot with a line, records it beside the take, and the scan reads it back", async () => {
+    const { store, take, tools, ports, takeId } = await landed();
+    const result = await checkTake(store, "saltlight", takeId, ports, new AbortController().signal);
     assert.equal(result, "checked");
     const record = currentTakeChecks(store.getBundle().productions.find(p => p.meta.id === "saltlight")!.takeChecks, take)!;
     assert.ok(record, "the scan read the record back, current for the take's media");
@@ -180,7 +210,7 @@ describe("a take checked when it lands", () => {
     assert.deepEqual(record.items.map(item => item.id), ["words", "unwritten-voice", "cuts-inside", "camera", "light"], "in the list's order");
     assert.equal(by["words"]!.says, "as written");
     assert.equal(by["unwritten-voice"]!.result, "fix");
-    assert.equal(by["unwritten-voice"]!.says, "at 5.2 s");
+    assert.equal(by["unwritten-voice"]!.says, "at 4.8 s");
     assert.equal(by["cuts-inside"]!.result, "fix");
     assert.equal(by["cuts-inside"]!.says, "at 3.0 s");
     assert.match(by["camera"]!.says, /^handheld · \d+ px$/, "the sway is a hand's");
@@ -188,6 +218,23 @@ describe("a take checked when it lands", () => {
     assert.deepEqual(record.skipped, [{ id: "lip-sync", reason: "no-voice-sent" }]);
     // A clip that is not a take of one shot is passed over.
     assert.equal(await checkTake(store, "saltlight", "tk_01J8A0000000000000000000A1", { tools, now: () => "2026-11-25T12:00:00.000Z" }, new AbortController().signal), "not-checkable");
+  });
+
+  it("does not hold a song's words against a shot whose sound is the song", async () => {
+    const { store, take, ports, takeId } = await landed({ soundKind: "music" });
+    assert.equal(await checkTake(store, "saltlight", takeId, ports, new AbortController().signal), "checked");
+    const record = currentTakeChecks(store.getBundle().productions.find(p => p.meta.id === "saltlight")!.takeChecks, take)!;
+    assert.deepEqual(record.items.map(item => item.id), ["cuts-inside", "camera", "light"]);
+    assert.deepEqual(record.skipped.filter(item => item.id !== "lip-sync"), [{ id: "words", reason: "sung" }, { id: "unwritten-voice", reason: "sung" }]);
+  });
+
+  it("keeps the picture's checks when the sound cannot be read", async () => {
+    const { store, take, tools, ports, takeId } = await landed();
+    const refused = { ...ports, tools: { ...tools, speechAudio: async () => { throw new Error("decoder refused"); } } };
+    assert.equal(await checkTake(store, "saltlight", takeId, refused, new AbortController().signal), "checked");
+    const record = currentTakeChecks(store.getBundle().productions.find(p => p.meta.id === "saltlight")!.takeChecks, take)!;
+    assert.deepEqual(record.items.map(item => item.id), ["cuts-inside", "camera", "light"]);
+    assert.ok(record.skipped.some(item => item.id === "words" && item.reason === "unavailable"));
   });
 
   it("reads the newest line for a take and reports a damaged one without losing the rest", async () => {

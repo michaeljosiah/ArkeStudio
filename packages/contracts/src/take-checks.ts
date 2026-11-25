@@ -42,11 +42,15 @@ export const TakeCheckSchema = z
   .strict();
 export type TakeCheck = z.infer<typeof TakeCheckSchema>;
 
-/** Why an item was not measured: the take has nothing for it to measure, or the host cannot. */
+/**
+ * Why an item was not measured: the take has nothing for it to measure, or the host cannot. A
+ * shot whose sound is the song is `sung`: its words are lyrics nobody wrote into the shot, and a
+ * voice in it is the point, not a fault (codex on PR 3306).
+ */
 export const TakeCheckSkipSchema = z
   .object({
     id: TakeCheckIdSchema,
-    reason: z.enum(["no-sound", "no-line", "no-voice-sent", "no-neighbour", "unavailable"]),
+    reason: z.enum(["no-sound", "no-line", "sung", "no-voice-sent", "no-neighbour", "unavailable"]),
   })
   .strict();
 export type TakeCheckSkip = z.infer<typeof TakeCheckSkipSchema>;

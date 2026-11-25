@@ -105,6 +105,18 @@ function shiftCost(a: Uint8Array, b: Uint8Array, width: number, height: number, 
   return count ? sum / count : Infinity;
 }
 
+/** Below this spread of grey levels a frame is flat: there is nothing in it to lay one frame on the next by. */
+const FLAT = 3;
+
+/** How far a frame's grey levels spread about their mean, from every fourth pixel. */
+function spread(frame: Uint8Array): number {
+  let sum = 0, squares = 0, count = 0;
+  for (let i = 0; i < frame.length; i += 4) { const value = frame[i]!; sum += value; squares += value * value; count++; }
+  if (count === 0) return 0;
+  const mean = sum / count;
+  return Math.sqrt(Math.max(0, squares / count - mean * mean));
+}
+
 /** Half the picture each way, box-averaged, for the coarse search. */
 function half(frame: Uint8Array, width: number, height: number): { frame: Uint8Array; width: number; height: number } {
   const w = width >> 1, h = height >> 1, out = new Uint8Array(w * h);
@@ -125,22 +137,32 @@ export function cameraPath(frames: readonly Uint8Array[], width: number, height:
   const steps: Array<{ dx: number; dy: number }> = [];
   const COARSE = 6, coarseMargin = COARSE + 2, fineMargin = 2 * COARSE + 4;
   if (width < 4 * fineMargin || height < 4 * fineMargin) return frames.slice(1).map(() => ({ dx: 0, dy: 0 }));
+  /*
+   * A shift that costs no more than a smaller one is not taken: on a black hold or a fade every
+   * shift costs the same, and keeping the first one tried read a still shot as a 8,464 px move
+   * (codex on PR 3306). Nearer wins a tie, so a picture with nothing to match stays put.
+   */
+  const better = (cost: number, dx: number, dy: number, best: { dx: number; dy: number; cost: number }) =>
+    cost < best.cost - 1e-9 || (Math.abs(cost - best.cost) <= 1e-9 && Math.abs(dx) + Math.abs(dy) < Math.abs(best.dx) + Math.abs(best.dy));
   for (let i = 1; i < frames.length; i++) {
-    const a = frames[i - 1]!, b = frames[i]!, ha = half(a, width, height), hb = half(b, width, height);
-    let best = { dx: 0, dy: 0, cost: Infinity };
+    const a = frames[i - 1]!, b = frames[i]!;
+    // A frame with no texture to match (black, a flat wall in shadow) says nothing of the camera.
+    if (spread(a) < FLAT || spread(b) < FLAT) { steps.push({ dx: 0, dy: 0 }); continue; }
+    const ha = half(a, width, height), hb = half(b, width, height);
+    let best = { dx: 0, dy: 0, cost: shiftCost(ha.frame, hb.frame, ha.width, ha.height, 0, 0, coarseMargin, 1) };
     for (let dy = -COARSE; dy <= COARSE; dy++) for (let dx = -COARSE; dx <= COARSE; dx++) {
       const cost = shiftCost(ha.frame, hb.frame, ha.width, ha.height, dx, dy, coarseMargin, 1);
-      if (cost < best.cost) best = { dx, dy, cost };
+      if (better(cost, dx, dy, best)) best = { dx, dy, cost };
     }
     const costs = new Map<string, number>(), at = (dx: number, dy: number) => {
       const key = `${dx},${dy}`; let cost = costs.get(key);
       if (cost === undefined) { cost = shiftCost(a, b, width, height, dx, dy, fineMargin, 2); costs.set(key, cost); }
       return cost;
     };
-    let fine = { dx: 2 * best.dx, dy: 2 * best.dy, cost: Infinity };
+    let fine = { dx: 2 * best.dx, dy: 2 * best.dy, cost: at(2 * best.dx, 2 * best.dy) };
     for (let dy = 2 * best.dy - 2; dy <= 2 * best.dy + 2; dy++) for (let dx = 2 * best.dx - 2; dx <= 2 * best.dx + 2; dx++) {
       const cost = at(dx, dy);
-      if (cost < fine.cost) fine = { dx, dy, cost };
+      if (better(cost, dx, dy, fine)) fine = { dx, dy, cost };
     }
     // A parabola through the best cost and its neighbours places the minimum between pixels.
     const vertex = (left: number, middle: number, right: number) => { const curve = left - 2 * middle + right; return curve > 1e-9 ? Math.max(-.5, Math.min(.5, (left - right) / (2 * curve))) : 0; };
@@ -266,6 +288,15 @@ function lineOf(shot: Shot): string | null {
   return audio.line;
 }
 
+/**
+ * Whether the shot's sound is the song: its words are lyrics, not a line, and a voice in it is
+ * the point (codex on PR 3306). The song kinds `shotSingsToSong` reads, whether or not anyone in
+ * the shot sings it, since the song's own voice can be in the take either way.
+ */
+function singsTheSong(shot: Shot): boolean {
+  return shot.audio !== undefined && /^(music|song|sung|singing|sings|lip-?sync)$/i.test(shot.audio.kind.trim());
+}
+
 const takePath = (productionId: string, take: Take) => `productions/${productionId}/takes/${take.id}/${take.media}`;
 
 async function streamsOf(tools: AgentMediaTools, path: string, signal: AbortSignal): Promise<{ video: Stream | null; audio: Stream | null; durationSec: number | null }> {
@@ -316,17 +347,23 @@ export async function measureTake(store: WorldStore, productionId: string, takeI
     items.push(judgeCamera(steps, picture.width, askedCamera(movement)));
     const first = picture.frames[0], last = picture.frames[picture.frames.length - 1];
     if (first && last) level = { first: meanLevel(first), last: meanLevel(last) };
-    if (!audio) {
+    // The sound is read only as far as it runs: a clip with six seconds of picture and four of
+    // sound had its reads refused, and the refusal took the picture's checks with it (codex on
+    // PR 3306). A read of the sound that fails leaves those checks as they are, the sound's skipped.
+    const soundEnd = audio ? Math.min(end, audio.durationSec ?? end) : 0;
+    const quietly = <T,>(read: Promise<T>) => read.catch((error: unknown) => { if (signal.aborted) throw error; return null; });
+    if (singsTheSong(place.shot)) {
+      skipped.push({ id: "words", reason: "sung" }, { id: "unwritten-voice", reason: "sung" });
+    } else if (!audio || soundEnd < .5) {
       skipped.push({ id: "unwritten-voice", reason: "no-sound" });
       if (line !== null) skipped.push({ id: "words", reason: "no-sound" });
     } else if (!ports.speech || !tools.speechAudio || (ports.speechReady && !await ports.speechReady(signal))) {
       skipped.push({ id: "unwritten-voice", reason: "unavailable" });
       if (line !== null) skipped.push({ id: "words", reason: "unavailable" });
     } else {
-      const derivative = await tools.speechAudio(snapshot.path, audio, 0, end, signal);
-      const heard = await recognizeAgentSpeech({ bytes: derivative.bytes, durationSec: derivative.durationSec, streamIndex: audio.index,
-        sourceStartSec: 0, viewStartSec: 0, read: ports.speech, signal }).then(transcript => transcript.words as AcousticWord[])
-        .catch((error: unknown) => { if (signal.aborted) throw error; return null; });
+      const read = ports.speech, derivative = await quietly(tools.speechAudio(snapshot.path, audio, 0, soundEnd, signal));
+      const heard = derivative === null ? null : await quietly(recognizeAgentSpeech({ bytes: derivative.bytes, durationSec: derivative.durationSec,
+        streamIndex: audio.index, sourceStartSec: 0, viewStartSec: 0, read, signal }).then(transcript => transcript.words as AcousticWord[]));
       if (heard === null) {
         skipped.push({ id: "unwritten-voice", reason: "unavailable" });
         if (line !== null) skipped.push({ id: "words", reason: "unavailable" });
@@ -337,7 +374,7 @@ export async function measureTake(store: WorldStore, productionId: string, takeI
       }
     }
     if (line === null && !items.some(item => item.id === "words") && !skipped.some(item => item.id === "words")) skipped.push({ id: "words", reason: "no-line" });
-    if (sync && audio && tools.monoAudio) takeSound = await tools.monoAudio(snapshot.path, audio, 0, end, 16_000, signal);
+    if (sync && audio && soundEnd >= .5 && tools.monoAudio) takeSound = await quietly(tools.monoAudio(snapshot.path, audio, 0, soundEnd, 16_000, signal));
   });
   if (!sync) skipped.push({ id: "lip-sync", reason: "no-voice-sent" });
   else {
