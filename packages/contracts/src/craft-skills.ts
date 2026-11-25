@@ -44,7 +44,10 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // white shirt and watch at her table, and her clothes in the crowd line drew her in before she entered).
     // v9: seen from the side, name a hand by where it is as well as what it wears (the owner's notes, 2026-11-24: a
     // wide put Ade's glass in his far hand twice, the watch on the near wrist, until "his near hand" was written).
-    version: 9,
+    // v10: leave a beat before and after each line for split cuts, move the camera as the production does rather
+    // than "locked off", and say whether each camera did what its shot asked (the owner's notes, 2026-11-25: about
+    // fifty of seventy-seven clips were made locked off, drifted a few pixels and never breathed).
+    version: 10,
     title: "Continuity across cuts",
     when: "before you plan, review or change a shot beside one that has a take, and before you review a cut",
     bodyPath: "continuity-across-cuts.md",
@@ -77,10 +80,13 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // left a mouth moving with no line, and an insert held too long.
     // v2: a take that talks before its line gets the line started under it, and the close shot cut in mid-sentence
     // (the owner's notes, 2026-11-24: the opening wide talked from 0.72 s; the goat line now starts there).
+    // v3: split the cuts in a conversation, one room tone under every take with a take's own sound gated to its
+    // voice and clear hits, and a laid line placed by the take's voice (the owner's notes, 2026-11-25: no line
+    // crossed a cut, the room changed at every cut, and five re-read lines sat 60 to 120 ms off the lips).
     id: "sound-and-pace",
-    version: 2,
+    version: 3,
     title: "Sound and pace in the cut",
-    when: "before you change the Cut's music or mix, or the length of a clip",
+    when: "before you change the Cut's music, mix or effects, or where a clip starts and ends",
     bodyPath: "sound-and-pace.md",
   },
 ];

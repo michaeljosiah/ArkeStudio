@@ -18,6 +18,12 @@ describe("the film direction craft", () => {
     ]) assert.match(FILM_DIRECTION_CRAFT, rule);
   });
 
+  it("moves the camera and leaves room to split a cut (the owner's notes, 2026-11-25)", () => {
+    // About fifty clips of the film were made "locked off" and never breathed; no line crossed a cut.
+    assert.match(FILM_DIRECTION_CRAFT, /the camera is handheld and breathes; never write it locked off/);
+    assert.match(FILM_DIRECTION_CRAFT, /a beat before and after its line, so a line can run over the listener's face/);
+  });
+
   it("keeps the script's words and never invites a new line", () => {
     assert.match(FILM_DIRECTION_CRAFT, /The words are the script's, exactly: never add, change or drop a line/);
   });
@@ -63,6 +69,8 @@ describe("the film direction craft", () => {
   });
 
   it("stays short enough to ride in every video production's thread", () => {
-    assert.ok(FILM_DIRECTION_CRAFT.length < 2600, `${FILM_DIRECTION_CRAFT.length} characters`);
+    // 2,600 until 2026-11-25, when it stood at 2,599: the camera and split-cut rules must reach a shot when it is
+    // first written, before any skill is read, so they ride here (about 230 characters).
+    assert.ok(FILM_DIRECTION_CRAFT.length < 2900, `${FILM_DIRECTION_CRAFT.length} characters`);
   });
 });
