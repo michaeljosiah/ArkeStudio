@@ -255,7 +255,13 @@ export function GlobalChatProvider({ children }: { children: ReactNode }) {
           {selected?.kind === "world" && selected.conversationId && worldChatId === selected.conversationId && initiative !== undefined && <label>Initiative<select value={initiative} onChange={event => setWorldChatInitiative(selected.worldId, selected.conversationId!, event.target.value as "assist" | "collaborate" | "develop")}>
             <option value="assist">Assist</option><option value="collaborate">Collaborate</option><option value="develop">Develop</option></select></label>}
         </nav>}
-        {!sameWorld && <div className="fy-global-chat-boundary" role="status"><p>{selected ? "This conversation belongs to another world. Its draft is retained there." : "Open a world to begin chatting with Arke."}</p>
+        {/* A thread of this world on a page with no thread of its own is not another world's: on
+            0.5.139 a Generate thread, opened by a shot's Fix, said "belongs to another world" over
+            the scene it came from and offered the world list. It says what it is about and goes there. */}
+        {!sameWorld && selected && selected.worldId === world?.meta.worldId && !current && <div className="fy-global-chat-boundary" role="status">
+          <p>{`This conversation is about ${selected.label}.`}</p>
+          <button type="button" onClick={() => navigate(selected.path)}>Go there</button></div>}
+        {!sameWorld && !(selected && selected.worldId === world?.meta.worldId && !current) && <div className="fy-global-chat-boundary" role="status"><p>{selected ? "This conversation belongs to another world. Its draft is retained there." : "Open a world to begin chatting with Arke."}</p>
           <button type="button" onClick={() => current ? adopt() : navigate("/worlds")}>{current ? "Open this world’s chat" : "Open world"}</button></div>}
         {sameWorld && mismatch && <div className="fy-global-chat-boundary"><p>You’re viewing {current?.label}. This conversation stays about {selected?.label}.</p><button type="button" onClick={adopt}>Use this page</button></div>}
         {sameWorld && selected.scopeMissing && <div className="fy-global-chat-boundary" role="status"><p>This saved draft’s subject could not be restored. Choose this page before sending; your words are retained.</p><button type="button" onClick={adopt}>Use this page</button></div>}
