@@ -37,6 +37,14 @@ describe("the checks after a take: words", () => {
     assert.equal(voice.endAtSec, 7.5, "a little before the voice");
   });
 
+  it("does not take the line's own words, misheard, for a voice before or after it (0.5.138)", () => {
+    const line = "Ehn-ehn. The goat was in the boot spiritually.";
+    const heard = ["eh", "eh", "the", "goat", "was", "in", "the", "boot", "spiritually"].map(w => ({ text: w, startSec: null, probability: 1 }));
+    assert.deepEqual(judgeWords(line, heard).voice, { id: "unwritten-voice", result: "pass", says: "none" });
+    const more = [{ text: "hey", startSec: null, probability: 1 }, { text: "you", startSec: null, probability: 1 }, ...heard];
+    assert.deepEqual(judgeWords(line, more).voice, { id: "unwritten-voice", result: "fix", says: "before the line" }, "two more than the line had");
+  });
+
   it("does not take a breath the recogniser was unsure of for a voice", () => {
     const { voice } = judgeWords("Ehen.", [word("ehen", .6), word("ah", 7.6, .2), word("mm", 7.9, .3)]);
     assert.equal(voice.result, "pass");

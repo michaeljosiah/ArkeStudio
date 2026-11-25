@@ -37,15 +37,15 @@ export function spokenWords(text: string): string[] {
     .map(word => word.replace(/^'+|'+$/g, "")).filter(Boolean);
 }
 
-/** Which heard words the longest in-order run of the line's words used, by index into `heard`. */
-function matchedHeard(line: readonly string[], heard: readonly string[]): number[] {
+/** The longest in-order run of the line's words in what was heard, as pairs of indices (line, heard). */
+function matchedHeard(line: readonly string[], heard: readonly string[]): Array<{ line: number; heard: number }> {
   const width = heard.length + 1, dp = new Uint16Array((line.length + 1) * width);
   for (let i = line.length - 1; i >= 0; i--) for (let j = heard.length - 1; j >= 0; j--) {
     dp[i * width + j] = line[i] === heard[j] ? 1 + dp[(i + 1) * width + j + 1]! : Math.max(dp[(i + 1) * width + j]!, dp[i * width + j + 1]!);
   }
-  const used: number[] = [];
+  const used: Array<{ line: number; heard: number }> = [];
   for (let i = 0, j = 0; i < line.length && j < heard.length;) {
-    if (line[i] === heard[j]) { used.push(j); i++; j++; }
+    if (line[i] === heard[j]) { used.push({ line: i, heard: j }); i++; j++; }
     else if (dp[(i + 1) * width + j]! >= dp[i * width + j + 1]!) i++;
     else j++;
   }
@@ -82,8 +82,17 @@ export function judgeWords(line: string | null, heard: readonly HeardWord[]): { 
     : share >= .6 ? { id: "words", result: "pass", says: `${used.length} of ${lineWords.length} words` }
     : { id: "words", result: "fix", says: `heard “${heardText.length > 48 ? `${heardText.slice(0, 47)}…` : heardText}”` };
   if (used.length === 0) return { words, voice: voiceAt(spoken, false, "heard") };
-  const after = voiceAt(spoken.slice(used[used.length - 1]! + 1), true, "after the line");
-  return { words, voice: after.result === "fix" ? after : voiceAt(spoken.slice(0, used[0]!), false, "before the line") };
+  /*
+   * Words outside the run are a voice nobody wrote only past the line's own words that were not
+   * matched on that side: a recogniser spells "Ehn-ehn" as "Eh, eh", and on 0.5.138 the two
+   * misheard words that open shot 4's line read as a voice before it. So a side's spare words are
+   * those beyond the line words left unmatched there.
+   */
+  const first = used[0]!, last = used[used.length - 1]!;
+  const spare = (words: typeof spoken, unmatched: number, end: "start" | "finish") =>
+    words.length - unmatched >= 2 ? (end === "start" ? words.slice(0, words.length - unmatched) : words.slice(unmatched)) : [];
+  const after = voiceAt(spare(spoken.slice(last.heard + 1), lineWords.length - 1 - last.line, "finish"), true, "after the line");
+  return { words, voice: after.result === "fix" ? after : voiceAt(spare(spoken.slice(0, first.heard), first.line, "start"), false, "before the line") };
 }
 
 // ---------- Cuts inside ----------
