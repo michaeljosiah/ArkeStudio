@@ -47,7 +47,9 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // v10: leave a beat before and after each line for split cuts, move the camera as the production does rather
     // than "locked off", and say whether each camera did what its shot asked (the owner's notes, 2026-11-25: about
     // fifty of seventy-seven clips were made locked off, drifted a few pixels and never breathed).
-    version: 10,
+    // v11: keep a spoken line on the speaker's face, a look away in the eyes and in a pause, a grin after the last
+    // word (the owner's notes, 2026-11-25: board 15-17 panned to the room mid-line and Tunde's lips stopped).
+    version: 11,
     title: "Continuity across cuts",
     when: "before you plan, review or change a shot beside one that has a take, and before you review a cut",
     bodyPath: "continuity-across-cuts.md",
