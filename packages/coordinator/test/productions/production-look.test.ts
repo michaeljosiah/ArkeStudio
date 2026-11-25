@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { applyLookPreset, planScene, type ManifestModel, type ProductionLook, type Scene, type Shot } from "@arke-studio/contracts";
+import { applyLookPreset, compilePasses, planScene, type ManifestModel, type ProductionLook, type Scene, type Shot } from "@arke-studio/contracts";
 import { setProductionLook, updateProductionMetadata } from "../../src/productions/ops.js";
 import { PRODUCTION_LOOK_SCHEMA_VERSION } from "../../src/world/commit.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -93,6 +93,20 @@ describe("a production's look (design turn 287)", () => {
     assert.doesNotMatch(two!, /gently breathing/);
     // The words a picture model never needs stay out of the prompt: they are Arke's to keep.
     assert.doesNotMatch(one!, /Ade's watch|split cuts|room tone/);
+
+    // A whole-scene pass rebuilds its beats from the scene when it is compiled for the request: the
+    // look must reach the paid request, not only the plan (codex on PR 3302).
+    const whole = planScene({
+      world: bundle.meta, productionId: production.meta.id, sheets: bundle.sheets, kits: bundle.referenceKits,
+      scene: { ...scene, defaults: undefined }, selections: {}, model: MODEL, artifacts: [], production: { look: GOLD_ON_GOLD },
+    }, "whole-scene");
+    const compiled = compilePasses({ productionId: production.meta.id, scene: { ...scene, defaults: undefined }, plan: whole, model: MODEL,
+      world: bundle, look: GOLD_ON_GOLD });
+    const sent = compiled.map((pass) => String(pass.params["prompt"])).join("\n");
+    assert.match(sent, /gently breathing/, "the paid request carries the look's camera");
+    assert.match(sent, /purple from above/, "and its light, where the scene sets none");
+    const bare = compilePasses({ productionId: production.meta.id, scene: { ...scene, defaults: undefined }, plan: whole, model: MODEL, world: bundle });
+    assert.doesNotMatch(bare.map((pass) => String(pass.params["prompt"])).join("\n"), /purple from above/, "only when the look is given");
 
     const without = planScene({
       world: bundle.meta, productionId: production.meta.id, sheets: bundle.sheets, kits: bundle.referenceKits, scene,

@@ -7,7 +7,7 @@ import {
   LOOK_WORDS_MAX,
   type ProductionLook,
 } from "@arke-studio/contracts";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, Checkbox, Input, Select } from "../components/ui.js";
 import { Plus } from "../components/icons.js";
 import { setProductionLook } from "../lib/store.js";
@@ -30,21 +30,32 @@ export function ProductionLookCard({ look, worldId, prodId }: {
   worldId: string | undefined;
   prodId: string | undefined;
 }) {
+  /*
+   * The look as last written, not as last received. Each change is the whole look, and the app's
+   * answer arrives after a round trip: composed from the received look, a preset pressed just after
+   * leaving a words field would write the old words back over the new (codex on PR 3302). A received
+   * look replaces it, so a refused write shows the look as it is.
+   */
+  const [shown, setShown] = useState<ProductionLook>(look ?? {});
+  const latest = useRef<ProductionLook>(look ?? {});
+  useEffect(() => { latest.current = look ?? {}; setShown(look ?? {}); }, [look]);
   const write = (next: ProductionLook) => {
+    latest.current = next;
+    setShown(next);
     if (worldId && prodId) setProductionLook(worldId, prodId, Object.keys(next).length > 0 ? next : null);
   };
-  const current = look ?? {};
+  const current = shown;
   // A choice changed after a preset is the person's own: the preset no longer describes the look.
   const choose = <K extends Part>(part: K, change: Partial<NonNullable<ProductionLook[K]>>) => {
-    const { preset: _preset, ...rest } = current;
-    write({ ...rest, [part]: { ...current[part], ...change } });
+    const { preset: _preset, ...rest } = latest.current;
+    write({ ...rest, [part]: { ...latest.current[part], ...change } });
   };
   const words = <K extends Part>(part: K, value: string) => {
-    const kept = { ...current[part] } as Record<string, unknown>;
+    const kept = { ...latest.current[part] } as Record<string, unknown>;
     const trimmed = value.trim();
     if (trimmed) kept.words = trimmed;
     else delete kept.words;
-    write({ ...current, [part]: kept });
+    write({ ...latest.current, [part]: kept });
   };
   return (
     <section className="fy-models fy-look" aria-label="Look">
@@ -57,7 +68,7 @@ export function ProductionLookCard({ look, worldId, prodId }: {
               type="button"
               className={`fy-takechip${current.preset === preset ? " fy-takechip--on" : ""}`}
               aria-pressed={current.preset === preset}
-              onClick={() => write(applyLookPreset(look, preset))}
+              onClick={() => write(applyLookPreset(latest.current, preset))}
             >
               {LOOK_PRESET_NAMES[preset]}
             </button>
@@ -94,7 +105,10 @@ export function ProductionLookCard({ look, worldId, prodId }: {
         <Select label="Inserts" value={String(current.cutting?.insertSec ?? "")}
           onChange={(e) => e.target.value && choose("cutting", { insertSec: Number(e.target.value) })}>
           {current.cutting?.insertSec === undefined && <option value="">Inserts</option>}
-          {INSERTS.map((sec) => <option key={sec} value={sec}>{`Inserts ${sec} s`}</option>)}
+          {/* A length a preset or Arke wrote that the list does not hold (Thriller's 0.8 s) is still shown as it is. */}
+          {[...new Set([...INSERTS, ...(current.cutting?.insertSec !== undefined ? [current.cutting.insertSec] : [])])]
+            .sort((a, b) => a - b)
+            .map((sec) => <option key={sec} value={sec}>{`Inserts ${sec} s`}</option>)}
         </Select>
         <Words part="Cutting" value={current.cutting?.words} onCommit={(value) => words("cutting", value)} />
       </Row>
@@ -112,7 +126,7 @@ export function ProductionLookCard({ look, worldId, prodId }: {
       </Row>
       <Row name="Own checks">
         <OwnChecks checks={current.checks ?? []} onChange={(checks) => {
-          const { checks: _checks, ...rest } = current;
+          const { checks: _checks, ...rest } = latest.current;
           write(checks.length > 0 ? { ...rest, checks } : rest);
         }} />
       </Row>

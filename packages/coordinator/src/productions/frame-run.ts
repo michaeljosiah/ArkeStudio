@@ -11,6 +11,7 @@ import {
   aspectSupport,
   assembleBoardPrompt,
   boardPromptFor,
+  sceneUnderLook,
   estimateMicroUsd,
   foldFrameRun,
   newId,
@@ -360,6 +361,7 @@ export async function compileFrameRunEvidence(input: CompileFrameRunInput): Prom
     plan,
     model: input.model,
     world: input.world,
+    look: input.production.meta.look,
   });
   const passByShot = new Map(passes.map((pass) => [pass.target.id, pass]));
   const includedIds = new Set(included.map((shot) => shot.id));
@@ -477,7 +479,8 @@ export async function compileFrameRunEvidence(input: CompileFrameRunInput): Prom
         assembleBoardPrompt({
           world: input.world.meta,
           sheets: input.world.sheets,
-          scene: input.scene,
+          // A board's prompt is assembled here, not in the plan: the look lies beneath its scene too.
+          scene: sceneUnderLook(input.scene, input.production.meta.look),
           shots: members,
           aspect,
           artDirection: input.world.artDirection.description,

@@ -3311,9 +3311,11 @@ async function sharedResourceProjection(
         clipsFrom: "Clips",
         look: "Look",
       });
-      // A look rewritten with the same choices but other words reads alike in a row: still a change.
-      if (fields.length === 0 && payload.action.changes.look !== undefined && JSON.stringify(payload.action.changes.look ?? null) !== JSON.stringify(production.meta.look ?? null)) {
-        fields.push({ label: "Look", before: lookWords(production.meta.look), after: `${lookWords(payload.action.changes.look)} · words changed` });
+      // A look rewritten with the same choices but other words, cutting or own checks reads alike in
+      // a row: still a change, and the card must say so whatever else it changes (codex on PR 3302).
+      if (payload.action.changes.look !== undefined && !fields.some((field) => field.label === "Look")
+        && JSON.stringify(payload.action.changes.look ?? null) !== JSON.stringify(production.meta.look ?? null)) {
+        fields.push({ label: "Look", before: lookWords(production.meta.look), after: `${lookWords(payload.action.changes.look)} · details changed` });
       }
       if (fields.length === 0) throw new Error("The production metadata already has those values.");
       shown = {

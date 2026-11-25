@@ -79,6 +79,24 @@ describe("the production's look (design turn 288a)", () => {
     assert.equal(written?.light?.key, "low", "and the rest of the look");
   });
 
+  it("a press just after leaving a words field keeps the new words: it composes from what was written", async () => {
+    // The app's answer arrives after a round trip; composed from the received look, the preset
+    // would write the old words back (codex on PR 3302).
+    const { container, looks } = await mount({ grade: { words: "35 mm" } });
+    const grade = container.querySelector<HTMLInputElement>('input[aria-label="Grade words"]')!;
+    grade.value = "35 mm, grain";
+    await act(async () => grade.dispatchEvent(new dom.Event("focusout", { bubbles: true })));
+    await press(container, "Thriller");
+    assert.equal(looks().at(-1)?.grade?.words, "35 mm, grain");
+    assert.equal(looks().at(-1)?.preset, "thriller");
+  });
+
+  it("shows a saved insert length the list does not hold", async () => {
+    const { container } = await mount(applyLookPreset(undefined, "thriller"));
+    const inserts = container.querySelector<HTMLSelectElement>('select[aria-label="Inserts"]')!;
+    assert.ok([...inserts.querySelectorAll("option")].some((option) => option.textContent === "Inserts 0.8 s"));
+  });
+
   it("writes a part's words when the field is left, and an emptied field drops them", async () => {
     const { container, looks } = await mount({ grade: { words: "35 mm" } });
     const grade = container.querySelector<HTMLInputElement>('input[aria-label="Grade words"]')!;

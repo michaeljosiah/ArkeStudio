@@ -680,7 +680,7 @@ export async function prepareBenchSubject(
     assembleBoardPrompt({
       world: world.meta,
       sheets: world.sheets,
-      scene,
+      scene: sceneUnderLook(scene, production.meta.look),
       shots: members,
       aspect,
       ...(style !== undefined ? { artDirection: style } : {}),

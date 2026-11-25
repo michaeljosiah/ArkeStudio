@@ -2124,7 +2124,8 @@ export function composeDispatches(
   acknowledgedRecommendationIds?: string[],
   assessedAt?: string,
 ): EnqueueInput[] {
-  return compilePasses({ productionId, scene, plan, model, world, manifest, acknowledgedRecommendationIds, assessedAt }).map((pass) => ({
+  const look = world.productions.find((production) => production.meta.id === productionId)?.meta.look;
+  return compilePasses({ productionId, scene, plan, model, world, manifest, acknowledgedRecommendationIds, assessedAt, look }).map((pass) => ({
     worldId,
     productionId,
     target: pass.target,

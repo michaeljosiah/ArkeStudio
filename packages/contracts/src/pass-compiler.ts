@@ -6,6 +6,7 @@ import { parseMentions } from "./planning.js";
 import type { PropStateProvenance } from "./prop.js";
 import type { ShotPropResolution } from "./planning.js";
 import { resolvedAuthoredDuration } from "./scene.js";
+import { sceneUnderLook, type ProductionLook } from "./production-look.js";
 import { characterAudioInstructions } from "./audio-reference.js";
 import {
   assemblePassBlocks,
@@ -244,11 +245,18 @@ export interface CompilePassesInput {
    * passes wearing a promise.
    */
   chainWholeSceneFrames?: boolean;
+  /**
+   * The production's look (design turn 287), laid beneath the scene's camera as `planScene` lays
+   * it: a whole-scene pass rebuilds its beats from the scene here, and without it the paid request
+   * would lose the camera, light, lens and grade the plan showed.
+   */
+  look?: ProductionLook;
 }
 
 /** The compiled passes for one dispatch, in enqueue order. Pure, deterministic, inspectable. */
 export function compilePasses(input: CompilePassesInput): CompiledPass[] {
-  const { productionId, scene, plan, model, world } = input;
+  const { productionId, plan, model, world } = input;
+  const scene = sceneUnderLook(input.scene, input.look);
   if (model.capability === "video" && plan.timingProblems?.length) throw new Error(plan.timingProblems.join(" "));
   const audioPlans = plan.mode === "per-shot" ? plan.shots.map(s => s.audioReferences) : plan.passReferences.map(p => p.audioReferences);
   const audioProblems = audioPlans.flatMap(a => a?.problems ?? []);
