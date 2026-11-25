@@ -212,6 +212,12 @@ export function sceneUnderLook<S extends { defaults?: ShotFraming }>(scene: S, l
   return { ...scene, defaults: { ...base, ...scene.defaults } };
 }
 
+/** The look's choices in a line, as a screen names them (turn 288b): "handheld · low key · long, shallow". */
+export function lookLine(look: ProductionLook): string {
+  const lens = [look.lens?.length, look.lens?.focus].filter(Boolean).join(", ");
+  return [look.camera?.kind, look.light?.key ? `${look.light.key} key` : undefined, lens || undefined].filter(Boolean).join(" · ");
+}
+
 /**
  * The look as Arke reads it, one line a part, for the brief of a production's threads (turn 287,
  * rule 12). Plain words; the parts a picture model never sees (cutting, sound, performance, the

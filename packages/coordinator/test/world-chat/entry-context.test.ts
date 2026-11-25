@@ -366,6 +366,16 @@ describe("a production with shots carries the director's craft (issues 3273, 327
     }
   });
 
+  it("says when shots are made together as a board, and what to check before a clip (owner, 2026-11-25)", async () => {
+    const text = await threadText({ medium: "video", kind: "film" }, ({ productionId, sceneId }) => ({ kind: "scene", productionId, sceneId }));
+    assert.match(text, /Make video as boards, not shot by shot: consecutive shots in one place with the same people go in one board of about ten seconds, often three shots/);
+    assert.match(text, /Make a shot alone only when it must stand alone/);
+    assert.match(text, /Before preparing a clip, check each shot as the bench's before-the-shot list does/);
+    assert.match(text, /board-seams skill/);
+    const book = await threadText({ format: "story", medium: "story", kind: "book" }, ({ productionId }) => ({ kind: "production", productionId }));
+    assert.doesNotMatch(book, /Make video as boards/, "a book has no boards");
+  });
+
   it("and the production's look, after the craft it qualifies, in every thread with shots (design turn 287)", async () => {
     // Gold on Gold's clips were written "locked off" with nothing in the thread to say the film is handheld.
     const look = { preset: "naturalistic-drama", camera: { kind: "handheld", strength: "gentle" }, checks: ["Ade's watch on his near wrist"] };

@@ -872,7 +872,8 @@ describe("screen inventory", () => {
     try {
       const worldId = world.meta.worldId;
       const workspace = renderAt(`/w/${worldId}/p/saltlight/generate?view=bench`);
-      assert.ok(workspace.includes("Production look"));
+      // The free words are the production's style; "look" is the production's look (design turn 288b).
+      assert.ok(workspace.includes("Production style"));
       assert.ok(workspace.includes("Bleached documentary realism · Arke writes it into shot prompts"));
 
       const overriddenWorld = {
@@ -898,6 +899,15 @@ describe("screen inventory", () => {
       const overriddenWorkspace = renderAt(`/w/${worldId}/p/saltlight/generate?view=bench`);
       assert.ok(overriddenWorkspace.includes("Shot prompt override"));
       assert.ok(overriddenWorkspace.includes("edited by you · carries as text"));
+
+      // A production with a look names it and its choices (design turn 288b), whatever its style says.
+      __setStateForTest({ ...FIXTURE_STATE, world: { ...world, productions: world.productions.map((production) => production.meta.id === "saltlight"
+        ? { ...production, meta: { ...production.meta, styleOverride: "Bleached documentary realism",
+          look: { preset: "naturalistic-drama" as const, camera: { kind: "handheld" as const }, light: { key: "low" as const }, lens: { length: "long" as const, focus: "shallow" as const } } } }
+        : production) } });
+      const looked = renderAt(`/w/${worldId}/p/saltlight/generate?view=bench`);
+      assert.ok(looked.includes("Production look · Naturalistic drama"));
+      assert.ok(looked.includes("handheld · low key · long, shallow"));
     } finally {
       __setStateForTest(FIXTURE_STATE);
     }

@@ -1,4 +1,5 @@
 import { readToolsFor } from "./action-guide.js";
+import { beforeShotNotes } from "./before-shot.js";
 import { DEFAULT_AUDIO_DRAMA_PLAN, WorldChatChapterReviewActionSchema } from "@arke-studio/contracts";
 import { productionCardPreview } from "./production-card-preview.js";
 import { PRODUCTION_CARD_PREVIEW_SCHEMA_VERSION, PRODUCTION_TIMELINE_CARD_SCHEMA_VERSION, SHEET_CREATION_CARD_REVIEW_SCHEMA_VERSION } from "@arke-studio/contracts";
@@ -3729,10 +3730,14 @@ async function sharedResourceProjection(
       const scope = dependency ? { conversationId: intent.conversationId,
         sceneDependencies: dependency.scenes.map(({ productionId, scene }) => ({ productionId, sceneId: scene.id })) } : undefined;
       const body = await deps.productionGenerationQuotes?.prepare(payload.action, intent.actionId, intent.createdAt, scope, dependency ? bundle : undefined);
+      // Design turn 287: what the shots still have to fix before they are made, on the card itself.
+      const target = payload.action.target;
+      const checked = beforeShotNotes(bundle, payload.action.productionId, payload.action.sceneId,
+        target.kind === "shot" ? [target.shotId] : target.memberShotIds, payload.action.mode);
       shown = {
         title: payload.action.retakeOf ? "Generate a retake" : "Generate production takes",
         consequence: "Dispatches the quoted image or video jobs and files immutable candidates on the named shots.",
-        affectedTargets: [...intent.targets], ripples: ["Results await a separate take-review decision; selections remain unchanged."],
+        affectedTargets: [...intent.targets], ripples: [...checked, "Results await a separate take-review decision; selections remain unchanged."],
         permissionReason: "spend-and-compute",
         body: body ?? { family: "generation", medium: payload.action.mode, purpose: "Production generation", prompt: "Unavailable",
           provider: "Unavailable", model: "Unavailable", quantity: 1, references: [], output: "Unselected candidate takes", cost: "Quote unavailable" },
