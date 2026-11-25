@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { applyLookPreset, type ClientMessage, type ProductionLook } from "@arke-studio/contracts";
 import { ProductionLookCard } from "../src/screens/production-look.js";
-import { __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
+import { __applyEventForTest, __setBridgeForTest, __setStateForTest } from "../src/lib/store.js";
 import type { ArkeBridge } from "../src/arke-bridge.js";
 import { FIXTURE_STATE } from "./fixture-state.js";
 import { FIXTURE_WORLD_ID } from "../src/screens/registry.js";
@@ -89,6 +89,53 @@ describe("the production's look (design turn 288a)", () => {
     await press(container, "Thriller");
     assert.equal(looks().at(-1)?.grade?.words, "35 mm, grain");
     assert.equal(looks().at(-1)?.preset, "thriller");
+  });
+
+  it("a late answer to an earlier write does not undo a newer one (0.5.133: seven words typed, two kept)", async () => {
+    const { container, looks } = await mount(undefined);
+    const rerender = async (look: ProductionLook | undefined) => act(async () => {
+      root!.render(<ProductionLookCard look={look} worldId={FIXTURE_WORLD_ID} prodId="the-film" />);
+    });
+    await press(container, "Naturalistic drama");
+    const first = looks().at(-1)!;
+    const grade = container.querySelector<HTMLInputElement>('input[aria-label="Grade words"]')!;
+    grade.value = "35 mm, grain";
+    await act(async () => grade.dispatchEvent(new dom.Event("focusout", { bubbles: true })));
+    // The app answers the preset only now, its keys in another order, after the words were written.
+    await rerender(Object.fromEntries(Object.entries(first!).reverse()) as ProductionLook);
+    const light = container.querySelector<HTMLInputElement>('input[aria-label="Light words"]')!;
+    light.value = "purple from above";
+    await act(async () => light.dispatchEvent(new dom.Event("focusout", { bubbles: true })));
+    const written = looks().at(-1)!;
+    assert.equal(written?.grade?.words, "35 mm, grain", "the grade written before the late answer is kept");
+    assert.equal(written?.light?.words, "purple from above");
+    // A look the card did not write (Arke's card) is taken as it comes.
+    await rerender({ camera: { kind: "steady" } });
+    assert.equal(container.querySelector('[aria-label="Camera"] .fy-seg__item--active')?.textContent, "Steady");
+  });
+
+  it("a refused write goes back to the look as it is (codex on PR 3304)", async () => {
+    const { container, looks } = await mount({ grade: { words: "35 mm" } });
+    const grade = container.querySelector<HTMLInputElement>('input[aria-label="Grade words"]')!;
+    grade.value = "35 mm, grain";
+    await act(async () => grade.dispatchEvent(new dom.Event("focusout", { bubbles: true })));
+    assert.equal(looks().at(-1)?.grade?.words, "35 mm, grain");
+    // The world is unchanged, so its snapshot reads as before; only the refusal says so.
+    await act(async () => __applyEventForTest({ at: "2026-11-25T12:00:00.000Z", type: "command.failed", command: "set-production-look", requestId: null, reason: "No." }));
+    assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Grade words"]')!.value, "35 mm");
+    await press(container, "Thriller");
+    assert.equal(looks().at(-1)?.grade?.words, "35 mm", "the next write starts from the saved look");
+    // Another command's refusal is not this card's.
+    grade.value = "35 mm, grain";
+    await act(async () => grade.dispatchEvent(new dom.Event("focusout", { bubbles: true })));
+    await act(async () => __applyEventForTest({ at: "2026-11-25T12:00:00.000Z", type: "command.failed", command: "set-production-clips", requestId: null, reason: "No." }));
+    assert.equal(container.querySelector<HTMLInputElement>('input[aria-label="Grade words"]')!.value, "35 mm, grain");
+  });
+
+  it("a line added with Add stays to be written", async () => {
+    const { container } = await mount(undefined);
+    await press(container, "Add");
+    assert.equal(container.querySelectorAll('input[aria-label="Own check"]').length, 1);
   });
 
   it("shows a saved insert length the list does not hold", async () => {

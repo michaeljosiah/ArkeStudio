@@ -1981,6 +1981,36 @@ describe("World Chat authority adapters", () => {
     assert.equal(production.meta.frameRate, 25);
   });
 
+  it("prepares a look card without a timeline read: only a frame-rate change needs one (0.5.133)", async () => {
+    // Gold on Gold's timeline holds 3,171 entries read twenty at a time; asked to set the film's look,
+    // Arke stopped at the first page and could not write the card.
+    const context = { kind: "production" as const, productionId: PRODUCTION };
+    const w = await setup(context);
+    await assembleStory(w.store, PRODUCTION);
+    const metadata = currentReceipt(w.store, "production-metadata", PRODUCTION);
+    const series = currentReceipt(w.store, "series");
+    const lookTurn = turn(w.conversationId, context, {
+      receipts: [metadata, series],
+      actions: [{ kind: "production-metadata", productionId: PRODUCTION,
+        changes: { look: { preset: "naturalistic-drama", camera: { kind: "handheld" } } }, checkReceiptIds: [metadata.id, series.id] }],
+    });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, lookTurn);
+    await appendTurn(w.log, lookTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    assert.equal((await decide(w.lifecycle, w.log, card)).status, "completed");
+    assert.equal(w.store.getBundle().productions.find((candidate) => candidate.meta.id === PRODUCTION)!.meta.look?.camera?.kind, "handheld");
+
+    const freshMetadata = currentReceipt(w.store, "production-metadata", PRODUCTION);
+    const freshSeries = currentReceipt(w.store, "series");
+    const rateTurn = turn(w.conversationId, context, {
+      receipts: [freshMetadata, freshSeries],
+      actions: [{ kind: "production-metadata", productionId: PRODUCTION, changes: { frameRate: 25 }, checkReceiptIds: [freshMetadata.id, freshSeries.id] }],
+    });
+    assert.throws(() => prepareWorldChatActions(w.store, w.lifecycle, rateTurn), /requires a complete current timeline read/,
+      "a frame-rate change still needs the timeline read");
+  });
+
   it("shows a look change on its own row beside another field's, and writes it on approval (design turn 287)", async () => {
     // A title and a look's grade words changed on one card: the look's summary reads alike before
     // and after, so its row must be added whatever else changes (codex on PR 3302).
