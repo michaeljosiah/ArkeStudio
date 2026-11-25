@@ -482,6 +482,18 @@ export function carriesSongWindow(raw: string): boolean {
 }
 
 /**
+ * A scene's board target (SPEC-035 R-4) is a field of the scene's strict `boards`. A build before
+ * it passes the world's version check, fails to parse the scene and drops it on scan, so the world
+ * is raised with the first scene written carrying one (codex on PR 3307). Clearing the target
+ * leaves the world where it is. (149 follows 148, the production look; no open branch held it.)
+ */
+export const BOARD_TARGET_SCHEMA_VERSION = 149;
+export function carriesBoardTarget(raw: string): boolean {
+  try { return parseSceneRecord(raw).boards?.targetSec !== undefined; }
+  catch { return false; }
+}
+
+/**
  * A shot that names the place's position its camera started from (design turn 285, issue 2302)
  * carries a strict staging field a build before the Plan drops the whole scene over, so the world
  * is raised with the first scene written carrying one. The boundary is the plan file's own.

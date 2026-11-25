@@ -30,6 +30,7 @@ export interface BoardNote {
 
 export type BoardReason =
   | "clip limit"
+  | "target length"
   | "panel limit"
   | "by hand"
   | "time of day changes"
@@ -103,6 +104,7 @@ export function boardPackKey(
   /** A caller-supplied digest of `hasFrame` across the same shots, e.g. `"1101"`. */
   frames: string,
   maxMembers?: number,
+  targetSec?: number,
 ): string {
   /*
    * JSON, not delimiters. `timeOfDay` and `lighting` are free text from art direction, so a
@@ -114,6 +116,7 @@ export function boardPackKey(
   return JSON.stringify([
     capSec,
     maxMembers ?? null,
+    targetSec ?? null,
     // `number` is in here because it reaches the OUTPUT: oversize refusals, continuity
     // warnings, lighting accents and solo warnings all name it. Renumbering a shot without
     // touching anything else would otherwise return a cached pack naming the old number.
@@ -144,8 +147,21 @@ export function packBoards(
   hasFrame: (shotId: string) => boolean,
   /** Frame-sheet packing passes the sheet's panel cap, so a board always fits one sheet (R-12). */
   maxMembers?: number,
+  /**
+   * The scene's board target (`scene.boards.targetSec`): how long the author wants each clip,
+   * where that is shorter than the route allows. A route that takes 15 seconds often does its
+   * best work at 10, and filling to the cap was the only rule the walk knew.
+   *
+   * A goal, not a second cap. A shot is never refused for being longer than the target — the
+   * route can still make it — it simply stands as a board of its own. And a target at or over
+   * the cap changes nothing: the cap is the provider's, and nothing authored may exceed it.
+   */
+  targetSec?: number,
 ): BoardPack {
   const capMs = ms(capSec);
+  // A target rounding to no time at all, or not under the cap, leaves the cap alone.
+  const targetMs = targetSec !== undefined && Number.isFinite(targetSec) ? ms(targetSec) : 0;
+  const fillMs = targetMs > 0 && targetMs < capMs ? targetMs : capMs;
 
   // R-5: refuse before walking. Nothing downstream can rescue a shot no cap can hold.
   for (const shot of shots) {
@@ -234,8 +250,10 @@ export function packBoards(
   let current: Working | null = null;
   let previous: PackShot | null = null;
 
-  // The walk (R-5). The order of these tests is the specification: cap, then panel limit, then
-  // a hand split, then a merge (which carries what it suppressed), then the automatic breaks.
+  // The walk (R-5). The order of these tests is the specification: cap, then target, then panel
+  // limit, then a hand split, then a merge (which carries what it suppressed), then the automatic
+  // breaks. The cap is tested first so a board that would overrun both names the limit no target
+  // can lift.
   for (const shot of shots) {
     let reason: BoardReason | null = null;
     if (current !== null && previous !== null) {
@@ -245,6 +263,9 @@ export function packBoards(
           ? "cast changes"
           : null;
       if (current.durationMs + ms(shot.durationSec) > capMs) reason = "clip limit";
+      // Over the target but inside the cap: a seam of the author's length, named as such, so the
+      // board line does not blame a limit the route never reached.
+      else if (current.durationMs + ms(shot.durationSec) > fillMs) reason = "target length";
       else if (maxMembers !== undefined && current.memberShotIds.length >= maxMembers) {
         reason = "panel limit";
       } else if (splits.has(shot.id)) reason = "by hand";
@@ -294,7 +315,7 @@ export function packBoards(
     if (board.memberShotIds.length > 1 || out.length === 1 || board.byHand) continue;
     const fits = (candidate: Working | undefined): boolean =>
       candidate !== undefined &&
-      candidate.durationMs + board.durationMs <= capMs &&
+      candidate.durationMs + board.durationMs <= fillMs &&
       (maxMembers === undefined || candidate.memberShotIds.length + 1 <= maxMembers);
     const before = out[i - 1];
     const after = out[i + 1];
@@ -313,6 +334,7 @@ export function packBoards(
     if (
       suppressed.reason !== null &&
       suppressed.reason !== "clip limit" &&
+      suppressed.reason !== "target length" &&
       suppressed.reason !== "panel limit" &&
       suppressed.reason !== "by hand" &&
       suppressed.at !== undefined

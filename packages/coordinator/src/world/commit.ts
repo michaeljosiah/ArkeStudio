@@ -38,8 +38,10 @@ import {
   carriesStageAnimatic,
   STAGE_ANIMATIC_SCHEMA_VERSION,
   carriesSongWindow,
+  carriesBoardTarget,
   carriesStagePosition,
   SCENE_SONG_WINDOW_SCHEMA_VERSION,
+  BOARD_TARGET_SCHEMA_VERSION,
   carriesStageEasing,
   carriesStagePerformance,
   carriesStageRig,
@@ -1261,6 +1263,7 @@ export class Committer {
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStagePose(f.newContent)) ? STAGE_POSE_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStageAnimatic(f.newContent)) ? STAGE_ANIMATIC_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesSongWindow(f.newContent)) ? SCENE_SONG_WINDOW_SCHEMA_VERSION : 0,
+      files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesBoardTarget(f.newContent)) ? BOARD_TARGET_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesStagePosition(f.newContent)) ? PLACE_PLAN_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && carriesBeat(f.newContent)) ? VISUAL_NOVEL_SCHEMA_VERSION : 0,
       // The kind as much as the beat: a visual novel created or converted, before any beat is set.

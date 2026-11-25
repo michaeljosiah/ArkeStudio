@@ -1,4 +1,4 @@
-import { clearBoardOverride, clearBoardPrompt, deleteShot, duplicateShot, editScene, editShot, insertShot, moveShot, moveBoardBoundary, nextShotIdIn, SceneOperationRefused, setBoardOverride, setBoardPrompt, type SceneDefaultsPatch, type ShotAnchor } from "./scene-operations.js";
+import { clearBoardOverride, clearBoardPrompt, deleteShot, duplicateShot, editScene, editShot, insertShot, moveShot, moveBoardBoundary, nextShotIdIn, setBoardTarget, SceneOperationRefused, setBoardOverride, setBoardPrompt, type SceneDefaultsPatch, type ShotAnchor } from "./scene-operations.js";
 import { orderedShots, type GraphScene, type SceneRecord } from "./scene-flow.js";
 import { parseMentions, shotLookIn, shotPlaceId } from "./planning.js";
 import { stageProblems, resolvedShotStaging, stagingRetimed } from "./staging.js";
@@ -27,6 +27,7 @@ export type SemanticSceneCommand =
   | { kind: "delete-shot"; shotId: string }
   | { kind: "set-board-override"; shotId: string; override: "split" | "merge" }
   | { kind: "clear-board-override"; shotId: string; override: "split" | "merge" }
+  | { kind: "set-board-target"; targetSec: number | null }
   | { kind: "move-board-boundary"; fromShotId: string; toShotId: string }
   | { kind: "set-board-prompt"; members: string[]; text: string }
   | { kind: "clear-board-prompt"; members: string[] };
@@ -251,6 +252,8 @@ export function sceneCommandCandidate(bundle: WorldBundle, productionId: string,
       return setBoardOverride(record, { shotId: command.shotId, override: command.override });
     case "clear-board-override":
       return clearBoardOverride(record, { shotId: command.shotId, override: command.override });
+    case "set-board-target":
+      return setBoardTarget(record, { targetSec: command.targetSec });
     case "move-board-boundary":
       return moveBoardBoundary(record, command);
     case "set-board-prompt":

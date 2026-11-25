@@ -11,6 +11,10 @@ import {
   PropIdSchema,
   ArtifactIdSchema,
   orderedShots,
+  packBoards,
+  packShotsFor,
+  resolveCast,
+  DEFAULT_SHOT_SEC,
   canonicalSceneFlow,
   chapterParagraphs,
   chapterCalled,
@@ -35,6 +39,7 @@ import {
   type ChapterSummary,
   type Job,
   type ProductionBundle,
+  type SceneRecord,
   type Sheet,
   type WorldBundle,
   ArkeVersionTargetSchema,
@@ -124,7 +129,10 @@ export interface TargetReadDeps {
   readonly getChapterQuiet?: (productionId: string, chapterFile: string) => Promise<import("../productions/audiobook-quiet.js").AudiobookQuietRead>;
   /** The production's song as the Studio measures it (issue 3099): its tempo and where it changes, for get_spine. */
   readonly getSongSections?: (productionId: string) => Promise<SongSectionsResult>;
+  /** The production's video route, its clip cap and sheet panel count, so get_scene_boards can show the boards it packs. */
+  readonly getBoardLimits?: (productionId: string) => Promise<BoardLimits | null>;
 }
+export interface BoardLimits { readonly model: string; readonly capSec: number; readonly panelCap?: number | undefined }
 export interface ArkeBuildItemRead { readonly key: string; readonly kind: string; readonly subject: string; readonly state: string; readonly detail: string | null }
 export const buildItemsFence = (items: readonly ArkeBuildItemRead[]) => conversationActionDigest(items);
 
@@ -615,6 +623,46 @@ function optionalString(args: Record<string, unknown>, name: string): string | u
   if (value === undefined) return undefined;
   if (typeof value !== "string" || value.trim() === "") throw new TargetReadError(`${name} must be a non-empty string`);
   return value;
+}
+
+/**
+ * The boards as the packer makes them, for the scene's video route (SPEC-035): which shots each
+ * clip holds, how long it runs and why it begins. The authored controls alone said where a hand
+ * had put a seam, not where the seams fall, and choosing seams needs the second.
+ */
+function packedBoardsRead(scene: SceneRecord, production: ProductionBundle, sheets: readonly Sheet[], limits: BoardLimits | null) {
+  if (limits === null) return { unavailable: "No video route is chosen for this production, so its boards cannot be packed." };
+  const shots = orderedShots(scene);
+  const numberOf = new Map(shots.map((shot) => [shot.id, shot.number]));
+  const pool = [...sheets];
+  const packed = packBoards(
+    packShotsFor({
+      scene,
+      shots,
+      selections: production.selections,
+      takes: production.takes,
+      castOf: (shot) => resolveCast(shot.description, pool).cast
+        .filter((entry) => entry.sheet.type === "character").map((entry) => entry.sheet.id),
+      defaultDurationSec: DEFAULT_SHOT_SEC,
+    }),
+    limits.capSec,
+    new Set(scene.boards?.splits ?? []),
+    new Set(scene.boards?.merges ?? []),
+    () => true,
+    limits.panelCap,
+    scene.boards?.targetSec,
+  );
+  const route = { model: limits.model, capSec: limits.capSec, targetSec: scene.boards?.targetSec ?? null, ...(limits.panelCap !== undefined ? { panelCap: limits.panelCap } : {}) };
+  if (!packed.ok) {
+    return { ...route, refused: `Shot ${packed.oversizeShot.number} is ${packed.oversizeShot.durationSec}s, over the ${packed.oversizeShot.capSec}s clip limit.` };
+  }
+  return { ...route, boards: packed.boards.map((board) => ({
+    letter: board.letter,
+    shots: board.memberShotIds.map((id) => ({ shotId: id, number: numberOf.get(id) ?? null })),
+    seconds: board.durationSec,
+    startsBecause: board.reason,
+    notes: board.notes.map((note) => note.text),
+  })) };
 }
 
 function assertArgs(args: Record<string, unknown>, allowed: readonly string[]): void {
@@ -1155,7 +1203,12 @@ export class WorldChatTargetReads {
         const sceneId = requireString(args, "sceneId");
         const scene = sceneOf(productionOf(bundle, productionId), sceneId);
         readTarget = target("boards", `${sceneTargetId(productionId, sceneId)}:boards`);
-        rows = scene ? [{ key: "boards", value: { controls: scene.boards ?? null, board: scene.board ?? null, storyboard: scene.storyboard ?? null } }] : [];
+        const production = productionOf(bundle, productionId);
+        // Without the host's routes (a bare read in tests or tools) nothing is packed: a guessed cap
+        // would show seams the frame run never cuts at.
+        const limits = scene && production && this.deps.getBoardLimits ? await this.deps.getBoardLimits(productionId) : undefined;
+        rows = scene ? [{ key: "boards", value: { controls: scene.boards ?? null, board: scene.board ?? null, storyboard: scene.storyboard ?? null,
+          packed: production && limits !== undefined ? packedBoardsRead(scene, production, bundle.sheets, limits) : null } }] : [];
         revisionOrDigest = fence(rows.map((row) => row.value), scene?.version ?? "absent");
         break;
       }

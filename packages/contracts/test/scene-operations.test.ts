@@ -11,6 +11,7 @@ import {
   migrateLegacyScene,
   moveShot,
   moveBoardBoundary,
+  setBoardTarget,
   nextShotIdIn,
   orderedShots,
   SceneOperationRefused,
@@ -316,6 +317,17 @@ describe("board boundary and prompt edits are whole named operations", () => {
       () => moveBoardBoundary(before, { fromShotId: "sh_2", toShotId: "sh_1" }),
       /divide nothing/,
     );
+  });
+
+  it("sets and clears the board target, keeping the hand seams and dropping an empty block", () => {
+    const before: SceneRecord = { ...graph(["sh_1", "sh_2", "sh_3"]), boards: { splits: ["sh_3"], merges: [] } };
+    const aimed = setBoardTarget(before, { targetSec: 10 });
+    assert.deepEqual(aimed.boards, { splits: ["sh_3"], merges: [], targetSec: 10 });
+    assert.throws(() => setBoardTarget(aimed, { targetSec: 10 }), /already 10s/);
+    assert.deepEqual(setBoardTarget(aimed, { targetSec: null }).boards, { splits: ["sh_3"], merges: [] });
+    const alone = setBoardTarget(graph(["sh_1", "sh_2"]), { targetSec: 8 });
+    assert.equal(setBoardTarget(alone, { targetSec: null }).boards, undefined, "nothing left to say is no block at all");
+    assert.throws(() => setBoardTarget(graph(["sh_1"]), { targetSec: null }), /no board target/);
   });
 
   it("keys prompts to one contiguous ordered membership and clears that exact prompt", () => {
