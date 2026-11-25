@@ -61,14 +61,42 @@ const BODY_WORDS = ["slim", "slender", "skinny", "thin-waisted", "curvy", "curva
 const STILL_CAMERA = /\blocked[ -]?off\b|\btripod\b|\bdoes not move\b|\bdoesn't move\b|\bstatic camera\b|\bcamera (?:is|stays|holds) still\b|\bno camera (?:movement|motion)\b/i;
 const MOVING_CAMERA = /\bhand-?held\b|\bshaky\b|\bshoulder-?mounted\b/i;
 
-/** A character's names as a shot's words would say them: each name of three letters or more, and any nickname in quotes. */
-function namesOf(character: BeforeShotInput["characters"][number]): string[] {
-  const names = new Set<string>();
+/** Words in a name that name nobody on their own: a title, an age, a kin word. */
+const NOT_A_NAME = new Set(["Mr", "Mrs", "Ms", "Miss", "Dr", "Sir", "Madam", "Chief", "Young", "Old", "Little", "Big", "Aunty", "Auntie", "Uncle", "Mama", "Papa", "Baba", "Iya"]);
+
+/**
+ * A character's names as a shot's words would say them. A name of their own (Tunde, Adeyemi "Ade"
+ * Akinola) by each part of three letters or more and any nickname in quotes, as written; a name that
+ * describes them (The Dancer, The Lady in White) only as the whole phrase, in any case. On 0.5.139
+ * "The Dancer" and "The Lady in White" were found in every shot that said "The".
+ */
+function namesOf(character: BeforeShotInput["characters"][number]): { parts: string[]; phrases: string[] } {
+  const parts = new Set<string>(), phrases = new Set<string>();
   for (const name of [character.name, ...(character.aliases ?? [])]) {
-    for (const quoted of name.matchAll(/["“]([^"”]+)["”]/g)) names.add(quoted[1]!.trim());
-    for (const part of name.replace(/["“”]/g, " ").split(/\s+/)) if (/^\p{Lu}[\p{L}'-]{2,}$/u.test(part)) names.add(part);
+    for (const quoted of name.matchAll(/["“]([^"”]+)["”]/g)) parts.add(quoted[1]!.trim());
+    if (/^(the|a|an)\s/i.test(name.trim())) { phrases.add(name.trim()); continue; }
+    for (const part of name.replace(/["“”]/g, " ").split(/\s+/).map((word) => word.replace(/\.$/, ""))) {
+      if (/^\p{Lu}[\p{L}'-]{2,}$/u.test(part) && !NOT_A_NAME.has(part)) parts.add(part);
+    }
   }
-  return [...names];
+  return { parts: [...parts], phrases: [...phrases] };
+}
+
+const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Whether the words name the character, by a part as written or a describing name in any case. */
+function names(text: string, character: BeforeShotInput["characters"][number]): boolean {
+  const { parts, phrases } = namesOf(character);
+  return parts.some((part) => new RegExp(`(^|[^\\p{L}])${escaped(part)}(?![\\p{L}])`, "u").test(text))
+    || phrases.some((phrase) => new RegExp(`(^|[^\\p{L}])${escaped(phrase).replace(/\s+/g, "\\s+")}(?![\\p{L}])`, "iu").test(text));
+}
+
+/** What the list calls a character: their nickname, else the name they are known by, else their first name. */
+function calledBy(character: BeforeShotInput["characters"][number]): string {
+  const quoted = /["“]([^"”]+)["”]/.exec(character.name)?.[1]?.trim();
+  if (quoted) return quoted;
+  const { parts, phrases } = namesOf(character);
+  return phrases[0] ?? parts[0] ?? character.name;
 }
 
 export function beforeShotChecks(input: BeforeShotInput): BeforeShotCheck[] {
@@ -90,15 +118,14 @@ export function beforeShotChecks(input: BeforeShotInput): BeforeShotCheck[] {
   const text = [shot.description, shot.camera ?? "", shot.intent ?? "", ...(shot.beats ?? []).map((beat) => beat.text)].join("\n");
   const cited = new Set(parseMentions(shot.description));
   const bare = text.replace(/@[a-z0-9][a-z0-9-]*/g, " ");
-  const uncited = input.characters.filter((character) => !cited.has(character.id)
-    && namesOf(character).some((name) => new RegExp(`(^|[^\\p{L}])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\p{L}])`, "u").test(bare)));
+  const uncited = input.characters.filter((character) => !cited.has(character.id) && names(bare, character));
   const body = BODY_WORDS.filter((word) => new RegExp(`\\b${word}\\b`, "i").test(text));
-  const shortName = (character: BeforeShotInput["characters"][number]) => namesOf(character).find((name) => /["“]/.test(character.name) && character.name.includes(`"${name}"`)) ?? namesOf(character)[0] ?? character.name;
-  if (uncited.length > 0) items.push({ id: "named", result: "fix", says: clip(`${uncited.map(shortName).join(", ")} not cited`) });
+  const listed = (characters: BeforeShotInput["characters"]) => [...new Set(characters.map(calledBy))].join(", ");
+  if (uncited.length > 0) items.push({ id: "named", result: "fix", says: clip(`${listed(uncited)} not cited`) });
   else if (body.length > 0) items.push({ id: "named", result: "fix", says: clip(`body words: ${body.join(", ")}`) });
   else {
-    const names = input.characters.filter((character) => cited.has(character.id)).map(shortName);
-    items.push({ id: "named", result: "pass", says: names.length > 0 ? clip(names.join(", ")) : "no one" });
+    const seen = input.characters.filter((character) => cited.has(character.id));
+    items.push({ id: "named", result: "pass", says: seen.length > 0 ? clip(listed(seen)) : "no one" });
   }
 
   // The camera's words against the film's look: never told to hold still in a handheld film.

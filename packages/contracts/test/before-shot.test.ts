@@ -46,6 +46,15 @@ describe("a shot read before it is made", () => {
       { id: "named", result: "fix", says: "body words: slim" });
   });
 
+  it("does not find a describing name in every 'The', nor a title in a name (0.5.139)", () => {
+    const characters = [...input().characters, { id: "the-dancer", name: "The Dancer" }, { id: "the-lady-in-white", name: "The Lady in White" },
+      { id: "mrs-ojo", name: "Mrs Ojo" }, { id: "young-ayoka", name: "Young Ayoka" }];
+    const plain = shot({ description: "@ade turns back to @tunde. The room is loud. Young men laugh at the bar." });
+    assert.deepEqual(item(beforeShotChecks(input({ characters, shot: plain })), "named"), { id: "named", result: "pass", says: "Ade, Tunde" });
+    const seen = shot({ description: "@ade turns back to @tunde. Behind them the dancer spins, and Mrs Ojo watches." });
+    assert.deepEqual(item(beforeShotChecks(input({ characters, shot: seen })), "named"), { id: "named", result: "fix", says: "The Dancer, Ojo not cited" });
+  });
+
   it("holds camera words that fight the film's look: locked off in a handheld film", () => {
     const checks = beforeShotChecks(input({ shot: shot({ camera: "MCU, the camera is locked off and does not move" }) }));
     assert.deepEqual(item(checks, "camera"), { id: "camera", result: "fix", says: "says locked off" });
