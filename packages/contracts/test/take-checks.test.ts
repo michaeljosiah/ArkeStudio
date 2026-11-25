@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { currentTakeChecks, takeChecksCount, takeIsCheckable, TakeChecksRecordSchema, type TakeChecksRecord } from "../src/index.js";
+import { currentTakeChecks, takeCheckSource, takeChecksCount, takeIsCheckable, TakeChecksRecordSchema, type Take, type TakeChecksRecord } from "../src/index.js";
 
 /** A take's checks (design turn 287): measured once, read only while they are of the take's media. */
 const record: TakeChecksRecord = {
@@ -17,21 +17,29 @@ describe("a take's checks", () => {
     assert.equal(TakeChecksRecordSchema.safeParse({ ...record, skipped: [{ id: "words", reason: "no-line" }] }).success, false);
   });
 
+  const clip = { id: record.takeId, kind: "clip", media: "clip.mp4", mediaHash: record.sourceHash, coversShots: ["sh_12"] } as unknown as Take;
+  const pass = { id: "tk_01M8PASS000000000000000001", kind: "clip", media: "pass.mp4", mediaHash: "sha256:aaaaaaaaaaaaaaaa", coversShots: ["sh_12", "sh_13"] } as unknown as Take;
+  const segment = { id: "tk_01M8SEGMENT00000000000001", kind: "clip", coversShots: ["sh_13"], segment: { passTakeId: pass.id, inSec: 4, outSec: 7.5 } } as unknown as Take;
+
   it("is the take's only while it is of the media the take has", () => {
-    assert.equal(currentTakeChecks({ [record.takeId]: record }, { id: record.takeId, mediaHash: record.sourceHash }), record);
-    assert.equal(currentTakeChecks({ [record.takeId]: record }, { id: record.takeId, mediaHash: "sha256:fedcba9876543210" }), null);
-    assert.equal(currentTakeChecks(undefined, { id: record.takeId, mediaHash: record.sourceHash }), null);
+    assert.equal(currentTakeChecks({ takes: [clip], takeChecks: { [record.takeId]: record } }, clip), record);
+    assert.equal(currentTakeChecks({ takes: [clip], takeChecks: { [record.takeId]: record } }, { ...clip, mediaHash: "sha256:fedcba9876543210" }), null);
+    assert.equal(currentTakeChecks({ takes: [clip] }, clip), null);
   });
 
   it("counts what passed, and the hard items to fix: a cut inside is, the camera is advice", () => {
     assert.deepEqual(takeChecksCount(record), { passed: 1, of: 3, hardToFix: 1 });
   });
 
-  it("measures a clip of one shot with media of its own, and nothing else", () => {
-    const clip = { kind: "clip" as const, media: "clip.mp4", mediaHash: "sha256:0123456789abcdef", coversShots: ["sh_12"], segment: undefined, panel: undefined };
-    assert.equal(takeIsCheckable(clip), true);
-    assert.equal(takeIsCheckable({ ...clip, kind: "frame" }), false);
-    assert.equal(takeIsCheckable({ ...clip, coversShots: ["sh_12", "sh_13"] }), false);
-    assert.equal(takeIsCheckable({ ...clip, mediaHash: undefined }), false);
+  it("measures a clip of one shot, its own or its range of a pass, and nothing else", () => {
+    assert.equal(takeIsCheckable([clip], clip), true);
+    assert.equal(takeIsCheckable([clip], { ...clip, kind: "frame" }), false);
+    assert.equal(takeIsCheckable([pass], pass), false, "a pass covers several shots");
+    assert.equal(takeIsCheckable([clip], { ...clip, mediaHash: undefined }), false);
+    // Gold on Gold's chosen takes were all segments of passes (0.5.135).
+    assert.deepEqual(takeCheckSource([pass, segment], segment), { mediaTakeId: pass.id, media: "pass.mp4", hash: "sha256:aaaaaaaaaaaaaaaa", startSec: 4, endSec: 7.5 });
+    assert.equal(takeIsCheckable([segment], segment), false, "a segment whose pass is not there is not measured");
+    const checks = { ...record, takeId: segment.id, sourceHash: "sha256:aaaaaaaaaaaaaaaa" };
+    assert.equal(currentTakeChecks({ takes: [pass, segment], takeChecks: { [segment.id]: checks } }, segment), checks, "fenced on the pass's clip");
   });
 });

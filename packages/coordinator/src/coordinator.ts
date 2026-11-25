@@ -21260,7 +21260,7 @@ export class Coordinator {
     if (this.takeCheckPorts() === null) return;
     const production = store.getBundle().productions.find(p => p.meta.id === productionId);
     const take = production?.takes.find(candidate => candidate.id === takeId);
-    if (!take || !takeIsCheckable(take)) return;
+    if (!production || !take || !takeIsCheckable(production.takes, take)) return;
     void this.checkTakeNow(store, productionId, takeId).catch(() => {
       void this.appLog?.append({ kind: "take.checks-unavailable", takeId, reason: store.closingSignal.aborted || this.runtimeStop.signal.aborted ? "cancelled" : "failed" }).catch(() => {});
     });

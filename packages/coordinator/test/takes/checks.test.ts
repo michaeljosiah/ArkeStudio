@@ -204,7 +204,7 @@ describe("a take checked when it lands", () => {
     const { store, take, tools, ports, takeId } = await landed();
     const result = await checkTake(store, "saltlight", takeId, ports, new AbortController().signal);
     assert.equal(result, "checked");
-    const record = currentTakeChecks(store.getBundle().productions.find(p => p.meta.id === "saltlight")!.takeChecks, take)!;
+    const record = currentTakeChecks(store.getBundle().productions.find(p => p.meta.id === "saltlight")!, take)!;
     assert.ok(record, "the scan read the record back, current for the take's media");
     const by = Object.fromEntries(record.items.map(item => [item.id, item]));
     assert.deepEqual(record.items.map(item => item.id), ["words", "unwritten-voice", "cuts-inside", "camera", "light"], "in the list's order");
@@ -223,16 +223,37 @@ describe("a take checked when it lands", () => {
   it("does not hold a song's words against a shot whose sound is the song", async () => {
     const { store, take, ports, takeId } = await landed({ soundKind: "music" });
     assert.equal(await checkTake(store, "saltlight", takeId, ports, new AbortController().signal), "checked");
-    const record = currentTakeChecks(store.getBundle().productions.find(p => p.meta.id === "saltlight")!.takeChecks, take)!;
+    const record = currentTakeChecks(store.getBundle().productions.find(p => p.meta.id === "saltlight")!, take)!;
     assert.deepEqual(record.items.map(item => item.id), ["cuts-inside", "camera", "light"]);
     assert.deepEqual(record.skipped.filter(item => item.id !== "lip-sync"), [{ id: "words", reason: "sung" }, { id: "unwritten-voice", reason: "sung" }]);
+  });
+
+  it("measures a segment of a pass over its own range, its times from the segment's start (0.5.135)", async () => {
+    const { store, ports } = await landed();
+    const dir = store.dir, passBytes = Buffer.from("PASS fixture");
+    const base = JSON.parse(await readFile(join(dir, "productions/saltlight/takes/tk_01J8C0000000000000000000C3/take.json"), "utf8"));
+    const passId = "tk_01M8CHECK00000000000000003", segmentId = "tk_01M8CHECK00000000000000004";
+    const { media: _media, ...unfiled } = base;
+    const pass = { ...base, id: passId, coversShots: ["sh_12", "sh_13"], mediaHash: sha(passBytes) };
+    const segment = { ...unfiled, id: segmentId, coversShots: ["sh_12"], segment: { passTakeId: passId, inSec: 2, outSec: 6 } };
+    await store.commit({ kind: "media-fixture", source: "test", files: [
+      { path: `productions/saltlight/takes/${passId}/take.json`, action: "create", baseHash: null, content: JSON.stringify(pass) },
+      { path: `productions/saltlight/takes/${passId}/clip.mp4`, action: "create", baseHash: null, encoding: "base64", content: passBytes.toString("base64") },
+      { path: `productions/saltlight/takes/${segmentId}/take.json`, action: "create", baseHash: null, content: JSON.stringify(segment) },
+    ] });
+    assert.equal(await checkTake(store, "saltlight", passId, ports, new AbortController().signal), "not-checkable", "a pass covers two shots");
+    assert.equal(await checkTake(store, "saltlight", segmentId, ports, new AbortController().signal), "checked");
+    const production = store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
+    const record = currentTakeChecks(production, production.takes.find(t => t.id === segmentId)!)!;
+    assert.equal(record.sourceHash, sha(passBytes), "fenced on the pass's clip");
+    assert.deepEqual(record.items.find(item => item.id === "cuts-inside"), { id: "cuts-inside", result: "fix", says: "at 1.0 s" }, "the pass's cut at 3 s is 1 s into the segment that starts at 2");
   });
 
   it("keeps the picture's checks when the sound cannot be read", async () => {
     const { store, take, tools, ports, takeId } = await landed();
     const refused = { ...ports, tools: { ...tools, speechAudio: async () => { throw new Error("decoder refused"); } } };
     assert.equal(await checkTake(store, "saltlight", takeId, refused, new AbortController().signal), "checked");
-    const record = currentTakeChecks(store.getBundle().productions.find(p => p.meta.id === "saltlight")!.takeChecks, take)!;
+    const record = currentTakeChecks(store.getBundle().productions.find(p => p.meta.id === "saltlight")!, take)!;
     assert.deepEqual(record.items.map(item => item.id), ["cuts-inside", "camera", "light"]);
     assert.ok(record.skipped.some(item => item.id === "words" && item.reason === "unavailable"));
   });

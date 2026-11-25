@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import {
-  orderedShots, referenceAudioMediaPath, sceneUnderLook, takeIsCheckable, TakeChecksRecordSchema,
+  orderedShots, referenceAudioMediaPath, sceneUnderLook, takeCheckSource, takeIsCheckable, TakeChecksRecordSchema,
   type AcousticWord, type AgentMediaInventory, type CharacterAudioPlan, type ProductionBundle, type SceneRecord,
   type Shot, type Take, type TakeCheck, type TakeCheckSkip, type TakeChecksRecord,
 } from "@arke-studio/contracts";
@@ -271,7 +271,7 @@ function placeOf(production: ProductionBundle, shotId: string): { scene: SceneRe
     if (index < 0) continue;
     const chosen = (at: number) => {
       const shot = shots[at], id = shot ? production.selections[shot.id]?.acceptedTakeId : undefined;
-      const take = id ? production.takes.find(candidate => candidate.id === id && takeIsCheckable(candidate)) : undefined;
+      const take = id ? production.takes.find(candidate => candidate.id === id && takeIsCheckable(production.takes, candidate)) : undefined;
       return take ? { number: at + 1, take } : null;
     };
     return { scene, shot: shots[index]!, neighbours: { before: chosen(index - 1), after: chosen(index + 1) } };
@@ -297,7 +297,12 @@ function singsTheSong(shot: Shot): boolean {
   return shot.audio !== undefined && /^(music|song|sung|singing|sings|lip-?sync)$/i.test(shot.audio.kind.trim());
 }
 
-const takePath = (productionId: string, take: Take) => `productions/${productionId}/takes/${take.id}/${take.media}`;
+/** A take's picture as the checks read it: the clip's world path and hash, and the window of it that is this take. */
+interface Source { path: string; hash: string; startSec: number; endSec: number | null }
+function sourceOf(production: ProductionBundle, take: Take): Source | null {
+  const found = takeCheckSource(production.takes, take);
+  return found && { path: `productions/${production.meta.id}/takes/${found.mediaTakeId}/${found.media}`, hash: found.hash, startSec: found.startSec, endSec: found.endSec };
+}
 
 async function streamsOf(tools: AgentMediaTools, path: string, signal: AbortSignal): Promise<{ video: Stream | null; audio: Stream | null; durationSec: number | null }> {
   const inventory = await tools.probe(path, signal);
@@ -306,25 +311,30 @@ async function streamsOf(tools: AgentMediaTools, path: string, signal: AbortSign
 }
 
 /** A neighbour's frame at its start or end, as one grey level. */
-async function edgeLevel(store: WorldStore, tools: AgentMediaTools, productionId: string, take: Take, edge: "first" | "last", signal: AbortSignal): Promise<number | null> {
-  return withContainedProductionMedia(store.dir, takePath(productionId, take), take.mediaHash!, signal, async snapshot => {
+async function edgeLevel(store: WorldStore, tools: AgentMediaTools, source: Source, edge: "first" | "last", signal: AbortSignal): Promise<number | null> {
+  return withContainedProductionMedia(store.dir, source.path, source.hash, signal, async snapshot => {
     const { video, durationSec } = await streamsOf(tools, snapshot.path, signal);
-    if (!video || durationSec === null || durationSec <= .1) return null;
-    const from = edge === "first" ? 0 : Math.max(0, durationSec - .3), read = await tools.grayFrames!(snapshot.path, video, from, Math.min(durationSec, from + .3), { fps: FPS, edge: 64 }, signal);
+    if (!video || durationSec === null) return null;
+    const start = source.startSec, end = Math.min(durationSec, source.endSec ?? durationSec);
+    if (end - start <= .1) return null;
+    const from = edge === "first" ? start : Math.max(start, end - .3), read = await tools.grayFrames!(snapshot.path, video, from, Math.min(end, from + .3), { fps: FPS, edge: 64 }, signal);
     const frame = edge === "first" ? read.frames[0] : read.frames[read.frames.length - 1];
     return frame ? meanLevel(frame) : null;
   }).catch(() => null);
 }
 
 /**
- * Measure one take. Null when it is not one the checks measure (a still, a voice, a segment of a
- * pass) or the host has no picture tools; otherwise every item measured or skipped with a reason.
+ * Measure one take. Null when it is not one the checks measure (a still, a voice, a pass covering
+ * several shots) or the host has no picture tools; otherwise every item measured or skipped with a
+ * reason. A segment of a pass is measured over its own range of the pass's clip, and every time
+ * it reports is from the segment's start.
  */
 export async function measureTake(store: WorldStore, productionId: string, takeId: string, ports: TakeCheckPorts, signal: AbortSignal): Promise<TakeChecksRecord | null> {
   const { tools } = ports;
   const production = store.getBundle().productions.find(p => p.meta.id === productionId);
   const take = production?.takes.find(candidate => candidate.id === takeId);
-  if (!production || !take || !takeIsCheckable(take) || !tools.grayFrames) return null;
+  const source = production && take ? sourceOf(production, take) : null;
+  if (!production || !take || !source || !tools.grayFrames) return null;
   const place = placeOf(production, take.coversShots[0]!);
   if (!place) return null;
   const items: TakeCheck[] = [], skipped: TakeCheckSkip[] = [];
@@ -333,11 +343,13 @@ export async function measureTake(store: WorldStore, productionId: string, takeI
   // Set inside the read below; cast so the checker does not keep them at their first null.
   let level = null as { first: number; last: number } | null;
   let takeSound = null as Float32Array | null;
-  await withContainedProductionMedia(store.dir, takePath(productionId, take), take.mediaHash!, signal, async snapshot => {
+  await withContainedProductionMedia(store.dir, source.path, source.hash, signal, async snapshot => {
     const { video, audio, durationSec } = await streamsOf(tools, snapshot.path, signal);
     if (!video || durationSec === null || durationSec <= 0) throw new Error("The take has no picture to measure.");
-    const end = Math.min(durationSec, MAX_SEC);
-    const picture = await tools.grayFrames!(snapshot.path, video, 0, end, { fps: FPS, edge: EDGE }, signal);
+    const start = Math.min(source.startSec, durationSec), stop = Math.min(durationSec, source.endSec ?? durationSec, start + MAX_SEC);
+    if (stop - start <= .2) throw new Error("The take's range of its clip is too short to measure.");
+    const end = stop - start;
+    const picture = await tools.grayFrames!(snapshot.path, video, start, stop, { fps: FPS, edge: EDGE }, signal);
     const cuts = findCuts([...frameMotion(picture.frames)], FPS);
     items.push(judgeCuts(cuts, end));
     const movement = place.shot.framing?.movement ?? sceneUnderLook(place.scene, production.meta.look).defaults?.movement;
@@ -350,7 +362,8 @@ export async function measureTake(store: WorldStore, productionId: string, takeI
     // The sound is read only as far as it runs: a clip with six seconds of picture and four of
     // sound had its reads refused, and the refusal took the picture's checks with it (codex on
     // PR 3306). A read of the sound that fails leaves those checks as they are, the sound's skipped.
-    const soundEnd = audio ? Math.min(end, audio.durationSec ?? end) : 0;
+    // Times from here are the take's own: from the segment's start, as the picture's are.
+    const soundStop = audio ? Math.min(stop, audio.durationSec ?? stop) : start, soundEnd = soundStop - start;
     const quietly = <T,>(read: Promise<T>) => read.catch((error: unknown) => { if (signal.aborted) throw error; return null; });
     if (singsTheSong(place.shot)) {
       skipped.push({ id: "words", reason: "sung" }, { id: "unwritten-voice", reason: "sung" });
@@ -361,7 +374,7 @@ export async function measureTake(store: WorldStore, productionId: string, takeI
       skipped.push({ id: "unwritten-voice", reason: "unavailable" });
       if (line !== null) skipped.push({ id: "words", reason: "unavailable" });
     } else {
-      const read = ports.speech, derivative = await quietly(tools.speechAudio(snapshot.path, audio, 0, soundEnd, signal));
+      const read = ports.speech, derivative = await quietly(tools.speechAudio(snapshot.path, audio, start, soundStop, signal));
       const heard = derivative === null ? null : await quietly(recognizeAgentSpeech({ bytes: derivative.bytes, durationSec: derivative.durationSec,
         streamIndex: audio.index, sourceStartSec: 0, viewStartSec: 0, read, signal }).then(transcript => transcript.words as AcousticWord[]));
       if (heard === null) {
@@ -374,7 +387,7 @@ export async function measureTake(store: WorldStore, productionId: string, takeI
       }
     }
     if (line === null && !items.some(item => item.id === "words") && !skipped.some(item => item.id === "words")) skipped.push({ id: "words", reason: "no-line" });
-    if (sync && audio && soundEnd >= .5 && tools.monoAudio) takeSound = await quietly(tools.monoAudio(snapshot.path, audio, 0, soundEnd, 16_000, signal));
+    if (sync && audio && soundEnd >= .5 && tools.monoAudio) takeSound = await quietly(tools.monoAudio(snapshot.path, audio, start, soundStop, 16_000, signal));
   });
   if (!sync) skipped.push({ id: "lip-sync", reason: "no-voice-sent" });
   else {
@@ -386,9 +399,11 @@ export async function measureTake(store: WorldStore, productionId: string, takeI
     if (!reference || !takeSound) skipped.push({ id: "lip-sync", reason: "unavailable" });
     else items.push(judgeSync(measureSoundtrackSync(takeSound, reference, 16_000, .6)));
   }
+  const beforeSource = place.neighbours.before ? sourceOf(production, place.neighbours.before.take) : null;
+  const afterSource = place.neighbours.after ? sourceOf(production, place.neighbours.after.take) : null;
   const [before, after] = await Promise.all([
-    place.neighbours.before ? edgeLevel(store, tools, productionId, place.neighbours.before.take, "last", signal) : null,
-    place.neighbours.after ? edgeLevel(store, tools, productionId, place.neighbours.after.take, "first", signal) : null,
+    beforeSource ? edgeLevel(store, tools, beforeSource, "last", signal) : null,
+    afterSource ? edgeLevel(store, tools, afterSource, "first", signal) : null,
   ]);
   const light = level === null ? null : judgeLight(level, before === null ? null : { number: place.neighbours.before!.number, last: before },
     after === null ? null : { number: place.neighbours.after!.number, first: after });
@@ -397,7 +412,7 @@ export async function measureTake(store: WorldStore, productionId: string, takeI
   const order = ["lip-sync", "words", "unwritten-voice", "cuts-inside", "camera", "light"];
   items.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));
   return TakeChecksRecordSchema.parse({ schemaVersion: 1, kind: "after-take", ts: ports.now(), takeId: take.id, shotId: take.coversShots[0],
-    sourceHash: take.mediaHash, items, skipped });
+    sourceHash: source.hash, items, skipped });
 }
 
 const queues = new WeakMap<WorldStore, Promise<unknown>>();
@@ -424,8 +439,9 @@ export function checkTake(store: WorldStore, productionId: string, takeId: strin
  */
 export async function recordTakeChecks(store: WorldStore, productionId: string, record: TakeChecksRecord): Promise<boolean> {
   return store.ownedWrite(async () => {
-    const take = store.getBundle().productions.find(p => p.meta.id === productionId)?.takes.find(candidate => candidate.id === record.takeId);
-    if (!take || take.mediaHash !== record.sourceHash) return false;
+    const production = store.getBundle().productions.find(p => p.meta.id === productionId);
+    const take = production?.takes.find(candidate => candidate.id === record.takeId);
+    if (!production || !take || takeCheckSource(production.takes, take)?.hash !== record.sourceHash) return false;
     const path = await audioWorldPath(store.dir, `productions/${productionId}/take-checks.jsonl`, true);
     const raw = await readFile(path, "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return ""; throw error; });
     // A torn last line is left for repair rather than glued to the next record.

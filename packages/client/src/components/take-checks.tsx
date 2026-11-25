@@ -10,7 +10,7 @@ import { Button } from "./ui.js";
  * has Check. The list labels and gives its figure; it explains nothing.
  */
 export function TakeChecks({ worldId, production, take }: { worldId: string; production: ProductionBundle; take: Take }) {
-  const record = currentTakeChecks(production.takeChecks, take);
+  const record = currentTakeChecks(production, take);
   // The toolbar's popover: open on the count, closed by Escape or a press outside both.
   const { open, setOpen, press, panel } = usePopover();
   const [checking, setChecking] = useState(false);
@@ -19,7 +19,7 @@ export function TakeChecks({ worldId, production, take }: { worldId: string; pro
   useEffect(() => subscribeCommandFailures((failure) => { if (failure.command === "check-take") setChecking(false); }), []);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { setOpen(false); setChecking(false); }, [take.id]);
-  if (!takeIsCheckable(take)) return null;
+  if (!takeIsCheckable(production.takes, take)) return null;
   const check = () => setChecking(checkTake(worldId, production.meta.id, take.id));
   if (!record) {
     return <Button variant="ghost" disabled={checking} onClick={check}>{checking ? "Checking…" : "Check"}</Button>;

@@ -68,7 +68,7 @@ export const TakeChecksRecordSchema = z
     ts: IsoDateTimeSchema,
     takeId: TakeIdSchema,
     shotId: ShotIdSchema,
-    /** The take's `mediaHash` when it was checked, in the take's own form. */
+    /** The hash of the clip measured when it was checked (a segment's is its pass's), in the take's own form. */
     sourceHash: Sha256Schema,
     items: z.array(TakeCheckSchema).max(TAKE_CHECKS.length),
     skipped: z.array(TakeCheckSkipSchema).max(TAKE_CHECKS.length),
@@ -80,10 +80,33 @@ export const TakeChecksRecordSchema = z
   });
 export type TakeChecksRecord = z.infer<typeof TakeChecksRecordSchema>;
 
+/**
+ * Where a take's picture is, for its checks: its own clip, or its range of the pass it is a
+ * segment of. A board or scene pass lands as one clip and a segment take a shot, and on Gold on
+ * Gold every chosen take was such a segment; checking only clips of their own checked none of
+ * them (0.5.135). Null for a take the checks do not measure: a still, a voice, a pass covering
+ * several shots, a crop of a sheet, or a clip with no recorded hash.
+ */
+export function takeCheckSource(takes: readonly Take[], take: Take): { mediaTakeId: string; media: string; hash: string; startSec: number; endSec: number | null } | null {
+  if (take.kind !== "clip" || take.coversShots.length !== 1 || take.panel !== undefined) return null;
+  if (take.segment !== undefined) {
+    const segment = take.segment, pass = takes.find(candidate => candidate.id === segment.passTakeId);
+    if (!pass || pass.kind !== "clip" || typeof pass.media !== "string" || pass.mediaHash === undefined || segment.outSec <= segment.inSec) return null;
+    return { mediaTakeId: pass.id, media: pass.media, hash: pass.mediaHash, startSec: segment.inSec, endSec: segment.outSec };
+  }
+  if (typeof take.media !== "string" || take.mediaHash === undefined) return null;
+  return { mediaTakeId: take.id, media: take.media, hash: take.mediaHash, startSec: 0, endSec: null };
+}
+
+/** Whether the checks measure a take: a clip of one shot whose picture can be found and fenced. */
+export function takeIsCheckable(takes: readonly Take[], take: Take): boolean {
+  return takeCheckSource(takes, take) !== null;
+}
+
 /** A take's checks, when they were made of the media it has now. */
-export function currentTakeChecks(checks: Readonly<Record<string, TakeChecksRecord>> | undefined, take: Pick<Take, "id" | "mediaHash">): TakeChecksRecord | null {
-  const record = checks?.[take.id];
-  return record !== undefined && take.mediaHash !== undefined && record.sourceHash === take.mediaHash ? record : null;
+export function currentTakeChecks(production: { takeChecks?: Readonly<Record<string, TakeChecksRecord>>; takes: readonly Take[] }, take: Take): TakeChecksRecord | null {
+  const record = production.takeChecks?.[take.id], source = takeCheckSource(production.takes, take);
+  return record !== undefined && source !== null && record.sourceHash === source.hash ? record : null;
 }
 
 /** The count beside the take: how many measured items passed, of how many were measured. */
@@ -91,10 +114,4 @@ export function takeChecksCount(record: TakeChecksRecord): { passed: number; of:
   const passed = record.items.filter(item => item.result === "pass").length;
   const hardToFix = record.items.filter(item => item.result === "fix" && HARD_TAKE_CHECKS.has(item.id)).length;
   return { passed, of: record.items.length, hardToFix };
-}
-
-/** Whether a take is one the checks measure: a clip of one shot with media of its own. */
-export function takeIsCheckable(take: Pick<Take, "kind" | "media" | "mediaHash" | "coversShots" | "segment" | "panel">): boolean {
-  return take.kind === "clip" && typeof take.media === "string" && take.mediaHash !== undefined
-    && take.coversShots.length === 1 && take.segment === undefined && take.panel === undefined;
 }
