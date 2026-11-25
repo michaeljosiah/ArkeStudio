@@ -44,6 +44,14 @@ Check each of these in the last frames of the shot going out and the first frame
   before the line, and to hold their face for a beat after it. Those beats are what the cut runs the other
   person's words over (the sound-and-pace skill says how). A shot that starts on its first word and stops on
   its last can only be cut straight.
+- **Keep a spoken line on the speaker's face.** While a person speaks, their head stays towards the one they
+  talk to and the camera stays on them. A look away is the eyes only, and it goes in a pause: never "turns to"
+  or "towards the room" during words, which the model reads as a camera move. A grin, a sip or a straight face
+  goes before the first word or after the last, and the shot says the line runs to its last word. On the film's
+  board of shots 15 to 17, a 7-second line written with "his eyes go past Ade's shoulder towards the room",
+  "mock-solemn" and "sits back grinning" after it came back panned to the dance floor, Tunde smirking with his
+  mouth shut for three seconds of words, then holding a grin through the last three. The owner heard the line
+  and saw no lips.
 - **Move the camera as the production does.** Unless the production's look says otherwise, the camera is
   handheld at eye level: it breathes, drifts a little, and eases a few centimetres closer on the beat that
   matters. To stop a model moving the camera on its own, name what it must not do ("no orbit, no zoom, no

@@ -169,6 +169,15 @@ it("the continuity skill fills the room the place describes, and says who is at 
   assert.match(continuity, /A full floor in one shot is full in the next/);
 });
 
+it("the continuity skill keeps a spoken line on the speaker's face (board 15-17, 2026-11-25)", async () => {
+  // "His eyes go past Ade's shoulder towards the room" mid-line panned the take to the dance floor, and a grin
+  // written after the line held through its last words: the owner heard Tunde and saw no lips.
+  const continuity = (await loadCraftSkill("continuity-across-cuts"))!.body;
+  assert.match(continuity, /Keep a spoken line on the speaker's face/);
+  assert.match(continuity, /A look away is the eyes only, and it goes in a pause/);
+  assert.match(continuity, /A grin, a sip or a straight face\s+goes before the first word or after the last/);
+});
+
 it("the local route's skill says it speaks a line anew and can garble it (shot 8, 2026-11-23)", async () => {
   const route = (await loadCraftSkill("local-h3-video"))!.body;
   assert.match(route, /It says the line again, in its own way/);
