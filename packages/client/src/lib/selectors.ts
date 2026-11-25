@@ -127,9 +127,10 @@ type Scenes = ProductionBundle["scenes"];
 const numbersByScenes = new WeakMap<Scenes, Map<string, number>>();
 
 /**
- * A shot's number as its scene shows it, its place in the scene's order; null for a shot the
- * production no longer holds. An id is not a number: Gold on Gold's fifteenth shot is `sh_499`, and
- * the Generate bench, the dashboard and the editor's inspector called it "Shot 499" (0.5.141).
+ * A shot's number as its scene shows it, the shot's own `number` (the scene's rows and the Takes view
+ * print it; it need not start at 1); null for a shot the production no longer holds. An id is not a
+ * number: Gold on Gold's fifteenth shot is `sh_499`, and the Generate bench, the dashboard and the
+ * editor's inspector called it "Shot 499" (0.5.141).
  */
 export function shotNumberOf(production: Pick<ProductionBundle, "scenes"> | null | undefined, shotId: string): number | null {
   if (!production) return null;
@@ -139,7 +140,7 @@ export function shotNumberOf(production: Pick<ProductionBundle, "scenes"> | null
     for (const scene of production.scenes) {
       let shots;
       try { shots = orderedShots(scene); } catch { continue; }
-      shots.forEach((shot, at) => index!.set(shot.id, at + 1));
+      for (const shot of shots) index.set(shot.id, shot.number);
     }
     numbersByScenes.set(production.scenes, index);
   }

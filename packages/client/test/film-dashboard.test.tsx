@@ -59,16 +59,18 @@ describe("a film's dashboard leads with what exists (issue 3218)", () => {
     } finally { __setStateForTest(FIXTURE_STATE); }
   });
 
-  it("numbers a shot by its place in its scene, never by its id (0.5.141)", () => {
+  it("numbers a shot as its scene does, never by its id (0.5.141)", () => {
     // Gold on Gold's fifteenth shot is sh_499, and three screens called it "Shot 499".
     const production = structuredClone(FIXTURE_STATE).world!.productions[0]!;
-    const ids = production.scenes.flatMap((scene) => orderedShots(scene).map((shot) => shot.id));
-    assert.ok(ids.length >= 2 && ids[0] !== "sh_1", "the fixture's ids are not its numbers");
-    assert.equal(shotNumberOf(production, ids[0]!), 1);
-    assert.equal(shotNumberOf(production, ids[1]!), 2);
-    assert.equal(shotLabel(production, ids[1]!, "Shot"), "Shot 2");
+    const scene = production.scenes[0]!;
+    const shots = orderedShots(scene);
+    // Renumbered away from their ids, as a scene is once shots are inserted and moved.
+    production.scenes[0] = { ...scene, shots: shots.map((shot, at) => ({ ...shot, number: 40 + at })) } as typeof scene;
+    assert.equal(shotNumberOf(production, shots[0]!.id), 40);
+    assert.equal(shotNumberOf(production, shots[1]!.id), 41);
+    assert.equal(shotLabel(production, shots[1]!.id, "Shot"), "Shot 41");
     assert.equal(shotLabel(production, "sh_999"), "shot 999", "a shot no scene holds keeps its id's digits");
-    assert.equal(shotNumberOf(null, ids[0]!), null);
+    assert.equal(shotNumberOf(null, shots[0]!.id), null);
   });
 
   it("keeps the next shot's card once shots are written", () => {
@@ -80,8 +82,8 @@ describe("a film's dashboard leads with what exists (issue 3218)", () => {
     try {
       const page = render(state);
       assert.doesNotMatch(page, /NO SHOTS YET|Open Develop/);
-      // sh_12 is scene 4's first shot: named by its place in the scene, not its id (0.5.141).
-      assert.match(page, /Shot 1 has no clip yet.*Scene 4 · Maren at the rail, listening.*Make the clip/);
+      // Named by its own number, as the scene's rows show it, not by its id (0.5.141).
+      assert.match(page, /Shot 12 has no clip yet.*Scene 4 · Maren at the rail, listening.*Make the clip/);
     } finally { __setStateForTest(FIXTURE_STATE); }
   });
 

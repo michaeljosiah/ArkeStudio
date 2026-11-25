@@ -255,7 +255,7 @@ export function GenerateScreen() {
     const board = pack.ok ? pack.boards.find((candidate) => candidate.memberShotIds.includes(shot.id)) : undefined;
     return board && board.memberShotIds.length > 1 ? board : null;
   })();
-  const shotNumber = (id: string) => (found ? orderedShots(found).findIndex((candidate) => candidate.id === id) + 1 : 0);
+  const shotNumber = (id: string) => shotNumberOf(production, id) ?? 0;
   const shotChecks = shot && found && production && world ? beforeShotChecks({
     scene: found, shot, look: production.meta.look,
     clipsFrom: shot.continuity?.clipsFrom ?? production.meta.clipsFrom ?? "frames",
