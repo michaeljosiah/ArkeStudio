@@ -1,4 +1,5 @@
 import { ProductionTargetSchema } from "./production-target.js";
+import { ProductionLookSchema } from "./production-look.js";
 import { z } from "zod";
 import { CanonIdSchema, EpisodeIdSchema, IsoDateSchema, IsoDateTimeSchema, SceneIdSchema, SlugSchema, UlidSchema } from "./ids.js";
 import { ChapterAudiobookStateSchema } from "./audiobook.js";
@@ -359,6 +360,14 @@ export const ProductionSchema = z
     frameRate: FrameRateSchema.optional(),
     /** Optional production-specific visual language; the world surface names this exception. */
     styleOverride: z.string().min(1).optional(),
+    /**
+     * How the whole production is photographed, cut, mixed and played (design turns 287 and 288):
+     * a preset and its parts, each a choice plus a few words. Its camera, light, lens and grade lie
+     * beneath every scene's camera where a prompt is assembled; the rest is Arke's to read and the
+     * director's checks' to hold. Beside `styleOverride`, which stays the free words it is. A strict
+     * field an older build would refuse, fenced at world schema 148.
+     */
+    look: ProductionLookSchema.optional(),
     /**
      * The aspect this production delivers in, e.g. "16:9" (SPEC-019 R-36, D29; issue 389).
      *

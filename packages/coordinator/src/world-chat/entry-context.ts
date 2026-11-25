@@ -3,6 +3,7 @@ import {
   COMIC_ADAPTATION_CRAFT,
   CRAFT_SKILLS_LINE,
   FILM_DIRECTION_CRAFT,
+  lookBrief,
   orderedShots,
   orderedTrackClips,
   productionAspect,
@@ -401,6 +402,14 @@ function describeShape(production: ProductionBundle | undefined, writesTheSeason
      * the owner wanted came from outside it. Only a picture has shots, so only here.
      */
     bits.push(FILM_DIRECTION_CRAFT);
+    /*
+     * The production's look (design turn 287), after the craft it qualifies: the craft says the
+     * camera is handheld "unless the production's look says otherwise", and this says what it says.
+     * On the film, about fifty clips were written locked off with nothing in the thread to say how
+     * the film is shot.
+     */
+    const look = lookBrief(production.meta.look);
+    if (look) bits.push(look);
     // The craft names when to read a skill; this line names which exist (design turn 286).
     bits.push(CRAFT_SKILLS_LINE);
   }

@@ -1,5 +1,6 @@
 import { VoiceConversationCommandSchema, VoiceConversationResponseSchema, type VoiceConversationResponse } from "./voice-conversation.js";
 import { PromptTargetSchema, PromptInspectSourceSchema } from "./prompt-tools.js";
+import { ProductionLookInputSchema } from "./production-look.js";
 import { WORLD_CHAT_INPUT_BOUNDS, WorldChatInputRequestSchema, WorldChatInputRoutingSchema } from "./world-chat-input.js";
 import { MediaMeasurementSourceSchema } from "./media-measurement.js";
 import { Sha256Schema as MeasurementHashSchema } from "./ids.js";
@@ -2794,6 +2795,18 @@ export const ClientMessageSchema = z.discriminatedUnion("kind", [
       worldId: UlidSchema,
       productionId: SlugSchema,
       aspect: z.string().min(1).max(20),
+    })
+    .strict(),
+  /**
+   * Design turn 288a: the production's look, written whole from Production settings. `null` clears
+   * it. Choosing a preset is the client's `applyLookPreset`, so what is written is what was shown.
+   */
+  z
+    .object({
+      kind: z.literal("set-production-look"),
+      worldId: UlidSchema,
+      productionId: SlugSchema,
+      look: ProductionLookInputSchema.nullable(),
     })
     .strict(),
   /** issue 3185: what the production's clips are made from — frames, or the cast and place pictures. */

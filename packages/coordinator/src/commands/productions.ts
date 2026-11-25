@@ -2,7 +2,7 @@ import type { ClientState, ConversationId, DomainEvent, SongSectionsResult } fro
 import { measureProductionMedia } from "../media/measurement.js";
 import type { MediaProbe } from "../media/probe.js";
 import { saveProductionNarrative } from "../productions/narrative.js";
-import { setProductionClipsFrom } from "../productions/ops.js";
+import { setProductionClipsFrom, setProductionLook } from "../productions/ops.js";
 import { handleProductionSetupCommand } from "../productions/setup-command.js";
 import { applyProductionSpineCommand } from "../productions/spine.js";
 import type { WorldChatRunner } from "../world-chat/run.js";
@@ -92,6 +92,18 @@ export function productionCommands(ctx: CommandContext, deps: {
         // which says it under this request, and the snapshot shows the production unchanged.
         try {
           await setProductionClipsFrom(store, msg.productionId, msg.clipsFrom);
+        } finally {
+          if (deps.stillOpen(store)) await ctx.refreshWorldSnapshot(msg.worldId);
+        }
+      },
+    },
+    "set-production-look": {
+      scope: "open-world",
+      async handle(msg, store) {
+        // The production's look (design turn 288a), whole, as Production settings shows it. A refusal
+        // throws to the router, which says it under this request; the snapshot shows the look as it is.
+        try {
+          await setProductionLook(store, msg.productionId, msg.look);
         } finally {
           if (deps.stillOpen(store)) await ctx.refreshWorldSnapshot(msg.worldId);
         }

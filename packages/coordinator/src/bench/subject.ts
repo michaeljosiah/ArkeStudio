@@ -50,6 +50,7 @@ import {
   type Shot,
   type ShotStaging,
   type WorldBundle,
+  sceneUnderLook,
 } from "@arke-studio/contracts";
 
 export interface PreparedBenchSubject {
@@ -531,7 +532,8 @@ export async function prepareBenchSubject(
     }
     if (playblast !== null) references.push(playblast);
     const nameOf = (sheetId: string) => world.sheets.find((sheet) => sheet.id === sheetId)?.name ?? sheetId;
-    const plannedPrompt = promptFor(world.meta, world.sheets, scene, shot, style, undefined, mode);
+    // The production's look lies beneath the scene's camera here as in the plan (design turn 287).
+    const plannedPrompt = promptFor(world.meta, world.sheets, sceneUnderLook(scene, production.meta.look), shot, style, undefined, mode);
     const prompt = plannedPrompt.text;
     const routedSubject: BenchSubject = { kind: "shot", ...subjectContext(production, scene), promptSheetVersions: {}, shotId: shot.id, shotNumber: shot.number, shotTitle: shot.title, durationSec: shown.durationSec, aspect };
     const riding = new Set(subjectReferenceRouting(references, routedSubject, model).activeTokens);

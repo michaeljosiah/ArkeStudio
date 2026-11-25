@@ -31,7 +31,9 @@ import {
   deriveArtDirectionDescription,
   buildRenderPlan,
   legacyArtifactScopeRefusal,
+  LOOK_PRESET_NAMES,
   productionFrameRate,
+  type ProductionLook,
   productionShape,
   SceneRecordSchema,
   orderedShots,
@@ -2333,6 +2335,23 @@ function clipsWords(clipsFrom: "frames" | "references" | undefined): string {
   return clipsFrom === "references" ? "From references" : "From frames";
 }
 
+/**
+ * A production's look as its card reads it (design turn 287): the preset, then the choices, then
+ * the count of its own checks. The whole look is one row, because it is written whole.
+ */
+function lookWords(look: ProductionLook | null | undefined): string {
+  if (!look || Object.keys(look).length === 0) return "None";
+  const parts = [
+    look.preset ? LOOK_PRESET_NAMES[look.preset] : undefined,
+    [look.camera?.kind, look.camera?.strength, look.camera?.pushOnBeat ? "push in on a beat" : undefined].filter(Boolean).join(" "),
+    look.light?.key ? `${look.light.key} key` : undefined,
+    [look.lens?.length, look.lens?.focus].filter(Boolean).join(", "),
+    look.performance?.style,
+    look.checks && look.checks.length > 0 ? `${look.checks.length} own check${look.checks.length === 1 ? "" : "s"}` : undefined,
+  ].filter((part): part is string => typeof part === "string" && part.length > 0);
+  return parts.length > 0 ? parts.join(" · ") : "Words only";
+}
+
 function diffFields(
   before: Record<string, unknown>,
   after: Record<string, unknown>,
@@ -3271,9 +3290,11 @@ async function sharedResourceProjection(
         aspect: production.meta.aspect ?? null,
         frameRate: productionFrameRate(production.meta),
         clipsFrom: clipsWords(production.meta.clipsFrom),
+        look: lookWords(production.meta.look),
       };
       const after = { ...before, ...payload.action.changes,
-        ...(payload.action.changes.clipsFrom !== undefined ? { clipsFrom: clipsWords(payload.action.changes.clipsFrom) } : {}) };
+        ...(payload.action.changes.clipsFrom !== undefined ? { clipsFrom: clipsWords(payload.action.changes.clipsFrom) } : {}),
+        ...(payload.action.changes.look !== undefined ? { look: lookWords(payload.action.changes.look) } : {}) };
       if (
         payload.action.changes.seriesId !== undefined &&
         payload.action.changes.seriesId !== null &&
@@ -3288,7 +3309,12 @@ async function sharedResourceProjection(
         aspect: "Aspect",
         frameRate: "Frame rate",
         clipsFrom: "Clips",
+        look: "Look",
       });
+      // A look rewritten with the same choices but other words reads alike in a row: still a change.
+      if (fields.length === 0 && payload.action.changes.look !== undefined && JSON.stringify(payload.action.changes.look ?? null) !== JSON.stringify(production.meta.look ?? null)) {
+        fields.push({ label: "Look", before: lookWords(production.meta.look), after: `${lookWords(payload.action.changes.look)} · words changed` });
+      }
       if (fields.length === 0) throw new Error("The production metadata already has those values.");
       shown = {
         title: `Change ${production.meta.title} metadata`,

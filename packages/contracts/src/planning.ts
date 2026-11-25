@@ -43,6 +43,7 @@ import type { ArtifactSidecar } from "./artifact.js";
 import { chooseReferenceSteering, type ReferenceSteering } from "./storyboard.js";
 import { orderedShots, type SceneRecord } from "./scene-flow.js";
 import { effectiveFraming, UNTITLED_SHOT } from "./scene.js";
+import { sceneUnderLook, type ProductionLook } from "./production-look.js";
 import { packBoards, packShotsFor } from "./boards.js";
 import type { Shot, ShotFraming } from "./scene.js";
 import type { Selections } from "./scene.js";
@@ -1782,6 +1783,8 @@ export interface ScenePlanInput {
     failureModes?: readonly string[];
     /** What its clips are made from (issue 3185); absent is frames. A shot may differ. */
     clipsFrom?: "frames" | "references";
+    /** Its look (design turn 287): the camera, light, lens and grade beneath the scene's camera. */
+    look?: ProductionLook;
   };
   /**
    * The production's audio design, which is where the score negative comes from (R-11). Absent
@@ -2276,7 +2279,9 @@ function resolveBoundaryFrames(
 
 /** The whole plan, computed before a dollar moves (R-17, R-20). Nothing here blocks (D12). */
 export function planScene(input: ScenePlanInput, mode: "per-shot" | "whole-scene"): ScenePlan {
-  const { world, sheets, kits, scene, selections, model } = input;
+  const { world, sheets, kits, selections, model } = input;
+  // The production's look lies beneath the scene's camera in every prompt this plan assembles.
+  const scene = sceneUnderLook(input.scene, input.production?.look);
   const productionStyleOverride = input.production?.styleOverride?.trim() || undefined;
   const effectiveStyle = styleFor(world, productionStyleFor(input.production, input.artDirection?.description));
   const props = input.props ?? [];

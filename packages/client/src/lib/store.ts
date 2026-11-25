@@ -163,7 +163,7 @@ export {
   isOwnChapterCreate, stopProsePage, openChapter, saveChapter, saveEpisodeScript, hearDramaLines,
   generateDramaSound, setDramaRole, setDramaVerdict, decideDramaNote, decideDramaTake,
   readChapterVersion, restoreChapter, setChapterRetired, editChapterPlan, reorderChapters,
-  reorderScenes, setProductionAspect, setProductionClips, dispatchScenePlanned, planContinue, planReconfirm, planCancel,
+  reorderScenes, setProductionAspect, setProductionClips, setProductionLook, dispatchScenePlanned, planContinue, planReconfirm, planCancel,
   listPlans, planTableRead, prepareTableRead, saveRouting, sendRoutingCommand, recordTraversal,
   listRoutingFindings, proposeBranchCanon, exportInteractive, compileSceneBoard, exportSceneBoard,
 } from "./store/productions.js";

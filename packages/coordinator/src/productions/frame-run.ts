@@ -339,6 +339,7 @@ export async function compileFrameRunEvidence(input: CompileFrameRunInput): Prom
       production: {
         ...(input.production.meta.styleOverride !== undefined ? { styleOverride: input.production.meta.styleOverride } : {}),
         ...(input.production.meta.musicPolicy !== undefined ? { musicPolicy: input.production.meta.musicPolicy } : {}),
+        ...(input.production.meta.look !== undefined ? { look: input.production.meta.look } : {}),
         failureModes: input.production.meta.failureModes,
       },
       sheets: input.world.sheets,

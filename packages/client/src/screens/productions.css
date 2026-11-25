@@ -67,6 +67,24 @@
 .fy-production-settings-sheet .fy-fact__state { grid-column: 2; }
 .fy-production-settings-sheet .fy-models__reset { grid-column: 3; }
 .fy-production-settings-sheet .ui-iconbtn { min-width: 44px; min-height: 44px; }
+/* Design turn 288a: the look, a card after Clips and before Models. A row is a part: its name, then its
+   choices and its words, wrapping on a narrow sheet rather than overflowing it. */
+.fy-production-settings-sheet .fy-look.fy-models { margin: 0; }
+.fy-production-settings-sheet .fy-look .fy-models__head { margin-bottom: 8px; }
+.fy-production-settings-sheet .fy-look .fy-models__head > h3 { margin-left: 0; }
+.fy-production-settings-sheet .fy-look .fy-models__row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-height: 36px; padding: 3px 0; }
+.fy-production-settings-sheet .fy-look .fy-models__what { flex: none; width: 112px; color: var(--muted-foreground); }
+.fy-production-settings-sheet .fy-look .fy-seg { flex: none; }
+.fy-production-settings-sheet .fy-look .fy-takechips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fy-production-settings-sheet .fy-look .ui-check { flex: none; align-items: center; }
+.fy-production-settings-sheet .fy-look .ui-select { flex: none; }
+.fy-production-settings-sheet .fy-look .ui-select__control { width: auto; }
+.fy-production-settings-sheet .fy-look select { min-height: 0; }
+.fy-production-settings-sheet .fy-look .ui-input { padding-block: 6px; }
+.fy-production-settings-sheet .fy-look .fy-look__words { flex: 1; min-width: 160px; max-width: 300px; }
+.fy-production-settings-sheet .fy-look .fy-look__words--wide { max-width: 420px; }
+.fy-production-settings-sheet .fy-look .fy-look__lines { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.fy-production-settings-sheet .fy-look .fy-look__line { flex: none; width: auto; field-sizing: content; min-width: 120px; max-width: 100%; }
 .fy-production-settings-sheet .fy-tip::after { left: auto; right: 0; transform: none; }
 .fy-production-settings-sheet .fy-page-sheet__body { display: flex; flex-direction: column; gap: 20px; }
 .fy-production-switch-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 0; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--foreground); text-align: left; cursor: pointer; font: var(--type-ui); }
