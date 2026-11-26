@@ -82,18 +82,22 @@ Splitting the cuts and trimming the waits can take a sixth out of a scene withou
 
 A cut is not ready because it was built. Play it through and check it before anyone else sees it.
 
-- **Hear every line where it belongs.** Transcribe the finished film with word times (`transcribe_audio` on
-  the export, a minute at a time) and set it beside the script, shot by shot. Every line must be heard once,
-  in the script's order, and nothing the script does not say. Each line plays in the shot of the person who
+- **Hear every line where it belongs.** Call `review_export` on the finished cut. It reads the words in it and
+  sets them beside its lines: its findings name a line that is not heard, one barely or partly heard, one heard
+  out of its place or under another shot than its own, a name to listen to, and words nobody wrote. For a
+  film that was cut outside the Studio, name the scene it was cut from in `script`. Every line must be heard
+  once, in the script's order, and nothing the script does not say. Each line plays in the shot of the person who
   says it, or runs over the next shot or the one before where you split that cut on purpose (section 4).
-  A line heard anywhere else, or twice, means a sound has lost its place in the mix.
+  A line heard anywhere else, or twice, means a sound has lost its place in the mix. Recognised words can be
+  misheard, names most of all: listen to whatever a finding names (`transcribe_audio` on that stretch) before
+  you call it a fault.
 - **Look at the mouths while the lines play.** `sample_video` with a region round the mouth, at each line's
   words and in the silences between them, wherever the speaker's own face is on screen. A speaker's mouth
   that moves with nothing heard, and the speaker's own shut or laughing mouth on screen while their words
   play, are the same fault. A listener's still face under the end of a split line is not.
 - **Measure the room shot by shot.** The quiet between lines should stay within about 3 dB from shot to shot.
-  A song that reaches its own ending, or a bed that stops, drops the room under the talk. Bring the next
-  piece of the room's music in under the ending.
+  `review_export` names a shot whose room drops. A song that reaches its own ending, or a bed that stops,
+  drops the room under the talk. Bring the next piece of the room's music in under the ending.
 - **Make each version from the last one that was shown and accepted.** Every note already given then stays
   done. Before you show a new version, check the notes that earlier versions answered.
 - **Fix what you find in the edit first**: trim, move a cut, cut to the listener, or use another take's part

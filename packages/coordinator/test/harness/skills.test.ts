@@ -69,9 +69,13 @@ it("the continuity skill holds the cut to the standard the test on the film show
   assert.match(body, /Overlap the action/);
   assert.match(body, /cut_contact_sheet/);
   assert.match(body, /sample_video/);
-  // A turn sees about 24 frames; four a cut spent them by the sixth cut of a ten-shot scene.
-  assert.match(body, /with a count of 2/);
-  assert.match(body, /no more than ten cuts in\s+one turn/);
+  // A turn sees about 24 images. Two frames a cut spent them by the twelfth cut; a page of cuts holds twelve for one image.
+  assert.match(body, /ask it for them \(`seams` true\)/);
+  assert.match(body, /twelve cuts to a page/);
+  assert.match(body, /a page of cuts\s+is one of them/);
+  // The checks on the cut read what is drawn, so they come first and the pictures still get looked at.
+  assert.match(body, /Read the cut's own checks first/);
+  assert.match(body, /They read the cut, not the pictures, so look as well/);
 });
 
 it("the continuity skill looks before it writes, and does not take an unmeasured shot for a still (tested on 0.5.127)", async () => {
@@ -164,6 +168,11 @@ it("the sound skill watches and listens to a cut before it is shown (shots 9 to 
   // than the one last shown, so the room tone, gating and effects asked for the day before were gone.
   const sound = (await loadCraftSkill("sound-and-pace"))!.body;
   assert.match(sound, /Watch and listen before you show it/);
+  // The listening is one call now: the film read against its lines, and what it names is listened to before it is called a fault.
+  assert.match(sound, /Call `review_export` on the finished cut/);
+  assert.match(sound, /name the scene it was cut from in `script`/);
+  assert.match(sound, /listen to whatever a finding names/);
+  assert.match(sound, /`review_export` names a shot whose room drops/);
   assert.match(sound, /Each line plays in the shot of the person who\s+says it/);
   // The split cuts section 4 asks for are not faults: a line may run over the listener on purpose.
   assert.match(sound, /where you split that cut on purpose/);
