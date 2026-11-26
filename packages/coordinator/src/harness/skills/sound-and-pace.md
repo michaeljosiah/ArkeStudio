@@ -61,6 +61,12 @@ each two-minute part, and no line was lost.
   frame where the thing happens. Find that frame in the pictures, not in the sound.
 - **Measure a made room tone before you use it.** One came back silent, and one made for a club can carry
   words: check its level and transcribe it.
+- **Never let a room tone repeat.** A looped room tone brings back every laugh and every glass on the same
+  beat, and the ear finds it within a minute. Make several takes of the place's sound, from different
+  corners and distances. Lay pieces of a few seconds from them end to end, each overlapping the last by
+  about a second with fades, each piece used once in the scene. Two such rows, a few seconds apart, the
+  second a little quieter, make a fuller room. On the film, a 6-second crowd clip looped nine times under
+  53 seconds, and the owner heard "the same laughing repeating over and over".
 
 ## 6 · A laid line sits on the take's voice
 
@@ -77,11 +83,13 @@ A cut is not ready because it was built. Play it through and check it before any
 
 - **Hear every line where it belongs.** Transcribe the finished film with word times (`transcribe_audio` on
   the export, a minute at a time) and set it beside the script, shot by shot. Every line must be heard once,
-  in the script's order, inside the shot whose mouth says it, and nothing the script does not say. A line
-  heard in the wrong shot, or twice, means a sound has lost its place in the mix.
+  in the script's order, and nothing the script does not say. Each line plays in the shot of the person who
+  says it, or runs over the next shot or the one before where you split that cut on purpose (section 4).
+  A line heard anywhere else, or twice, means a sound has lost its place in the mix.
 - **Look at the mouths while the lines play.** `sample_video` with a region round the mouth, at each line's
-  words and in the silences between them. A mouth that moves with nothing heard and a line heard over a shut
-  mouth are the same fault.
+  words and in the silences between them, wherever the speaker's own face is on screen. A speaker's mouth
+  that moves with nothing heard, and the speaker's own shut mouth on screen while their line plays, are the
+  same fault. A listener's still face under the end of a split line is not.
 - **Measure the room shot by shot.** The quiet between lines should stay within about 3 dB from shot to shot.
   A song that reaches its own ending, or a bed that stops, drops the room under the talk. Bring the next song
   in under the ending, as the DJ would.

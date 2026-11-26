@@ -52,7 +52,9 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // v12: keep where a watcher looks for someone, within a turn of the head, and show what they see through
     // their eyes (the owner's notes, 2026-11-26: Ade turned left in his close shots while every view of her
     // table looked over his shoulder from behind him).
-    version: 12,
+    // v13: let the body play a mocking line word by word while the mouth keeps speaking (the owner, 2026-11-26,
+    // on shot 20: the body movement "enhanced the mocking making this feel more human").
+    version: 13,
     title: "Continuity across cuts",
     when: "before you plan, review or change a shot beside one that has a take, and before you review a cut",
     bodyPath: "continuity-across-cuts.md",
@@ -90,7 +92,8 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // crossed a cut, the room changed at every cut, and five re-read lines sat 60 to 120 ms off the lips).
     // v4: watch and listen before showing a cut: every line in its own shot against the script, the mouths, the
     // room's level shot by shot, and each version made from the last one accepted (the owner, 2026-11-26: a cut
-    // sent with shots 19 and 20 silent, their lines over shot 9, and the previous day's sound notes undone).
+    // sent with shots 19 and 20 silent, their lines over shot 9, and the previous day's sound notes undone), and
+    // a room tone that never repeats (the same day: a 6 s crowd clip looped nine times, "the same laughing").
     id: "sound-and-pace",
     version: 4,
     title: "Sound and pace in the cut",

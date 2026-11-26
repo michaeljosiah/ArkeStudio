@@ -60,6 +60,12 @@ Check each of these in the last frames of the shot going out and the first frame
   "mock-solemn" and "sits back grinning" after it came back panned to the dance floor, Tunde smirking with his
   mouth shut for three seconds of words, then holding a grin through the last three. The owner heard the line
   and saw no lips.
+- **Let the body play the line, word by word.** A line that mocks, imitates or teases lands when the body acts
+  it on its words while the mouth keeps speaking. Tie each movement to the words it goes with. A mood word
+  alone ("mock-solemn") gave a still face and a shut mouth. On the film's shot 20, Tunde quotes Ade. On the
+  quoted words he "sits up straight and makes his voice flat and formal, doing Ade". On the punchline he
+  "leans in a little towards Ade". Only after the last word do his eyebrows go up. The owner: the body
+  movement "enhanced the mocking making this feel more human".
 - **Move the camera as the production does.** Unless the production's look says otherwise, the camera is
   handheld at eye level: it breathes, drifts a little, and eases a few centimetres closer on the beat that
   matters. To stop a model moving the camera on its own, name what it must not do ("no orbit, no zoom, no
