@@ -1,7 +1,9 @@
-import { applyTimelineCommands, clipSoundFile, clipSourceInSec, framesToSeconds, isMatchLoudnessCommand, isSoundGateCommand, migrateLegacyCut,
-  needsSoundMeasure, seedFirstPictureTimeline, soundGateFromLevels, soundGateProblem, sourceLengthFramesFor, SOUND_GATE, TimelineOperationRefused,
-  type ModelEditorRequest, type ProductionBundle, type ProductionTimeline, type SoundGate, type TimelineClip, type TimelineClipCommand, type TimelineCommand,
-  type TimelineTrack } from "@arke-studio/contracts";
+import { randomInt } from "node:crypto";
+import { applyTimelineCommands, clipSoundFile, clipSourceInSec, framesToSeconds, isLayRoomCommand, isMatchLoudnessCommand, isSoundGateCommand, migrateLegacyCut,
+  needsSoundMeasure, resolveProductionArtifact, roomNeedsMeasure, roomSourceWindow, seedFirstPictureTimeline, soundGateFromLevels, soundGateProblem,
+  sourceLengthFramesFor, SOUND_GATE, TimelineOperationRefused,
+  type ModelEditorRequest, type ProductionBundle, type ProductionTimeline, type RoomSource, type SoundGate, type TimelineClip, type TimelineClipCommand,
+  type TimelineCommand, type TimelineTrack } from "@arke-studio/contracts";
 import type { AgentMediaTools } from "../media/agent-media-tools.js";
 import { stepLevels } from "../media/song-map.js";
 import { agentMediaSource } from "../world-chat/media-inspection.js";
@@ -12,9 +14,10 @@ import { EditorRequestRefused } from "./editor-requests.js";
 import { TimelineCommandRefused } from "./timeline.js";
 
 /*
- * The two timeline commands that need a sound measured before anything pure can apply them
- * (SPEC-038 R-58, R-59): a gate, kept as the stretches where a clip's sound stands over its own
- * floor, and a clip set to a loudness, applied as the gain that reaches the figure.
+ * The timeline commands that need a sound measured before anything pure can apply them
+ * (SPEC-038 R-58, R-59, R-63): a gate, kept as the stretches where a clip's sound stands over its
+ * own floor; a clip set to a loudness, applied as the gain that reaches the figure; and a room,
+ * laid from beds whose length and loudness the command carries from here on.
  *
  * They are measured here, before the write and outside the world's write gate, and never inside
  * it: decoding a take is seconds of FFmpeg, and the gate holds every other write in the world
@@ -67,6 +70,31 @@ async function soundOf<T>(store: WorldStore, production: ProductionBundle, clip:
   }
 }
 
+/**
+ * One of a room's beds, measured (R-63): where the stretch it is cut from ends, held to the file's
+ * own length, and how loud that stretch plays in a film. The laying is arithmetic on these two.
+ */
+async function measureRoomBed(store: WorldStore, production: ProductionBundle, bed: RoomSource, tools: SoundTools, signal: AbortSignal): Promise<RoomSource> {
+  const resolved = resolveProductionArtifact(store.getBundle().artifacts, bed.artifactId, production.meta.id);
+  if (!resolved.ok) return refuse(`${bed.label} cites ${resolved.reason}`);
+  try {
+    const file = await agentMediaSource(store, { kind: "artifact", id: bed.artifactId });
+    return await withContainedProductionMedia(store.dir, file.path, file.expectedHash, signal, async snapshot => {
+      const inventory = await tools.probe(snapshot.path, signal), audio = inventory.streams.find(stream => stream.kind === "audio");
+      if (!audio || inventory.durationSec === null || !tools.loudness) return refuse(`${bed.label} has no sound a room can be cut from`);
+      const window = roomSourceWindow(bed, inventory.durationSec);
+      if (!window.ok) return refuse(window.reason);
+      const measured = (await tools.loudness(snapshot.path, audio, window.inSec, window.outSec, signal, "film")).integratedLufs;
+      if (measured === null) return refuse(`${bed.label} is too quiet to measure a loudness from`);
+      // Down to the millisecond and never up: a piece cut to the bed's last frame is still inside the file.
+      return { ...bed, outSec: Math.floor(window.outSec * 1000) / 1000, measuredLufs: measured };
+    });
+  } catch (error) {
+    if (error instanceof RetrievalError || error instanceof WorldReferenceError) return refuse(`${bed.label}'s sound file is missing or has changed, so it cannot be measured`);
+    throw error;
+  }
+}
+
 /** Where a sound stands over its own floor, across its whole file, so a clip trimmed wider later is still gated by what was measured. */
 export async function measureSoundGate(tools: SoundTools, path: string, signal: AbortSignal): Promise<SoundGate> {
   const inventory = await tools.probe(path, signal), audio = inventory.streams.find(stream => stream.kind === "audio"), seconds = inventory.durationSec;
@@ -111,7 +139,7 @@ export async function measureTimelineSound(store: WorldStore, productionId: stri
   if (!commands.some(needsSoundMeasure)) return [...commands];
   const production = store.getBundle().productions.find(candidate => candidate.meta.id === productionId);
   if (!production) return refuse(`production ${productionId} is not in this world`);
-  if (!tools?.monoAudio || !tools.loudness) return refuse("Sound cannot be measured on this host, so a gate or a loudness cannot be set here");
+  if (!tools?.monoAudio || !tools.loudness) return refuse("Sound cannot be measured on this host, so a gate, a loudness or a room cannot be set here");
   const artifacts = store.getBundle().artifacts, base = currentTimeline(store, production), measured: TimelineCommand[] = [];
   // A clip placed earlier in the same batch is found by applying what comes before it, on a copy nothing keeps.
   const before = (): ProductionTimeline => {
@@ -141,6 +169,12 @@ export async function measureTimelineSound(store: WorldStore, productionId: stri
         return loudnessGain(tools, file.path, from, to, command.lufs, track, clip.source.label, signal);
       });
       measured.push({ kind: "set-clip-gain", clipId: command.clipId, gainDb });
+    } else if (isLayRoomCommand(command) && roomNeedsMeasure(command)) {
+      // Every bed again, whatever the command came with: a room is laid from what this host heard, not from figures it was handed.
+      const sources: RoomSource[] = [];
+      for (const bed of command.sources) sources.push(await measureRoomBed(store, production, bed, tools, signal));
+      // The seed is settled here and kept, so the card, Accept and a replay all lay the same room.
+      measured.push({ ...command, sources, seed: command.seed ?? randomInt(0x7fffffff) });
     } else measured.push(command);
   }
   return measured;

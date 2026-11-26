@@ -486,6 +486,15 @@ export function refuseUnrenderablePlacements(
       if (source?.kind === "text") refuse("Text has no speed");
       if (source?.kind === "artifact" && artifacts.some(artifact => artifact.id === source.artifactId && artifact.kind !== "video")) refuse("Speed and direction need a video");
     }
+    // A room's beds are held to what a placed sound clip is (SPEC-038 R-64): a file this production may use, that carries sound.
+    if (command.kind === "lay-room") {
+      for (const bed of command.sources) {
+        const resolved = resolveProductionArtifact(artifacts, bed.artifactId, production.meta.id);
+        if (!resolved.ok) refuse(`${bed.label} cites ${resolved.reason}`);
+        else if (!(resolved.artifact.kind === "audio" || (resolved.artifact.kind === "video" && resolved.artifact.mediaInfo?.hasAudio === true))) refuse(`${bed.label} cites ${resolved.artifact.file}, which is not known to carry sound`);
+      }
+      for (const id of command.trackIds) if (!kinds.has(id)) kinds.set(id, "ambience");
+    }
     if (command.kind !== "place") continue;
     sources.set(command.clip.id, command.clip.source);
     const kind = kinds.get(command.trackId);

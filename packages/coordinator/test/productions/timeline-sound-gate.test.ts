@@ -157,7 +157,7 @@ test("a clip set to a loudness becomes the gain that reaches it, measured over t
   await refused([loud(-20, "cl_still")], d.tools, "Choose a clip on an audio track");
   await refused([{ kind: "sound-gate", clipId: "cl_still", on: true }], d.tools, "Choose a clip on an audio track");
   await refused([loud(-20, "cl_gone")], d.tools, "cl_gone is not on the timeline");
-  await refused([loud(-20)], undefined, "Sound cannot be measured on this host, so a gate or a loudness cannot be set here");
+  await refused([loud(-20)], undefined, "Sound cannot be measured on this host, so a gate, a loudness or a room cannot be set here");
   await refused([{ kind: "sound-gate", clipId: "cl_line", on: true }], { probe: d.tools.probe }, /^Sound cannot be measured on this host/);
 
   // A clip placed earlier in the same batch is found, and what was not measured is never applied.

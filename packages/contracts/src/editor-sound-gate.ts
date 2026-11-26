@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isLayRoomCommand, roomNeedsMeasure } from "./editor-room.js";
 import type { TimelineClip, TimelineClipId, TimelineTrack } from "./timeline.js";
 
 const clipId = z.string().regex(/^cl_[A-Za-z0-9][A-Za-z0-9_-]*$/) as z.ZodType<TimelineClipId>;
@@ -81,7 +82,7 @@ export const isMatchLoudnessCommand = (value: { kind: string }): value is MatchL
 
 /** A command the coordinator has to measure sound for before anything pure can apply it. */
 export const needsSoundMeasure = (command: { kind: string }): boolean =>
-  isMatchLoudnessCommand(command) || isSoundGateCommand(command) && command.on && command.gate === undefined;
+  isMatchLoudnessCommand(command) || isSoundGateCommand(command) && command.on && command.gate === undefined || isLayRoomCommand(command) && roomNeedsMeasure(command);
 
 /** Why a clip cannot be gated, or null when it can: a sound clip, of a file a gate can be measured from. */
 export function soundGateProblem(trackKind: string, clip: Pick<TimelineClip, "source">): string | null {

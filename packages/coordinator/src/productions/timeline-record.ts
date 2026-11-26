@@ -106,6 +106,21 @@ export function carriesSoundGate(raw: string): boolean {
 }
 
 /**
+ * SPEC-038 R-64: a room asked for in a request. What a laid room leaves on a timeline is clips and
+ * tracks an older build reads; the command itself is a kind that build's request reader refuses,
+ * and a request holds it whole, with its beds as they were measured, until a person decides.
+ */
+export function carriesLaidRoom(raw: string): boolean {
+  const carries = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.some(carries);
+    if (!value || typeof value !== "object") return false;
+    const row = value as Record<string, unknown>;
+    return row.kind === "lay-room" || Object.values(row).some(carries);
+  };
+  try { return carries(JSON.parse(raw)); } catch { return false; }
+}
+
+/**
  * SPEC-038 R-45..R-50: a picture look, on the record or in Undo or Redo, where it is the entry's
  * before and after. Both are strict fields an older Cut refuses to read. Its own field name is
  * what lets this be read from the raw record: a title's source has a `look` of its own, which

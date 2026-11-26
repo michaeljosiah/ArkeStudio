@@ -27,8 +27,17 @@ import {
   soundFadeAt,
   soundFadeWindows,
   sourceLengthFramesFor,
+  ROOM,
   SOUND_GATE,
   SoundGateSchema,
+  layRoomSteps,
+  needsSoundMeasure,
+  previewEditorRequest,
+  roomFrames,
+  roomLayerLufs,
+  roomNeedsMeasure,
+  roomPieces,
+  roomSourceWindow,
   soundGateAt,
   soundGateFromLevels,
   trackEndFrame,
@@ -39,6 +48,7 @@ import {
   type ProductionTimeline,
   type RenderArtifact,
   type RenderPlan,
+  type RoomPiece,
   type Scene,
   type TimelineClip,
   type TimelineClipCommand,
@@ -910,5 +920,173 @@ describe("a gate on a sound clip, and a clip set to a loudness (SPEC-038 R-57..R
     assert.equal(cut.gate!.length, 2);
     for (const [index, [from, to]] of ([[-0.2, 1.3], [2.8, 4.8]] as const).entries()) { near(cut.gate![index]!.startSec, from, "a kept stretch's start"); near(cut.gate![index]!.endSec, to, "a kept stretch's end"); }
     for (const offset of [0, 0.5, 1.3, 1.36, 2, 2.795, 3.5]) near(audioLevelAt(part, cut, offset), audioLevelAt(plan, song, 3.2 + offset), `level ${offset}s into the part`);
+  });
+});
+
+/*
+ * A room laid from pieces (2026-11-26). One made bed looped under a scene brings every laugh back
+ * on the same beat, and the owner heard it. The film's room was cut from several beds outside the
+ * Studio: pieces in a shuffled order, none twice while another was unused, crossing at even power,
+ * and a second layer under the first with its joins somewhere else. Here that is one command.
+ */
+describe("a room laid from pieces (SPEC-038 R-61..R-64)", () => {
+  const FPS = 25, { cross, least } = roomFrames(FPS), OFFSET = Math.round(ROOM.secondLayerOffsetSec * FPS);
+  const BEDS = [{ inSec: 0, outSec: 22 }, { inSec: 0, outSec: 30 }, { inSec: 2, outSec: 26 }, { inSec: 0, outSec: 18.4 }];
+  const AMPLE = [{ inSec: 0, outSec: 90 }, { inSec: 0, outSec: 90 }, { inSec: 5, outSec: 95 }, { inSec: 0, outSec: 90 }];
+  const endOf = (piece: RoomPiece) => piece.startFrame + piece.durationFrames;
+  const layerOf = (pieces: RoomPiece[], layer: number) => pieces.filter((piece) => piece.layer === layer);
+  const clipsOf = (timeline: ProductionTimeline, prefix: string): Array<TimelineClip & { trackId: string }> =>
+    timeline.tracks.flatMap((track) => track.clips.filter((clip) => clip.id.startsWith(prefix)).map((clip) => ({ ...clip, trackId: track.id })))
+      .sort((a, b) => Number(a.id.slice(prefix.length)) - Number(b.id.slice(prefix.length)));
+  /** A room as the coordinator hands it on: each bed's length and loudness measured, and its seed settled. */
+  const room = (over: Record<string, unknown> = {}) => ({ kind: "lay-room" as const, clipId: "cl_room" as const, trackIds: ["tr_room1", "tr_room2"] as [`tr_${string}`, `tr_${string}`],
+    sources: [{ artifactId: BELLS, label: "Bells", outSec: 20, measuredLufs: -25 }, { artifactId: SONG, label: "Crowd", inSec: 10, outSec: 70, measuredLufs: -18.4 }],
+    startFrame: 25, durationFrames: 30 * FPS, lufs: -33, seed: 11, ...over }) as TimelineClipCommand;
+
+  it("covers the room to the frame on every layer, crosses each join exactly, and cuts no clip shorter than its own two fades", () => {
+    assert.deepEqual([cross, least], [30, 65], "1.2 s at 25 frames a second, and two of them and a breath");
+    let laid = 0;
+    for (const seed of [1, 7, 20261126]) for (let total = least; total <= 70 * FPS; total += 37) for (const count of [1, 2] as const) {
+      const pieces = roomPieces({ sources: BEDS, durationFrames: total, frameRate: FPS, layers: count, seed }), said = `seed ${seed}, ${total} frames, ${count} layer(s)`;
+      for (const layer of [0, 1]) {
+        const row = layerOf(pieces, layer), from = layer === 0 ? 0 : OFFSET;
+        if (layer === 1 && (count === 1 || total - OFFSET < least)) { assert.equal(row.length, 0, `${said}: no second layer`); continue; }
+        assert.equal(row[0]!.startFrame, from, `${said}: layer ${layer} starts`);
+        assert.equal(endOf(row.at(-1)!), total, `${said}: layer ${layer} ends on the room's last frame`);
+        row.forEach((piece, index) => {
+          assert.equal(piece.row, index % 2, `${said}: pieces alternate between a layer's two tracks`);
+          assert.ok(piece.durationFrames >= least, `${said}: piece ${index} is ${piece.durationFrames} frames`);
+          if (index > 0) assert.equal(piece.startFrame, endOf(row[index - 1]!) - cross, `${said}: piece ${index} starts one join before the last ends`);
+          if (index > 1) assert.ok(piece.startFrame >= endOf(row[index - 2]!), `${said}: two pieces on one track never overlap`);
+          const bed = BEDS[piece.source]!;
+          assert.ok(piece.sourceInFrames / FPS >= bed.inSec - 1e-9 && (piece.sourceInFrames + piece.durationFrames) / FPS <= bed.outSec + 1e-9, `${said}: piece ${index} is cut from inside its bed`);
+        });
+        laid += row.length;
+      }
+    }
+    assert.ok(laid > 1500, "a few thousand pieces were held to it");
+    assert.deepEqual(roomPieces({ sources: [{ inSec: 0, outSec: 3 }], durationFrames: 500, frameRate: FPS, layers: 1, seed: 1 }), [], "a bed shorter than a piece gives none");
+  });
+
+  it("plays nothing twice while anything is unplayed, keeps a bed off both layers at once, and replays from its seed", () => {
+    const pieces = roomPieces({ sources: AMPLE, durationFrames: 60 * FPS, frameRate: FPS, layers: 2, seed: 42 });
+    assert.equal(new Set(pieces.map((piece) => `${piece.source}@${piece.sourceInFrames}`)).size, pieces.length, "with beds to spare, every piece is a different stretch");
+    layerOf(pieces, 0).forEach((piece, index, row) => { if (index > 0) assert.notEqual(piece.source, row[index - 1]!.source, "a piece's neighbour is from another bed"); });
+    // On the second layer the first rule is the other layer's: a bed is never on both at once, and a neighbour from the same bed is taken before that.
+    for (const upper of layerOf(pieces, 1)) for (const lower of layerOf(pieces, 0)) {
+      if (upper.startFrame < endOf(lower) && lower.startFrame < endOf(upper)) assert.notEqual(upper.source, lower.source, "the two layers never play one bed at the same time");
+    }
+    // One short bed under a long room has to come round, and comes round evenly: no piece a third time before every piece a second.
+    const scarce = roomPieces({ sources: [{ inSec: 0, outSec: 14 }], durationFrames: 90 * FPS, frameRate: FPS, layers: 1, seed: 3 });
+    const uses = new Map<number, number>();
+    for (const piece of scarce) uses.set(piece.sourceInFrames, (uses.get(piece.sourceInFrames) ?? 0) + 1);
+    assert.ok(Math.max(...uses.values()) - Math.min(...uses.values()) <= 1, JSON.stringify([...uses]));
+    assert.deepEqual(roomPieces({ sources: AMPLE, durationFrames: 60 * FPS, frameRate: FPS, layers: 2, seed: 42 }), pieces, "the same seed lays the same room");
+    assert.notDeepEqual(roomPieces({ sources: AMPLE, durationFrames: 60 * FPS, frameRate: FPS, layers: 2, seed: 43 }), pieces, "another seed lays another");
+    // Each layer's loudness, so the two together are the room's: they add as powers.
+    const [first, second] = roomLayerLufs(-33, 2);
+    assert.ok(Math.abs(10 * Math.log10(Math.pow(10, first / 10) + Math.pow(10, second! / 10)) + 33) < 1e-9 && Math.abs(first - second! - 4) < 1e-9);
+    assert.deepEqual(roomLayerLufs(-33, 1), [-33]);
+    assert.deepEqual(roomSourceWindow({ label: "Crowd", inSec: 10 }, 70), { ok: true, inSec: 10, outSec: 70 });
+    assert.deepEqual(roomSourceWindow({ label: "Crowd", outSec: 900 }, 70), { ok: true, inSec: 0, outSec: 70 }, "held to the file's own length");
+    assert.deepEqual(roomSourceWindow({ label: "Crowd" }, 4000), { ok: true, inSec: 0, outSec: 600 }, "and to ten minutes of it");
+    assert.deepEqual(roomSourceWindow({ label: "Crowd", inSec: 67 }, 70), { ok: false, reason: "Crowd has 3 s to cut from, and a room's piece is at least 4.5 s" });
+  });
+
+  it("lays as tracks and clips: held Ambience tracks where there are none, each piece at its bed's gain with an even-power fade at each end, and one Undo", () => {
+    const laid = valid(apply(mixed(), room())), clips = clipsOf(laid, "cl_room-");
+    const made = laid.tracks.filter((track) => track.id.startsWith("tr_room"));
+    assert.deepEqual(made.map((track) => [track.id, track.kind, track.name, track.ducks]), [["tr_room1", "ambience", "Room 1", false], ["tr_room2", "ambience", "Room 2", false]]);
+    assert.ok(clips.length >= 4, `${clips.length} pieces`);
+    assert.deepEqual([clips[0]!.startFrame, clips.at(-1)!.startFrame + clips.at(-1)!.durationFrames], [25, 25 + 30 * FPS], "from the frame asked for, for as long as asked");
+    clips.forEach((clip, index) => {
+      assert.equal(clip.trackId, index % 2 ? "tr_room2" : "tr_room1");
+      assert.deepEqual([clip.role, clip.soundFade], ["ambience", { inFrames: cross, outFrames: cross, power: true }]);
+      const source = clip.source.kind === "artifact" ? clip.source : assert.fail("a bed is an artifact");
+      // -33 less what the bed measures: -25 for the bells, -18.4 for the crowd.
+      assert.deepEqual([source.label, clip.gainDb], source.artifactId === BELLS ? ["Bells", -8] : ["Crowd", -14.6]);
+      if (source.artifactId === SONG) assert.ok(clip.sourceInFrames >= 10 * FPS && clip.sourceInFrames + clip.durationFrames <= 70 * FPS, "cut from the stretch named");
+    });
+    // The command is one entry: Undo takes every piece and both tracks, and Redo lays the same room.
+    const undone = undoTimelineHistory(laid);
+    assert.deepEqual(undone.tracks, mixed().tracks);
+    assert.deepEqual(redoTimelineHistory(undone).tracks, laid.tracks);
+    assert.equal(describeTimelineCommand(room()), "Lay a room");
+
+    // Four tracks lay a second layer 4 dB under the first, the two together at the room's figure.
+    const two = valid(apply(mixed(), room({ trackIds: ["tr_room1", "tr_room2", "tr_room3", "tr_room4"] })));
+    const upper = clipsOf(two, "cl_room-").filter((clip) => clip.trackId === "tr_room3" || clip.trackId === "tr_room4");
+    assert.ok(upper.length >= 3 && upper[0]!.startFrame === 25 + OFFSET, "the second layer comes in after the first, so its joins fall between the first's");
+    for (const clip of upper) assert.equal(clip.gainDb, clip.source.kind === "artifact" && clip.source.artifactId === BELLS ? -13.5 : -20.1, "-33, less 1.5 for the two together, less 4, less what the bed measures");
+    assert.deepEqual(two.tracks.filter((track) => track.id.startsWith("tr_room")).map((track) => track.name), ["Room 1", "Room 2", "Room 3", "Room 4"]);
+
+    // A track that is there is used as it is: its level is counted in each piece's gain, and nothing about it is changed.
+    const kept = valid(apply(mixed(), { kind: "add-track", trackId: "tr_air", trackKind: "ambience", name: "Air" }, { kind: "set-track", trackId: "tr_air", levelDb: -6 }, room({ trackIds: ["tr_air", "tr_room2"] })));
+    const air = kept.tracks.find((track) => track.id === "tr_air")!;
+    assert.deepEqual([air.name, air.levelDb, "ducks" in air], ["Air", -6, false]);
+    for (const clip of air.clips) assert.equal(clip.gainDb, clip.source.kind === "artifact" && clip.source.artifactId === BELLS ? -2 : -8.6);
+    // A later room goes on the same tracks, and one that would overlap the first is refused whole.
+    const later = valid(apply(laid, room({ clipId: "cl_hall", startFrame: 25 + 30 * FPS + 100, seed: 5 })));
+    assert.equal(later.tracks.length, laid.tracks.length, "no track is made twice");
+    assert.ok(clipsOf(later, "cl_hall-").length >= 4);
+    assert.throws(() => apply(laid, room({ clipId: "cl_hall", startFrame: 200 })), /overlap/);
+  });
+
+  it("is refused in words where it cannot be laid, and never laid from beds nobody measured", () => {
+    const refused = (over: Record<string, unknown>, reason: RegExp) => assert.throws(() => apply(mixed(), room(over)), (error: unknown) => error instanceof TimelineOperationRefused && reason.test(error.reason), String(reason));
+    const unmeasured = room({ sources: [{ artifactId: BELLS, label: "Bells" }] }), unseeded = room({ seed: undefined });
+    for (const command of [unmeasured, unseeded]) {
+      assert.equal(needsSoundMeasure(command), true);
+      assert.throws(() => apply(mixed(), command), /A room is laid from its beds as they were measured; this host did not measure them/);
+    }
+    assert.deepEqual([needsSoundMeasure(room()), room().kind === "lay-room" && roomNeedsMeasure(room() as never)], [false, false]);
+    refused({ trackIds: ["tr_picture", "tr_room2"] }, /^Picture is not an audio track, and a room is sound$/);
+    refused({ trackIds: ["tr_room1", "tr_room1"] }, /^A room's tracks are different tracks: pieces that cross cannot share one$/);
+    refused({ sources: [{ artifactId: BELLS, label: "Bells", outSec: 20, measuredLufs: -25 }, { artifactId: BELLS, label: "Bells again", outSec: 20, measuredLufs: -25 }] }, /^A room names each bed once$/);
+    refused({ durationFrames: 40 }, /^A room is at least 2\.6 s long: a piece fades in and out over 1\.2 s each$/);
+    refused({ sources: [{ artifactId: BELLS, label: "Bells", outSec: 3, measuredLufs: -25 }] }, /^Bells has 3 s to cut from, and a room's piece is at least 4\.5 s$/);
+    refused({ sources: [{ artifactId: BELLS, label: "Bells", outSec: 20, measuredLufs: -60 }] }, /^Bells measures -60 LUFS: a room at -33 LUFS would take a gain of \+27 dB, and a clip's gain is -60 to \+12$/);
+    refused({ durationFrames: 3600 * FPS }, /^A room this long takes more than the 240 pieces one command lays; lay it in parts$/);
+    // Refused whole: a room that fails on its last piece leaves no track behind it.
+    assert.throws(() => apply(mixed(), { kind: "add-track", trackId: "tr_room2", trackKind: "ambience", name: "Air" },
+      { kind: "place", trackId: "tr_room2", clip: { id: "cl_there", startFrame: 300, durationFrames: 50, sourceInFrames: 0, source: { kind: "artifact", artifactId: BELLS, label: "Bells" } } }, room()), /overlap/);
+    assert.equal(layRoomSteps(mixed().tracks, FPS, room() as never).filter((step) => step.kind === "add-track").length, 2);
+  });
+
+  it("Arke may ask for one, its card names every piece, and it plays held under speech at one level through each join", () => {
+    const asked = (command: unknown) => ModelEditorRequestSchema.safeParse({ summary: "Lay the club's room under the scene", commands: [command] }).success;
+    const bare = { kind: "lay-room", clipId: "cl_room", trackIds: ["tr_room1", "tr_room2"], sources: [{ artifactId: BELLS, label: "Bells" }], startFrame: 0, durationFrames: 750, lufs: -33 };
+    assert.deepEqual([asked(bare), asked({ ...bare, trackIds: ["tr_room1", "tr_room2", "tr_room3"] }), asked({ ...bare, sources: [] }), asked({ ...bare, lufs: -3 }), asked({ ...bare, sources: [{ artifactId: BELLS }] })],
+      [true, false, false, false, false]);
+    assert.match(TIMELINE_EDITOR_COMMAND_GUIDE, /lay-room \(clipId, trackIds, sources, startFrame, durationFrames, lufs, seed\)/);
+    assert.match(TIMELINE_EDITOR_COMMAND_GUIDE, /lay-room lays one room under a scene from pieces of several beds, so nothing in it comes round again/);
+    assert.match(TIMELINE_EDITOR_COMMAND_GUIDE, /leave measuredLufs and seed out, the beds are measured when the request is made/);
+
+    assert.deepEqual(previewEditorRequest(mixed(), [bare as never]), { ok: false, reason: "A room is laid from its beds as they were measured; this host did not measure them" });
+    // A film long enough to hold the room: the story's 7.5 s of picture, then a still to 39.5 s.
+    const film = valid(apply(mixed(), { kind: "place", trackId: "tr_picture", clip: { id: "cl_plate", startFrame: 188, durationFrames: 800, sourceInFrames: 0, source: { kind: "artifact", artifactId: PLATE, label: "Plate" } } }));
+    const preview = previewEditorRequest(film, [room()]);
+    if (!preview.ok) assert.fail(preview.reason);
+    const pieces = clipsOf(preview.timeline, "cl_room-");
+    assert.deepEqual(preview.digest.tracks, ["adds tr_room1", "adds tr_room2"]);
+    assert.equal(preview.digest.added.length, pieces.length);
+    assert.match(preview.digest.effects[0]!.label, /^Add (Bells|Crowd) \(cl_room-\d+\)$/);
+    assert.match(preview.digest.effects.map((effect) => effect.detail ?? "").join("\n"), /not present -> tr_room1, frames 25-\d+, source \d+-\d+, -(8|14\.6) dB, sound fade in 30 out 30 even-power/);
+    assert.deepEqual(preview.digest.range, { startFrame: 25, endFrame: 25 + 30 * FPS });
+
+    // The room in the film's plan: under the line it is at its own gain, and across a join the two pieces' powers add to one.
+    const result = buildRenderPlan({ production: production(), artifacts, timeline: { status: "ready", timeline: preview.timeline }, scope: { kind: "production" }, preset: "review-cut" });
+    if (!result.ok) assert.fail(result.reason);
+    const items = pieces.map((clip) => result.plan.audio.find((item) => item.clipId === clip.id)!);
+    assert.ok(items.every((item) => item.ducks === false && item.role === "ambience"));
+    assert.equal(audioGainDbAt(result.plan, items[0]!, 3), pieces[0]!.gainDb, "the line at 2 s to 4 s does not lower it");
+    for (let index = 1; index < items.length; index++) {
+      const from = items[index]!.startSec, out = items[index - 1]!, into = items[index]!;
+      assert.ok(Math.abs(out.endSec - from - ROOM.crossSec) < 1e-9, "a join is as long as its fades");
+      for (const sec of [from + 0.05, from + 0.3, from + 0.6, from + 0.9, from + 1.15]) {
+        const power = Math.pow(soundFadeAt(out, sec), 2) + Math.pow(soundFadeAt(into, sec), 2);
+        assert.ok(Math.abs(power - 1) < 1e-9, `the join at ${from}s holds ${power} of the room's power at ${sec}s`);
+      }
+    }
   });
 });
