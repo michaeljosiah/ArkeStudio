@@ -85,18 +85,37 @@ function read({ production, timeline, artifacts = [] }: CutChecksInput): CutChec
   const sound = audibleTracks(timeline).filter((track) => AUDIO_TRACK_KINDS.has(track.kind)).flatMap((track) => track.clips.map((clip) => (
     { clip, role: effectiveAudioRole(track, clip), start: clip.startFrame, end: clip.startFrame + clip.durationFrames })));
   const look = production.meta.look, items: CutCheck[] = [];
+  /**
+   * What a clip plays, on its file's own clock, as the render resolves it: the pass a segment is a
+   * range of, and where in it the clip starts once the segment's in-point, a placed take's offset
+   * or a shot's chosen trim, and the clip's own are added. Two clips are the same sound, or one
+   * stretch of picture played on, only when they agree here; by take id and clip in-point alone,
+   * two halves of one take read as a repeat and two segments replaying one stretch of a pass did not.
+   */
+  const sourceAt = (clip: TimelineClip): { key: string; fromSec: number } | null => {
+    const source = clip.source;
+    if (source.kind === "artifact") return { key: `artifact:${source.artifactId}`, fromSec: clip.sourceInFrames / rate };
+    if (source.kind !== "take" && source.kind !== "shot") return null;
+    const take = takes.get(source.kind === "take" ? source.takeId : production.selections[source.shotId]?.acceptedTakeId ?? "");
+    if (!take) return null;
+    const own = source.kind === "take" ? source.offsetSec ?? 0 : production.selections[source.shotId]?.trimInSec ?? 0;
+    return { key: `take:${take.segment?.passTakeId ?? take.id}`, fromSec: (take.segment?.inSec ?? 0) + own + clip.sourceInFrames / rate };
+  };
 
   /*
    * Lines. A line belongs under the picture of the shot it was made for. One lying wholly under
    * another shot's picture has lost its place: that is how a film was shown with a line over the
    * wrong face. Running over the next shot, or starting under the one before, is a split cut and
    * a choice, unless the look says the film is cut straight. A line tied to no shot cannot be
-   * placed against anything, and says so rather than passing.
+   * placed against anything, and says so rather than passing. A line under no picture at all plays
+   * over black; under a title or a placed file alone it is not judged, and is not counted as
+   * under its shot either.
    */
   const lines = sound.filter((entry) => entry.role === "dialogue");
   if (lines.length > 0) {
     const astray: Array<{ clipId: string; says: string }> = [], untied: string[] = [];
     const slack = look?.cutting?.splitCuts === false ? Math.round(STRAIGHT_CUT_SLACK_SEC * rate) : null;
+    let placed = 0;
     for (const line of lines) {
       const own = shotsOf(line.clip);
       if (own.length === 0) { untied.push(line.clip.id); continue; }
@@ -105,14 +124,16 @@ function read({ production, timeline, artifacts = [] }: CutChecksInput): CutChec
       const other = under.find((entry) => entry.shotId !== null && !own.includes(entry.shotId));
       if (onOwn.length === 0) {
         if (other) astray.push({ clipId: line.clip.id, says: `shot ${numberOf(own[0]!)}'s under shot ${numberOf(other.shotId!)}` });
-      } else if (slack !== null) {
-        const from = Math.min(...onOwn.map((entry) => entry.start)), to = Math.max(...onOwn.map((entry) => entry.end));
-        if (from - line.start > slack || line.end - to > slack) astray.push({ clipId: line.clip.id, says: `shot ${numberOf(own[0]!)}'s runs past its shot` });
+        else if (under.length === 0) astray.push({ clipId: line.clip.id, says: `shot ${numberOf(own[0]!)}'s under no picture` });
+        continue;
       }
+      const from = Math.min(...onOwn.map((entry) => entry.start)), to = Math.max(...onOwn.map((entry) => entry.end));
+      if (slack !== null && (from - line.start > slack || line.end - to > slack)) astray.push({ clipId: line.clip.id, says: `shot ${numberOf(own[0]!)}'s runs past its shot` });
+      else placed++;
     }
-    items.push(astray.length > 0 ? { id: "lines", result: "fix", says: `${astray[0]!.says}${more(astray.length)}`, clipIds: astray.map((line) => line.clipId) }
-      : untied.length > 0 ? { id: "lines", result: "fix", says: `${untied.length} tied to no shot`, clipIds: untied }
-      : { id: "lines", result: "pass", says: `${lines.length} under their shots` });
+    if (astray.length > 0) items.push({ id: "lines", result: "fix", says: `${astray[0]!.says}${more(astray.length)}`, clipIds: astray.map((line) => line.clipId) });
+    else if (untied.length > 0) items.push({ id: "lines", result: "fix", says: `${untied.length} tied to no shot`, clipIds: untied });
+    else if (placed > 0) items.push({ id: "lines", result: "pass", says: `${placed} under their shots` });
   }
 
   /*
@@ -137,8 +158,9 @@ function read({ production, timeline, artifacts = [] }: CutChecksInput): CutChec
         scenes.set(id, [...(scenes.get(id) ?? []), { start: entry.start, end: entry.end }]);
       }
       for (const shots of scenes.values()) {
-        // A scene cut with no room at all is a choice; one with a room is held to it.
-        if (!shots.some((window) => sounding.some((bed) => bed.start < window.end && bed.end > window.start))) continue;
+        // A scene cut with no room at all is a choice; one with a room is held to it. Asked of the
+        // beds as they were drawn: one whose file ran out before the scene began was still meant for it.
+        if (!shots.some((window) => beds.some((bed) => bed.start < window.end && bed.end > window.start))) continue;
         // Shots that touch are one stretch of the scene: a silence across a cut is one gap, not one a shot.
         const windows: Array<{ start: number; end: number }> = [];
         for (const shot of [...shots].sort((a, b) => a.start - b.start)) {
@@ -157,9 +179,10 @@ function read({ production, timeline, artifacts = [] }: CutChecksInput): CutChec
     }
     const uses = new Map<string, Array<{ from: number; to: number; clip: TimelineClip }>>();
     for (const bed of sounding) {
-      const source = bed.clip.source, key = source.kind === "artifact" ? `artifact:${source.artifactId}` : source.kind === "take" ? `take:${source.takeId}` : null;
-      if (key === null) continue;
-      uses.set(key, [...(uses.get(key) ?? []), { from: bed.clip.sourceInFrames, to: bed.clip.sourceInFrames + (bed.end - bed.start), clip: bed.clip }]);
+      const played = sourceAt(bed.clip);
+      if (played === null) continue;
+      const from = Math.round(played.fromSec * rate);
+      uses.set(played.key, [...(uses.get(played.key) ?? []), { from, to: from + (bed.end - bed.start), clip: bed.clip }]);
     }
     const repeated = [...uses.values()].map((ranges) => {
       const sorted = [...ranges].sort((a, b) => a.from - b.from);
@@ -185,12 +208,6 @@ function read({ production, timeline, artifacts = [] }: CutChecksInput): CutChec
    * ranges of one clip played straight on, which have no cut between them to jump.
    */
   if (production.spine === null && look?.preset !== "music-video") {
-    const mediaAt = (clip: TimelineClip): { key: string; fromSec: number } | null => {
-      const source = clip.source, shotId = source.kind === "shot" ? source.shotId : null;
-      const take = source.kind === "take" ? takes.get(source.takeId) : shotId !== null ? takes.get(production.selections[shotId]?.acceptedTakeId ?? "") : undefined;
-      if (!take) return null;
-      return { key: take.segment?.passTakeId ?? take.id, fromSec: (take.segment?.inSec ?? 0) + (source.kind === "take" ? source.offsetSec ?? 0 : 0) + clip.sourceInFrames / rate };
-    };
     const twice: Array<{ clipId: string; says: string }> = [];
     let judged = 0;
     for (let i = 1; i < picture.length; i++) {
@@ -202,7 +219,7 @@ function read({ production, timeline, artifacts = [] }: CutChecksInput): CutChec
       judged++;
       if (from !== to) continue;
       if (into.at === out.at + 1 && (into.shot.continuity?.openOnPrevious === true || into.shot.continuity?.continuesPrevious === true)) continue;
-      const a = mediaAt(before.clip), b = mediaAt(after.clip);
+      const a = sourceAt(before.clip), b = sourceAt(after.clip);
       if (a !== null && b !== null && a.key === b.key && Math.abs(a.fromSec + before.clip.durationFrames / rate - b.fromSec) <= 2 / rate) continue;
       twice.push({ clipId: after.clip.id, says: `shots ${out.shot.number}, ${into.shot.number}` });
     }

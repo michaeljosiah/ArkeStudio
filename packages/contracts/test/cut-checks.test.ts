@@ -68,6 +68,18 @@ describe("the checks on a cut: lines", () => {
     assert.equal(item(cutChecks({ production: p, timeline: over, artifacts }), "lines")?.result, "pass", "a split cut is a choice unless the look says otherwise");
   });
 
+  it("does not pass a line that plays over black, or count one it cannot judge (codex on PR 3329)", () => {
+    // Shot 2 lifted out of the cut: its line, and shot 1's dragged into the hole, play over no picture.
+    const hole = [shotClip(1, 0), shotClip(3, 240)];
+    const black = timeline(hole, [{ kind: "dialogue", clips: [line("cl_l1", AR(1), 150)] }]);
+    assert.deepEqual(item(cutChecks({ production: p, timeline: black, artifacts }), "lines"), { id: "lines", result: "fix", says: "shot 1's under no picture", clipIds: ["cl_l1"] });
+    // Under a placed file alone a line is not judged: it is not said to be under its shot.
+    const card = { id: "cl_card", startFrame: 120, durationFrames: 120, source: { kind: "artifact", artifactId: AR(3), label: "card.png" } };
+    const mixed = timeline([shotClip(1, 0), card, shotClip(3, 240)], [{ kind: "dialogue", clips: [line("cl_l1", AR(1), 10), line("cl_l2", AR(2), 150)] }]);
+    assert.deepEqual(item(cutChecks({ production: p, timeline: mixed, artifacts }), "lines"), { id: "lines", result: "pass", says: "1 under their shots" });
+    assert.equal(item(cutChecks({ production: p, timeline: timeline([shotClip(1, 0), card, shotClip(3, 240)], [{ kind: "dialogue", clips: [line("cl_l2", AR(2), 150)] }]), artifacts }), "lines"), undefined);
+  });
+
   it("leaves the item out when the cut lays no lines, and reads nothing of a cut with no story shot in it", () => {
     assert.equal(item(cutChecks({ production: p, timeline: timeline(three), artifacts }), "lines"), undefined);
     const reel = timeline([{ id: "cl_a", startFrame: 0, durationFrames: 90, source: { kind: "artifact", artifactId: AR(3), label: "reel.mp4" } }],
@@ -104,6 +116,29 @@ describe("the checks on a cut: room tone", () => {
     assert.equal(item(cutChecks({ production: quiet, timeline: hole }), "room")?.result, "pass", "a look with no room a place is not held to one");
   });
 
+  it("reads a room's stretches on its file's own clock, as the render plays them (codex on PR 3329)", () => {
+    const base = { kind: "voice", provider: "test", model: "test", provenance: { canonRevision: 1, sheets: {} }, cost: { estimatedMicroUsd: 0, actualMicroUsd: 0 }, dispatchedAt: AT, coversShots: [] };
+    const whole = TakeSchema.parse({ ...base, id: "tk_01M8CVTCHECK00000000000011", media: "room.wav" });
+    const first = TakeSchema.parse({ ...base, id: "tk_01M8CVTCHECK00000000000012", segment: { passTakeId: whole.id, inSec: 0, outSec: 6 } });
+    const again = TakeSchema.parse({ ...base, id: "tk_01M8CVTCHECK00000000000013", segment: { passTakeId: whole.id, inSec: 2, outSec: 8 } });
+    const withTakes = production([{}, {}, {}], { takes: [whole, first, again] });
+    const of = (id: string, takeId: string, start: number, frames: number, offsetSec?: number): Clip => ({ id, startFrame: start, durationFrames: frames, role: "ambience",
+      source: { kind: "take", takeId, label: "room", ...(offsetSec === undefined ? {} : { offsetSec }) } });
+    // One take's first six seconds, then its next six: each stretch once.
+    const halves = timeline(three, [{ kind: "ambience", clips: [of("cl_ra", whole.id, 0, 180, 0), of("cl_rb", whole.id, 180, 180, 6)] }]);
+    assert.equal(item(cutChecks({ production: withTakes, timeline: halves }), "room")?.result, "pass");
+    // Two segments of one file that share four seconds of it: heard twice, though their take ids differ.
+    const shared = timeline(three, [{ kind: "ambience", clips: [of("cl_ra", first.id, 0, 180), of("cl_rb", again.id, 180, 180)] }]);
+    assert.deepEqual(item(cutChecks({ production: withTakes, timeline: shared }), "room"), { id: "room", result: "fix", says: "room used 2 times", clipIds: ["cl_rb"] });
+  });
+
+  it("holds a scene to a room whose file ran out before the scene began (codex on PR 3329)", () => {
+    // Drawn from the top for twelve seconds, the file runs eight; the scene starts at ten.
+    const late = timeline([shotClip(1, 300)], [{ kind: "ambience", clips: [room("cl_r1", AR(1), 0, 360)] }]);
+    assert.deepEqual(item(cutChecks({ production: p, timeline: late, artifacts: [{ id: AR(1), links: [], mediaInfo: { durationSec: 8 } }] }), "room"),
+      { id: "room", result: "fix", says: "gap at 0:10 · 4.0 s" });
+  });
+
   it("leaves the item out when the cut has no room at all", () => {
     assert.equal(item(cutChecks({ production: p, timeline: timeline(three, [{ kind: "music", clips: [file("cl_m", AR(1), 0, 360)] }]) }), "room"), undefined);
   });
@@ -131,8 +166,11 @@ describe("the checks on a cut: set-ups", () => {
     const board = production([{ position: 2 }, { position: 2 }, { position: 3 }], { takes: [pass, first, second],
       selections: { sh_1: { acceptedTakeId: first.id, trimInSec: 0 }, sh_2: { acceptedTakeId: second.id, trimInSec: 0 } } });
     assert.equal(item(cutChecks({ production: board, timeline: timeline(three) }), "set-ups")?.result, "pass");
-    // Trimmed, the same two segments have a cut between them.
+    // Trimmed, the same two segments have a cut between them: on the timeline, or by the shot's own chosen trim (codex on PR 3329).
     assert.equal(item(cutChecks({ production: board, timeline: timeline([shotClip(1, 0, 90), shotClip(2, 90), shotClip(3, 210)]) }), "set-ups")?.result, "fix");
+    const trimmed = production([{ position: 2 }, { position: 2 }, { position: 3 }], { takes: [pass, first, second],
+      selections: { sh_1: { acceptedTakeId: first.id, trimInSec: 0 }, sh_2: { acceptedTakeId: second.id, trimInSec: 1 } } });
+    assert.equal(item(cutChecks({ production: trimmed, timeline: timeline(three) }), "set-ups")?.result, "fix");
     const video = production([{ position: 2 }, { position: 2 }], { look: { preset: "music-video" } });
     assert.equal(item(cutChecks({ production: video, timeline: timeline(three.slice(0, 2)) }), "set-ups"), undefined);
   });
