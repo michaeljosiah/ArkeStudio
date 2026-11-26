@@ -424,8 +424,8 @@ describe("typed audio tracks and the speech-first mix (#681)", () => {
 
     // The FFmpeg graph spells the same envelope: the same figures, in film seconds, after adelay.
     const graph = graphOf(buildFfmpegArgs(plan, "/w", "/out.mp4", "/f.ttf"));
-    assert.match(graph, /adelay=0:all=1,volume=eval=frame:volume='pow\(10,\(-6\+\(-9\)\*\(if\(between\(t,1\.92,4\),1,if\(between\(t,4,4\.4\),1-\(t-4\)\/0\.4,0\)\)\)\)\/20\)'\[ac1\]/);
-    assert.match(graph, /adelay=2000:all=1,volume=0dB\[ac0\]/, "dialogue keeps a plain gain");
+    assert.match(graph, /adelay=0:all=1,asetpts=N\/SR\/TB,volume=eval=frame:volume='pow\(10,\(-6\+\(-9\)\*\(if\(between\(t,1\.92,4\),1,if\(between\(t,4,4\.4\),1-\(t-4\)\/0\.4,0\)\)\)\)\/20\)'\[ac1\]/);
+    assert.match(graph, /adelay=2000:all=1,asetpts=N\/SR\/TB,volume=0dB\[ac0\]/, "dialogue keeps a plain gain");
     assert.match(graph, /alimiter=limit=0\.891251:level=false\[aout\]/, "peak protection at -1 dBFS closes the mix");
   });
 
@@ -649,8 +649,8 @@ describe("sound fades at a clip's edges (SPEC-038 R-37..R-44)", () => {
     // The export spells the same two lines in film seconds, in a stage of its own that closes the
     // clip's chain, and leaves the gain-and-duck expression before it exactly as it was.
     const graph = graphOf(buildFfmpegArgs(plan, "/w", "/out.mp4", "/f.ttf"));
-    assert.match(graph, /adelay=0:all=1,volume=eval=frame:volume='pow\(10,\(-6\+\(-9\)\*\(if\(between\(t,1\.92,4\),1,if\(between\(t,4,4\.4\),1-\(t-4\)\/0\.4,0\)\)\)\)\/20\)',asetnsamples=n=64:p=0,volume=eval=frame:volume='clip\(\(t-\(0\)\)\/2,0,1\)\*clip\(\(\(7\.52\)-t\)\/3,0,1\)'\[ac1\]/);
-    assert.match(graph, /asetpts=PTS-STARTPTS,adelay=2000:all=1,volume=0dB\[ac0\]/, "an unfaded clip's chain is the one it always was");
+    assert.match(graph, /adelay=0:all=1,asetpts=N\/SR\/TB,volume=eval=frame:volume='pow\(10,\(-6\+\(-9\)\*\(if\(between\(t,1\.92,4\),1,if\(between\(t,4,4\.4\),1-\(t-4\)\/0\.4,0\)\)\)\)\/20\)',asetnsamples=n=64:p=0,volume=eval=frame:volume='clip\(\(t-\(0\)\)\/2,0,1\)\*clip\(\(\(7\.52\)-t\)\/3,0,1\)'\[ac1\]/);
+    assert.match(graph, /asetpts=PTS-STARTPTS,adelay=2000:all=1,asetpts=N\/SR\/TB,volume=0dB\[ac0\]/, "an unfaded clip's chain is the one it always was");
     // One regroup in a chain and never a second: two made FFmpeg end the film's last padding early.
     assert.equal((graph.match(/asetnsamples/g) ?? []).length, 1);
     assert.equal(graphOf(buildFfmpegArgs(planOf(mixed()), "/w", "/out.mp4", "/f.ttf")).includes("asetnsamples"), false, "a film with no fade builds the graph it always did");
@@ -741,7 +741,7 @@ describe("a track's level, a track that holds under speech, and even-power fades
     assert.equal("ducks" in itemOf(before, "cl_song"), false, "a plan from a cut with no such track is the plan it was");
     near(audioLevelAt(plan, song, 3), Math.pow(10, -6 / 20));
     // The export gives it the plain gain it gives a sound nothing lowers, and no envelope.
-    assert.match(graphOf(buildFfmpegArgs(plan, "/w", "/out.mp4", "/f.ttf")), /adelay=0:all=1,volume=-6dB\[ac1\]/);
+    assert.match(graphOf(buildFfmpegArgs(plan, "/w", "/out.mp4", "/f.ttf")), /adelay=0:all=1,asetpts=N\/SR\/TB,volume=-6dB\[ac1\]/);
     assert.equal(EffectAudioContributionSchema.safeParse(song).success, true, "an analysed contribution says whether speech lowered it");
 
     const again = valid(apply(held, { kind: "set-track", trackId: "tr_music", ducks: true }));

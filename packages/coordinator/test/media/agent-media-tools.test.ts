@@ -143,6 +143,19 @@ test("native: a steady tone's EBU R128 loudness and true peak read from FFmpeg's
   assert.ok(loud.integratedLufs! < -14 && loud.integratedLufs! > -24, JSON.stringify(loud));
   assert.ok(Math.abs(loud.shortTermMaxLufs! - loud.integratedLufs!) < 1, JSON.stringify(loud));
 });
+test("native: a window's loudness is the window's alone, not everything before it as well, and a one-channel sound reads 3 LU up as a film plays it", { skip: !available }, async () => {
+  const folder = await tempDir("arke-measure-window-"), steps = join(folder, "steps.wav");
+  // Four seconds at 1/8 amplitude, then four seconds 20 dB under that, in one channel.
+  await generate(["-f", "lavfi", "-i", "sine=frequency=997:sample_rate=48000:duration=8", "-af", "volume='if(lt(t,4),1,0.1)':eval=frame", "-c:a", "pcm_f32le", steps]);
+  const stream = (await tools.probe(steps, signal())).streams[0]!;
+  const first = (await tools.loudness!(steps, stream, 0, 4, signal())).integratedLufs!, second = (await tools.loudness!(steps, stream, 4, 8, signal())).integratedLufs!;
+  // The meter answers to a tenth of a LU and its first blocks straddle nothing here, so half a LU is its own grain twice over.
+  assert.ok(Math.abs(first - second - 20) < 0.5, `the quiet half reads ${second} LUFS after a half at ${first}`);
+  assert.ok(Math.abs((await tools.loudness!(steps, stream, 4.5, 7.5, signal())).truePeakDbtp! + 38.1) < 1, "and its peak is its own");
+  // The film's mix plays a one-channel sound whole in both of its channels.
+  const inFilm = (await tools.loudness!(steps, stream, 4, 8, signal(), "film")).integratedLufs!;
+  assert.ok(Math.abs(inFilm - second - 3) < 0.15, `as a film plays it: ${inFilm} LUFS, in its own file ${second}`);
+});
 test("native: a take that carries the reference 120 ms late measures 120 ms late", { skip: !available }, async () => {
   const folder = await tempDir("arke-measure-sync-"), reference = join(folder, "reference.wav"), take = join(folder, "take.mkv");
   // Bursts on two incommensurate periods, so no lag but the true one lines every burst up.
