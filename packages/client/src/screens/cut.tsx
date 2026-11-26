@@ -103,6 +103,8 @@ import { CutLoopControl } from "./editor-loop.js";
 import { TransitionProvider, TransitionLibrary, TransitionInspector, TransitionTouchJoins, TransitionPhoneNavigation } from "./editor-transitions.js";
 import { useMediaQuery } from "../lib/media-query.js";
 import { isTransitionCommand, type TransitionPair } from "@arke-studio/contracts";
+import { cutChecks } from "@arke-studio/contracts";
+import { CutChecks } from "../components/cut-checks.js";
 import { useTransitionReview } from "../lib/editor-transition-review.js";
 import { TransitionReviewBar } from "./editor-transition-review-bar.js";
 import {
@@ -327,6 +329,11 @@ function CutEditorScreen() {
     }
   }, [production, worldArtifacts]);
   const editableTimeline = edited.timeline;
+  // The cut's own checks (design turn 288d), read from the record the editor holds: nothing is decoded.
+  const cutCheckItems = useMemo(
+    () => (production && editableTimeline ? cutChecks({ production, timeline: editableTimeline, artifacts: worldArtifacts ?? [] }) : []),
+    [production, editableTimeline, worldArtifacts],
+  );
   let cut: ResolvedPictureCut | null = null;
   let timelineError: string | null = edited.error;
   if (production && timelineError === null) {
@@ -1262,6 +1269,13 @@ function CutEditorScreen() {
     // Zoomed in, the use can sit past the canvas edge; a locate that leaves it there is a no-op to the eye.
     queueMicrotask(() => document.querySelector<HTMLElement>(`[data-clip="${clipId}"]`)?.scrollIntoView?.({ block: "nearest", inline: "center" }));
   };
+  /** A check's Show: the playhead to the clip it is about, on whichever track that is. Nothing is selected or written. */
+  const showCheckedClip = (clipId: string) => {
+    const clip = editableTimeline?.tracks.flatMap((track) => track.clips).find((candidate) => candidate.id === clipId);
+    if (!clip) return;
+    transport.seek(clip.startFrame / frameRate);
+    queueMicrotask(() => document.querySelector<HTMLElement>(`[data-clip="${clipId}"]`)?.scrollIntoView?.({ block: "nearest", inline: "center" }));
+  };
   const onTrackDrop = (drop: TrackDrop) => {
     const artifact = artifacts.find((candidate) => candidate.id === drop.artifactId);
     if (artifact) placeArtifact(artifact, drop.trackId, drop.frame);
@@ -1612,6 +1626,7 @@ function CutEditorScreen() {
             <Play size={12} />
             Watch from top
           </Button>
+          <CutChecks items={cutCheckItems} onShow={showCheckedClip} />
           <Button
             size="sm"
             variant="primary"
