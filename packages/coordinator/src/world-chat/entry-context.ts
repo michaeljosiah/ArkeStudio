@@ -27,6 +27,12 @@ import { MAX_PROPOSALS } from "./wrapup.js";
 const EPISODE_RUN = 8;
 
 /**
+ * The checks on the cut (design turn 288d), for the place the cut is made. Read from the saved
+ * timeline each time it is read, so an edit's effect on them is in the next read.
+ */
+const CUT_CHECKS_LINE = "get_timeline's cut-checks row says what was read of the cut as it stands; answer a fix there before you show the cut or export it, and read it again after your edit lands: a line under another shot's picture has lost its place, a room tone used twice or with a gap is heard, and two shots in a row from one camera position read as a jump. They are read from the timeline, not heard or seen: a cut that passes them has still to be watched and listened to.";
+
+/**
  * The checks after a take (design turn 287), for the places takes are judged. Measured when a
  * clip lands; a fix is the first thing to answer, and a remake asks for what the last take missed.
  */
@@ -89,7 +95,7 @@ export function describeEntryContext(context: WorldChatContext, bundle: WorldBun
       const first = context.kind === "stage" ? "Start with production-stage-construct for blocking, camera and motion, and production-scene-command for authored shot changes. Read get_scene_stage and get_scene."
         : context.kind === "takes" ? `Start with production-take-review, production-take-trim and production-take-generation. Read list_takes and get_scene; inspect the take's imageSources.poster and imageSources.startFrame through view_image where present. Posters reveal no motion or audio. A review based only on records must say metadata-only in its reason; do not claim unseen pixels or unheard audio. ${TAKE_CHECKS_LINE}`
         : context.kind === "generate" ? `Start with production-frame-run-start, its pause/resume/cancel/retry controls, and production-scene-dispatch. Read list_frame_runs, list_plans, get_scene and list_takes. Resume and retry that may spend need a fresh generation approval. ${TAKE_CHECKS_LINE}`
-        : context.kind === "cut" ? "Start with editorRequests for timeline picture, text, audio and subtitle commands, audio-spine-command and production-cut-export. Before an editorRequest, page get_timeline to complete=true this turn. Read list_editor_requests for pending decisions and history, and get_audio_cut for legacy audio placements."
+        : context.kind === "cut" ? `Start with editorRequests for timeline picture, text, audio and subtitle commands, audio-spine-command and production-cut-export. Before an editorRequest, page get_timeline to complete=true this turn. Read list_editor_requests for pending decisions and history, and get_audio_cut for legacy audio placements. ${CUT_CHECKS_LINE}`
         : "Start with production-scene-command, production-take-generation and production-stage-construct. Read get_scene, get_scene_shots, get_scene_stage and list_takes.";
       const base = "sceneId" in context && context.sceneId !== undefined
         ? describeEntryContext({ kind: "scene", productionId: context.productionId, sceneId: context.sceneId }, bundle)

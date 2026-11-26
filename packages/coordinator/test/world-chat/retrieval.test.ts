@@ -760,6 +760,33 @@ describe("leased retrieval", () => {
     assert.equal(timelineFence(production, h.bundle.artifacts), fence);
     h.index?.close();
   });
+
+  it("reads the cut's checks with the timeline, outside the fence (design turn 288d)", async () => {
+    const h = await harness({ withIndex: false });
+    const production = h.bundle.productions.find((entry) => entry.meta.id === "saltlight")!;
+    // A room tone laid twice from its top under one shot: the loop Gold on Gold was shown with.
+    const room = (id: `cl_${string}`, startFrame: number) => ({ id, startFrame, durationFrames: 48, sourceInFrames: 0, role: "ambience" as const,
+      source: { kind: "artifact" as const, artifactId: h.bundle.artifacts[0]!.id, label: "room.wav" } });
+    production.timeline = { status: "ready", timeline: {
+      schemaVersion: 1, revision: 1, frameRate: 24, history: { undo: [], redo: [] },
+      mix: { speechFirst: true, duckingDb: -9, lookAheadMs: 80, releaseMs: 400, limiterCeilingDb: -1 }, library: [],
+      tracks: [
+        { id: "tr_story", kind: "picture", name: "Picture", order: 0, muted: false, clips: [
+          { id: "cl_shot", startFrame: 0, durationFrames: 96, sourceInFrames: 0, source: { kind: "shot", shotId: "sh_21", sceneNumber: 6, shotNumber: 2, label: "Shot" } }] },
+        { id: "tr_room", kind: "ambience", name: "Room", order: 1, muted: false, clips: [room("cl_room_a", 0), room("cl_room_b", 48)] },
+      ],
+    } };
+    const { result } = await h.retrieval.call(h.mint().token, "get_timeline", { productionId: "saltlight", limit: 20 });
+    const page = result as { items: Array<{ kind: string }>; observedRevisionOrDigest: string };
+    assert.deepEqual(page.items.find((item) => item.kind === "cut-checks"), { kind: "cut-checks", passed: 0, of: 1, toFix: 1,
+      items: [{ id: "room", name: "Room tone", result: "fix", says: "room.wav used 2 times", clipIds: ["cl_room_b"] }] });
+    // Read off the scene and the look as they stand: a changed look must not stale an edit to the cut.
+    const fence = timelineFence(production, h.bundle.artifacts);
+    assert.equal(page.observedRevisionOrDigest, fence);
+    production.meta.look = { sound: { roomTonePerPlace: false } };
+    assert.equal(timelineFence(production, h.bundle.artifacts), fence);
+    h.index?.close();
+  });
 });
 
 describe("leased attachment reads", () => {

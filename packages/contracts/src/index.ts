@@ -172,6 +172,7 @@ export * from "./dialogue-assessment.js";
 export * from "./take-feedback.js";
 export * from "./take-checks.js";
 export * from "./before-shot.js";
+export * from "./cut-checks.js";
 export { referencePrompt } from "./reference-prompt.js";
 
 export * from "./stage-construction.js";

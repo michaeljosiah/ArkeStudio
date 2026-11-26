@@ -2488,6 +2488,46 @@ describe("World Chat authority adapters", () => {
     assert.ok(artifacts.some((artifact) => artifact.kind === "board" && artifact.created === AT));
   });
 
+  it("prepares a clip made outside for one shot or a run of them, and keeps a clip's fields off a still (2026-11-26)", async () => {
+    const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
+    const asked: unknown[] = [];
+    const w = await setup(context, () => ({
+      importProductionTake: async (action) => {
+        asked.push(action);
+        return { status: "completed", id: "tk_01M8CMP0RT0000000000000009", detail: "The clip was recorded, and one take a shot (2), cut where its picture cuts." };
+      },
+    }));
+    const receipts = () => [currentReceipt(w.store, "scenes", `${PRODUCTION}:${context.sceneId}`), currentReceipt(w.store, "takes", PRODUCTION)];
+    const importing = (fields: Record<string, unknown>) => {
+      const read = receipts();
+      return turn(w.conversationId, context, { receipts: read,
+        actions: [{ kind: "production-take-import", productionId: PRODUCTION, sceneId: context.sceneId, shotId: "sh_12", ...fields, checkReceiptIds: read.map((receipt) => receipt.id) }] });
+    };
+    const clipTurn = importing({ media: "clip", throughShotId: "sh_13", madeWith: "Wan 3.0 on another site", prompt: "A 9-second scene: two shots joined by a hard cut." });
+    const prepared = prepareWorldChatActions(w.store, w.lifecycle, clipTurn);
+    await appendTurn(w.log, clipTurn, prepared);
+    await bindAll(w.lifecycle, prepared);
+    const card = (await loaded(w.log)).actions[0]!;
+    assert.match(card.shown.title, /^Import a clip for shots \d+ to \d+$/);
+    assert.match(card.shown.ripples.join(" "), /one take a shot, cut where its picture cuts.*Nothing is accepted or placed/);
+    assert.equal(asked.length, 0, "nothing is picked or filed before approval");
+    const decided = await decide(w.lifecycle, w.log, card);
+    assert.equal(decided.status, "completed");
+    assert.deepEqual(asked.map((action) => { const { checkReceiptIds: _receipts, ...rest } = action as Record<string, unknown>; return rest; }), [
+      { kind: "production-take-import", productionId: PRODUCTION, sceneId: "sc_04", shotId: "sh_12", media: "clip", throughShotId: "sh_13",
+        madeWith: "Wan 3.0 on another site", prompt: "A 9-second scene: two shots joined by a hard cut." }]);
+    // A still has none of a clip's fields, a run of shots runs forwards, and a shelf file is a video.
+    const refused = async (fields: Record<string, unknown>, says: RegExp) => {
+      const next = importing(fields), nextPrepared = prepareWorldChatActions(w.store, w.lifecycle, next);
+      await appendTurn(w.log, next, nextPrepared);
+      await assert.rejects(bindAll(w.lifecycle, nextPrepared), says);
+    };
+    await refused({ madeWith: "a camera" }, /madeWith is for a clip/);
+    await refused({ media: "clip", shotId: "sh_13", throughShotId: "sh_12" }, /not a later shot/);
+    await refused({ media: "clip", artifactId: "ar_01M8CMP0RT0000000000000009" }, /not a video on the shelf/);
+    assert.equal(asked.length, 1);
+  });
+
   it("imports an unselected take and dispatches quoted production generation only after approval", async () => {
     const context = { kind: "scene" as const, productionId: PRODUCTION, sceneId: "sc_04" };
     let imported = 0;
