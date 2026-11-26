@@ -60,19 +60,37 @@ const SURE = .5;
  * word is still a breath.
  */
 const SURE_ALONE = .8;
-/** Two spellings this alike are one sound: "boot" and "boat", "Oya" and "Oh yeah", "Tunde" and "Tundi". */
+/**
+ * A line's one unmatched word and the little heard in its place are one sound when their
+ * spellings are this alike: "boot" and "boat", "Oya" and "Oh yeah".
+ */
 const ALIKE = .5;
+/**
+ * A word looked for inside a longer run of heard letters has to be more alike than that, or it is
+ * found by chance: "Tunde" in "Tundi", "Adeyemi" in "the Yemi", never "Tunde" in "fortune".
+ */
+const ALIKE_IN_A_RUN = .65;
+/** A word shorter than this has no sound of its own to find: an "a" is inside every "bag". */
+const SHORTEST_BY_SOUND = 3;
+/** A word this short is found in a run only one letter off and about its own length: two letters of four are everywhere. */
+const SHORT_WORD = 4;
+/** How many letters past the word before it a word is looked for: a few misheard or invented words' worth. */
+const SOUND_REACH = 80;
 
-/** How alike two runs of letters are, 0 to 1: one less the edits that turn one into the other, over the longer's length. */
-export function alike(a: string, b: string): number {
-  if (a.length === 0 || b.length === 0) return 0;
+/** The edits (a letter added, dropped or changed) that turn one run of letters into another. */
+function edits(a: string, b: string): number {
   let row = Array.from({ length: b.length + 1 }, (_, j) => j);
   for (let i = 1; i <= a.length; i++) {
     const next = [i];
     for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j]! + 1, next[j - 1]! + 1, row[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
     row = next;
   }
-  return 1 - row[b.length]! / Math.max(a.length, b.length);
+  return row[b.length]!;
+}
+
+/** How alike two runs of letters are, 0 to 1: one less their edits over the longer's length. */
+export function alike(a: string, b: string): number {
+  return a.length === 0 || b.length === 0 ? 0 : 1 - edits(a, b) / Math.max(a.length, b.length);
 }
 
 /**
@@ -80,9 +98,17 @@ export function alike(a: string, b: string): number {
  * of another language comes back as the English it sounds like, split where it likes: "Adeyemi
  * Akinola" as "the Yemi Aki Nola". Word for word nothing matches, and a line passed or failed on
  * its other words alone: a take that said the name wrong passed at thirteen words of sixteen.
- * So each run of the line's words left unmatched is set, as letters, against the run of heard
- * words in the same gap that is most like it. Alike enough, the line's words were said and those
- * heard words are theirs; otherwise they were not heard, and the take said something else there.
+ * So where the line's words went unmatched, the heard words in the same gap are read as one run
+ * of letters. One unmatched word with little heard in its place is set against all of it. In a
+ * longer gap each of the line's words is looked for in the run, in order: a stretch of letters
+ * about the word's length and alike enough is the word, and the heard words those letters came
+ * from are the line's. A word with no such stretch was not heard.
+ *
+ * Each word has to be found for itself. Setting a whole gap against a whole run let one long word
+ * carry a name that was never said: "Tunde, congratulations!" heard as "congratulation" was alike
+ * enough, and the name passed (codex on PR 3327). And each word is looked for only a little way
+ * past the one before it, so a long take whose words match nothing costs a little, not the
+ * fourteen seconds a hundred such words took when every run was tried against every run.
  */
 function heardBySound(line: readonly string[], heard: readonly string[], used: ReadonlyArray<{ line: number; heard: number }>): { line: Set<number>; heard: Set<number> } {
   const found = { line: new Set<number>(), heard: new Set<number>() };
@@ -90,20 +116,31 @@ function heardBySound(line: readonly string[], heard: readonly string[], used: R
   for (let e = 1; e < edges.length; e++) {
     const from = edges[e - 1]!, to = edges[e]!;
     if (to.line - from.line < 2 || to.heard - from.heard < 2) continue;
-    const target = line.slice(from.line + 1, to.line).join("");
-    let best: { start: number; end: number; score: number } | null = null;
-    for (let start = from.heard + 1; start < to.heard; start++) {
-      let text = "";
-      // A run much longer than the words it stands for is not them, however it scores.
-      for (let end = start; end < to.heard && text.length + heard[end]!.length <= target.length * 2 + 3; end++) {
-        text += heard[end]!;
-        const score = alike(target, text);
-        if (!best || score > best.score) best = { start, end, score };
-      }
+    // The gap's heard words as letters, each remembering the word it came from.
+    let text = ""; const owner: number[] = [];
+    for (let j = from.heard + 1; j < to.heard; j++) { text += heard[j]!; for (let k = 0; k < heard[j]!.length; k++) owner.push(j); }
+    const alone = to.line - from.line === 2 ? line[from.line + 1]! : null;
+    if (alone !== null && text.length <= alone.length * 2 + 3) {
+      if (alone.length >= SHORTEST_BY_SOUND && alike(alone, text) >= ALIKE) { found.line.add(from.line + 1); for (const j of owner) found.heard.add(j); }
+      continue;
     }
-    if (!best || best.score < ALIKE) continue;
-    for (let i = from.line + 1; i < to.line; i++) found.line.add(i);
-    for (let j = best.start; j <= best.end; j++) found.heard.add(j);
+    let at = 0;
+    for (let i = from.line + 1; i < to.line; i++) {
+      const word = line[i]!;
+      if (word.length < SHORTEST_BY_SOUND) continue;
+      const short = word.length <= SHORT_WORD;
+      let best: { start: number; end: number; score: number } | null = null;
+      for (let start = at; start < text.length && start <= at + SOUND_REACH; start++) {
+        for (let length = Math.max(1, word.length - (short ? 1 : 2)); length <= word.length + (short ? 1 : 3) && start + length <= text.length; length++) {
+          const piece = text.slice(start, start + length), score = alike(word, piece);
+          if ((short ? edits(word, piece) <= 1 : score >= ALIKE_IN_A_RUN) && (!best || score > best.score)) best = { start, end: start + length, score };
+        }
+      }
+      if (!best) continue;
+      found.line.add(i);
+      for (let k = best.start; k < best.end; k++) found.heard.add(owner[k]!);
+      at = best.end;
+    }
   }
   return found;
 }

@@ -92,7 +92,26 @@ describe("the checks after a take: words", () => {
     // Said wrong: twelve words of fifteen passed, and the name reached the cut.
     assert.deepEqual(judgeWords(line, heardAs(["i", "do", "it", "in", "a", "bag"]), names).words, { id: "words", result: "fix", says: "name unclear: adeyemi akinola" });
     // The same loss with no name in it is a recogniser's slip, and says which words it lost.
-    assert.deepEqual(judgeWords(line, heardAs(["i", "do", "it", "in", "a", "bag"])).words, { id: "words", result: "pass", says: "12 of 15 words · not heard: adeyemi akinola abeg" });
+    // ("abeg" was said: the recogniser's "a bag" is it.)
+    assert.deepEqual(judgeWords(line, heardAs(["i", "do", "it", "in", "a", "bag"])).words, { id: "words", result: "pass", says: "13 of 15 words · not heard: adeyemi akinola" });
+  });
+
+  it("finds each word for itself: a long word beside a name does not carry the name (codex on PR 3327)", () => {
+    const names = new Set(["tunde"]);
+    // The whole gap set against the whole run was alike enough, and the name that was never said passed.
+    assert.equal(judgeWords("Tunde, congratulations!", [word("congratulation", 1, .95)], names).words?.result, "fix");
+    const dropped = judgeWords("Tunde, many congratulations to you!", ["many", "congratulation", "to", "you"].map((w, i) => word(w, .4 + i * .3)), names).words;
+    assert.deepEqual(dropped, { id: "words", result: "fix", says: "name unclear: tunde" });
+    // A word of one or two letters has no sound of its own: an "a" is inside every "bag".
+    assert.equal(judgeWords("Go to a bar now.", ["go", "bag", "bar", "now"].map((w, i) => word(w, i * .3))).words?.says, "3 of 5 words · not heard: to a");
+  });
+
+  it("stays quick on a long take whose words match nothing (codex on PR 3327)", () => {
+    const line = Array.from({ length: 100 }, (_, i) => `word${i}`).join(" ");
+    const heard = Array.from({ length: 100 }, (_, i) => word(`other${i}`, i * .5));
+    const started = performance.now(), judged = judgeWords(line, heard);
+    assert.ok(performance.now() - started < 2000, "a hundred such words took fourteen seconds");
+    assert.equal(judged.words?.result, "fix");
   });
 
   it("hears a word of another language in the English the recogniser made of it", () => {
