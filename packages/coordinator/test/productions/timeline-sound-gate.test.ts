@@ -183,7 +183,7 @@ test("a file that is gone or is no longer the one the world recorded is refused 
   const { store, sound, measure } = await placed(), d = decoder(sound);
   await writeFile(join(store.dir, "artifacts", "line.wav"), "changed");
   await assert.rejects(measure([{ kind: "sound-gate", clipId: "cl_line", on: true }], d.tools),
-    (error: unknown) => error instanceof TimelineCommandRefused && error.reason === "Tunde's line's sound file is missing or has changed, so it cannot be measured");
+    (error: unknown) => error instanceof TimelineCommandRefused && error.reason === "Tunde's line cannot be measured: its sound file is missing or has changed");
   assert.deepEqual(d.paths, [], "nothing is decoded from a file that is not the one recorded");
 });
 

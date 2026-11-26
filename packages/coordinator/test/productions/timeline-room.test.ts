@@ -117,7 +117,7 @@ test("a room that cannot be laid says why, and is never laid from what nobody me
   await refused([room({ sources: [{ artifactId: bar.id, label: "Bar", inSec: 11 }] })], tools(), "Bar has 3 s to cut from, and a room's piece is at least 4.5 s");
   await refused([room({ sources: [{ artifactId: "ar_01J8G0000000000000000000ZZ", label: "Gone" }] })], tools(), "Gone cites a file which this world does not have");
   await refused([room()], tools({ lufs: null }), "Crowd is too quiet to measure a loudness from");
-  await refused([room({ sources: [{ artifactId: still.id, label: "Still" }] })], tools({ silent: true }), /^Still('s sound file is missing or has changed, so it cannot be measured| has no sound a room can be cut from)$/);
+  await refused([room({ sources: [{ artifactId: still.id, label: "Still" }] })], tools({ silent: true }), /^Still (cannot be measured: its sound file is missing or has changed|has no sound a room can be cut from)$/);
   await refused([room()], null, "Sound cannot be measured on this host, so a gate, a loudness or a room cannot be set here");
   // The unmeasured command straight to the reducer, a bed that is a picture, and a gain no clip may have.
   await assert.rejects(send([room()]), /A room is laid from its beds as they were measured; this host did not measure them/);
@@ -130,7 +130,7 @@ test("a room that cannot be laid says why, and is never laid from what nobody me
   // A file changed on disk is not the bed the world recorded.
   const from = asked.length;
   await writeFile(join(store.dir, "artifacts", "crowd.wav"), "changed");
-  await refused([room()], tools(), "Crowd's sound file is missing or has changed, so it cannot be measured");
+  await refused([room()], tools(), "Crowd cannot be measured: its sound file is missing or has changed");
   assert.equal(asked.length, from, "and nothing is decoded from it");
 });
 

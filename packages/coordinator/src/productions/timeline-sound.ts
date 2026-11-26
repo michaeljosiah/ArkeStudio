@@ -60,12 +60,12 @@ async function soundOf<T>(store: WorldStore, production: ProductionBundle, clip:
     const source = clip.source.kind === "artifact" ? await agentMediaSource(store, { kind: "artifact", id: clip.source.artifactId })
       : clip.source.kind === "take" ? await agentMediaSource(store, { kind: "production-take", productionId: production.meta.id, takeId: clip.source.takeId }) : null;
     // The plan's file is the one to measure. Where the catalogue names another, a gate would keep the wrong stretches.
-    if (!source || source.path !== file.path) return refuse(`${clip.source.label}'s sound cannot be measured: its file is not the one the cut plays`);
+    if (!source || source.path !== file.path) return refuse(`${clip.source.label} cannot be measured: its file is not the one the cut plays`);
     return await withContainedProductionMedia(store.dir, file.path, source.expectedHash, signal, snapshot =>
       consume({ path: snapshot.path, inSec: file.segmentInSec, outSec: file.sourceOutSec }));
   } catch (error) {
     // A file that is gone, or is no longer the one the world recorded, is said as a refusal: a screen and Arke both show those.
-    if (error instanceof RetrievalError || error instanceof WorldReferenceError) return refuse(`${clip.source.label}'s sound file is missing or has changed, so it cannot be measured`);
+    if (error instanceof RetrievalError || error instanceof WorldReferenceError) return refuse(`${clip.source.label} cannot be measured: its sound file is missing or has changed`);
     throw error;
   }
 }
@@ -90,7 +90,7 @@ async function measureRoomBed(store: WorldStore, production: ProductionBundle, b
       return { ...bed, outSec: Math.floor(window.outSec * 1000) / 1000, measuredLufs: measured };
     });
   } catch (error) {
-    if (error instanceof RetrievalError || error instanceof WorldReferenceError) return refuse(`${bed.label}'s sound file is missing or has changed, so it cannot be measured`);
+    if (error instanceof RetrievalError || error instanceof WorldReferenceError) return refuse(`${bed.label} cannot be measured: its sound file is missing or has changed`);
     throw error;
   }
 }
