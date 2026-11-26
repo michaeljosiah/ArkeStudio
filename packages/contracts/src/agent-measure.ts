@@ -218,12 +218,22 @@ export type AgentClipQuality = z.infer<typeof AgentClipQualitySchema>;
  * otherwise found in the picture.
  */
 export const AGENT_SHEET_SCHEMA_VERSION = 143;
-export const AGENT_SHEET_LIMITS = Object.freeze({ maxSeconds: 900, maxShots: 240, perPage: 30, columns: 5, maxPages: 8, tileWidth: 288, tileHeight: 162 });
+/**
+ * A page of cuts (2026-11-26): the same sheet asked for its cuts, each as the last frame before
+ * it and the first after, side by side. A sheet of middle frames shows no cut, and looking at one
+ * cost two of the about twenty-four frames a turn can see: reviewing a clip of three shots, Arke
+ * ran out before the seam that mattered and placed a cut 1.1 s from where it was. Twelve cuts a
+ * page, a page one picture.
+ */
+export const AGENT_SEAM_SCHEMA_VERSION = 151;
+export const AGENT_SHEET_LIMITS = Object.freeze({ maxSeconds: 900, maxShots: 240, perPage: 30, columns: 5, maxPages: 8, tileWidth: 288, tileHeight: 162, seamsPerPage: 12 });
 export const CutContactSheetArgsSchema = z.object({
   source: AgentMediaSourceSchema,
   /** Defaults to the whole source when it is at most 15 minutes. */
   window: AgentSongWindowSchema.optional(),
   streamIndex: AgentMediaStreamIndexSchema.optional(),
+  /** The cuts instead of the shots: the frame either side of each. */
+  seams: z.boolean().optional(),
 }).strict();
 export type CutContactSheetArgs = z.infer<typeof CutContactSheetArgsSchema>;
 export const AgentSheetShotSchema = z.object({
@@ -239,15 +249,22 @@ export const AgentContactSheetSchema = z.object({
   shots: z.array(AgentSheetShotSchema).min(1).max(AGENT_SHEET_LIMITS.maxShots),
   pages: z.array(z.object({ image: ImageObservationSchema, firstShot: z.number().int().min(1), lastShot: z.number().int().min(1) }).strict())
     .min(1).max(AGENT_SHEET_LIMITS.maxPages),
+  /** A page of cuts: for each shot after the first, the cut into it and the two frames shown, the last before it and the first after. */
+  seams: z.array(z.object({ shot: z.number().int().min(2), atSec: agentMediaTime, beforeSec: agentMediaTime, afterSec: agentMediaTime }).strict())
+    .min(1).max(AGENT_SHEET_LIMITS.maxShots).optional(),
 }).strict().superRefine((sheet, context) => {
   const issue = (message: string) => context.addIssue({ code: z.ZodIssueCode.custom, message });
   if (sheet.endSec <= sheet.startSec) issue("A sheet covers a positive window");
   if ((sheet.shotsFrom === "timeline") !== (sheet.productionId !== null)) issue("Only shots from a timeline name its production");
   if (sheet.shots.some((shot, i) => shot.number !== i + 1 || shot.endSec <= shot.startSec || shot.frameSec < shot.startSec || shot.frameSec >= shot.endSec ||
     shot.startSec < sheet.startSec - .001 || shot.endSec > sheet.endSec + .001 || (sheet.shotsFrom === "picture") !== (shot.label === null))) issue("Shots are numbered in order, each with its frame inside it and the window");
-  // The pages lay the shots out in order, each shot on exactly one page.
-  if (sheet.pages[0]!.firstShot !== 1 || sheet.pages[sheet.pages.length - 1]!.lastShot !== sheet.shots.length ||
-    sheet.pages.some((page, i) => page.lastShot < page.firstShot || page.lastShot - page.firstShot >= AGENT_SHEET_LIMITS.perPage || i > 0 && page.firstShot !== sheet.pages[i - 1]!.lastShot + 1)) issue("Pages lay out every shot once, in order");
+  const seams = sheet.seams;
+  if (seams !== undefined && (seams.length !== sheet.shots.length - 1 || seams.some((seam, i) => seam.shot !== i + 2 || Math.abs(seam.atSec - sheet.shots[i + 1]!.startSec) > .001 ||
+    seam.beforeSec >= seam.atSec || seam.afterSec < seam.atSec || seam.beforeSec < sheet.shots[i]!.startSec - .001 || seam.afterSec >= sheet.shots[i + 1]!.endSec))) issue("A page of cuts holds one cut for each shot after the first, with a frame from either side of it");
+  // The pages lay the shots out in order, each shot on exactly one page; a page of cuts lays out each shot the cuts lead into.
+  const first = seams === undefined ? 1 : 2, most = seams === undefined ? AGENT_SHEET_LIMITS.perPage : AGENT_SHEET_LIMITS.seamsPerPage;
+  if (sheet.pages[0]!.firstShot !== first || sheet.pages[sheet.pages.length - 1]!.lastShot !== sheet.shots.length ||
+    sheet.pages.some((page, i) => page.lastShot < page.firstShot || page.lastShot - page.firstShot >= most || i > 0 && page.firstShot !== sheet.pages[i - 1]!.lastShot + 1)) issue("Pages lay out every shot once, in order");
 });
 export type AgentContactSheet = z.infer<typeof AgentContactSheetSchema>;
 

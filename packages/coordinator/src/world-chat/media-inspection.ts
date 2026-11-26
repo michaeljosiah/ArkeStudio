@@ -1,10 +1,10 @@
 import { AGENT_EXPORT_MEDIA_SCHEMA_VERSION, AGENT_PERFORMANCE_MEDIA_SCHEMA_VERSION, PerformanceRecordBaseSchema, AGENT_LISTENING_SCHEMA_VERSION, AGENT_LISTENING_LIMITS, ListenAudioArgsSchema, AGENT_AUDIO_SCHEMA_VERSION, AGENT_TRANSCRIPT_LIMITS, AGENT_MEDIA_LIMITS, AGENT_MEDIA_PROFILE, AGENT_MEDIA_SCHEMA_VERSION, AgentMediaObservationSchema, AnalyzeAudioArgsSchema,
   InspectMediaArgsSchema, SampleVideoArgsSchema, ReviewAudioContentArgsSchema, MeasureSyncArgsSchema, AGENT_SYNC_SCHEMA_VERSION, newId,
   SongMapArgsSchema, AGENT_SONG_SCHEMA_VERSION, AGENT_SONG_LIMITS, ClipQualityArgsSchema, AGENT_QUALITY_SCHEMA_VERSION,
-  CutContactSheetArgsSchema, AGENT_SHEET_SCHEMA_VERSION, AGENT_SHEET_LIMITS, ReviewExportArgsSchema, AGENT_REVIEW_SCHEMA_VERSION, AGENT_REVIEW_LIMITS, type ReviewExportArgs,
+  CutContactSheetArgsSchema, AGENT_SHEET_SCHEMA_VERSION, AGENT_SEAM_SCHEMA_VERSION, AGENT_SHEET_LIMITS, ReviewExportArgsSchema, AGENT_REVIEW_SCHEMA_VERSION, AGENT_REVIEW_LIMITS, type ReviewExportArgs,
   type AgentListeningFocus, type AgentMediaObservation, type AgentMediaSource, type ClipQualityArgs, type CutContactSheetArgs, type MeasureSyncArgs, type AgentMediaRegion,
   type SongMapArgs, type WorldChatCheckReceipt } from "@arke-studio/contracts";
-import { contactSheetInSnapshot, measureSyncInSnapshot, qualityInSnapshot, reviewInSnapshot, songMapInSnapshot, QUALITY_LIMITATIONS, REVIEW_LIMITATIONS, SHEET_LIMITATIONS,
+import { contactSheetInSnapshot, measureSyncInSnapshot, qualityInSnapshot, reviewInSnapshot, songMapInSnapshot, QUALITY_LIMITATIONS, REVIEW_LIMITATIONS, SEAM_LIMITATIONS, SHEET_LIMITATIONS,
   SONG_LIMITATIONS, SYNC_LIMITATIONS } from "./media-measure.js";
 import { readBenchSession } from "../bench/chat-reads.js";
 import { resolveTakeSource } from "../bench/service.js";
@@ -139,8 +139,8 @@ export class ConversationMediaInspection {
       ? "measure_sync: name an immutable take and a bounded interval, a reference source with its start, and a region round the mouth for the mouth method."
       : songRead ? "song_map: name an immutable audio source, and a window of at most 15 minutes when it is longer."
       : qualityRead ? "clip_quality: name an immutable clip and a bounded interval; a compared clip's range runs as long."
-      : sheetRead ? "cut_contact_sheet: name an immutable film (an export by its id), and a window of at most 15 minutes when it is longer."
-      : reviewRead ? "review_export: name a finished film (an export by its id), and a window of at most 15 minutes when it is longer."
+      : sheetRead ? "cut_contact_sheet: name a film (an export by its id, a take or a video on the shelf), and a window of at most 15 minutes when it is longer; seams is true or false."
+      : reviewRead ? "review_export: name a film (an export by its id, a take or a video on the shelf), and a window of at most 15 minutes when it is longer."
       : `${name}: name an immutable source and a bounded, valid interval.`);
     const count = this.counts.get(lease.runId) ?? 0;
     if (count >= AGENT_MEDIA_LIMITS.calls) throw new RetrievalError("budget-exhausted", "This run has reached its media inspection call budget.");
@@ -199,7 +199,7 @@ export class ConversationMediaInspection {
         const selected = args.streamIndex === undefined ? candidates.length === 1 ? candidates[0] : undefined : candidates.find(stream => stream.index === args.streamIndex);
         if (!selected) throw new RetrievalError("bad-argument", "Select one explicit video stream from inspect_media; ambiguous tracks are never guessed.");
         const sheet = await contactSheetInSnapshot(this.store, tools, signal, { path: snapshot.path, stream: selected,
-          startSec: source.startSec + window.startSec, endSec: source.startSec + window.endSec, viewStartSec: window.startSec }, args.source);
+          startSec: source.startSec + window.startSec, endSec: source.startSec + window.endSec, viewStartSec: window.startSec }, args.source, sheetArgs.seams === true);
         this.access(lease, name);
         return { observation: base, frames: [], sheet };
       }
@@ -292,13 +292,14 @@ export class ConversationMediaInspection {
     const pages: Prepared[] = [];
     const sheetPrepared = "sheet" in prepared ? prepared.sheet : undefined;
     if (sheetPrepared) for (const page of sheetPrepared.pages) {
-      pages.push(await this.deps.images.prepareFrame(lease, { id: `${source.id}:sheet:${page.firstShot}-${page.lastShot}`,
-        label: `Contact sheet, shots ${page.firstShot} to ${page.lastShot}, of ${source.id}`, sourceHash: prepared.observation.sourceHash, bytes: page.bytes }));
+      const cuts = sheetPrepared.sheet.seams !== undefined;
+      pages.push(await this.deps.images.prepareFrame(lease, { id: `${source.id}:${cuts ? "cuts" : "sheet"}:${page.firstShot}-${page.lastShot}`,
+        label: `${cuts ? "Cuts into" : "Contact sheet,"} shots ${page.firstShot} to ${page.lastShot}${cuts ? "" : ","} of ${source.id}`, sourceHash: prepared.observation.sourceHash, bytes: page.bytes }));
     }
     const images = [...pixels.map(value => value.image), ...pages.map(value => value.image)], contents = [...pixels.map(value => value.content), ...pages.map(value => value.content)];
     const observation: AgentMediaObservation = sheetPrepared ? AgentMediaObservationSchema.parse({ ...prepared.observation, coverage: "contact-sheet",
       sheet: { ...sheetPrepared.sheet, pages: sheetPrepared.pages.map((page, i) => ({ image: pages[i]!.image, firstShot: page.firstShot, lastShot: page.lastShot })) },
-      limitations: SHEET_LIMITATIONS })
+      limitations: sheetPrepared.sheet.seams !== undefined ? SEAM_LIMITATIONS : SHEET_LIMITATIONS })
       : prepared.frames.length ? AgentMediaObservationSchema.parse({ ...prepared.observation,
       range: "range" in prepared ? prepared.range : undefined, coverage: "sampled-frames-only", ...(frameRegion ? { region: frameRegion } : {}),
       frames: pixels.map(value => ({ requestedSourceTimeSec: value.frame.requestedSourceTimeSec, sourceTimeSec: value.frame.sourceTimeSec,
@@ -310,6 +311,7 @@ export class ConversationMediaInspection {
     this.access(lease, name);
     // A measurement is newer than every source kind it can name, so its own boundary covers them; so is a sampled frame's box.
     await this.store.raiseSchemaBoundary(syncRead ? AGENT_SYNC_SCHEMA_VERSION : songRead ? AGENT_SONG_SCHEMA_VERSION : qualityRead ? AGENT_QUALITY_SCHEMA_VERSION
+      : sheetPrepared?.sheet.seams !== undefined ? AGENT_SEAM_SCHEMA_VERSION
       : sheetRead || frameRegion ? AGENT_SHEET_SCHEMA_VERSION : reviewRead ? AGENT_REVIEW_SCHEMA_VERSION : args.source.kind === "export" ? AGENT_EXPORT_MEDIA_SCHEMA_VERSION
       : args.source.kind === "performance" ? AGENT_PERFORMANCE_MEDIA_SCHEMA_VERSION
       : listeningRead ? AGENT_LISTENING_SCHEMA_VERSION : speechRead ? AGENT_AUDIO_SCHEMA_VERSION : AGENT_MEDIA_SCHEMA_VERSION, "agent-media-evidence");

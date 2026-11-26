@@ -57,6 +57,32 @@ function drawText(image: RgbaImage, x: number, y: number, text: string, scale: n
 }
 
 const GUTTER = 8, LABEL = 22;
+
+/**
+ * A page of cuts (2026-11-26): for each cut, the last frame before it and the first after it,
+ * side by side with the cut's number and time beneath, two cuts to a row. A sheet of middle
+ * frames shows no cut, and looking at a cut cost two frames of a turn that can see about
+ * twenty-four: reviewing a three-shot clip, Arke ran out before the seam that mattered and guessed
+ * a cut 1.1 s off. One page here is one picture, and holds twelve cuts.
+ */
+export const SEAMS_PER_PAGE = 12;
+const SEAM_COLUMNS = 2, SEAM_JOIN = 2, SEAM_GAP = 24;
+export function composeSeamPage(seams: ReadonlyArray<{ before: Uint8Array; after: Uint8Array; label: string }>): RgbaImage {
+  const { tileWidth: w, tileHeight: h } = AGENT_SHEET_LIMITS, pair = w * 2 + SEAM_JOIN, rows = Math.ceil(seams.length / SEAM_COLUMNS);
+  const width = GUTTER * 2 + SEAM_COLUMNS * pair + (SEAM_COLUMNS - 1) * SEAM_GAP, height = rows * (h + LABEL) + (rows + 1) * GUTTER;
+  const image: RgbaImage = { width, height, pixels: new Uint8Array(width * height * 4) };
+  for (let i = 0; i < image.pixels.length; i += 4) image.pixels.set([24, 24, 24, 255], i);
+  for (const [i, seam] of seams.entries()) {
+    const x0 = GUTTER + (i % SEAM_COLUMNS) * (pair + SEAM_GAP), y0 = GUTTER + Math.floor(i / SEAM_COLUMNS) * (h + LABEL + GUTTER);
+    for (let y = 0; y < h; y++) {
+      image.pixels.set(seam.before.subarray(y * w * 4, (y + 1) * w * 4), ((y0 + y) * width + x0) * 4);
+      image.pixels.set(seam.after.subarray(y * w * 4, (y + 1) * w * 4), ((y0 + y) * width + x0 + w + SEAM_JOIN) * 4);
+    }
+    drawText(image, x0 + 2, y0 + h + 4, seam.label, 2);
+  }
+  return image;
+}
+
 /** One page: tiles of RGBA at the sheet's tile size, laid five to a row with their labels beneath. */
 export function composeSheetPage(tiles: ReadonlyArray<{ rgba: Uint8Array; label: string }>): RgbaImage {
   const { columns, tileWidth: w, tileHeight: h } = AGENT_SHEET_LIMITS, rows = Math.ceil(tiles.length / columns);

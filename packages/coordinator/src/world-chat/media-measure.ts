@@ -4,7 +4,7 @@ import { AGENT_QUALITY_LIMITS, AGENT_REVIEW_LIMITS, AGENT_SHEET_LIMITS, AGENT_SY
 import { hashContainedProductionMedia, withContainedProductionMedia } from "../world/reference-files.js";
 import { parseStreamRate, regionGeometry, type AgentMediaTools } from "../media/agent-media-tools.js";
 import { cadenceFromSteps, droppedFromSteps, measureCadence, measureDetail } from "../media/clip-quality.js";
-import { composeSheetPage, findCuts, tileLabel } from "../media/contact-sheet.js";
+import { composeSeamPage, composeSheetPage, findCuts, tileLabel } from "../media/contact-sheet.js";
 import { encodePngAsync } from "../references/png-runner.js";
 import { readCompletedExports } from "../productions/export-receipts.js";
 import type { WorldStore } from "../world/store.js";
@@ -196,7 +196,7 @@ async function pictureShots(tools: AgentMediaTools, film: { path: string; stream
  * shots are on the source's own clock (its view), as every receipt's times are.
  */
 export async function contactSheetInSnapshot(store: WorldStore, tools: AgentMediaTools, signal: AbortSignal,
-  film: { path: string; stream: Stream; startSec: number; endSec: number; viewStartSec: number }, source: AgentMediaSource):
+  film: { path: string; stream: Stream; startSec: number; endSec: number; viewStartSec: number }, source: AgentMediaSource, seams = false):
   Promise<{ sheet: Omit<AgentContactSheet, "pages">; pages: Array<{ bytes: Uint8Array; firstShot: number; lastShot: number }> }> {
   const { tile, grayFrames } = tools;
   if (!tile || !grayFrames) throw new RetrievalError("unavailable", "Local contact sheets are unavailable on this host.");
@@ -208,14 +208,42 @@ export async function contactSheetInSnapshot(store: WorldStore, tools: AgentMedi
   const numbered = shots.map((shot, i) => ({ number: i + 1, startSec: round(shot.startSec), endSec: round(shot.endSec),
     frameSec: round(Math.min(shot.endSec - .001, (shot.startSec + shot.endSec) / 2)), label: shot.label, clipId: shot.clipId }));
   const size = { width: AGENT_SHEET_LIMITS.tileWidth, height: AGENT_SHEET_LIMITS.tileHeight }, pages = [];
+  const about = { streamIndex: film.stream.index, startSec: round(from), endSec: round(to), shotsFrom: fromTimeline ? "timeline" as const : "picture" as const,
+    productionId: fromTimeline?.productionId ?? null, shots: numbered };
+  if (seams) {
+    if (numbered.length < 2) throw new RetrievalError("bad-argument", "This window is one shot: it has no cut to show.");
+    const { seamsPerPage, maxPages } = AGENT_SHEET_LIMITS;
+    if (numbered.length - 1 > seamsPerPage * maxPages) throw new RetrievalError("bad-argument", `This window holds ${numbered.length - 1} cuts, more than its pages show (${seamsPerPage * maxPages}); name a shorter window.`);
+    /*
+     * The last frame before each cut and the first after it. A timeline's cut is exact, so the
+     * frames are the ones either side of it. A cut found in the picture is the first of ten
+     * frames a second to show the new shot, so the old shot's last frame is up to a tenth of a
+     * second before that: step back past it, or the "before" is the new shot too.
+     */
+    const lead = fromTimeline ? .04 : .12, lag = fromTimeline ? .01 : .02;
+    const cuts = numbered.slice(1).map((shot, i) => ({ shot: shot.number, atSec: shot.startSec,
+      beforeSec: round(Math.max(numbered[i]!.startSec, shot.startSec - lead)), afterSec: round(Math.min(shot.endSec - .001, shot.startSec + lag)) }));
+    for (let first = 0; first < cuts.length; first += seamsPerPage) {
+      const group = cuts.slice(first, first + seamsPerPage);
+      const pairs = await inParallel(group, signal, async (cut, each) => ({ before: await tile(film.path, film.stream, decodeAt(cut.beforeSec), size, each),
+        after: await tile(film.path, film.stream, decodeAt(cut.afterSec), size, each), label: tileLabel(cut.shot, cut.atSec) }));
+      pages.push({ bytes: await encodePngAsync(composeSeamPage(pairs), {}, signal), firstShot: group[0]!.shot, lastShot: group[group.length - 1]!.shot });
+    }
+    return { sheet: { ...about, seams: cuts }, pages };
+  }
   for (let first = 0; first < numbered.length; first += AGENT_SHEET_LIMITS.perPage) {
     const group = numbered.slice(first, first + AGENT_SHEET_LIMITS.perPage);
     const tiles = await inParallel(group, signal, async (shot, each) => ({ rgba: await tile(film.path, film.stream, decodeAt(shot.frameSec), size, each), label: tileLabel(shot.number, shot.startSec) }));
     pages.push({ bytes: await encodePngAsync(composeSheetPage(tiles), {}, signal), firstShot: group[0]!.number, lastShot: group[group.length - 1]!.number });
   }
-  return { sheet: { streamIndex: film.stream.index, startSec: round(from), endSec: round(to), shotsFrom: fromTimeline ? "timeline" : "picture",
-    productionId: fromTimeline?.productionId ?? null, shots: numbered }, pages };
+  return { sheet: about, pages };
 }
+
+export const SEAM_LIMITATIONS = [
+  "Two still frames a cut, the last before it and the first after it: the movement across a cut, sound and sync were not reviewed.",
+  "Shots are the production's picture clips when its cut is unchanged since this export; otherwise cuts found where the picture jumps, which misses dissolves and slow fades, and a found cut is placed to a tenth of a second.",
+  "Each pair is labelled with the number of the shot the cut leads into and the cut's time; clip names are in the shot table.",
+];
 
 export const REVIEW_LIMITATIONS = [
   "Signal measurement: length, stream format, EBU R128 loudness, repeated frames per shot, and for each clip whose own sound is muted in the cut, that sound against the film's mix.",

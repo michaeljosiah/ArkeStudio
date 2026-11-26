@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { newId, productionExportFingerprint, storyTimelineFingerprint, WorldChatCheckReceiptSchema, type AgentMediaInventory, type AgentMediaRegion, type HarnessAdapter, type TimelineClipCommand } from "@arke-studio/contracts";
+import { AGENT_SEAM_SCHEMA_VERSION, newId, productionExportFingerprint, storyTimelineFingerprint, WorldChatCheckReceiptSchema, type AgentMediaInventory, type AgentMediaRegion, type HarnessAdapter, type TimelineClipCommand } from "@arke-studio/contracts";
 import { encodePng, solidImage } from "../../src/references/png.js";
 import { recordCompletedExport } from "../../src/productions/export-receipts.js";
 import { applyHumanTimelineCommand } from "../../src/productions/timeline.js";
@@ -287,6 +287,23 @@ test("cut_contact_sheet on a film with no cut behind it: shots found where the p
   assert.match(outcome.receipt.querySummary!, /^Contact sheet/);
   assert.equal(WorldChatCheckReceiptSchema.safeParse(outcome.receipt).success, true);
   assert.equal(h.store.getBundle().meta.schemaVersion, 143);
+});
+
+test("cut_contact_sheet with seams: the frame either side of each cut, three cuts on one image, on any film; schema 151", async () => {
+  const h = await harness();
+  const outcome = await h.retrieval.call(h.lease.token, "cut_contact_sheet", { source: h.film, seams: true });
+  const sheet = outcome.receipt.media!.sheet!;
+  // A cut found in the picture is the first of ten frames a second to show the new shot: the frame before it is taken past that.
+  assert.deepEqual(sheet.seams, [{ shot: 2, atSec: 3.2, beforeSec: 3.08, afterSec: 3.22 }, { shot: 3, atSec: 7.5, beforeSec: 7.38, afterSec: 7.52 }, { shot: 4, atSec: 12.1, beforeSec: 11.98, afterSec: 12.12 }]);
+  assert.deepEqual(h.calls.filter(call => call.what === "tile").map(call => call.startSec).sort((a, b) => a - b), [3.08, 3.22, 7.38, 7.52, 11.98, 12.12]);
+  assert.equal(sheet.shots.length, 4, "the shots' table rides with the cuts");
+  assert.deepEqual(sheet.pages.map(page => [page.firstShot, page.lastShot, page.image.width]), [[2, 4, 1196]]);
+  assert.equal(outcome.imageContent!.length, 1, "one image of the budget, however many cuts it holds");
+  assert.match(outcome.receipt.media!.limitations.join(" "), /Two still frames a cut/);
+  assert.equal(WorldChatCheckReceiptSchema.safeParse(outcome.receipt).success, true);
+  assert.equal(h.store.getBundle().meta.schemaVersion, AGENT_SEAM_SCHEMA_VERSION);
+  // One shot has no cut to show.
+  await assert.rejects(h.retrieval.call(h.lease.token, "cut_contact_sheet", { source: h.film, seams: true, window: { startSec: 0, endSec: 3 } }), /one shot/);
 });
 
 /** A two-clip cut of the fixture's production, both clips' own sound muted under the mix, and an export stamped with that cut. */
