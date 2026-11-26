@@ -38,7 +38,7 @@ export function spokenWords(text: string): string[] {
 }
 
 /** The longest in-order run of the line's words in what was heard, as pairs of indices (line, heard). */
-function matchedHeard(line: readonly string[], heard: readonly string[]): Array<{ line: number; heard: number }> {
+export function matchedHeard(line: readonly string[], heard: readonly string[]): Array<{ line: number; heard: number }> {
   const width = heard.length + 1, dp = new Uint16Array((line.length + 1) * width);
   for (let i = line.length - 1; i >= 0; i--) for (let j = heard.length - 1; j >= 0; j--) {
     dp[i * width + j] = line[i] === heard[j] ? 1 + dp[(i + 1) * width + j + 1]! : Math.max(dp[(i + 1) * width + j]!, dp[i * width + j + 1]!);
@@ -110,7 +110,7 @@ export function alike(a: string, b: string): number {
  * past the one before it, so a long take whose words match nothing costs a little, not the
  * fourteen seconds a hundred such words took when every run was tried against every run.
  */
-function heardBySound(line: readonly string[], heard: readonly string[], used: ReadonlyArray<{ line: number; heard: number }>): { line: Set<number>; heard: Set<number> } {
+export function heardBySound(line: readonly string[], heard: readonly string[], used: ReadonlyArray<{ line: number; heard: number }>): { line: Set<number>; heard: Set<number> } {
   const found = { line: new Set<number>(), heard: new Set<number>() };
   const edges = [{ line: -1, heard: -1 }, ...used, { line: line.length, heard: heard.length }];
   for (let e = 1; e < edges.length; e++) {
@@ -434,7 +434,7 @@ export function castNames(sheets: ReadonlyArray<{ type: string; name: string; al
 const SPOKEN_KINDS = new Set(["dialogue", "vo", "voice", "voice-over", "voiceover", "line", "speech"]);
 
 /** The line the shot is meant to carry, when its sound is a spoken one. */
-function lineOf(shot: Shot): string | null {
+export function lineOf(shot: Shot): string | null {
   const audio = shot.audio;
   if (!audio?.line?.trim() || !SPOKEN_KINDS.has(audio.kind.trim().toLowerCase())) return null;
   return audio.line;

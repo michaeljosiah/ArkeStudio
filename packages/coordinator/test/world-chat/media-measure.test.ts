@@ -3,8 +3,9 @@ import { test } from "node:test";
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { AGENT_SEAM_SCHEMA_VERSION, newId, productionExportFingerprint, storyTimelineFingerprint, WorldChatCheckReceiptSchema, type AgentMediaInventory, type AgentMediaRegion, type HarnessAdapter, type TimelineClipCommand } from "@arke-studio/contracts";
+import { AGENT_REVIEW_SPEECH_SCHEMA_VERSION, AGENT_SEAM_SCHEMA_VERSION, MEASURED_WORD_TIMING_ENGINE, newId, productionExportFingerprint, storyTimelineFingerprint, WorldChatCheckReceiptSchema, type AgentMediaInventory, type AgentMediaRegion, type HarnessAdapter, type TimelineClipCommand } from "@arke-studio/contracts";
 import { encodePng, solidImage } from "../../src/references/png.js";
+import { readSpeechWav, writeSpeechWav } from "../../src/audio/speech-wav.js";
 import { recordCompletedExport } from "../../src/productions/export-receipts.js";
 import { applyHumanTimelineCommand } from "../../src/productions/timeline.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -82,7 +83,9 @@ const takeInventory: AgentMediaInventory = { durationSec: 6, streams: [
 ] };
 const songInventory: AgentMediaInventory = { durationSec: 10, streams: [{ index: 0, kind: "audio", codec: "fixture", sampleRate: RATE, channels: 1, durationSec: 10, startTimeSec: 0 }] };
 
-async function harness(options: { songStreams?: AgentMediaInventory["streams"]; noMeasure?: boolean } = {}) {
+/** A word of the film's sound, on the film's own clock, for a harness that can hear; `untimed` is one the measured reader cannot place. */
+type Said = { text: string; startSec: number; probability?: number; untimed?: boolean };
+async function harness(options: { songStreams?: AgentMediaInventory["streams"]; noMeasure?: boolean; said?: () => Said[] } = {}) {
   const dir = await makeTempWorld(), store = await WorldStore.open(dir); closeOnCleanup(() => store.close());
   const cv = newId("cv"), runId = newId("run"), takeId = newId("ar"), songId = newId("ar"), chat = new WorldChatStore(conversationDir(dir, cv));
   await chat.create(cv, "2026-11-17T00:00:00Z"); await chat.append({ type: "conversation.created", title: "Sync", entryContext: { kind: "world" } });
@@ -98,6 +101,7 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
   const adapter = { imageInput: true, imageInputForSession: () => true, imageDestinationForSession: () => ({ provider: "test-provider", local: true }) } as unknown as HarnessAdapter;
   const images = new ConversationImages(store, leases, { adapter, allowed: async () => true, publish: async () => {} }); images.start(runId, "session", stop.signal);
   const calls: Array<{ what: string; startSec: number; endSec: number; region?: AgentMediaRegion; fps?: number }> = [];
+  let heardFrom = 0;
   const which = async (path: string) => { const bytes = await readFile(path); return bytes.equals(GROOVE) ? "groove" : bytes.equals(STEM) ? "stem" : bytes.equals(SONG) ? "song" : bytes.equals(TAKE2) ? "take2"
     : bytes.equals(FILM) ? "film" : bytes.equals(EXPORT) ? "export" : "take"; };
   const tools: AgentMediaTools = {
@@ -131,6 +135,22 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
         return out;
       },
       loudness: async () => ({ integratedLufs: -14, rangeLu: 5, truePeakDbtp: -.4, shortTermMaxLufs: -11 }),
+      /*
+       * The derivative the local readers are given: a tone under each word of `said` and quiet
+       * between, so the stretches of voice are found where the words are. The first sample of each
+       * twentieth of a second holds that step's number, which is how the readers below know where
+       * in the window a stretch they are handed begins.
+       */
+      ...(options.said ? { speechAudio: async (_path: string, _stream: unknown, startSec: number, endSec: number) => {
+        heardFrom = startSec; calls.push({ what: "speech", startSec, endSec });
+        const samples = new Float32Array(Math.round((endSec - startSec) * 16000));
+        for (const word of options.said!()) {
+          const from = Math.round((word.startSec - startSec) * 16000);
+          for (let i = Math.max(0, from); i < Math.min(samples.length, from + 3200); i++) samples[i] = .25 * Math.sin(2 * Math.PI * 220 * i / 16000);
+        }
+        for (let step = 0; step * 800 < samples.length; step++) samples[step * 800] = (step + 1) / 32768;
+        return { bytes: writeSpeechWav({ rate: 16000, samples }), durationSec: samples.length / 16000 };
+      } } : {}),
       tile: async (_path, _stream, atSec, size) => { calls.push({ what: "tile", startSec: atSec, endSec: atSec }); return new Uint8Array(size.width * size.height * 4).fill(Math.round(atSec * 10) % 256); },
       grayFrames: async (path, stream, startSec, endSec, frameOptions) => {
         if (frameOptions.fps === 10 && await which(path) === "film") {
@@ -167,7 +187,21 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
       },
     }),
   };
-  const media = new ConversationMediaInspection(store, leases, { images, tools }); media.start(runId, stop.signal);
+  // The words `said` puts in the stretch a reader is handed, each at its time from the stretch's start.
+  const inStretch = (bytes: Uint8Array) => {
+    const pcm = readSpeechWav(bytes), seconds = pcm.samples.length / 16000, from = heardFrom + (Math.round(pcm.samples[0]! * 32768) - 1) * .05;
+    return { seconds, words: options.said!().filter(word => word.startSec >= from - 1e-6 && word.startSec < from + seconds - 1e-6)
+      .map(word => ({ word, startSec: Math.max(0, word.startSec - from) })) };
+  };
+  // The measured reader hears them with their times, and refuses a stretch holding a word it cannot time; the plain reader gives the stretch's text alone.
+  const speech = options.said && (async (bytes: Uint8Array) => {
+    const { seconds, words } = inStretch(bytes);
+    if (words.some(({ word }) => word.untimed)) throw new Error("a word has no usable timing or an unresolved pause");
+    const timed = words.map(({ word, startSec }) => ({ text: word.text, startSec, endSec: Math.min(seconds, startSec + .2), probability: word.probability ?? .9 }));
+    return { text: timed.map(word => word.text).join(" "), seconds, engine: { id: MEASURED_WORD_TIMING_ENGINE, version: "1", model: "base-en" }, words: timed };
+  });
+  const speechText = options.said && (async (bytes: Uint8Array) => inStretch(bytes).words.map(({ word }) => word.text).join(" "));
+  const media = new ConversationMediaInspection(store, leases, { images, tools, ...(speech && speechText ? { speech, speechText } : {}) }); media.start(runId, stop.signal);
   const retrieval = new WorldChatRetrieval({ leases, getBundle: () => store.getBundle(), getIndex: () => null, attachments: new WorldChatAttachmentStore(dir), findAttachment: async () => null,
     readImage: (lease, args) => images.read(lease, args), readMedia: (lease, name, args) => media.read(lease, name, args) });
   return { store, lease, retrieval, calls, take: { kind: "artifact" as const, id: takeId }, song: { kind: "artifact" as const, id: songId },
@@ -435,6 +469,87 @@ test("review_export of a film with no cut behind it finds its shots in the pictu
   const review = outcome.receipt.media!.review!;
   assert.equal(review.shotsFrom, "picture"); assert.equal(review.length.expectedSec, null); assert.equal(review.shots.length, 4);
   assert.ok(review.shots.every(shot => shot.sync === null)); assert.equal(review.loudness, null); assert.ok(review.findings.includes("The film has no sound."));
+});
+
+/** A cut of two of the fixture's story shots, shot 12's voice-over then shot 14's line, and an export stamped with it. */
+async function storyCutAndExport(h: Awaited<ReturnType<typeof harness>>, id: string) {
+  const production = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
+  const shot = (clipId: `cl_${string}`, shotId: string, number: number, startFrame: number, durationFrames: number): TimelineClipCommand => ({ kind: "place", trackId: "tr_picture",
+    clip: { id: clipId, startFrame, durationFrames, sourceInFrames: 0, source: { kind: "shot", shotId: shotId as never, sceneNumber: 4, shotNumber: number, label: `SC 4 · SH ${number}` } } });
+  await applyHumanTimelineCommand(h.store, "saltlight", { kind: "commands", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production),
+    commands: [shot("cl_verse", "sh_12", 12, 0, 96), shot("cl_rest", "sh_14", 14, 96, 48)] });
+  const current = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
+  assert.equal(current.timeline?.status, "ready");
+  await mkdir(join(h.store.dir, "exports"), { recursive: true }); await writeFile(join(h.store.dir, "exports", `${id}.mp4`), EXPORT);
+  await recordCompletedExport(h.store, { worldId: h.store.worldId, productionId: "saltlight", status: "done", createdAt: "2026-11-26T00:00:00Z", deliveryKind: "video",
+    id, output: `exports/${id}.mp4`, sourceFingerprint: productionExportFingerprint(h.store.getBundle(), current) });
+}
+const say = (text: string, from: number, step = .3): Said[] => text.split(" ").map((word, i) => ({ text: word, startSec: Math.round((from + i * step) * 1000) / 1000 }));
+
+test("review_export hears the film: every line of the cut's shots heard under its own shot; schema 152", async () => {
+  const h = await harness({ said: () => [...say("the verse under the water", .5), ...say("tell you the rest after", 4.3)] });
+  await storyCutAndExport(h, "ex_heard");
+  const outcome = await h.retrieval.call(h.lease.token, "review_export", { source: { kind: "export", exportId: "ex_heard" } });
+  const review = outcome.receipt.media!.review!;
+  assert.deepEqual(review.speech, { linesFrom: "cut", unwritten: 0, misplaced: 0, readSec: 6,
+    lines: [{ number: 1, shot: 1, said: "as-written", startSec: .5 }, { number: 2, shot: 2, said: "as-written", startSec: 4.3 }] });
+  assert.deepEqual(review.findings.filter(line => /^Line |^Words nobody|words could not/.test(line)), [], review.findings.join(" | "));
+  assert.deepEqual(h.calls.filter(call => call.what === "speech").map(call => [call.startSec, call.endSec]), [[0, 6]], "read once, a minute at a time");
+  assert.equal(WorldChatCheckReceiptSchema.safeParse(outcome.receipt).success, true);
+  assert.equal(h.store.getBundle().meta.schemaVersion, AGENT_REVIEW_SPEECH_SCHEMA_VERSION);
+});
+
+test("review_export finds a line the mix moved under another shot, words nobody wrote, and says when it cannot hear", async () => {
+  // Shot 14's line lost its place and plays at the top, under shot 12; a take's "oh no" follows the voice-over.
+  const moved = await harness({ said: () => [...say("tell you the rest after", .3), ...say("the verse under the water", 2), ...say("oh no", 5)] });
+  await storyCutAndExport(moved, "ex_moved");
+  const review = (await moved.retrieval.call(moved.lease.token, "review_export", { source: { kind: "export", exportId: "ex_moved" } })).receipt.media!.review!;
+  const heard = review.findings.filter(line => /^Line |^Words nobody/.test(line));
+  assert.ok(heard.some(line => /^Line 2 is heard at 0:00\.3 under shot 1, not its own shot 2\.$/.test(line)) || heard.some(line => /^Line 2 .* is not heard in its place; words like it are heard at 0:00\.3\.$/.test(line)), heard.join(" | "));
+  assert.ok(heard.some(line => /^Words nobody wrote at 0:05\.0: "oh no"\.$/.test(line)), heard.join(" | "));
+  // A host with no local reader does not report silence: it says the lines were not checked.
+  const deaf = await harness(); await storyCutAndExport(deaf, "ex_deaf");
+  const unheard = (await deaf.retrieval.call(deaf.lease.token, "review_export", { source: { kind: "export", exportId: "ex_deaf" } })).receipt.media!.review!;
+  assert.equal(unheard.speech, undefined);
+  assert.ok(unheard.findings.includes("The film's words could not be read on this host, so its lines were not checked."));
+  assert.equal(deaf.store.getBundle().meta.schemaVersion, 144, "a review with no words in it is the review it was");
+});
+
+test("review_export keeps a line the measured reader cannot time: heard, with no time, and its stretch is never words nobody wrote", async () => {
+  // Film sound: the second line sits over a room the measured reader refuses, and the plain reader adds words of its own after it.
+  const h = await harness({ said: () => [...say("the verse under the water", .5), ...say("tell you the rest after la la", 4.3, .2).map(word => ({ ...word, untimed: true }))] });
+  await storyCutAndExport(h, "ex_untimed");
+  const review = (await h.retrieval.call(h.lease.token, "review_export", { source: { kind: "export", exportId: "ex_untimed" } })).receipt.media!.review!;
+  assert.deepEqual(review.speech, { linesFrom: "cut", unwritten: 0, misplaced: 0, readSec: 6,
+    lines: [{ number: 1, shot: 1, said: "as-written", startSec: .5 }, { number: 2, shot: 2, said: "as-written", startSec: null }] });
+  assert.deepEqual(review.findings.filter(line => /^Line |^Words nobody|words could not/.test(line)), [], review.findings.join(" | "));
+});
+
+test("review_export holds a cut made outside the Studio to the script of the scene the call names", async () => {
+  // The film says the first line, never the second, and a name the script has is said as something else.
+  const h = await harness({ said: () => [...say("the verse under the water", .5), ...say("i do it in a bag go and greet her before i die", 3, .2)] });
+  const scenePath = "productions/saltlight/scenes/04-the-verse-rises.json", raw = await readFile(join(h.store.dir, scenePath));
+  const scene = JSON.parse(raw.toString("utf8"));
+  scene.script = { blocks: [{ id: "blk_verse", kind: "dialogue", speaker: "maren-kest", text: "The verse, under the water." },
+    { id: "blk_rest", kind: "dialogue", speaker: "maren-kest", text: "Tell you the rest after." },
+    { id: "blk_name", kind: "dialogue", speaker: "maren-kest", text: "Maren Kest, abeg, go and greet her before I die." },
+    { id: "blk_look", kind: "action", text: "She looks at the water." }] };
+  await h.store.commit({ kind: "media-fixture", source: "test", files: [{ path: scenePath, action: "replace", baseHash: hash(raw), content: JSON.stringify(scene, null, 2) }] });
+  // An export whose cut the production no longer holds: a film with no cut behind it, as a file from outside is.
+  await mkdir(join(h.store.dir, "exports"), { recursive: true }); await writeFile(join(h.store.dir, "exports", "ex_outside.mp4"), EXPORT);
+  await recordCompletedExport(h.store, { worldId: h.store.worldId, productionId: "saltlight", status: "done", createdAt: "2026-11-26T00:00:00Z", deliveryKind: "video",
+    id: "ex_outside", output: "exports/ex_outside.mp4", sourceFingerprint: "production-export-v1:a-cut-made-elsewhere" });
+  const source = { kind: "export" as const, exportId: "ex_outside" };
+  const review = (await h.retrieval.call(h.lease.token, "review_export", { source, script: { productionId: "saltlight", sceneId: "sc_04" } })).receipt.media!.review!;
+  assert.equal(review.shotsFrom, "picture");
+  assert.deepEqual(review.speech!.lines.map(line => [line.number, line.shot, line.said]), [[1, null, "as-written"], [2, null, "not-heard"], [3, null, "partly"]]);
+  assert.equal(review.speech!.linesFrom, "script");
+  const heard = review.findings.filter(line => line.startsWith("Line "));
+  assert.deepEqual(heard, ["Line 2 \"Tell you the rest after.\" is not heard.", "Line 3: nothing like the name maren kest is heard (the line is at 0:04.2); listen to it."], review.findings.join(" | "));
+  // Without the scene named it has no lines to be held to, and says nothing of words.
+  const unheld = (await h.retrieval.call(h.lease.token, "review_export", { source })).receipt.media!.review!;
+  assert.equal(unheld.speech, undefined); assert.equal(unheld.findings.some(line => /^Line |words could not/.test(line)), false);
+  await assert.rejects(h.retrieval.call(h.lease.token, "review_export", { source, script: { productionId: "saltlight", sceneId: "sc_99" } }), /not in this world/);
 });
 
 test("sample_video looks closely at a box: the region reaches the decoder and the receipt, and raises schema 143", async () => {

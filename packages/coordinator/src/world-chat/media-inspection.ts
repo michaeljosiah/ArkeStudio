@@ -1,10 +1,10 @@
 import { AGENT_EXPORT_MEDIA_SCHEMA_VERSION, AGENT_PERFORMANCE_MEDIA_SCHEMA_VERSION, PerformanceRecordBaseSchema, AGENT_LISTENING_SCHEMA_VERSION, AGENT_LISTENING_LIMITS, ListenAudioArgsSchema, AGENT_SPEECH_STRETCHES_SCHEMA_VERSION, AGENT_TRANSCRIPT_LIMITS, AGENT_MEDIA_LIMITS, AGENT_MEDIA_PROFILE, AGENT_MEDIA_SCHEMA_VERSION, AgentMediaObservationSchema, AnalyzeAudioArgsSchema,
   InspectMediaArgsSchema, SampleVideoArgsSchema, ReviewAudioContentArgsSchema, MeasureSyncArgsSchema, AGENT_SYNC_SCHEMA_VERSION, newId,
   SongMapArgsSchema, AGENT_SONG_SCHEMA_VERSION, AGENT_SONG_LIMITS, ClipQualityArgsSchema, AGENT_QUALITY_SCHEMA_VERSION,
-  CutContactSheetArgsSchema, AGENT_SHEET_SCHEMA_VERSION, AGENT_SEAM_SCHEMA_VERSION, AGENT_SHEET_LIMITS, ReviewExportArgsSchema, AGENT_REVIEW_SCHEMA_VERSION, AGENT_REVIEW_LIMITS, type ReviewExportArgs,
+  CutContactSheetArgsSchema, AGENT_SHEET_SCHEMA_VERSION, AGENT_SEAM_SCHEMA_VERSION, AGENT_SHEET_LIMITS, ReviewExportArgsSchema, AGENT_REVIEW_SCHEMA_VERSION, AGENT_REVIEW_SPEECH_SCHEMA_VERSION, AGENT_REVIEW_SPEECH_LIMITS, AGENT_REVIEW_LIMITS, type ReviewExportArgs,
   type AgentListeningFocus, type AgentMediaObservation, type AgentMediaSource, type ClipQualityArgs, type CutContactSheetArgs, type MeasureSyncArgs, type AgentMediaRegion,
   type SongMapArgs, type WorldChatCheckReceipt } from "@arke-studio/contracts";
-import { contactSheetInSnapshot, measureSyncInSnapshot, qualityInSnapshot, reviewInSnapshot, songMapInSnapshot, QUALITY_LIMITATIONS, REVIEW_LIMITATIONS, SEAM_LIMITATIONS, SHEET_LIMITATIONS,
+import { contactSheetInSnapshot, measureSyncInSnapshot, qualityInSnapshot, reviewInSnapshot, songMapInSnapshot, type FilmHearing, QUALITY_LIMITATIONS, REVIEW_LIMITATIONS, SEAM_LIMITATIONS, SHEET_LIMITATIONS,
   SONG_LIMITATIONS, SYNC_LIMITATIONS } from "./media-measure.js";
 import { readBenchSession } from "../bench/chat-reads.js";
 import { resolveTakeSource } from "../bench/service.js";
@@ -17,6 +17,7 @@ import { RetrievalError, type RetrievalOutcome } from "./retrieval.js";
 import { LeaseDeniedError, type QueryLease, type QueryLeaseRegistry } from "./lease.js";
 import { conversationDir, WorldChatStore } from "./store.js";
 import { readAgentSpeech, type AgentSpeechReader, type AgentSpeechTextReader } from "../media/agent-speech.js";
+import type { HeardWord } from "../takes/checks.js";
 import { listenToAgentAudio, type AgentAudioListener } from "../media/agent-listening.js";
 import { VoxaCancelledError, VoxaTimeoutError, wordTimingRefusalReason } from "@arke-studio/voice";
 
@@ -200,8 +201,38 @@ export class ConversationMediaInspection {
         };
         const video = pick("video", reviewArgs.streamIndex), audio = pick("audio", reviewArgs.audioStreamIndex);
         if (!video?.width || !video.height || audio === undefined) throw new RetrievalError("bad-argument", "Select one explicit video and audio stream from inspect_media; ambiguous tracks are never guessed.");
+        /*
+         * How the review hears the film: a minute at a time through the readers transcribe_audio
+         * uses, a stretch of voice at a time, its words on the window's clock, for up to five
+         * minutes of a call. A stretch the measured reader cannot time is kept as its text alone:
+         * those words can be a line's, with no time to say where, and are never sure enough to be
+         * called words nobody wrote, since that reader invents words over room tone. A host with no
+         * reader, or a minute it refuses outright, hears nothing it can vouch for and says so:
+         * silence read from a refusal would report every line of that minute as not heard.
+         */
+        const speech = this.deps.speech, speechText = this.deps.speechText, speechAudio = tools.speechAudio, ready = this.deps.speechReady;
+        const hearing: FilmHearing | undefined = audio ? { script: reviewArgs.script, hear: async each => {
+          if (!speech || !speechAudio || ready && !await ready(each).catch(() => false)) return null;
+          const words: HeardWord[] = [], readSec = Math.min(window.endSec - window.startSec, AGENT_REVIEW_SPEECH_LIMITS.maxSeconds);
+          for (let at = 0; at < readSec - .05; at += 60) {
+            const startSec = source.startSec + window.startSec + at, endSec = Math.min(source.startSec + window.startSec + readSec, startSec + 60);
+            const heard = await speechAudio(snapshot.path, audio, startSec, endSec, each)
+              .then(derivative => readAgentSpeech({ ...derivative, streamIndex: audio.index, sourceStartSec: startSec, viewStartSec: window.startSec + at, read: speech, readText: speechText, signal: each }))
+              .catch(error => { if (each.aborted) throw error; return null; });
+            if (heard === null) return null;
+            let next = 0;
+            for (const stretch of heard.stretches ?? []) {
+              if (stretch.read === "text-only") words.push({ text: stretch.text, startSec: null, probability: 0 });
+              if (stretch.read !== "timed") continue;
+              for (; next < heard.words.length && heard.words[next]!.endSec <= stretch.endSec + .000001; next++) {
+                words.push({ text: heard.words[next]!.text, startSec: heard.words[next]!.viewStartSec, probability: heard.words[next]!.probability });
+              }
+            }
+          }
+          return { words, readSec };
+        } } : undefined;
         const review = await reviewInSnapshot(this.store, tools, signal, { path: snapshot.path, video, audio, startSec: source.startSec + window.startSec,
-          endSec: source.startSec + window.endSec, viewStartSec: window.startSec, whole: !reviewArgs.window }, args.source, clip => agentMediaSource(this.store, clip));
+          endSec: source.startSec + window.endSec, viewStartSec: window.startSec, whole: !reviewArgs.window }, args.source, clip => agentMediaSource(this.store, clip), hearing);
         this.access(lease, name);
         return { observation: AgentMediaObservationSchema.parse({ ...base, review, coverage: "export-review", limitations: REVIEW_LIMITATIONS }), frames: [] };
       }
@@ -338,7 +369,7 @@ export class ConversationMediaInspection {
     // and a transcript's stretches, which come first: an export's or a performance's own boundary would raise a speech read too little.
     await this.store.raiseSchemaBoundary(speechRead ? AGENT_SPEECH_STRETCHES_SCHEMA_VERSION : syncRead ? AGENT_SYNC_SCHEMA_VERSION : songRead ? AGENT_SONG_SCHEMA_VERSION : qualityRead ? AGENT_QUALITY_SCHEMA_VERSION
       : sheetPrepared?.sheet.seams !== undefined ? AGENT_SEAM_SCHEMA_VERSION
-      : sheetRead || frameRegion ? AGENT_SHEET_SCHEMA_VERSION : reviewRead ? AGENT_REVIEW_SCHEMA_VERSION : args.source.kind === "export" ? AGENT_EXPORT_MEDIA_SCHEMA_VERSION
+      : sheetRead || frameRegion ? AGENT_SHEET_SCHEMA_VERSION : reviewRead ? (observation.review?.speech ? AGENT_REVIEW_SPEECH_SCHEMA_VERSION : AGENT_REVIEW_SCHEMA_VERSION) : args.source.kind === "export" ? AGENT_EXPORT_MEDIA_SCHEMA_VERSION
       : args.source.kind === "performance" ? AGENT_PERFORMANCE_MEDIA_SCHEMA_VERSION
       : listeningRead ? AGENT_LISTENING_SCHEMA_VERSION : AGENT_MEDIA_SCHEMA_VERSION, "agent-media-evidence");
     await this.store.ownedWrite(async () => {

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { FullSha256Schema } from "./audio.js";
-import { SlugSchema } from "./ids.js";
+import { SceneIdSchema, SlugSchema } from "./ids.js";
 import { ImageObservationSchema } from "./world-chat-images.js";
 import { AgentMediaRangeSchema, AgentMediaSourceSchema, AgentMediaStreamIndexSchema, agentMediaTime } from "./agent-media-source.js";
 
@@ -278,10 +278,22 @@ export const AGENT_REVIEW_SCHEMA_VERSION = 144;
 export const AGENT_REVIEW_LIMITS = Object.freeze({ maxSeconds: 900, maxShots: 240, maxFindings: 60,
   /** EBU R128 / ITU-R BS.1770: a true peak over -1 dBTP can clip once the film is encoded for delivery. */
   truePeakCeilingDbtp: -1 });
+/**
+ * The film heard (2026-11-26): its words set beside the lines it was cut to say. Gold on Gold's
+ * scene was shown with three lines playing over other shots while their own shots' mouths moved
+ * in silence, words a take invented, and a name said wrong; every take had passed alone, and the
+ * review measured the film's loudness and never listened to it. A film whose cut the production
+ * still holds is held to its own shots' lines; one with no cut behind it (a cut made outside, on
+ * the shelf) is held to the script of the scene the call names.
+ */
+export const AGENT_REVIEW_SPEECH_SCHEMA_VERSION = 152;
+export const AGENT_REVIEW_SPEECH_LIMITS = Object.freeze({ maxLines: 400, maxSeconds: 300 });
 export const ReviewExportArgsSchema = z.object({
   source: AgentMediaSourceSchema,
   window: AgentSongWindowSchema.optional(),
   streamIndex: AgentMediaStreamIndexSchema.optional(), audioStreamIndex: AgentMediaStreamIndexSchema.optional(),
+  /** The scene whose script the film's words are held to, for a film with no cut of the production behind it. */
+  script: z.object({ productionId: SlugSchema, sceneId: SceneIdSchema }).strict().optional(),
 }).strict();
 export type ReviewExportArgs = z.infer<typeof ReviewExportArgsSchema>;
 const dbOrNull = z.number().finite().nullable();
@@ -304,6 +316,19 @@ export const AgentExportReviewSchema = z.object({
     sync: z.object({ source: AgentMediaSourceSchema, sourceHash: FullSha256Schema, lagSec: z.number().finite().nullable(), correlation: correlation.nullable(), follows: z.boolean() }).strict().nullable(),
   }).strict()).min(1).max(AGENT_REVIEW_LIMITS.maxShots),
   findings: z.array(z.string().min(1).max(300)).max(AGENT_REVIEW_LIMITS.maxFindings),
+  /**
+   * The film's words against its lines, when it has lines to be held to and the host can hear:
+   * each line as it was heard and when, and how many runs of words were no line's or out of
+   * place (the findings say which). `linesFrom` is the cut's own shots or the script the call named.
+   */
+  speech: z.object({
+    linesFrom: z.enum(["cut", "script"]),
+    lines: z.array(z.object({ number: z.number().int().min(1), shot: z.number().int().min(1).nullable(),
+      said: z.enum(["as-written", "by-sound", "partly", "not-heard"]), startSec: agentMediaTime.nullable() }).strict()).min(1).max(AGENT_REVIEW_SPEECH_LIMITS.maxLines),
+    unwritten: z.number().int().min(0), misplaced: z.number().int().min(0),
+    /** How much of the window was read for words: all of it, or its first five minutes. */
+    readSec: agentMediaTime,
+  }).strict().optional(),
 }).strict().superRefine((review, context) => {
   if (review.endSec <= review.startSec || review.shots.some((shot, i) => shot.number !== i + 1 || shot.endSec <= shot.startSec)) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "A review covers a positive window with its shots numbered in order" });
