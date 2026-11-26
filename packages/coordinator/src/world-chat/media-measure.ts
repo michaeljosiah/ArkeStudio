@@ -215,18 +215,23 @@ export async function contactSheetInSnapshot(store: WorldStore, tools: AgentMedi
     const { seamsPerPage, maxPages } = AGENT_SHEET_LIMITS;
     if (numbered.length - 1 > seamsPerPage * maxPages) throw new RetrievalError("bad-argument", `This window holds ${numbered.length - 1} cuts, more than its pages show (${seamsPerPage * maxPages}); name a shorter window.`);
     /*
-     * The last frame before each cut and the first after it. A timeline's cut is exact, so the
-     * frames are the ones either side of it. A cut found in the picture is the first of ten
-     * frames a second to show the new shot, so the old shot's last frame is up to a tenth of a
-     * second before that: step back past it, or the "before" is the new shot too.
+     * The last frame before each cut and the first after it, by the film's own frames. The first
+     * frame after is the one at the cut. The last before is one frame earlier for a timeline's
+     * cut, which is exact; a cut found in the picture is the first of ten frames a second to show
+     * the new shot, so the old shot's last frame is up to a tenth of a second before that, and the
+     * frame is taken past it. A fixed lead would not do: at 24 frames a second, 40 ms before a cut
+     * is already past the last frame's own time, and the decoder, asked for a time, gives the next
+     * frame at or after it, which is the new shot's (codex on PR 3330).
      */
-    const lead = fromTimeline ? .04 : .12, lag = fromTimeline ? .01 : .02;
+    const frame = 1 / (parseStreamRate(film.stream.frameRate) ?? 30), lead = fromTimeline ? frame : .1 + frame;
     const cuts = numbered.slice(1).map((shot, i) => ({ shot: shot.number, atSec: shot.startSec,
-      beforeSec: round(Math.max(numbered[i]!.startSec, shot.startSec - lead)), afterSec: round(Math.min(shot.endSec - .001, shot.startSec + lag)) }));
+      beforeSec: round(Math.max(numbered[i]!.startSec, shot.startSec - lead)), afterSec: shot.startSec }));
+    // Asked for a hair before a frame's time, the decoder's next frame is that frame, whatever rounding did to the time.
+    const frameAt = (view: number) => Math.max(film.startSec, decodeAt(view) - .001);
     for (let first = 0; first < cuts.length; first += seamsPerPage) {
       const group = cuts.slice(first, first + seamsPerPage);
-      const pairs = await inParallel(group, signal, async (cut, each) => ({ before: await tile(film.path, film.stream, decodeAt(cut.beforeSec), size, each),
-        after: await tile(film.path, film.stream, decodeAt(cut.afterSec), size, each), label: tileLabel(cut.shot, cut.atSec) }));
+      const pairs = await inParallel(group, signal, async (cut, each) => ({ before: await tile(film.path, film.stream, frameAt(cut.beforeSec), size, each),
+        after: await tile(film.path, film.stream, frameAt(cut.afterSec), size, each), label: tileLabel(cut.shot, cut.atSec) }));
       pages.push({ bytes: await encodePngAsync(composeSeamPage(pairs), {}, signal), firstShot: group[0]!.shot, lastShot: group[group.length - 1]!.shot });
     }
     return { sheet: { ...about, seams: cuts }, pages };

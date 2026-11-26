@@ -293,9 +293,11 @@ test("cut_contact_sheet with seams: the frame either side of each cut, three cut
   const h = await harness();
   const outcome = await h.retrieval.call(h.lease.token, "cut_contact_sheet", { source: h.film, seams: true });
   const sheet = outcome.receipt.media!.sheet!;
-  // A cut found in the picture is the first of ten frames a second to show the new shot: the frame before it is taken past that.
-  assert.deepEqual(sheet.seams, [{ shot: 2, atSec: 3.2, beforeSec: 3.08, afterSec: 3.22 }, { shot: 3, atSec: 7.5, beforeSec: 7.38, afterSec: 7.52 }, { shot: 4, atSec: 12.1, beforeSec: 11.98, afterSec: 12.12 }]);
-  assert.deepEqual(h.calls.filter(call => call.what === "tile").map(call => call.startSec).sort((a, b) => a - b), [3.08, 3.22, 7.38, 7.52, 11.98, 12.12]);
+  // The first frame after is the one at the cut. A cut found in the picture is the first of ten frames a second to show
+  // the new shot, so the frame before it is taken a tenth of a second and one of this 30 fps film's frames earlier.
+  assert.deepEqual(sheet.seams, [{ shot: 2, atSec: 3.2, beforeSec: 3.067, afterSec: 3.2 }, { shot: 3, atSec: 7.5, beforeSec: 7.367, afterSec: 7.5 }, { shot: 4, atSec: 12.1, beforeSec: 11.967, afterSec: 12.1 }]);
+  // Each is asked for a hair before its frame's time: the decoder gives the next frame at or after the time it is asked for.
+  assert.deepEqual(h.calls.filter(call => call.what === "tile").map(call => Math.round(call.startSec * 1000) / 1000).sort((a, b) => a - b), [3.066, 3.199, 7.366, 7.499, 11.966, 12.099]);
   assert.equal(sheet.shots.length, 4, "the shots' table rides with the cuts");
   assert.deepEqual(sheet.pages.map(page => [page.firstShot, page.lastShot, page.image.width]), [[2, 4, 1196]]);
   assert.equal(outcome.imageContent!.length, 1, "one image of the budget, however many cuts it holds");
@@ -334,6 +336,10 @@ test("cut_contact_sheet on an export whose production still holds its cut: the t
   const sheet = outcome.receipt.media!.sheet!;
   assert.equal(sheet.shotsFrom, "timeline"); assert.equal(sheet.productionId, "saltlight");
   assert.deepEqual(sheet.shots.map(shot => [shot.label, shot.clipId, shot.startSec, shot.endSec]), [["The opening", "cl_open", 0, 96 / rate], ["The close", "cl_close", 96 / rate, 144 / rate]]);
+  // The timeline's cut is exact: its page of cuts shows the frame at the cut and the one frame before it (codex on PR 3330).
+  const cut = (await h.retrieval.call(h.lease.token, "cut_contact_sheet", { source: { kind: "export", exportId: "ex_sheet" }, seams: true })).receipt.media!.sheet!.seams![0]!;
+  assert.deepEqual([cut.shot, cut.atSec, cut.afterSec], [2, 96 / rate, 96 / rate]);
+  assert.ok(cut.atSec - cut.beforeSec > 0 && cut.atSec - cut.beforeSec <= 1 / 23, `one frame before, not a fixed lead: ${cut.beforeSec}`);
   // A changed fingerprint (the cut moved on since) falls back to the picture.
   await writeFile(join(h.store.dir, "exports", "ex_old.mp4"), EXPORT);
   await recordCompletedExport(h.store, { ...stamp, id: "ex_old", output: "exports/ex_old.mp4", sourceFingerprint: "production-export-v1:an-older-cut" });
