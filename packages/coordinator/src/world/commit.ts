@@ -57,7 +57,7 @@ import {
 } from "../productions/scene-record.js";
 import { atomicWriteFile, renameWithRetry } from "./atomic.js";
 import { completesFoundingLook } from "../references/master-look.js";
-import { carriesEditorEffects, carriesEditorTransitions, carriesEditorAppearance, carriesPictureMotion, carriesEditorText, carriesClipSpeed, carriesSoundFade, carriesPictureLook } from "../productions/timeline-record.js";
+import { carriesEditorEffects, carriesEditorTransitions, carriesEditorAppearance, carriesPictureMotion, carriesEditorText, carriesClipSpeed, carriesSoundFade, carriesPictureLook, carriesSoundLevels } from "../productions/timeline-record.js";
 import { appendChanges, readChanges } from "./change-writer.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { JsonFile, MarkdownFile, sha256 } from "./text-files.js";
@@ -705,6 +705,12 @@ export const EDITOR_SOUND_FADE_SCHEMA_VERSION = 133;
 /** SPEC-038 R-45..R-50: a cut's picture look is a strict timeline field an older Cut would refuse to read, on the record or in Undo or Redo. */
 export const EDITOR_PICTURE_LOOK_SCHEMA_VERSION = 134;
 /**
+ * SPEC-038 R-55: a track's level and hold under speech, and a fade's even-power shape, are strict
+ * fields an older Cut would refuse to read, on the record, in Undo or Redo, or in a request.
+ * (153 follows 152, the film review's speech; no open branch held it.)
+ */
+export const EDITOR_SOUND_LEVELS_SCHEMA_VERSION = 153;
+/**
  * Issue 3185: what a production's or a shot's clips are made from is a strict field on
  * production.json and on a shot's continuity. An older build would refuse the production or the
  * scene over it, so the world is raised with the first one written. (135 is PR 3133's.)
@@ -1245,6 +1251,7 @@ export class Committer {
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesClipSpeed(f.newContent)) ? EDITOR_CLIP_SPEED_SCHEMA_VERSION : 0,
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesSoundFade(f.newContent)) ? EDITOR_SOUND_FADE_SCHEMA_VERSION : 0,
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesPictureLook(f.newContent)) ? EDITOR_PICTURE_LOOK_SCHEMA_VERSION : 0,
+      files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesSoundLevels(f.newContent)) ? EDITOR_SOUND_LEVELS_SCHEMA_VERSION : 0,
       files.some(f => (classify(f.path).track === "production-meta" || classify(f.path).track === "scene") && f.newContent != null && CLIPS_FROM_KEY.test(f.newContent)) ? CLIPS_FROM_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "production-meta" && f.newContent != null && PRODUCTION_LOOK_KEY.test(f.newContent)) ? PRODUCTION_LOOK_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && LIP_SYNC_KEY.test(f.newContent)) ? LIP_SYNC_SCHEMA_VERSION : 0,

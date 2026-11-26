@@ -23,6 +23,7 @@ import {
   type TimelineCommand,
   type TimelineSelectionChange,
   type TimelineState,
+  type TimelineTrackProps,
 } from "./timeline.js";
 
 /**
@@ -95,7 +96,7 @@ const EditorRequestCommandSchema = z.discriminatedUnion("kind", TimelineCommandS
 export const TIMELINE_EDITOR_COMMAND_GUIDE = EditorRequestCommandSchema.options.map(option => {
   const kind = option.shape.kind.value;
   return `${kind} (${Object.keys(option.shape).filter(field => field !== "kind").join(", ")})`;
-}).join(" | ") + ` | picture-motion's motion is {kind: ${PICTURE_MOTION_KINDS.join(" | ")}, amount: 0.01 to 0.5, where 0.08 ends a push 8% closer} or null to remove; only a still image moves | picture-fade's inFrames and outFrames fade from and to black at an edge with no crossfade; 0 removes | sound-fade's inFrames and outFrames fade a clip on an audio track up from silence and back down, in frames from its own edges; 0 removes; a video's own sound has none until its audio is detached | set-clip-speed's speed is ${CLIP_SPEED_MIN} to ${CLIP_SPEED_MAX} in hundredths, where 0.5 is half speed and 1 is the clip's own; the clip keeps the same stretch of source and its start, so it gets longer or shorter, and stops at the next clip; only a video on a Picture track | set-clip-reverse's reverse true plays the same frames last first, so the clip ends on the frame it began on | a clip at another speed or backwards plays no sound of its own; its sourceInFrames and durationFrames count frames at its speed | ${TEXT_REQUEST_GUIDE} | detach-audio is excluded from editorRequests; the direct editor resolves live selected media before detaching | procedural effects and protection require their dedicated reviewed-version flow; generic editorRequests cannot change effect tracks`;
+}).join(" | ") + ` | picture-motion's motion is {kind: ${PICTURE_MOTION_KINDS.join(" | ")}, amount: 0.01 to 0.5, where 0.08 ends a push 8% closer} or null to remove; only a still image moves | picture-fade's inFrames and outFrames fade from and to black at an edge with no crossfade; 0 removes | sound-fade's inFrames and outFrames fade a clip on an audio track up from silence and back down, in frames from its own edges; 0 removes; power true draws both fades as even-power curves, the shape for two sounds that cross under one another, and false draws them straight again; a video's own sound has none until its audio is detached | set-track's levelDb is added to the gain of every clip on an audio track, -60 to 12, so a room laid from many pieces comes down with one number; its ducks false holds that track's level under speech, where Music and Ambience are otherwise lowered, which is for a room's tone and the music a place plays, and true lowers it again | set-clip-speed's speed is ${CLIP_SPEED_MIN} to ${CLIP_SPEED_MAX} in hundredths, where 0.5 is half speed and 1 is the clip's own; the clip keeps the same stretch of source and its start, so it gets longer or shorter, and stops at the next clip; only a video on a Picture track | set-clip-reverse's reverse true plays the same frames last first, so the clip ends on the frame it began on | a clip at another speed or backwards plays no sound of its own; its sourceInFrames and durationFrames count frames at its speed | ${TEXT_REQUEST_GUIDE} | detach-audio is excluded from editorRequests; the direct editor resolves live selected media before detaching | procedural effects and protection require their dedicated reviewed-version flow; generic editorRequests cannot change effect tracks`;
 /** The shared result shape stays compact; the turn's action guide supplies command fields. */
 export const TIMELINE_EDITOR_COMMAND_NAMES = EditorRequestCommandSchema.options.map(option => option.shape.kind.value).join(" | ");
 
@@ -243,6 +244,19 @@ function clipLabel(clip: TimelineClip): string {
   return source.kind === "shot" ? source.shotId : source.kind === "take" ? source.takeId : source.label;
 }
 
+/**
+ * What a card says of a track whose level or hold under speech changes (SPEC-038 R-56). A track's
+ * level moves every clip on it, so "changes tr_room" alone would have a person accept forty
+ * pieces 6 dB down without being told.
+ */
+function trackSoundChange(before: TimelineTrackProps, after: TimelineTrackProps): string {
+  const said = [
+    (before.levelDb ?? 0) === (after.levelDb ?? 0) ? "" : `level ${before.levelDb ?? 0} dB -> ${after.levelDb ?? 0} dB`,
+    (before.ducks === false) === (after.ducks === false) ? "" : after.ducks === false ? "holds under speech" : "lowered under speech again",
+  ].filter(Boolean);
+  return said.length ? ` (${said.join(", ")})` : "";
+}
+
 function pictureShotOrder(timeline: ProductionTimeline): string {
   const picture = timeline.tracks.find((track) => track.id === PICTURE_TRACK_ID);
   if (picture === undefined) return "";
@@ -318,7 +332,7 @@ export function previewEditorRequest(
       const clip = after ?? before!;
       const state = (value: TimelineClip | null) => value === null
         ? "not present"
-        : `${change.trackId}, frames ${value.startFrame}-${value.startFrame + value.durationFrames}, source ${value.sourceInFrames}-${value.sourceInFrames + value.durationFrames}${value.gainDb === undefined ? "" : `, ${value.gainDb} dB`}${value.audio === undefined ? "" : `, audio ${value.audio}`}${value.motion === undefined ? "" : `, ${value.motion.kind} ${value.motion.amount}`}${value.fade === undefined ? "" : `, fade in ${value.fade.inFrames ?? 0} out ${value.fade.outFrames ?? 0}`}${value.soundFade === undefined ? "" : `, sound fade in ${value.soundFade.inFrames ?? 0} out ${value.soundFade.outFrames ?? 0}`}${value.speed === undefined ? "" : `, speed ${value.speed}x`}${value.reverse ? ", backwards" : ""}`;
+        : `${change.trackId}, frames ${value.startFrame}-${value.startFrame + value.durationFrames}, source ${value.sourceInFrames}-${value.sourceInFrames + value.durationFrames}${value.gainDb === undefined ? "" : `, ${value.gainDb} dB`}${value.audio === undefined ? "" : `, audio ${value.audio}`}${value.motion === undefined ? "" : `, ${value.motion.kind} ${value.motion.amount}`}${value.fade === undefined ? "" : `, fade in ${value.fade.inFrames ?? 0} out ${value.fade.outFrames ?? 0}`}${value.soundFade === undefined ? "" : `, sound fade in ${value.soundFade.inFrames ?? 0} out ${value.soundFade.outFrames ?? 0}${value.soundFade.power ? " even-power" : ""}`}${value.speed === undefined ? "" : `, speed ${value.speed}x`}${value.reverse ? ", backwards" : ""}`;
       digest.effects.push({
         label: `${before === null ? "Add" : after === null ? "Remove" : "Change"} ${clipLabel(clip)} (${clip.id})`,
         detail: `${state(before)} -> ${state(after)}`,
@@ -331,7 +345,7 @@ export function previewEditorRequest(
     }
     if (Number.isFinite(start) && Number.isFinite(end)) digest.range = { startFrame: start, endFrame: end };
     digest.tracks = entry.tracks.map((change) =>
-      change.after === null ? `removes ${change.trackId}` : change.before === null ? `adds ${change.trackId}` : `changes ${change.trackId}`,
+      change.after === null ? `removes ${change.trackId}` : change.before === null ? `adds ${change.trackId}` : `changes ${change.trackId}${trackSoundChange(change.before, change.after)}`,
     );
     for (const change of entry.tracks) {
       digest.effects.push({

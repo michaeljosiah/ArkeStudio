@@ -358,7 +358,8 @@ export function TypedTrackRows({
             <span className="fy-track__label fy-track__label--typed">
               {phone && <button type="button" className="fy-cut-lane-open" aria-label={`${track.name} lane`} onClick={() => openLane(track.id)}>{laneIcon(track.kind)}</button>}
               <span className="fy-track__icon" aria-hidden="true">{laneIcon(track.kind)}</span>
-              <span className="fy-track__name" title={`${track.name} · ${kindLabel}`}>{track.name}</span>
+              {/* A track's level and its hold under speech change every clip on it, so its name says them where it is read (R-52, R-53). */}
+              <span className="fy-track__name" title={`${track.name} · ${kindLabel}${track.levelDb ? ` · ${track.levelDb > 0 ? "+" : ""}${track.levelDb} dB` : ""}${track.ducks === false ? " · held under speech" : ""}`}>{track.name}</span>
               <span className="fy-trackbtns" role="group" aria-label={`${track.name} controls`}>
                 {removable && (
                   <IconButton
@@ -482,7 +483,7 @@ export function TypedTrackRows({
                 const selected = clip.id === selectedClipId || selectedClipIds?.has(clip.id) === true;
                 const name = shownName(clip);
                 // A text chip shows its first line; its name aloud is all its words (SPEC-065 R-33).
-                const label = `${clipSpokenName(clip, name)}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${silenced ? ", silent" : ""}${clip.gainDb !== undefined && clip.gainDb !== 0 ? `, ${clip.gainDb} dB` : ""}${clip.soundFade?.inFrames ? ", fades in" : ""}${clip.soundFade?.outFrames ? ", fades out" : ""}`;
+                const label = `${clipSpokenName(clip, name)}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${silenced ? ", silent" : ""}${clip.gainDb !== undefined && clip.gainDb !== 0 ? `, ${clip.gainDb} dB` : ""}${clip.soundFade?.inFrames ? ", fades in" : ""}${clip.soundFade?.outFrames ? ", fades out" : ""}${clip.soundFade?.power ? ", even power" : ""}`;
                 const isGhost = moving && clip.id === laneDrag.clipId;
                 const artifact = artifactOf(clip);
                 const picture = !audio && artifact !== null ? artifactPicturePath(artifact) : null;
@@ -581,7 +582,44 @@ export function AudioClipSettings({ clip, track, disabled, onCommands }: {
         {roles.map(([role, label]) => <option key={role} value={role}>{label}</option>)}
       </select>
     </label>
+    <TrackLevel track={track} disabled={disabled} onCommands={onCommands} />
   </div>;
+}
+
+/**
+ * A track's own level over every clip on it, and whether speech lowers it (SPEC-038 R-52, R-53).
+ * The rows sit with the track's name because they are the track's: a room laid from forty pieces
+ * comes down here once, and the music a place plays is held while a line is spoken.
+ */
+export function TrackLevel({ track, disabled, onCommands }: {
+  track: TimelineTrack; disabled: boolean;
+  onCommands: (commands: TimelineClipCommand[], label?: string) => void;
+}) {
+  const level = track.levelDb ?? 0, held = track.ducks === false;
+  const set = (next: number) => onCommands([{ kind: "set-track", trackId: track.id, levelDb: Math.max(-60, Math.min(12, next)) }], "Set track level");
+  return <>
+    <div className="fy-cutinspect__row fy-framestep">
+      <span>Track level</span>
+      <strong>
+        <button type="button" className="fy-trim__step" aria-label="Track 1 dB quieter" disabled={disabled || level <= -60} onClick={() => set(level - 1)}>
+          −
+        </button>
+        <span className="fy-mono">{level > 0 ? `+${level}` : level} dB</span>
+        <button type="button" className="fy-trim__step" aria-label="Track 1 dB louder" disabled={disabled || level >= 12} onClick={() => set(level + 1)}>
+          +
+        </button>
+      </strong>
+    </div>
+    <div className="fy-cutinspect__row">
+      <span>Under speech</span>
+      <strong>
+        <button type="button" className="fy-takepick__use" aria-pressed={held} aria-label={held ? "Track holds under speech" : "Track is lowered under speech"} disabled={disabled}
+          onClick={() => onCommands([{ kind: "set-track", trackId: track.id, ducks: held }], held ? "Lower track under speech" : "Hold track under speech")}>
+          {held ? "Held" : "Lowered"}
+        </button>
+      </strong>
+    </div>
+  </>;
 }
 
 export function ClipGain({
@@ -623,6 +661,16 @@ export function ClipSoundFade({ clip, frameRate, disabled, onCommands, resetToke
       onCommit={inFrames => onCommands([{ kind: "sound-fade", clipId: clip.id, inFrames }], "Set sound fade")} />
     <EffectTimeField label="Fade out" value={clip.soundFade?.outFrames ?? 0} frameRate={frameRate} max={clip.durationFrames} disabled={disabled} resetToken={resetToken}
       onCommit={outFrames => onCommands([{ kind: "sound-fade", clipId: clip.id, outFrames }], "Set sound fade")} />
+    {/* The shape of a fade that is there (R-54): with no fade it has nothing to draw, so the row waits for one. */}
+    <div className="fy-cutinspect__row">
+      <span>Even power</span>
+      <strong>
+        <button type="button" className="fy-takepick__use" aria-pressed={clip.soundFade?.power === true} disabled={disabled || clip.soundFade === undefined}
+          onClick={() => onCommands([{ kind: "sound-fade", clipId: clip.id, power: clip.soundFade?.power !== true }], "Set fade shape")}>
+          {clip.soundFade?.power === true ? "On" : "Off"}
+        </button>
+      </strong>
+    </div>
   </section>;
 }
 

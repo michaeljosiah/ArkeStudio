@@ -69,6 +69,26 @@ export function carriesSoundFade(raw: string): boolean {
 }
 
 /**
+ * SPEC-038 R-55: a track's level, a track that holds under speech, and an even-power fade. On the
+ * record, in Undo or Redo (a track's before and after carry its level and its hold), or in a
+ * request's commands. All are strict fields an older Cut refuses to read, and one that read past
+ * them would play a room 6 dB up and breathing under every line. `levelDb` and `ducks` are no other
+ * key of a timeline or a request; a fade's `power` is counted only on a sound fade or its command.
+ */
+export function carriesSoundLevels(raw: string): boolean {
+  const carries = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.some(carries);
+    if (!value || typeof value !== "object") return false;
+    const row = value as Record<string, unknown>;
+    if (Object.hasOwn(row, "levelDb") || Object.hasOwn(row, "ducks")) return true;
+    if (row.kind === "sound-fade" && Object.hasOwn(row, "power")) return true;
+    if (!!row.soundFade && typeof row.soundFade === "object" && Object.hasOwn(row.soundFade, "power")) return true;
+    return Object.values(row).some(carries);
+  };
+  try { return carries(JSON.parse(raw)); } catch { return false; }
+}
+
+/**
  * SPEC-038 R-45..R-50: a picture look, on the record or in Undo or Redo, where it is the entry's
  * before and after. Both are strict fields an older Cut refuses to read. Its own field name is
  * what lets this be read from the raw record: a title's source has a `look` of its own, which

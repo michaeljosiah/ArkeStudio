@@ -36,10 +36,11 @@ export const EffectAudioNativeDescriptorSchema = z.object({
 export type EffectAudioNativeDescriptor = z.infer<typeof EffectAudioNativeDescriptorSchema>;
 // A clip's fade shapes what is heard, so it is part of what was analysed (SPEC-038 R-42). Its start
 // may be negative: a delivery window that opens inside a fade keeps the slope's own beginning.
-const fadeWindow = z.object({ startSec: z.number().finite(), durationSec: z.number().finite().positive() }).strict();
+// So does its shape, and whether its track holds under speech (R-53, R-54): both change the samples, so both are in what an analysis is of.
+const fadeWindow = z.object({ startSec: z.number().finite(), durationSec: z.number().finite().positive(), power: z.literal(true).optional() }).strict();
 export const EffectAudioContributionSchema = z.object({ path, clipId: z.string().min(1).optional(), trackId: z.string().min(1).optional(),
   startSec: second, endSec: second, sourceInSec: second, gainDb: z.number().finite().min(-60).max(12),
-  role: z.enum(["dialogue", "ambience", "music", "picture", "unspecified"]),
+  role: z.enum(["dialogue", "ambience", "music", "picture", "unspecified"]), ducks: z.literal(false).optional(),
   fadeIn: fadeWindow.optional(), fadeOut: fadeWindow.optional(),
 }).strict().refine(value => value.endSec > value.startSec, "audio contributions must have positive duration");
 export const EffectAudioSourceDescriptorSchema = z.object({
