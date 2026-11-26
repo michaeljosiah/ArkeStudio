@@ -144,8 +144,14 @@ function heardBySound(line: readonly string[], heard: readonly string[], used: R
       const word = line[i]!;
       if (word.length < SHORTEST_BY_SOUND) continue;
       const short = word.length <= SHORT_WORD;
+      /*
+       * The first place the word will do, at its best length there, not its best fit anywhere in
+       * reach: "John Johnson" heard as "Jon Johnsen" has a perfect "john" inside the surname, and
+       * taking it left "Jon" a voice nobody wrote and the surname unheard (codex on PR 3327). A
+       * word is where the line puts it, straight after the one before.
+       */
       let best: { start: number; end: number; score: number } | null = null;
-      for (let start = at; start < text.length && start <= at + SOUND_REACH; start++) {
+      for (let start = at; start < text.length && start <= at + SOUND_REACH && best === null; start++) {
         for (let length = Math.max(1, word.length - (short ? 1 : 2)); length <= word.length + (short ? 1 : 3) && start + length <= text.length; length++) {
           const piece = text.slice(start, start + length), score = alike(word, piece);
           if ((short ? edits(word, piece) <= 1 : score >= ALIKE_IN_A_RUN) && (!best || score > best.score)) best = { start, end: start + length, score };

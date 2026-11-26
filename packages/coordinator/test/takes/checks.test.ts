@@ -116,6 +116,13 @@ describe("the checks after a take: words", () => {
     assert.deepEqual([before.words?.says, before.voice.result, before.voice.says], ["by sound", "fix", "at 0.2 s"], "and before it");
   });
 
+  it("finds a word where the line puts it, not its better spelling inside the next word (codex on PR 3327)", () => {
+    const heard = ["jon", "johnsen", "come", "here", "now"].map((w, i) => word(w, .3 + i * .4));
+    const judged = judgeWords("John Johnson, come here now.", heard, new Set(["john", "johnson"]));
+    assert.deepEqual(judged.words, { id: "words", result: "pass", says: "as written, 2 by sound" });
+    assert.equal(judged.voice.result, "pass", "and \"Jon\" is the name, not a voice nobody wrote");
+  });
+
   it("stays quick on a long take whose words match nothing (codex on PR 3327)", () => {
     const line = Array.from({ length: 100 }, (_, i) => `word${i}`).join(" ");
     const heard = Array.from({ length: 100 }, (_, i) => word(`other${i}`, i * .5));
