@@ -8,11 +8,16 @@ mix or effects, or where a clip starts and ends, and before you show anyone a cu
 - **Music playing in the place itself is part of the room**: a club, a party, a car radio. Keep it under the
   whole scene, from the first frame to the last, at one low level: about 8 to 10 LU under the voices, for
   example voices about -20 LUFS and the room's music about -29.
-- **Turn ducking off for it.** Ducking drops the music under each line and lifts it between lines, so the
-  room seems to breathe in and out. Set the mix's ducking to 0 dB and lower the music clip's own gain
-  instead. Ducking is set for the whole Cut: if score elsewhere needs it, say so and ask.
+- **Turn ducking off for it, on its own track.** Ducking drops the music under each line and lifts it
+  between lines, so the room seems to breathe in and out. Put the room's music on a track of its own and
+  set that track to hold under speech (`set-track` with `ducks` false). Set its level once on the track
+  (`levelDb`), not clip by clip.
 - **Fade it only where the scene starts and ends**, over about a second.
-- **Score is different.** Music the people cannot hear may duck under speech; music the room plays does not.
+- **Cross one piece into the next at even power.** Where one piece of the room's music ends and the next
+  begins, overlap them by about a second and give both fades the even-power shape (`sound-fade` with
+  `power` true). Two straight fades dip in the middle of the join; these hold one level through it.
+- **Score is different.** Music the people cannot hear may duck under speech, on a track of its own that
+  still does; music the room plays does not.
 
 ## 2 · No mouth moves without a line
 
@@ -55,16 +60,23 @@ Splitting the cuts and trimming the waits can take a sixth out of a scene withou
   under the whole of it.
 - **Keep a take's own sound only for what it does well**: its voice, and an action sound that lands on its
   action and stands clear of its room by about 10 dB. Gate the rest of it away, so the shared room runs
-  beneath.
+  beneath: detach the take's audio, then `sound-gate` on that sound clip. The gate is measured from the
+  clip's own sound, and its card says how many stretches it keeps. Check the words after it, as section 7
+  says: a take that talks from its first frame to its last leaves a gate little room to find.
+- **Set every line to one loudness.** `match-loudness` on each voice clip, about -20 LUFS. It measures the
+  stretch the clip plays as the cut's mix plays it, so a recording in one channel and a take's own sound
+  in two land at the same level, where their files' own figures sit 3 LU apart.
 - **Lay an effect where the take's own sound is faint or off its action.** Place it by its peak on the
   frame where the thing happens. Find that frame in the pictures, not in the sound.
 - **Measure a made room tone before you use it.** One can come back silent, and one made for a crowd can
   carry words: check its level and transcribe it.
 - **Never let a room tone repeat.** A looped room tone brings back every laugh and every glass on the same
   beat, and the ear finds it within a minute. Make several takes of the place's sound, from different
-  corners and distances. Lay pieces of a few seconds from them end to end, each overlapping the last by
-  about a second with fades, each piece used once in the scene. Two such rows, a few seconds apart, the
-  second a little quieter, make a fuller room.
+  corners and distances, and lay the room from them with `lay-room`. It cuts them into pieces of a few
+  seconds and lays them end to end, each crossing into the next over about a second,
+  each piece used once in the scene while another is unused. Four tracks lay a second row under the
+  first, a few seconds apart and a little quieter, for a fuller room. Give it about as many seconds of
+  bed as the scene is long for each row; with less, pieces come round again.
 
 ## 6 · A laid line sits on the take's voice
 

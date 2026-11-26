@@ -192,6 +192,18 @@ it("a room tone never repeats, and a performance is tied to its words (the owner
   assert.match(continuity, /A mood word alone \("sarcastic", "solemn"\) gives a still face and a shut mouth/);
 });
 
+it("the sound skill names what the Cut does for a room: a held track, an even-power join, a gate, one loudness, a laid room (2026-11-26)", async () => {
+  // The skill said what a mixer does and the Cut could do none of it, so a scene's sound was mixed by a script outside
+  // the Studio. Each of them is a command now, named where the craft asks for it.
+  const sound = (await loadCraftSkill("sound-and-pace"))!.body;
+  assert.match(sound, /`set-track` with `ducks` false/);
+  assert.match(sound, /`sound-fade` with\s+`power` true/);
+  assert.match(sound, /detach the take's audio, then `sound-gate` on that sound clip/);
+  assert.match(sound, /`match-loudness` on each voice clip, about -20 LUFS/);
+  assert.match(sound, /lay the room from them with `lay-room`/);
+  assert.match(sound, /with less, pieces come round again/);
+});
+
 it("the craft skills hold general craft only, nothing of any one story (the owner, 2026-11-26)", async () => {
   // A skill is read for every production. The owner found one production's characters, lines and shots in them:
   // "The Arke skill should not have anything specific to" the story it was learned on.

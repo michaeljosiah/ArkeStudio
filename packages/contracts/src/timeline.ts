@@ -6,6 +6,7 @@ import { PictureAppearanceSchema, PictureAppearanceCommandSchema, isPictureAppea
 import { PictureMotionSchema, PictureFadeSchema, PictureMotionCommandSchema, isPictureMotionCommand, applyPictureMotionCommand, splitPictureFade, pictureMotionStructureProblem, type PictureMotionCommand } from "./editor-picture-motion.js";
 import { SoundFadeSchema, SoundFadeCommandSchema, isSoundFadeCommand, applySoundFadeCommand, splitSoundFade } from "./editor-sound-fade.js";
 import { SoundGateSchema, SoundGateCommandSchema, MatchLoudnessCommandSchema, isSoundGateCommand, isMatchLoudnessCommand, applySoundGateCommand, soundGateProblem } from "./editor-sound-gate.js";
+import { LayRoomCommandSchema, isLayRoomCommand, layRoomSteps } from "./editor-room.js";
 import { ClipSpeedSchema, ClipSpeedCommandSchema, isClipSpeedCommand, clipRetimed, clipSourceInSec, clipSpeedProblem, clipSpeedStructureProblem,
   retimedClip, retimedSourceFrames, reversedClip, splitSourceIns, trimmedSourceIn } from "./editor-clip-speed.js";
 import { TimelinePictureLookSchema, TimelinePictureLookCommandSchema, timelinePictureLookWritten, type TimelinePictureLook, type TimelinePictureLookCommand } from "./editor-picture-look.js";
@@ -561,6 +562,7 @@ export const TimelineCommandSchema = z.discriminatedUnion("kind", [
   SoundFadeCommandSchema,
   SoundGateCommandSchema,
   MatchLoudnessCommandSchema,
+  LayRoomCommandSchema,
   ...ClipSpeedCommandSchema.options,
   TextSetCommandSchema,
   z.object({ kind: z.literal("set-performance-source"), clipId: TimelineClipIdSchema, sourceClipId: TimelineClipIdSchema.nullable() }).strict(),
@@ -693,6 +695,7 @@ export function describeTimelineCommand(command: TimelineCommand): string {
   if (isSoundFadeCommand(command)) return "Set sound fade";
   if (isSoundGateCommand(command)) return command.on ? "Gate sound" : "Remove gate";
   if (isMatchLoudnessCommand(command)) return `Set ${command.clipId} to ${command.lufs} LUFS`;
+  if (isLayRoomCommand(command)) return "Lay a room";
   if (isClipSpeedCommand(command)) return command.kind === "set-clip-speed" ? `Set speed to ${command.speed}x` : command.reverse ? "Play backwards" : "Play forwards";
   if (isTextSetCommand(command)) return command.clipIds.length === 1 ? "Change text" : `Change text on ${command.clipIds.length} clips`;
   switch (command.kind) {
@@ -1601,6 +1604,14 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
   }
   // Never applied as it is: the coordinator measures the clip and applies the gain that reaches the figure (R-59).
   if (isMatchLoudnessCommand(command)) throw new TimelineOperationRefused("A clip is set to a loudness by measuring it first; this host did not");
+  if (isLayRoomCommand(command)) {
+    // A room is its tracks and its pieces, laid one step after another by the rules a hand-made batch is (SPEC-038 R-61): any step refused refuses the room.
+    let steps: TimelineClipCommand[];
+    try { steps = layRoomSteps(working.tracks, working.timeline.frameRate, command); }
+    catch (error) { throw new TimelineOperationRefused(error instanceof Error ? error.message : String(error)); }
+    for (const step of steps) applyClipCommand(working, step);
+    return;
+  }
   if (isTextSetCommand(command)) {
     try {
       // All of it or none: the command refuses before a clip is touched, and a clip that comes back

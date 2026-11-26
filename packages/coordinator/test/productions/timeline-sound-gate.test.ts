@@ -162,7 +162,7 @@ test("a clip set to a loudness becomes the gain that reaches it, measured over t
   await refused([loud(-20, "cl_still")], d.tools, "Choose a clip on an audio track");
   await refused([{ kind: "sound-gate", clipId: "cl_still", on: true }], d.tools, "Choose a clip on an audio track");
   await refused([loud(-20, "cl_gone")], d.tools, "cl_gone is not on the timeline");
-  await refused([loud(-20)], undefined, "Sound cannot be measured on this host, so a gate or a loudness cannot be set here");
+  await refused([loud(-20)], undefined, "Sound cannot be measured on this host, so a gate, a loudness or a room cannot be set here");
   await refused([{ kind: "sound-gate", clipId: "cl_line", on: true }], { probe: d.tools.probe }, /^Sound cannot be measured on this host/);
 
   // A clip placed earlier in the same batch is found, and what was not measured is never applied.
@@ -183,7 +183,7 @@ test("a file that is gone or is no longer the one the world recorded is refused 
   const { store, sound, measure } = await placed(), d = decoder(sound);
   await writeFile(join(store.dir, "artifacts", "line.wav"), "changed");
   await assert.rejects(measure([{ kind: "sound-gate", clipId: "cl_line", on: true }], d.tools),
-    (error: unknown) => error instanceof TimelineCommandRefused && error.reason === "Tunde's line's sound file is missing or has changed, so it cannot be measured");
+    (error: unknown) => error instanceof TimelineCommandRefused && error.reason === "Tunde's line cannot be measured: its sound file is missing or has changed");
   assert.deepEqual(d.paths, [], "nothing is decoded from a file that is not the one recorded");
 });
 
