@@ -30,6 +30,14 @@ Check each of these in the last frames of the shot going out and the first frame
   keeps their side of the frame. Crossing it swaps their sides and turns the room over.
 - **The angle.** Two shots in a row of the same person change the camera's angle by about 30 degrees or
   more, and the size by a clear step: wide to medium, medium to close. Less than that reads as a jump.
+- **Keep where they look for someone.** Decide once where the person being watched is, from where the watcher
+  sits, and keep it for the whole scene: the watcher turns the same way and as far every time, to the same side
+  of the frame in their own shots. Put what they watch where a turn of the head reaches it, not at their back,
+  so a look is never a turn right round. Show what they see through their eyes: from their seat, at their eye
+  height, with nothing of them in the frame, straight after a shot of them turning to look. A camera over their
+  shoulder from behind says the person is at their back. On the film, Ade turned his head to his left in his
+  close shots, while every view of her table looked over his shoulder from behind him; the owner saw him look
+  two ways, and a shoulder that did not sit where his seat was.
 
 ## 4 · Plan for the cut
 

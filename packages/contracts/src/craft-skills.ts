@@ -49,7 +49,10 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // fifty of seventy-seven clips were made locked off, drifted a few pixels and never breathed).
     // v11: keep a spoken line on the speaker's face, a look away in the eyes and in a pause, a grin after the last
     // word (the owner's notes, 2026-11-25: board 15-17 panned to the room mid-line and Tunde's lips stopped).
-    version: 11,
+    // v12: keep where a watcher looks for someone, within a turn of the head, and show what they see through
+    // their eyes (the owner's notes, 2026-11-26: Ade turned left in his close shots while every view of her
+    // table looked over his shoulder from behind him).
+    version: 12,
     title: "Continuity across cuts",
     when: "before you plan, review or change a shot beside one that has a take, and before you review a cut",
     bodyPath: "continuity-across-cuts.md",
