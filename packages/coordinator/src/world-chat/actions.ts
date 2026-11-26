@@ -11,6 +11,7 @@ import { WorldChatProductionAudioGenerationActionSchema, WorldChatProductionPerf
 import { freezeProductionPerformance, productionPerformanceBody, executeProductionPerformance } from "./production-performance.js";
 import { freezeProductionAudioCue, productionAudioCueBody, executeProductionAudioCue } from "./production-audio-cue.js";
 import { WorldChatProductionMusicActionSchema } from "@arke-studio/contracts";
+import { CLIP_IMPORT_FIELDS } from "@arke-studio/contracts";
 import { executeProductionMusic, musicAlbumCard } from "./production-music.js";
 import { frameRunReadRows, performanceReadRows, voiceSampleReadRows, audioCutReadRows, editorRequestReadRows, productionReadFence } from "./production-reads.js";
 import { readAudioRightsSync } from "../audio/rights.js";
@@ -3684,6 +3685,33 @@ async function sharedResourceProjection(
       const scene = production?.scenes.find((candidate) => candidate.id === payload.action.sceneId);
       const shot = scene && orderedShots(scene).find((candidate) => candidate.id === payload.action.shotId);
       if (!production || !scene || !shot) throw new Error("That shot is no longer in this scene.");
+      if (payload.action.media === "clip") {
+        // A clip made outside (2026-11-26): one shot's, or a run of consecutive shots made as one.
+        const ordered = orderedShots(scene), first = ordered.indexOf(shot);
+        const last = payload.action.throughShotId === undefined ? first : ordered.findIndex((candidate) => candidate.id === payload.action.throughShotId);
+        // Said in words Arke can act on: a refusal with no reason is prepared again the same way.
+        if (last < first) throw new ConversationActionPreparationError("throughShotId is not a later shot of this scene.");
+        const onShelf = payload.action.artifactId === undefined ? undefined : bundle.artifacts.find((artifact) => artifact.id === payload.action.artifactId);
+        if (payload.action.artifactId !== undefined && onShelf?.kind !== "video") throw new ConversationActionPreparationError("That artifact is not a video on the shelf.");
+        if (!deps.importProductionTake) approvalBlockedReason = "This clip import needs the desktop host.";
+        const shots = last === first ? `shot ${shot.number}` : `shots ${shot.number} to ${ordered[last]!.number}`;
+        shown = {
+          title: `Import a clip for ${shots}`,
+          consequence: onShelf ? "Copies the video from the shelf and records it as an immutable take." : "Opens a host-owned file picker and records the chosen video as an immutable take.",
+          affectedTargets: [...intent.targets],
+          ripples: [last === first ? "The clip is checked as it lands. It is not accepted or placed by this action."
+            : "The clip is filed whole and as one take a shot, cut where its picture cuts; each is checked as it lands. Nothing is accepted or placed."],
+          permissionReason: "host-file-access",
+          body: {
+            family: "host-action",
+            action: onShelf ? `Use ${onShelf.file} from the shelf` : "Choose one video on this device",
+            effect: "The host path and bytes stay outside the conversation; only the new take ID is returned.",
+          },
+        };
+        break;
+      }
+      const clipOnly = CLIP_IMPORT_FIELDS.filter((key) => payload.action[key] !== undefined);
+      if (clipOnly.length > 0) throw new ConversationActionPreparationError(`${clipOnly.join(", ")} ${clipOnly.length === 1 ? "is" : "are"} for a clip: set media to "clip".`);
       if (!deps.importProductionTake) approvalBlockedReason = "This take import needs the desktop host's image picker.";
       shown = {
         title: `Import a frame take for ${shot.title}`,
@@ -4872,10 +4900,10 @@ async function executeSharedResource(
       return { status: "completed", receipt: { kind: "board-export", id: file, summary: "One immutable board artifact was filed." } };
     }
     case "world-chat-production-take-import": {
-      if (!deps.importProductionTake) return { status: "failed", detail: "The desktop image picker is unavailable." };
+      if (!deps.importProductionTake) return { status: "failed", detail: payload.action.media === "clip" ? "The desktop host is unavailable." : "The desktop image picker is unavailable." };
       const result = await deps.importProductionTake(payload.action, options);
       return result.status === "completed"
-        ? { status: "completed", receipt: { kind: "take", id: result.id ?? action.actionId, summary: "The image was recorded as an unselected immutable take." } }
+        ? { status: "completed", receipt: { kind: "take", id: result.id ?? action.actionId, summary: result.detail ?? "The image was recorded as an unselected immutable take." } }
         : { status: result.status, detail: result.detail };
     }
     case "world-chat-production-frame-run-start":
