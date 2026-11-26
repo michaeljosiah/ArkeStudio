@@ -279,7 +279,9 @@ function describeTimeline(production: ProductionBundle | undefined): string | nu
         .slice(0, 40)
         .map((clip) => `${clip.id} ${clipLabel(clip)} ${clip.startFrame}–${clip.startFrame + clip.durationFrames}f`)
         .join(", ");
-      return `${track.id} (${track.kind}${track.muted ? ", muted" : ""}): ${items || "empty"}${clips.length > 40 ? ", …" : ""}`;
+      // A track's level and its hold under speech change every clip on it, so the summary says them with Mute (SPEC-038 R-52, R-53).
+      const sound = `${track.levelDb ? `, ${track.levelDb > 0 ? "+" : ""}${track.levelDb} dB` : ""}${track.ducks === false ? ", holds under speech" : ""}`;
+      return `${track.id} (${track.kind}${track.muted ? ", muted" : ""}${sound}): ${items || "empty"}${clips.length > 40 ? ", …" : ""}`;
     });
   const pending = production.editorRequests.filter((request) => request.status === "pending");
   const waiting =

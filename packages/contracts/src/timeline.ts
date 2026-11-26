@@ -166,6 +166,14 @@ export const TimelineTrackSchema = z
     solo: z.boolean().optional(),
     defaultRole: AudioRoleSchema.optional(),
     /**
+     * Audio tracks only (SPEC-038 R-52, R-53): what the track adds to each of its clips' gain, and
+     * whether speech lowers it. Absent is 0 dB, and lowered as its clips' roles say. A room laid
+     * from forty pieces is brought down with one number, and the music a place plays holds its
+     * level under a line while score on another track still drops.
+     */
+    levelDb: z.number().min(-60).max(12).optional(),
+    ducks: z.literal(false).optional(),
+    /**
      * Where the track's used range ends when that is past its last clip. Deleting the final clip
      * leaves a hole (R-21), and a hole with nothing after it has no clip to mark its far side, so
      * the track remembers it here. Absent means the last clip's end.
@@ -195,6 +203,8 @@ export const TimelineTrackPropsSchema = z
     muted: z.boolean(),
     solo: z.boolean().optional(),
     defaultRole: AudioRoleSchema.optional(),
+    levelDb: z.number().min(-60).max(12).optional(),
+    ducks: z.literal(false).optional(),
     endFrame: WholeFrameSchema.optional(),
     language: LanguageTagSchema.optional(),
     style: SubtitleStyleSchema.optional(),
@@ -209,6 +219,8 @@ export function trackProps(track: TimelineTrack): TimelineTrackProps {
     muted: track.muted,
     ...(track.solo !== undefined ? { solo: track.solo } : {}),
     ...(track.defaultRole !== undefined ? { defaultRole: track.defaultRole } : {}),
+    ...(track.levelDb !== undefined ? { levelDb: track.levelDb } : {}),
+    ...(track.ducks !== undefined ? { ducks: track.ducks } : {}),
     ...(track.endFrame !== undefined ? { endFrame: track.endFrame } : {}),
     ...(track.language !== undefined ? { language: track.language } : {}),
     ...(track.style !== undefined ? { style: track.style } : {}),
@@ -574,6 +586,9 @@ export const TimelineCommandSchema = z.discriminatedUnion("kind", [
       muted: z.boolean().optional(),
       solo: z.boolean().optional(),
       order: WholeFrameSchema.optional(),
+      /** Audio tracks only (SPEC-038 R-52, R-53): the track's level, and whether speech lowers it. 0 dB and true are the track as it was made. */
+      levelDb: z.number().min(-60).max(12).optional(),
+      ducks: z.boolean().optional(),
       /** Subtitle tracks only. */
       language: LanguageTagSchema.optional(),
     })
@@ -1830,13 +1845,19 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
       if (track === undefined) throw new TimelineOperationRefused(`track ${command.trackId} is not on the timeline`);
       if (command.solo !== undefined && !AUDIO_TRACK_KINDS.has(track.kind)) throw new TimelineOperationRefused(`${track.name} is not an audio track and cannot solo`);
       if (command.defaultRole !== undefined && !AUDIO_TRACK_KINDS.has(track.kind)) throw new TimelineOperationRefused("Only audio tracks have a default role");
+      if ((command.levelDb !== undefined || command.ducks !== undefined) && !AUDIO_TRACK_KINDS.has(track.kind)) throw new TimelineOperationRefused(`${track.name} is not an audio track and has no level`);
       if (command.language !== undefined && track.kind !== "subtitle") throw new TimelineOperationRefused(`${track.name} is not a Subtitle track and has no language`);
       if (command.order !== undefined && working.tracks.some((candidate) => candidate.id !== track.id && candidate.order === command.order)) {
         throw new TimelineOperationRefused(`another track already has order ${command.order}`);
       }
       touchTrack(working, track, trackProps(track));
+      // 0 dB and "lowered under speech" are a track as it was made, so neither is written: a record holds only what differs (R-52, R-53).
+      const { levelDb: wasLevel, ducks: wasDucks, ...plain } = track;
+      const levelDb = command.levelDb ?? wasLevel, ducks = command.ducks === undefined ? wasDucks : command.ducks ? undefined : false;
       const next: TimelineTrack = {
-        ...track,
+        ...plain,
+        ...(levelDb !== undefined && levelDb !== 0 ? { levelDb } : {}),
+        ...(ducks === false ? { ducks } : {}),
         ...(command.name !== undefined ? { name: command.name } : {}),
         ...(command.defaultRole !== undefined ? { defaultRole: command.defaultRole } : {}),
         ...(command.muted !== undefined ? { muted: command.muted } : {}),

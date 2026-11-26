@@ -507,6 +507,8 @@ export interface ExportAudioClip {
   gainDb: number;
   /** What the sound is for; only Music and Ambience are lowered under speech (SPEC-038 R-14). */
   role?: "dialogue" | "ambience" | "music" | "picture" | "unspecified";
+  /** False on a sound whose track holds its level under speech, whatever its role (SPEC-038 R-53). */
+  ducks?: false;
   /** Seconds into the source where the window starts; absent reads as the top of the file. */
   sourceInSec?: number;
   /**
@@ -529,11 +531,13 @@ export interface ExportAudioClip {
  */
 function fadeExpression(clip: ExportAudioClip): string | null {
   const lines: string[] = [];
+  // An even-power fade is a quarter of a sine over the same line, as `soundFadeAt` draws it (R-54).
+  const curve = (window: SoundFadeWindow, line: string) => window.power ? `sin(${line}*PI/2)` : line;
   if (clip.fadeIn && clip.fadeIn.startSec + clip.fadeIn.durationSec > clip.startSec) {
-    lines.push(`clip((t-(${clip.fadeIn.startSec}))/${clip.fadeIn.durationSec},0,1)`);
+    lines.push(curve(clip.fadeIn, `clip((t-(${clip.fadeIn.startSec}))/${clip.fadeIn.durationSec},0,1)`));
   }
   if (clip.fadeOut && clip.fadeOut.startSec < clip.endSec) {
-    lines.push(`clip(((${clip.fadeOut.startSec + clip.fadeOut.durationSec})-t)/${clip.fadeOut.durationSec},0,1)`);
+    lines.push(curve(clip.fadeOut, `clip(((${clip.fadeOut.startSec + clip.fadeOut.durationSec})-t)/${clip.fadeOut.durationSec},0,1)`));
   }
   return lines.length > 0 ? lines.join("*") : null;
 }
@@ -904,7 +908,7 @@ export function buildCanonicalAudioGraph(plan: Pick<ExportPlan, "audio" | "mix" 
    * no mix at all, emits the plain `volume=<gain>dB` it always did.
    */
   const speech = plan.mix?.speechFirst === true ? (plan.speech ?? []) : [];
-  const ducked = (clip: ExportAudioClip): boolean => speech.length > 0 && (clip.role === "music" || clip.role === "ambience");
+  const ducked = (clip: ExportAudioClip): boolean => speech.length > 0 && (clip.role === "music" || clip.role === "ambience") && clip.ducks !== false;
   plan.audio.forEach((clip, i) => {
     const index = inputIndex + i;
     // Windowed at the input so the source starts where the clip's own in-point says (R-19).

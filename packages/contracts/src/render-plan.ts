@@ -419,10 +419,21 @@ function effectProjection(record: ProductionTimeline, pictures: RenderPictureLay
  */
 export function soundFadeWindows(clip: Pick<TimelineClip, "startFrame" | "durationFrames" | "soundFade">, frameRate: FrameRate): Pick<ExportAudioClip, "fadeIn" | "fadeOut"> {
   const inFrames = Math.min(clip.soundFade?.inFrames ?? 0, clip.durationFrames), outFrames = Math.min(clip.soundFade?.outFrames ?? 0, clip.durationFrames);
+  // The shape rides on each window, so a part of a clip, or one edge alone, draws the curve the whole draws (R-54).
+  const power = clip.soundFade?.power === true ? { power: true as const } : {};
   return {
-    ...(inFrames > 0 ? { fadeIn: { startSec: framesToSeconds(clip.startFrame, frameRate), durationSec: framesToSeconds(inFrames, frameRate) } } : {}),
-    ...(outFrames > 0 ? { fadeOut: { startSec: framesToSeconds(clip.startFrame + clip.durationFrames - outFrames, frameRate), durationSec: framesToSeconds(outFrames, frameRate) } } : {}),
+    ...(inFrames > 0 ? { fadeIn: { startSec: framesToSeconds(clip.startFrame, frameRate), durationSec: framesToSeconds(inFrames, frameRate), ...power } } : {}),
+    ...(outFrames > 0 ? { fadeOut: { startSec: framesToSeconds(clip.startFrame + clip.durationFrames - outFrames, frameRate), durationSec: framesToSeconds(outFrames, frameRate), ...power } } : {}),
   };
+}
+
+/**
+ * A clip's gain with its track's level added, held to what a gain may be (SPEC-038 R-52). A track
+ * is a second hand on the same fader, not a second fader: forty pieces of a room come down
+ * together, and no sum plays louder than a clip alone may be set.
+ */
+export function trackedGainDb(clip: Pick<TimelineClip, "gainDb">, track: Pick<TimelineTrack, "levelDb">): number {
+  return Math.max(-60, Math.min(12, (clip.gainDb ?? 0) + (track.levelDb ?? 0)));
 }
 
 /** Typed audio tracks become mixed sound (R-12, R-13, R-19); each clip conformed to its window. */
@@ -478,10 +489,12 @@ function audioFromTimeline(
         path,
         startSec,
         endSec,
-        gainDb: clip.gainDb ?? 0,
+        gainDb: trackedGainDb(clip, track),
         role: effectiveAudioRole(track, clip),
         sourceInSec: physicalInSec ?? (segmentInSec + clipSourceInSec(clip, frameRate)),
         clipId: clip.id,
+        // Said only where it differs, so a plan from a cut with no such track is the plan it was (R-53).
+        ...(track.ducks === false ? { ducks: false as const } : {}),
         ...soundFadeWindows(clip, frameRate),
       }, sourceOutSec);
       audio.push(...sound);
@@ -995,9 +1008,9 @@ export function isDuckable(role: RenderAudioRole): boolean {
   return role === "music" || role === "ambience";
 }
 
-/** The gain a sound plays at, in dB, after its own gain and any ducking (R-13, R-14, R-17). */
-export function audioGainDbAt(plan: Pick<RenderPlan, "mix" | "speech">, item: Pick<RenderAudioItem, "gainDb" | "role">, sec: number): number {
-  if (!plan.mix.speechFirst || !isDuckable(item.role) || plan.speech.length === 0) return item.gainDb;
+/** The gain a sound plays at, in dB, after its own gain and any ducking (R-13, R-14, R-17). A sound on a track that holds under speech is never lowered (R-53). */
+export function audioGainDbAt(plan: Pick<RenderPlan, "mix" | "speech">, item: Pick<RenderAudioItem, "gainDb" | "role" | "ducks">, sec: number): number {
+  if (!plan.mix.speechFirst || !isDuckable(item.role) || item.ducks === false || plan.speech.length === 0) return item.gainDb;
   return item.gainDb + plan.mix.duckingDb * duckingEnvelope(plan.speech, plan.mix, sec);
 }
 
@@ -1006,7 +1019,7 @@ export function audioGainDbAt(plan: Pick<RenderPlan, "mix" | "speech">, item: Pi
  * (R-38). Linear because a fade reaches silence, which no figure in dB states. The browser sets
  * its gain node to this, and the export's two volume stages multiply to the same number.
  */
-export function audioLevelAt(plan: Pick<RenderPlan, "mix" | "speech">, item: Pick<RenderAudioItem, "gainDb" | "role" | "fadeIn" | "fadeOut">, sec: number): number {
+export function audioLevelAt(plan: Pick<RenderPlan, "mix" | "speech">, item: Pick<RenderAudioItem, "gainDb" | "role" | "ducks" | "fadeIn" | "fadeOut">, sec: number): number {
   return Math.pow(10, audioGainDbAt(plan, item, sec) / 20) * soundFadeAt(item, sec);
 }
 

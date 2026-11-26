@@ -296,6 +296,47 @@ describe("typed tracks on the editor (issue 681)", () => {
     }
   });
 
+  it("sets a track's level and its hold under speech from the Inspector, and a fade's even-power shape (SPEC-038 R-52..R-54)", async () => {
+    const { state, timeline } = migratedState(), id = "cl_ov-01J8G0000000000000000000A1";
+    const trackId = timeline.tracks.find((track) => track.clips.some((clip) => clip.id === id))!.id;
+    const screen = await mountCut(state);
+    try {
+      await act(async () => screen.container.querySelector<HTMLButtonElement>(`[data-clip='${id}']`)!.click());
+      // The track's rows sit with its name, under the clip's own gain and fades.
+      const inspector = screen.container.querySelector(".fy-cutinspect")!.innerHTML;
+      assert.ok(inspector.indexOf('aria-label="Track name"') < inspector.indexOf("Track 1 dB quieter"), "with the track's name");
+      await act(async () => byLabel(screen, "Track 1 dB quieter").click());
+      assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "set-track", trackId, levelDb: -1 }]);
+      assert.equal(commandsSent(screen).at(-1)?.label, "Set track level");
+      await advance(state);
+      await act(async () => byLabel(screen, "Track is lowered under speech").click());
+      assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "set-track", trackId, ducks: false }]);
+      assert.equal(commandsSent(screen).at(-1)?.label, "Hold track under speech");
+      assert.equal(byLabel(screen, "Off").disabled, true, "with no fade there is no shape to set");
+
+      // What the coordinator would send back: the track says its level and its hold, in the Inspector and on its name.
+      state.world!.productions[0]!.timeline = { status: "ready", timeline: applyTimelineCommands(timeline, [{ kind: "set-track", trackId, levelDb: -6, ducks: false }, { kind: "sound-fade", clipId: id, inFrames: 12 }]) };
+      await act(async () => __setStateForTest(structuredClone(state) as ClientState));
+      assert.match(screen.container.querySelector(".fy-cutinspect")!.textContent ?? "", /Track level\s*−\s*-6 dB/);
+      const hold = byLabel(screen, "Track holds under speech");
+      assert.deepEqual([hold.getAttribute("aria-pressed"), hold.textContent], ["true", "Held"]);
+      assert.match(screen.container.querySelector(`[data-track-id='${trackId}'] .fy-track__name`)!.getAttribute("title") ?? "", / · -6 dB · held under speech$/);
+      await act(async () => hold.click());
+      assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "set-track", trackId, ducks: true }]);
+      await advance(state);
+      await act(async () => byLabel(screen, "Off").click());
+      assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "sound-fade", clipId: id, power: true }]);
+      assert.equal(commandsSent(screen).at(-1)?.label, "Set fade shape");
+
+      state.world!.productions[0]!.timeline = { status: "ready", timeline: applyTimelineCommands(timeline, [{ kind: "sound-fade", clipId: id, inFrames: 12, power: true }]) };
+      await act(async () => __setStateForTest(structuredClone(state) as ClientState));
+      assert.equal(byLabel(screen, "On").getAttribute("aria-pressed"), "true");
+      assert.match(screen.container.querySelector<HTMLButtonElement>(`[data-clip='${id}']`)!.getAttribute("aria-label") ?? "", /, fades in, even power$/);
+    } finally {
+      await close(screen);
+    }
+  });
+
   it("edits an unsaved cut's legacy placements as typed clips, fenced for the first write", async () => {
     const state = structuredClone(FIXTURE_STATE) as ClientState;
     const production = state.world!.productions[0]!;
