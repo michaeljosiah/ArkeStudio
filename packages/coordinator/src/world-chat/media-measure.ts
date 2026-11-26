@@ -388,7 +388,8 @@ export async function reviewInSnapshot(store: WorldStore, tools: AgentMediaTools
   // The film's words against the lines it is held to, when it has lines and this host can hear.
   const held = hearing ? filmLines(store, fromTimeline?.productionId ?? null, shots, hearing.script) : null;
   let speech: AgentExportReview["speech"];
-  if (held && hearing && film.audio) {
+  if (held?.over) findings.unshift(`The scene holds ${held.over} spoken lines, more than a review sets beside a film (${AGENT_REVIEW_SPEECH_LIMITS.maxLines}), so its lines were not checked.`);
+  else if (held && hearing && film.audio) {
     const heard = await hearing.hear(signal);
     if (heard === null) findings.unshift("The film's words could not be read on this host, so its lines were not checked.");
     else {
@@ -410,7 +411,14 @@ export async function reviewInSnapshot(store: WorldStore, tools: AgentMediaTools
         const first = all ? 0 : words.lines.findIndex(line => line.said !== "not-heard"), end = all ? words.lines.length : words.lines.reduce((last, line, i) => (line.said === "not-heard" ? last : i + 1), 0);
         const keptLines = first < 0 ? [] : words.lines.slice(first, end), numbers = new Set(keptLines.map(line => line.number));
         const kept = { lines: keptLines, unwritten: words.unwritten, misplaced: words.misplaced.filter(moved => numbers.has(moved.number)) };
-        const shotAt = held.from === "cut" ? (seconds: number) => { const at = reviewed.findIndex(shot => seconds >= shot.startSec && seconds < shot.endSec); return at < 0 ? null : at + 1; } : undefined;
+        /*
+         * Which shot is on screen at a time, to find a line under the wrong one. A cut with a
+         * second Picture track holds two clips at one time, and which of them the film shows is
+         * the render's to say, not this list's: a line spoken by an insert laid over the base read
+         * as under the base (codex on PR 3333). Such a cut's lines are heard and not placed.
+         */
+        const layered = reviewed.some((shot, i) => i > 0 && shot.startSec < reviewed[i - 1]!.endSec - 1e-6);
+        const shotAt = held.from === "cut" && !layered ? (seconds: number) => { const at = reviewed.findIndex(shot => seconds >= shot.startSec && seconds < shot.endSec); return at < 0 ? null : at + 1; } : undefined;
         const said = filmWordFindings(lines, kept, shotAt);
         if (keptLines.length === 0) said.push("None of the scene's lines is heard in this part of the film.");
         if (!whole) said.push(`Words were read for the first ${Math.round(heard.readSec)} s of this window; name a later window for the rest.`);
@@ -462,12 +470,15 @@ export interface FilmHearing {
  * to say whose line is whose. Otherwise the cut's own story shots give theirs, each with the
  * shot it belongs to, so a line can be found under the wrong one. Null when there are none.
  */
-function filmLines(store: WorldStore, productionId: string | null, shots: ReadonlyArray<{ clip: CutClip | null }>, script: FilmHearing["script"]): { from: "cut" | "script"; lines: FilmLine[] } | null {
+function filmLines(store: WorldStore, productionId: string | null, shots: ReadonlyArray<{ clip: CutClip | null }>, script: FilmHearing["script"]): { from: "cut" | "script"; lines: FilmLine[]; over?: number } | null {
   const bundle = store.getBundle(), most = AGENT_REVIEW_SPEECH_LIMITS.maxLines;
   if (script) {
     const scene = bundle.productions.find(row => row.meta.id === script.productionId)?.scenes.find(row => row.id === script.sceneId);
     if (!scene) throw new RetrievalError("bad-argument", "That scene is not in this world: name the production and the scene whose script the film is held to.");
-    const lines = (scene.script?.blocks ?? []).filter(block => block.kind === "dialogue" && block.text.trim()).slice(0, most).map((block, i) => ({ number: i + 1, shot: null, text: block.text }));
+    const spoken = (scene.script?.blocks ?? []).filter(block => block.kind === "dialogue" && block.text.trim());
+    // More lines than a review sets beside a film. Cut short at the limit, the lines past it were read as words nobody wrote (codex on PR 3333).
+    if (spoken.length > most) return { from: "script", lines: [], over: spoken.length };
+    const lines = spoken.map((block, i) => ({ number: i + 1, shot: null, text: block.text }));
     return lines.length ? { from: "script", lines } : null;
   }
   const production = bundle.productions.find(row => row.meta.id === productionId);

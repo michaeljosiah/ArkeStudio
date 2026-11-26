@@ -37,7 +37,12 @@ export interface FilmLineHeard {
   number: number;
   shot: number | null;
   said: "as-written" | "by-sound" | "partly" | "not-heard";
-  /** When its first and last heard words were heard, as written or by sound; null when none was heard with a time. */
+  /**
+   * When its first heard word starts and where its last one is, as written or by sound; null when
+   * none was heard with a time. The last word is placed at its middle when the reader measured its
+   * end: a word that begins a fifth of a second before its own shot is still said under it, and a
+   * read's last word can be given an end later than its own (codex on PR 3333).
+   */
   startSec: number | null;
   endSec: number | null;
   /** How many words the line has, and how many of them were heard, as written or by sound. */
@@ -77,7 +82,7 @@ const milli = (seconds: number) => Math.round(seconds * 1000) / 1000;
 /** Null when the film and the script are together too long to set side by side in one read; name a shorter window. */
 export function filmWordsAgainstScript(lines: readonly FilmLine[], heard: readonly HeardWord[], names: ReadonlySet<string> = new Set()): FilmWords | null {
   const script = lines.flatMap((line, at) => spokenWords(line.text).map((text) => ({ text, at })));
-  const spoken = heard.flatMap((word) => spokenWords(word.text).map((text) => ({ text, startSec: word.startSec, probability: word.probability })));
+  const spoken = heard.flatMap((word) => spokenWords(word.text).map((text) => ({ text, startSec: word.startSec, endSec: word.endSec ?? null, probability: word.probability })));
   if ((script.length + 1) * (spoken.length + 1) > MOST_CELLS) return null;
   const scriptTexts = script.map((word) => word.text), heardTexts = spoken.map((word) => word.text);
   const used = matchedHeard(scriptTexts, heardTexts), sound = heardBySound(scriptTexts, heardTexts, used);
@@ -90,13 +95,15 @@ export function filmWordsAgainstScript(lines: readonly FilmLine[], heard: readon
      * a name heard in the recogniser's spelling under the line's own shot dropped from the line's
      * span, and a split cut read as a line wholly under the next shot (codex on PR 3333).
      */
-    const heardAt = own.flatMap((i) => (exact.has(i) ? [spoken[exact.get(i)!]!.startSec] : sound.at.has(i) ? [spoken[sound.at.get(i)!]!.startSec] : []))
-      .filter((time): time is number => time !== null);
+    const heardAt = own.flatMap((i) => (exact.has(i) ? [spoken[exact.get(i)!]!] : sound.at.has(i) ? [spoken[sound.at.get(i)!]!] : []))
+      .flatMap((word) => (word.startSec === null ? [] : [{ startSec: word.startSec, endSec: word.endSec }]));
+    const last = heardAt.reduce<{ startSec: number; endSec: number | null } | null>((latest, word) => (latest === null || word.startSec > latest.startSec ? word : latest), null);
     const missing = own.filter((i) => !said.has(i)).map((i) => script[i]!.text);
     const share = own.length === 0 ? 1 : (own.length - missing.length) / own.length;
     return { number: line.number, shot: line.shot,
       said: share === 1 ? (own.some((i) => sound.line.has(i)) ? "by-sound" : "as-written") : share >= .6 ? "partly" : "not-heard",
-      startSec: heardAt.length ? milli(Math.min(...heardAt)) : null, endSec: heardAt.length ? milli(Math.max(...heardAt)) : null,
+      startSec: last ? milli(Math.min(...heardAt.map((word) => word.startSec))) : null,
+      endSec: last ? milli(last.endSec === null || last.endSec < last.startSec ? last.startSec : (last.startSec + last.endSec) / 2) : null,
       words: own.length, heardWords: own.length - missing.length, missing, unclearNames: [...new Set(missing.filter((word) => names.has(word)))] };
   });
 

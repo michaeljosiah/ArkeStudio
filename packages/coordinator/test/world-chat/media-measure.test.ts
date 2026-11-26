@@ -483,13 +483,15 @@ test("review_export of a film with no cut behind it finds its shots in the pictu
 });
 
 /** A cut of two of the fixture's story shots, shot 12's voice-over then shot 14's line, and an export stamped with it. */
-async function storyCutAndExport(h: Awaited<ReturnType<typeof harness>>, id: string, options: { split?: boolean } = {}) {
+async function storyCutAndExport(h: Awaited<ReturnType<typeof harness>>, id: string, options: { split?: boolean; layered?: boolean } = {}) {
   const production = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
-  const shot = (clipId: `cl_${string}`, shotId: string, number: number, startFrame: number, durationFrames: number): TimelineClipCommand => ({ kind: "place", trackId: "tr_picture",
+  const shot = (clipId: `cl_${string}`, shotId: string, number: number, startFrame: number, durationFrames: number, trackId: `tr_${string}` = "tr_picture"): TimelineClipCommand => ({ kind: "place", trackId,
     clip: { id: clipId, startFrame, durationFrames, sourceInFrames: 0, source: { kind: "shot", shotId: shotId as never, sceneNumber: 4, shotNumber: number, label: `SC 4 · SH ${number}` } } });
   await applyHumanTimelineCommand(h.store, "saltlight", { kind: "commands", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production),
     // Split: shot 12 shown in two clips, with shot 14 between them as an insert would be.
     commands: options.split ? [shot("cl_verse", "sh_12", 12, 0, 48), shot("cl_rest", "sh_14", 14, 48, 48), shot("cl_verse_on", "sh_12", 12, 96, 48)]
+      // Layered: shot 12 under the whole film, and shot 14 laid over it from 1 s to 3 s on a second Picture track.
+      : options.layered ? [shot("cl_verse", "sh_12", 12, 0, 144), { kind: "add-track", trackId: "tr_over", trackKind: "picture", name: "Over" }, shot("cl_rest", "sh_14", 14, 24, 48, "tr_over")]
       : [shot("cl_verse", "sh_12", 12, 0, 96), shot("cl_rest", "sh_14", 14, 96, 48)] });
   const current = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
   assert.equal(current.timeline?.status, "ready");
@@ -537,6 +539,31 @@ test("review_export holds a shot shown in two clips of the cut to its line once"
   // Counted for each clip, the line read as said and then not heard (codex on PR 3333).
   assert.deepEqual(review.speech!.lines, [{ number: 1, shot: 1, said: "as-written", startSec: .3 }, { number: 2, shot: 2, said: "as-written", startSec: 2.2 }]);
   assert.deepEqual(review.findings.filter(line => /^Line |^Words nobody/.test(line)), [], review.findings.join(" | "));
+});
+
+test("review_export hears the lines of a cut with a second Picture track, and does not say which shot they are under", async () => {
+  // Shot 14 is laid over shot 12 from 1 s to 3 s and says its line there. Both clips hold that second: which one the film shows is the render's to say.
+  const h = await harness({ said: () => [...say("the verse under the water", .1, .15), ...say("tell you the rest after", 1.2)] });
+  await storyCutAndExport(h, "ex_layered", { layered: true });
+  const review = (await h.retrieval.call(h.lease.token, "review_export", { source: { kind: "export", exportId: "ex_layered" } })).receipt.media!.review!;
+  assert.deepEqual(review.speech!.lines.map(line => [line.number, line.shot, line.said]), [[1, 1, "as-written"], [2, 2, "as-written"]]);
+  // Looked up by the first clip holding the time, the insert's line read as under the base (codex on PR 3333).
+  assert.deepEqual(review.findings.filter(line => /^Line |^Words nobody/.test(line)), [], review.findings.join(" | "));
+});
+
+test("review_export does not hold a film to a scene with more lines than it sets beside one", async () => {
+  const h = await harness({ said: () => say("the verse under the water", .5) });
+  const scenePath = "productions/saltlight/scenes/04-the-verse-rises.json", raw = await readFile(join(h.store.dir, scenePath)), scene = JSON.parse(raw.toString("utf8"));
+  scene.script = { blocks: Array.from({ length: 401 }, (_, i) => ({ id: `blk_${i}`, kind: "dialogue", speaker: "maren-kest", text: "Yes." })) };
+  await h.store.commit({ kind: "media-fixture", source: "test", files: [{ path: scenePath, action: "replace", baseHash: hash(raw), content: JSON.stringify(scene, null, 2) }] });
+  await mkdir(join(h.store.dir, "exports"), { recursive: true }); await writeFile(join(h.store.dir, "exports", "ex_long.mp4"), EXPORT);
+  await recordCompletedExport(h.store, { worldId: h.store.worldId, productionId: "saltlight", status: "done", createdAt: "2026-11-26T00:00:00Z", deliveryKind: "video",
+    id: "ex_long", output: "exports/ex_long.mp4", sourceFingerprint: "production-export-v1:a-cut-made-elsewhere" });
+  const review = (await h.retrieval.call(h.lease.token, "review_export", { source: { kind: "export", exportId: "ex_long" }, script: { productionId: "saltlight", sceneId: "sc_04" } })).receipt.media!.review!;
+  // Cut short at 400, the lines past it were read as words nobody wrote (codex on PR 3333).
+  assert.equal(review.speech, undefined);
+  assert.ok(review.findings.includes("The scene holds 401 spoken lines, more than a review sets beside a film (400), so its lines were not checked."), review.findings.join(" | "));
+  assert.deepEqual(h.calls.filter(call => call.what === "speech"), [], "and the film is not read for them");
 });
 
 test("review_export keeps a line the measured reader cannot time: heard, with no time, and its stretch is never words nobody wrote", async () => {

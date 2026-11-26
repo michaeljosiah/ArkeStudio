@@ -180,7 +180,8 @@ export function heardBySound(line: readonly string[], heard: readonly string[], 
  * after the scene was cut. The recogniser cannot say a name was said right, only that it heard
  * nothing like it, so the item says which name to listen for.
  */
-export type HeardWord = { text: string; startSec: number | null; probability: number };
+/** `endSec` is where the word stops, for a reader that measures it: a film's review places a line by it. */
+export type HeardWord = { text: string; startSec: number | null; endSec?: number | null; probability: number };
 export function judgeWords(line: string | null, heard: readonly HeardWord[], names: ReadonlySet<string> = new Set()): { words: TakeCheck | null; voice: TakeCheck } {
   const spoken = heard.flatMap(word => spokenWords(word.text).map(text => ({ text, startSec: word.startSec, probability: word.probability })));
   const voiceAt = (words: typeof spoken, trimmable: boolean, where: string): TakeCheck => {

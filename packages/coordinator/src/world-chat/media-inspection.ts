@@ -225,7 +225,7 @@ export class ConversationMediaInspection {
               if (stretch.read === "text-only") words.push({ text: stretch.text, startSec: null, probability: 0 });
               if (stretch.read !== "timed") continue;
               for (; next < heard.words.length && heard.words[next]!.endSec <= stretch.endSec + .000001; next++) {
-                words.push({ text: heard.words[next]!.text, startSec: heard.words[next]!.viewStartSec, probability: heard.words[next]!.probability });
+                words.push({ text: heard.words[next]!.text, startSec: heard.words[next]!.viewStartSec, endSec: heard.words[next]!.viewEndSec, probability: heard.words[next]!.probability });
               }
             }
           }

@@ -99,6 +99,17 @@ describe("a film's words against its script", () => {
     assert.deepEqual(filmWordFindings(name, words, shotAt), []);
   });
 
+  it("places a line's end at the middle of its last word, when the reader measured where the word stops", () => {
+    const lines: FilmLine[] = [{ number: 1, shot: 1, text: "It is not possible." }, { number: 2, shot: 2, text: "Stop." }];
+    const at = (seconds: number) => (seconds < 2 ? 1 : 2);
+    const found = (startSec: number, endSec: number) => filmWordFindings(lines, filmWordsAgainstScript(lines, [...say("It is not possible", .2, .2), { text: "Stop", startSec, endSec, probability: .9 }], NAMES)!, at);
+    // Held to the word's start alone, a word begun a fifth of a second before its own shot read as wholly under the shot before (codex on PR 3333).
+    assert.deepEqual(found(1.8, 2.3), [], "begun under the shot before, said under its own");
+    assert.deepEqual(found(1.2, 1.5), ["Line 2 is heard at 0:01.2 under shot 1, not its own shot 2."]);
+    // A read's last word can be given an end later than its own: its middle still falls before the cut.
+    assert.deepEqual(found(1.2, 2.4), ["Line 2 is heard at 0:01.2 under shot 1, not its own shot 2."]);
+  });
+
   it("a shot shown in two clips of the cut says its line once, under either of them or over the insert between", () => {
     // Shot 2 of the cut is split round an insert: the line belongs to shots 2 and 4, with shot 3 between them.
     const split: FilmLine[] = [LINES[0]!, { ...LINES[1]!, shots: [2, 4] }];
