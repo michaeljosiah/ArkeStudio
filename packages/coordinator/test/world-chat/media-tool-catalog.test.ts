@@ -28,3 +28,21 @@ it("the sheet and the review say they read any film, not only an export", () => 
 it("the export review says a shot with no motion figures is not proof of a still", () => {
   assert.match(describe("review_export"), /not proof of a still: look before saying a shot does not move/);
 });
+
+/*
+ * What the speech tools say of how they read and what a read costs. On film sound they refused
+ * almost every window, each refusal took one of the turn's four speech calls, and nothing told
+ * Arke how many it had: it reviewed a scene deaf.
+ */
+it("the speech tools name the three ways a stretch is read, and that a refused or voiceless read uses no speech read", () => {
+  const transcribe = describe("transcribe_audio"), review = describe("review_audio_content");
+  for (const read of ["timed", "text-only", "silent"]) { assert.match(transcribe, new RegExp(`\\b${read}\\b`)); assert.match(review, new RegExp(`\\b${read}\\b`)); }
+  assert.match(transcribe, /Sound outside the stretches is not read/); assert.match(transcribe, /No stretches means no voice was found/);
+  assert.match(transcribe, /Four speech reads a run: a refused read, or one that finds no voice, uses none/);
+  assert.match(review, /A refused read, or one that finds no voice, uses no speech read/);
+  assert.match(transcribe, /Every media result and refusal says what remains of the run's speech, media, listening and image budgets/);
+});
+
+it("video sampling says it samples what the image budget has left, and refuses without a media call when it has none", () => {
+  assert.match(describe("sample_video"), /with fewer images left than asked for it samples as many as are left across the interval and says so, and with none left it refuses without using a media call/);
+});

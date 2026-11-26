@@ -8,7 +8,7 @@ import { newId, measureAudioSignal, LOCAL_ACTOR_ID, type ConversationActionPrepa
 import { wav } from "../audio/helpers.js";
 import { analyzePcmWav } from "../../src/audio/qc.js";
 import { writeSpeechWav } from "../../src/audio/speech-wav.js";
-import type { AgentSpeechReader } from "../../src/media/agent-speech.js";
+import type { AgentSpeechReader, AgentSpeechTextReader } from "../../src/media/agent-speech.js";
 import type { AgentAudioListener } from "../../src/media/agent-listening.js";
 import { WorldStore } from "../../src/world/store.js";
 import { WorldChatStore, conversationDir } from "../../src/world-chat/store.js";
@@ -33,7 +33,20 @@ const inventory: AgentMediaInventory = { durationSec: 10, streams: [
   { index: 0, kind: "video", codec: "fixture", width: 3, height: 2, durationSec: 10, startTimeSec: 0 },
   { index: 1, kind: "audio", codec: "fixture", sampleRate: 4, channels: 2, durationSec: 10, startTimeSec: 0 },
 ] };
-async function harness(options: { sourceBytes?: Uint8Array; listener?: AgentAudioListener; speech?: AgentSpeechReader; speechReady?: (signal: AbortSignal) => Promise<boolean>; local?: boolean; allowed?: boolean; supported?: boolean; inventory?: AgentMediaInventory; missing?: boolean; duringProbe?: () => Promise<void>; duringFrame?: () => Promise<void>; duringPublish?: () => Promise<void> } = {}) {
+/** Sound with nothing standing over its own level: a read of it is one reader call on the whole interval, as every read once was. */
+const tone = (start: number, end: number) => Float32Array.from({ length: Math.round((end - start) * 16000) }, (_, i) => .1 * Math.sin(2 * Math.PI * 220 * i / 16000));
+/** Film sound: a room that is never silent, and a line wherever `lines` says, in seconds from the interval's start. */
+const filmSound = (lines: Array<[number, number]>) => (start: number, end: number) => {
+  let state = 7;
+  const noise = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state / 2147483648 - 1; };
+  const samples = new Float32Array(Math.round((end - start) * 16000)).map(() => .008 * noise());
+  for (const [from, to] of lines) for (let i = from * 16000; i < to * 16000; i++) samples[i]! += .15 * Math.sin(2 * Math.PI * 220 * i / 16000);
+  return samples;
+};
+const unplaced = () => new Error("a word has no usable timing or an unresolved pause");
+/** What a refusal says is left of the run's budgets. */
+const left = (speech: number, media: number, listening = 2, images = 24) => ` Left in this run: ${speech} speech, ${media} media and ${listening} listening calls, ${images} images.`;
+async function harness(options: { sourceBytes?: Uint8Array; listener?: AgentAudioListener; speech?: AgentSpeechReader; speechText?: AgentSpeechTextReader; sound?: (start: number, end: number) => Float32Array; speechReady?: (signal: AbortSignal) => Promise<boolean>; local?: boolean; allowed?: boolean; supported?: boolean; inventory?: AgentMediaInventory; missing?: boolean; duringProbe?: () => Promise<void>; duringFrame?: () => Promise<void>; duringPublish?: () => Promise<void> } = {}) {
   const bytes = options.sourceBytes ?? png;
   const dir = await makeTempWorld(), store = await WorldStore.open(dir); closeOnCleanup(() => store.close());
   const cv = newId("cv"), runId = newId("run"), id = newId("ar"), chat = new WorldChatStore(conversationDir(dir, cv));
@@ -51,8 +64,8 @@ async function harness(options: { sourceBytes?: Uint8Array; listener?: AgentAudi
     frame: async (_path: string, _stream: number, at: number) => { frames++; await options.duringFrame?.(); return { bytes: png, width: 3, height: 2, sourceTimeSec: at }; },
     audio: async (_path: string, stream: AgentMediaInventory["streams"][number], start: number, end: number) => {
       const bytes = Buffer.alloc((end - start) * 4 * 2 * 4); return measureAudioSignal(bytes, 4, 2, stream.index, hash(bytes)); },
-    speechAudio: async (_path: string, _stream: unknown, start: number, end: number) => ({ bytes: writeSpeechWav({ rate: 16000, samples: new Float32Array(Math.round((end - start) * 16000)) }), durationSec: end - start }), };
-  const media = new ConversationMediaInspection(store, leases, { images, listener: options.listener, speech: options.speech, speechReady: options.speechReady, publish: options.duringPublish, ...(options.missing ? {} : { tools }) }); media.start(runId, stop.signal);
+    speechAudio: async (_path: string, _stream: unknown, start: number, end: number) => ({ bytes: writeSpeechWav({ rate: 16000, samples: (options.sound ?? tone)(start, end) }), durationSec: end - start }), };
+  const media = new ConversationMediaInspection(store, leases, { images, listener: options.listener, speech: options.speech, speechText: options.speechText, speechReady: options.speechReady, publish: options.duringPublish, ...(options.missing ? {} : { tools }) }); media.start(runId, stop.signal);
   const retrieval = new WorldChatRetrieval({ leases, getBundle: () => store.getBundle(), getIndex: () => null, attachments: new WorldChatAttachmentStore(dir), findAttachment: async () => null,
     readImage: (lease, args) => images.read(lease, args), readMedia: (lease, name, args) => media.read(lease, name, args) });
   return { store, leases, lease, cv, images, media, retrieval, source: { kind: "artifact" as const, id }, stop,
@@ -73,22 +86,78 @@ const listeningAnswer = { engine: { id: "local-qwen2-audio-v1" as const, model: 
   modelHash: hash(Buffer.from("model fixture")), runtime: "fixture-1" }, review: "The voice sounds restrained; soft strings support the slow pulse." };
 const listener: AgentAudioListener = { ready: async () => true, listen: async () => listeningAnswer };
 
-test("a safe Voxa refusal after successful decode stays a speech refusal and still consumes the four-call budget", async () => {
+test("a safe Voxa refusal after successful decode stays a speech refusal and spends no speech call; the media call budget is what ends a run of them", async () => {
   const client = new VoxaClient(async () => new Response(JSON.stringify({ detail: "The recognizer returned multiple words under one timestamp." }),
     { status: 422, headers: { "content-type": "application/problem+json" } }), "http://127.0.0.1:9");
   let recognized = 0;
   const h = await harness({ speech: async (bytes, signal) => { recognized++; assert.ok(bytes.length > 32000); return client.transcribeWords(bytes, { signal }); } });
   const before = h.store.getBundle().meta.schemaVersion, args = { source: h.source, range: { startSec: 0, endSec: 1 } };
   try {
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 16; i++) {
       const outcome = await h.retrieval.call(h.lease.token, "transcribe_audio", args);
       assert.equal(outcome.receipt.status, "unavailable");
-      assert.deepEqual(outcome.result, { unavailable: true, reason: "Local speech recognition unavailable: the recognizer grouped multiple words under one timestamp." });
+      assert.deepEqual(outcome.result, { unavailable: true, reason: "Local speech recognition unavailable: the recognizer grouped multiple words under one timestamp." + left(4, 15 - i) });
     }
-    assert.equal(recognized, 4); assert.equal(h.counts().snapshots, 4);
-    await assert.rejects(h.retrieval.call(h.lease.token, "transcribe_audio", args), /four speech recognition calls/);
+    assert.equal(recognized, 16); assert.equal(h.counts().snapshots, 16);
+    await assert.rejects(h.retrieval.call(h.lease.token, "transcribe_audio", args), /media inspection call budget\. Left in this run: 4 speech, 0 media/);
     assert.equal(h.store.getBundle().meta.schemaVersion, before); assert.equal((await h.loaded())!.mediaReceipts, undefined);
   } finally { client.dispose(); }
+});
+
+test("four answered speech reads are the budget, and the refusals between them take none of it", async () => {
+  let reads = 0;
+  const h = await harness({ speech: async () => { if (++reads % 2) throw unplaced(); return speechAnswer; } });
+  const args = { source: h.source, range: { startSec: 0, endSec: 1 } };
+  for (let i = 0; i < 4; i++) {
+    const refused = await h.retrieval.call(h.lease.token, "transcribe_audio", args);
+    assert.deepEqual(refused.result, { unavailable: true, reason: "Local speech recognition unavailable: a word has no usable timing or an unresolved pause." + left(4 - i, 15 - 2 * i) });
+    const answered = await h.retrieval.call(h.lease.token, "transcribe_audio", args);
+    assert.equal(answered.receipt.status, "complete");
+    assert.deepEqual((answered.result as { remaining: unknown }).remaining, { speechCalls: 3 - i, mediaCalls: 14 - 2 * i, listeningCalls: 2, images: 24 });
+  }
+  await assert.rejects(h.retrieval.call(h.lease.token, "transcribe_audio", args), /four speech recognition calls\. Left in this run: 0 speech, 8 media/);
+  assert.equal(reads, 8); assert.equal((await h.loaded())!.mediaReceipts!.length, 4);
+});
+
+test("film sound is read in stretches through leased MCP: timed where its words can be placed, text alone where they cannot", async () => {
+  const heardSeconds: number[] = [];
+  const h = await harness({ sound: filmSound([[1, 2], [6, 7]]), speechText: async () => "  Not yet.\n",
+    speech: async bytes => {
+      const seconds = (bytes.length - 44) / 32000; heardSeconds.push(seconds);
+      // The whole ten seconds, with its four-second pause, is what the measured reader refuses; so is the second line here.
+      if (seconds > 5 || heardSeconds.length === 2) throw unplaced();
+      return { ...speechAnswer, seconds };
+    } });
+  const server = new WorldQueryServer(() => h.store); await server.start(); closeOnCleanup(() => server.stop());
+  server.attachLease(h.lease.token, { retrieval: h.retrieval, onReceipt: () => {} });
+  const response = await fetch(server.leasedUrl(h.lease.token)!, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "transcribe_audio", arguments: { source: h.source, range: { startSec: 0, endSec: 10 } } } }) });
+  const body = await response.json() as { result: { content: Array<{ type: string; text?: string }> } };
+  const { remaining, ...observed } = JSON.parse(body.result.content[0]!.text!);
+  assert.deepEqual(observed.transcript.stretches.map((stretch: { read: string; text: string; startSec: number; viewEndSec: number }) => [stretch.read, stretch.text, stretch.startSec, stretch.viewEndSec]),
+    [["timed", "Stay here", .7, 2.3], ["text-only", "Not yet.", 5.7, 7.3]]);
+  assert.equal(observed.transcript.text, "Stay here Not yet."); assert.deepEqual(observed.transcript.words.map((word: { text: string }) => word.text), ["Stay", "here"]);
+  assert.ok(Math.abs(observed.transcript.words[0].sourceStartSec - .8) < 1e-9, "a word's time is the interval's, not its stretch's");
+  assert.deepEqual(heardSeconds.map(seconds => Math.round(seconds * 1000) / 1000), [1.6, 1.6], "neither reader was given the pause");
+  assert.deepEqual(remaining, { speechCalls: 3, mediaCalls: 15, listeningCalls: 2, images: 24 });
+  assert.match(observed.limitations.join(" "), /sound outside them was not read/); assert.match(observed.limitations.join(" "), /text-only stretch/);
+  assert.deepEqual((await h.loaded())!.mediaReceipts![0]!.media, observed, "the receipt keeps the evidence, not the budgets");
+  assert.equal(h.store.getBundle().meta.schemaVersion, 150);
+});
+
+test("an interval with no voice in it completes with no stretches, calls no reader and spends no speech call", async () => {
+  let calls = 0;
+  const h = await harness({ sound: (start, end) => new Float32Array(Math.round((end - start) * 16000)),
+    speech: async () => { calls++; return speechAnswer; }, speechText: async () => { calls++; return "invented"; } });
+  const args = { source: h.source, range: { startSec: 0, endSec: 1 } };
+  for (let i = 0; i < 5; i++) {
+    const outcome = i % 2 ? await h.retrieval.call(h.lease.token, "review_audio_content", { ...args, expectedText: "Stay here" }) : await h.retrieval.call(h.lease.token, "transcribe_audio", args);
+    const transcript = outcome.receipt.media!.transcript!;
+    assert.equal(outcome.receipt.status, "complete"); assert.deepEqual(transcript.stretches, []); assert.equal(transcript.text, ""); assert.equal(transcript.engine, undefined);
+    assert.equal(transcript.contentReview?.comparison.status, i % 2 ? "compared" : undefined, "a review of nothing heard still carries its comparison");
+    assert.deepEqual((outcome.result as { remaining: unknown }).remaining, { speechCalls: 4, mediaCalls: 15 - i, listeningCalls: 2, images: 24 });
+  }
+  assert.equal(calls, 0); assert.equal((await h.loaded())!.mediaReceipts!.length, 5);
 });
 
 for (const [name, speech, reason] of [
@@ -101,19 +170,27 @@ for (const [name, speech, reason] of [
 ] as const) test(`speech ${name} keeps a safe stage-specific refusal without claiming a decode failure`, async () => {
   const h = await harness({ speech });
   const outcome = await h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 0, endSec: 1 } });
-  assert.deepEqual(outcome.result, { unavailable: true, reason });
+  assert.deepEqual(outcome.result, { unavailable: true, reason: reason + left(4, 15) });
   assert.equal(outcome.receipt.status, "unavailable"); assert.equal((await h.loaded())!.mediaReceipts, undefined);
+});
+
+test("a plain reader that fails too, or runs past its bounds, leaves the measured reader's own safe refusal", async () => {
+  for (const speechText of [async () => { throw new Error("PRIVATE transcript /secret/path"); }, async () => "x".repeat(12001)]) {
+    const h = await harness({ speech: async () => { throw unplaced(); }, speechText });
+    const outcome = await h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 0, endSec: 1 } });
+    assert.deepEqual(outcome.result, { unavailable: true, reason: "Local speech recognition unavailable: a word has no usable timing or an unresolved pause." + left(4, 15) });
+  }
 });
 
 test("an unknown host failure is neutral while a listener failure names only the listening stage", async () => {
   let speechCalls = 0;
   const broken = await harness({ duringProbe: async () => { throw new Error("PRIVATE decoder path"); }, speech: async () => { speechCalls++; return speechAnswer; } });
   const failed = await broken.retrieval.call(broken.lease.token, "transcribe_audio", { source: broken.source, range: { startSec: 0, endSec: 1 } });
-  assert.deepEqual(failed.result, { unavailable: true, reason: "Media inspection could not be completed, or inspection was stopped." });
+  assert.deepEqual(failed.result, { unavailable: true, reason: "Media inspection could not be completed, or inspection was stopped." + left(4, 15) });
   assert.equal(speechCalls, 0);
   const listening = await harness({ listener: { ...listener, listen: async () => { throw new Error("PRIVATE model output"); } } });
   const result = await listening.retrieval.call(listening.lease.token, "listen_audio", { source: listening.source, range: { startSec: 0, endSec: 1 }, focuses: ["voice-delivery"] });
-  assert.deepEqual(result.result, { unavailable: true, reason: "Local audio listening could not be completed or its response was invalid." });
+  assert.deepEqual(result.result, { unavailable: true, reason: "Local audio listening could not be completed or its response was invalid." + left(4, 15, 1) });
   assert.equal((await listening.loaded())!.mediaReceipts, undefined);
 });
 
@@ -121,7 +198,7 @@ test("cancellation during recognition overrides a coincident recognizer validati
   let h: Awaited<ReturnType<typeof harness>>;
   h = await harness({ speech: async () => { h.stop.abort(); throw new Error("Recognizer duration does not match the derivative"); } });
   const result = await h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 0, endSec: 1 } });
-  assert.deepEqual(result.result, { unavailable: true, reason: "Local speech recognition was stopped." });
+  assert.deepEqual(result.result, { unavailable: true, reason: "Local speech recognition was stopped." }, "a stopped run is told of no budget: it has nothing left to plan");
   assert.equal((await h.loaded())!.mediaReceipts, undefined);
 });
 
@@ -137,9 +214,10 @@ test("local listening serves subjective music/emotion/delivery text through leas
       range: { startSec: 3, endSec: 4 }, focuses: ["music", "emotion", "voice-delivery"] } } }) });
   const body = await response.json() as { result: { content: Array<{ type: string; text?: string }> } };
   assert.equal(calls, 1); assert.ok(body.result.content.every(content => content.type === "text"));
-  const result = JSON.parse(body.result.content[0]!.text!);
+  const { remaining, ...result } = JSON.parse(body.result.content[0]!.text!);
   assert.equal(result.coverage, "model-audio-listening"); assert.equal(result.listening.review, listeningAnswer.review);
   assert.deepEqual(result.range, { startSec: 3, endSec: 4 }); assert.equal(result.listening.streamIndex, 1);
+  assert.deepEqual(remaining, { speechCalls: 4, mediaCalls: 15, listeningCalls: 1, images: 24 });
   assert.equal(h.store.getBundle().meta.schemaVersion, 81); await assert.rejects(readWorldMeta(h.store.dir, { supports: 80 }), /newer Arke/);
   const loaded = (await h.loaded())!;
   assert.deepEqual(loaded.mediaReceipts![0]!.media, result); assert.equal(loaded.imageDisclosures, undefined);
@@ -185,15 +263,17 @@ test("listening requires explicit ambiguous streams and validates interval/focus
   assert.equal(calls, 0);
 });
 
-test("local speech receipts replay with schema 80 and source/view times without image permission or raw audio", async () => {
+test("local speech receipts replay with schema 150, their stretches and source/view times, without image permission or raw audio", async () => {
   const h = await harness({ allowed: false, supported: false, speech: async () => speechAnswer });
   const outcome = await h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 3, endSec: 4 } });
   assert.equal(outcome.receipt.status, "complete"); assert.equal(outcome.receipt.media!.coverage, "recognized-speech");
   assert.equal(outcome.receipt.media!.transcript!.words[0]!.sourceStartSec, 3.1);
+  assert.deepEqual(outcome.receipt.media!.transcript!.stretches, [{ startSec: 0, endSec: 1, viewStartSec: 3, viewEndSec: 4, read: "timed", text: "Stay here" }]);
   assert.equal(outcome.imageContent, undefined); assert.equal((await h.loaded())!.imageDisclosures, undefined);
   const persisted = (await h.loaded())!.mediaReceipts![0]!;
-  assert.deepEqual(persisted, outcome.receipt); assert.equal(h.store.getBundle().meta.schemaVersion, 80);
-  await assert.rejects(readWorldMeta(h.store.dir, { supports: 79 }), /newer Arke/);
+  assert.deepEqual(persisted, outcome.receipt); assert.equal(h.store.getBundle().meta.schemaVersion, 150);
+  // A build from before stretches holds a transcript to one timed read, so it must refuse the world rather than its journal.
+  await assert.rejects(readWorldMeta(h.store.dir, { supports: 149 }), /newer Arke/);
   assert.equal(JSON.stringify(outcome.result).includes("base64"), false);
 });
 
@@ -235,7 +315,8 @@ test("speech stream ambiguity, invalid references and per-run recognition budget
   const h = await harness({ speech: async () => speechAnswer, inventory: { ...inventory, streams: [...inventory.streams, { ...inventory.streams[1]!, index: 2 }] } });
   await assert.rejects(h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 0, endSec: 1 } }), /explicit audio/);
   await assert.rejects(h.retrieval.call(h.lease.token, "review_audio_content", { source: h.source, range: { startSec: 0, endSec: 1 }, expectedText: "" }), /valid interval/);
-  for (let i = 0; i < 3; i++) assert.equal((await h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 0, endSec: 1 }, streamIndex: 2 })).receipt.status, "complete");
+  // The ambiguous call above was never answered, so all four speech reads are still to come.
+  for (let i = 0; i < 4; i++) assert.equal((await h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 0, endSec: 1 }, streamIndex: 2 })).receipt.status, "complete");
   await assert.rejects(h.retrieval.call(h.lease.token, "transcribe_audio", { source: h.source, range: { startSec: 0, endSec: 1 }, streamIndex: 2 }), /four speech/);
 });
 
@@ -295,6 +376,19 @@ test("local image inspection needs no cloud permission or disclosure; the shared
   for (let i = 0; i < 3; i++) assert.equal((await h.retrieval.call(h.lease.token, "sample_video", { source: h.source, range: { startSec: 0, endSec: 1 }, count: 8 })).receipt.status, "complete");
   const refused = await h.retrieval.call(h.lease.token, "sample_video", { source: h.source, range: { startSec: 0, endSec: 1 } }); assert.equal(refused.receipt.status, "unavailable");
   assert.equal((await h.loaded())!.imageDisclosures, undefined); assert.equal((await h.loaded())!.mediaReceipts!.length, 3);
+});
+test("with fewer images left than asked for, sample_video samples what is left across the interval; with none left it refuses before a media call is spent", async () => {
+  const h = await harness({ local: true }), args = { source: h.source, range: { startSec: 0, endSec: 8 } };
+  for (const count of [8, 8, 5]) assert.equal((await h.retrieval.call(h.lease.token, "sample_video", { ...args, count })).receipt.status, "complete");
+  // Three left of 24. Eight frames used to be decoded, three counted, and the fourth refused the whole call.
+  const last = await h.retrieval.call(h.lease.token, "sample_video", { ...args, count: 8 });
+  assert.equal(last.receipt.status, "complete"); assert.equal(last.imageContent!.length, 3);
+  assert.deepEqual(last.receipt.media!.frames!.map(frame => frame.sourceTimeSec), [0, 8 / 3, 16 / 3], "spread over the interval, not the first three of eight");
+  assert.match(last.receipt.media!.limitations.join(" "), /Asked for 8 frames; 3 were sampled/);
+  assert.deepEqual((last.result as { remaining: unknown }).remaining, { speechCalls: 4, mediaCalls: 12, listeningCalls: 2, images: 0 });
+  const refused = await h.retrieval.call(h.lease.token, "sample_video", args);
+  assert.deepEqual(refused.result, { unavailable: true, reason: "sample_video: this run has reached its 24-image inspection limit." + left(4, 12, 2, 0) });
+  assert.equal(h.counts().frames, 24, "nothing was decoded for the refused call"); assert.equal((await h.loaded())!.mediaReceipts!.length, 4);
 });
 test("ambiguous audio tracks require explicit stream selection", async () => {
   const h = await harness({ inventory: { ...inventory, streams: [...inventory.streams, { ...inventory.streams[1]!, index: 2 }] } });
@@ -422,9 +516,10 @@ test("an exact saved performance is inspectable independently of review/selectio
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "inspect_media", arguments: { source: performance.source } } }) });
   const reply = await response.json() as { result: { content: Array<{ type: string; text: string }> } };
   assert.ok(reply.result.content.every(value => value.type === "text"));
-  const result = JSON.parse(reply.result.content[0]!.text);
+  const { remaining, ...result } = JSON.parse(reply.result.content[0]!.text);
   assert.deepEqual(result.source, performance.source); assert.deepEqual(servedSource, performance.source);
   assert.equal(result.sourceHash, performance.record.provenance.outputHash);
+  assert.deepEqual(remaining, { speechCalls: 4, mediaCalls: 15, listeningCalls: 2, images: 24 });
   assert.equal(h.store.getBundle().meta.schemaVersion, 104);
   assert.deepEqual((await h.loaded())!.mediaReceipts![0]!.media, result);
   await assert.rejects(readWorldMeta(h.store.dir, { supports: 103 }), /newer|version|schema/i);
@@ -472,7 +567,17 @@ test("performance signal, speech and listening reuse the same per-run budgets as
   for (let i = 0; i < 9; i++) await h.retrieval.call(h.lease.token, "inspect_media", { source: i % 2 ? h.source : performance.source });
   await assert.rejects(h.retrieval.call(h.lease.token, "inspect_media", { source: performance.source }), /call budget/);
   assert.equal((await h.loaded())!.mediaReceipts!.length, 16);
-  assert.equal(h.store.getBundle().meta.schemaVersion, 104);
+  // A speech read's own boundary is above a performance's, and comes first: 104 would leave its stretches to a build that cannot read them.
+  assert.equal(h.store.getBundle().meta.schemaVersion, 150);
+});
+
+test("a speech read of a performance or a finished film raises the world past its stretches, not only past its source", async () => {
+  const p = await harness({ sourceBytes: performanceBytes, speech: async () => speechAnswer }), performance = await addPerformance(p);
+  assert.equal((await p.retrieval.call(p.lease.token, "transcribe_audio", { source: performance.source, range: { startSec: 0, endSec: 1 } })).receipt.status, "complete");
+  assert.equal(p.store.getBundle().meta.schemaVersion, 150);
+  const e = await harness({ speech: async () => speechAnswer }), exported = await addExport(e);
+  assert.equal((await e.retrieval.call(e.lease.token, "transcribe_audio", { source: exported.source, range: { startSec: 0, endSec: 1 } })).receipt.status, "complete");
+  assert.equal(e.store.getBundle().meta.schemaVersion, 150);
 });
 
 async function addExport(h: Awaited<ReturnType<typeof harness>>, deliveryKind: "video" | "manuscript" | "audiobook-video" = "video", id = "ex_review") {
