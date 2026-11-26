@@ -106,6 +106,16 @@ describe("the checks after a take: words", () => {
     assert.equal(judgeWords("Go to a bar now.", ["go", "bag", "bar", "now"].map((w, i) => word(w, i * .3))).words?.says, "3 of 5 words · not heard: to a");
   });
 
+  it("keeps what was said beside a word found by sound for the voice nobody wrote (codex on PR 3327)", () => {
+    // The whole gap was credited to the line, so the "thank you" after it was never heard as added.
+    const added = judgeWords("Congratulations!", [word("congratulation", 1, .95), word("thank", 2, .95), word("you", 2.3, .95)]);
+    assert.deepEqual(added.words, { id: "words", result: "pass", says: "by sound" });
+    assert.equal(added.voice.result, "fix");
+    assert.equal(added.voice.says, "at 2.0 s");
+    const before = judgeWords("Oya!", [word("hey", .2, .95), word("oh", 1.5), word("yeah", 1.7)]);
+    assert.deepEqual([before.words?.says, before.voice.result, before.voice.says], ["by sound", "fix", "at 0.2 s"], "and before it");
+  });
+
   it("stays quick on a long take whose words match nothing (codex on PR 3327)", () => {
     const line = Array.from({ length: 100 }, (_, i) => `word${i}`).join(" ");
     const heard = Array.from({ length: 100 }, (_, i) => word(`other${i}`, i * .5));

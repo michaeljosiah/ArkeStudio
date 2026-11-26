@@ -121,7 +121,22 @@ function heardBySound(line: readonly string[], heard: readonly string[], used: R
     for (let j = from.heard + 1; j < to.heard; j++) { text += heard[j]!; for (let k = 0; k < heard[j]!.length; k++) owner.push(j); }
     const alone = to.line - from.line === 2 ? line[from.line + 1]! : null;
     if (alone !== null && text.length <= alone.length * 2 + 3) {
-      if (alone.length >= SHORTEST_BY_SOUND && alike(alone, text) >= ALIKE) { found.line.add(from.line + 1); for (const j of owner) found.heard.add(j); }
+      /*
+       * The run of whole heard words most like the word is the word, and only that run: the rest
+       * of the gap is still what the take said beside it. Crediting the whole gap took a "thank
+       * you" after "Congratulations!" for part of the line, and the voice nobody wrote went
+       * unheard (codex on PR 3327).
+       */
+      let best: { start: number; end: number; score: number } | null = null;
+      for (let start = from.heard + 1; start < to.heard && alone.length >= SHORTEST_BY_SOUND; start++) {
+        let run = "";
+        for (let end = start; end < to.heard; end++) {
+          run += heard[end]!;
+          const score = alike(alone, run);
+          if (score >= ALIKE && (!best || score > best.score)) best = { start, end, score };
+        }
+      }
+      if (best) { found.line.add(from.line + 1); for (let j = best.start; j <= best.end; j++) found.heard.add(j); }
       continue;
     }
     let at = 0;
