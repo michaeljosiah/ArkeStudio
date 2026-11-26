@@ -1,7 +1,7 @@
 # Sound and pace in the cut
 
 How a picture editor and a sound mixer finish a scene's cut. Read this before you change the Cut's music,
-mix or effects, or where a clip starts and ends.
+mix or effects, or where a clip starts and ends, and before you show anyone a cut or an export.
 
 ## 1 · Music the room plays
 
@@ -70,3 +70,25 @@ each two-minute part, and no line was lost.
   drifted.
 - **Check the sync at the end of a cut as well as at its start.** Drift adds up cut by cut: a picture one
   frame short at each cut put the voices 0.7 s off the lips by the end of a two-minute part.
+
+## 7 · Watch and listen before you show it
+
+A cut is not ready because it was built. Play it through and check it before anyone else sees it.
+
+- **Hear every line where it belongs.** Transcribe the finished film with word times (`transcribe_audio` on
+  the export, a minute at a time) and set it beside the script, shot by shot. Every line must be heard once,
+  in the script's order, inside the shot whose mouth says it, and nothing the script does not say. A line
+  heard in the wrong shot, or twice, means a sound has lost its place in the mix.
+- **Look at the mouths while the lines play.** `sample_video` with a region round the mouth, at each line's
+  words and in the silences between them. A mouth that moves with nothing heard and a line heard over a shut
+  mouth are the same fault.
+- **Measure the room shot by shot.** The quiet between lines should stay within about 3 dB from shot to shot.
+  A song that reaches its own ending, or a bed that stops, drops the room under the talk. Bring the next song
+  in under the ending, as the DJ would.
+- **Make each version from the last one that was shown and accepted.** Every note already given then stays
+  done. Before you show a new version, check the notes that earlier versions answered.
+
+On the film (2026-11-26), a cut of shots 9 to 20 was built from an older list than the last one shown. It lost
+the club's room tone, the gated takes and the effects the owner had asked for the day before. Three sounds also
+lost their place: shots 19 and 20 moved their mouths in silence while their lines played over shot 9. The owner
+heard it first: "Watch and listen to this before sending this to me."

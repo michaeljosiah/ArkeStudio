@@ -159,6 +159,17 @@ it("the owner's notes of 2026-11-25 reach the skills: a moving camera, split cut
   assert.match(sound, /Check the sync at the end of a cut as well as at its start/);
 });
 
+it("the sound skill watches and listens to a cut before it is shown (shots 9 to 20, 2026-11-26)", async () => {
+  // A cut went to the owner with shots 19 and 20 silent while their lines played over shot 9, built from a list older
+  // than the one last shown, so the room tone, gating and effects asked for the day before were gone.
+  const sound = (await loadCraftSkill("sound-and-pace"))!.body;
+  assert.match(sound, /Watch and listen before you show it/);
+  assert.match(sound, /inside the shot whose mouth says it/);
+  assert.match(sound, /A mouth that moves with nothing heard and a line heard over a shut\s+mouth are the same fault/);
+  assert.match(sound, /The quiet between lines should stay within about 3 dB/);
+  assert.match(sound, /Make each version from the last one that was shown and accepted/);
+});
+
 it("the continuity skill fills the room the place describes, and says who is at a table (the club, 2026-11-23)", async () => {
   // "Nobody else is in the picture", written to keep strangers out of the booth, emptied a busy club in
   // every shot that saw the room.
