@@ -20,7 +20,7 @@ Check each of these in the last frames of the shot going out and the first frame
 - **The props**: which ones, where they stand, how full, how many. A glass is the same glass, the same size.
 - **Clothes and hair**: a collar open in one shot is open in the next.
 - **The room behind them**: a camera looking the same way sees the same background. A wall behind someone
-  in the wide shot is a wall behind them in their close shot. A full floor in one shot is full in the next.
+  in the wide shot is a wall behind them in their close shot. A full room in one shot is full in the next.
 - **The light**: where it comes from, and how bright.
 - **The direction of movement**: someone who leaves frame right comes in frame left.
 
@@ -35,9 +35,8 @@ Check each of these in the last frames of the shot going out and the first frame
   of the frame in their own shots. Put what they watch where a turn of the head reaches it, not at their back,
   so a look is never a turn right round. Show what they see through their eyes: from their seat, at their eye
   height, with nothing of them in the frame, straight after a shot of them turning to look. A camera over their
-  shoulder from behind says the person is at their back. On the film, Ade turned his head to his left in his
-  close shots, while every view of her table looked over his shoulder from behind him; the owner saw him look
-  two ways, and a shoulder that did not sit where his seat was.
+  shoulder from behind says the person is at their back: a watcher who turns their head to one side in their
+  own close shots, cut against views from behind their shoulder, seems to look two ways at once.
 
 ## 4 · Plan for the cut
 
@@ -55,24 +54,18 @@ Check each of these in the last frames of the shot going out and the first frame
 - **Keep a spoken line on the speaker's face.** While a person speaks, their head stays towards the one they
   talk to and the camera stays on them. A look away is the eyes only, and it goes in a pause: never "turns to"
   or "towards the room" during words, which the model reads as a camera move. A grin, a sip or a straight face
-  goes before the first word or after the last, and the shot says the line runs to its last word. On the film's
-  board of shots 15 to 17, a 7-second line written with "his eyes go past Ade's shoulder towards the room",
-  "mock-solemn" and "sits back grinning" after it came back panned to the dance floor, Tunde smirking with his
-  mouth shut for three seconds of words, then holding a grin through the last three. The owner heard the line
-  and saw no lips.
-- **Let the body play the line, word by word.** A line that mocks, imitates or teases lands when the body acts
-  it on its words while the mouth keeps speaking. Tie each movement to the words it goes with. A mood word
-  alone ("mock-solemn") gave a still face and a shut mouth. On the film's shot 20, Tunde quotes Ade. On the
-  quoted words he "sits up straight and makes his voice flat and formal, doing Ade". On the punchline he
-  "leans in a little towards Ade". Only after the last word do his eyebrows go up. The owner: the body
-  movement "enhanced the mocking making this feel more human".
+  goes before the first word or after the last, and the shot says the line runs to its last word. A long line
+  written with a look away during it, a mood word and a grin after it can come back with the camera panned
+  away, the mouth shut for seconds of words, and a grin held through the rest.
+- **Tie each movement to its words.** Write a performance as what the body does on which words, while the
+  mouth keeps speaking: a change of posture on a quoted phrase, a lean on the last words, a reaction only after
+  the last word. A mood word alone ("sarcastic", "solemn") gives a still face and a shut mouth.
 - **Move the camera as the production does.** Unless the production's look says otherwise, the camera is
   handheld at eye level: it breathes, drifts a little, and eases a few centimetres closer on the beat that
   matters. To stop a model moving the camera on its own, name what it must not do ("no orbit, no zoom, no
-  cut inside the shot") and keep the handheld. Never write "locked off" or "does not move" to do it: on the
-  film, about fifty clips made that way drifted a few pixels, never breathed, and the owner asked where the
-  camera movement was. Hold the camera still only where stillness is the point: a composed wide, an empty
-  room, a screen to be read.
+  cut inside the shot") and keep the handheld. Never write "locked off" or "does not move" to do it: clips made
+  that way drift a few pixels and never breathe. Hold the camera still only where stillness is the point: a
+  composed wide, an empty room, a screen to be read.
 - **Carry the state forward.** When a take is accepted, write its end into the next shot: who is where and
   how, where each person looks, what each hand holds, what is on the table and where.
 - **Say how the seats face.** When you ask for a view of a place where people sit together, say how the
@@ -81,24 +74,24 @@ Check each of these in the last frames of the shot going out and the first frame
 - **Name a hand by what it wears.** A picture sorts "left" and "right" by where things sit in the frame, and
   can swap them. Tie a prop to the hand's mark: "the hand that wears the watch holds the card", not only
   "his left hand". Then look at which hand it drew. Seen from the side, say where the hand is too: "his near
-  hand, the one nearest the camera, which wears the watch, holds the glass". Named by the watch alone, the glass
-  went to the far hand twice, with the watch on the near wrist at his knee.
+  hand, the one nearest the camera, which wears the watch, holds the glass". Named by the mark alone, a prop
+  can go to the far hand while the mark stays on the near one.
 - **Fill the room the place describes.** A place's views are drawn empty, so that every shot from one camera
   position shares one room. The people in it come only from the shot's words. Write the place's crowd into
   every shot that sees the room, and the same crowd from each position: who is on the floor, at the bar, at
   the other tables.
-- **Say who is at the table, not who is missing.** To keep strangers out of a table, write "the only people
-  at this table are Tunde and Ade", never "nobody else is in the picture". A picture reads that as the whole
-  room: every shot of a busy club came out closed.
+- **Say who is at the table, not who is missing.** To keep strangers out of a table, name the people at it
+  ("the only people at this table are the two friends"), never "nobody else is in the picture". A picture
+  reads that as the whole room, and a busy place comes out empty.
 - **Keep a lane where someone must be seen.** When a person has to pass behind someone and be read, keep that
   strip clear in the words, with the crowd beyond it.
-- **A crowd brings strangers.** Look at each frame for someone near the table who wears what marks one of the
-  cast: a watch, bangles.
+- **A crowd brings strangers.** Look at each frame for someone near the cast who wears what marks one of
+  them: a watch, jewellery, a colour only one character wears.
 - **Name in the first frame only who is in it.** Every person a shot's words name rides with its frame as a
-  picture, and the picture draws them in. A shot looking across the room "from Ade's seat", with him out of
-  frame, put a man in his white shirt and watch at her table. Place the camera without naming him: "from the
-  booth's end seat". When someone enters after the first frame, leave them out of the first frame's words
-  entirely, their clothes too: "the only gold in the room is what she wears" drew a woman in gold walking in.
+  picture, and the picture draws them in. A view "from her seat", with her out of frame, can put a second
+  her in the room. Place the camera without naming the person: "from the end seat of the bench". When
+  someone enters after the first frame, leave them out of the first frame's words entirely, their clothes
+  too: naming what they wear can draw a stranger wearing it.
 
 ## 5 · Look at the cuts in the pictures
 
@@ -109,8 +102,8 @@ Words that match prove nothing about the pictures. When shots have takes, look a
 - **Before you write the next shot, look at the end of the shot before it as the Cut plays it.** The Cut
   may use only part of a take: look where the Cut ends that clip, not where its take ends. Write the new
   shot's opening from what you see there, not from what the last shot's words say it ends on.
-- **Answer from the pictures what they can show**: which hand holds the glass, which wrist the bangles are
-  on, what is on the table. Never ask the person what a take already shows.
+- **Answer from the pictures what they can show**: which hand holds the glass, which wrist wears the
+  jewellery, what is on the table. Never ask the person what a take already shows.
 - **A contact sheet shows no cut.** `cut_contact_sheet` takes one frame from the middle of each shot. Use it
   to find where the shots are, then look at the cuts themselves.
 
@@ -140,26 +133,38 @@ How to judge:
 - Name each cut by its two shots ("shot 4 to shot 5") and say, for each, matched and holds, matched and
   does not hold, or deliberate.
 
-## 6 · Fix it or change the camera, cheapest first
+## 6 · Fix it in the edit first
 
-When a matched cut does not hold, choose the cheapest fix that keeps the moment, and offer it on a card:
+When a take works but fails at one point (a hand where it should not be, a mouth that stops with words still
+to come, someone looking at the lens, a stranger in the frame), fix it in the Cut before making anything
+again. A new take of a shot that mostly worked can fail somewhere else, and costs money and time.
 
-1. **Move the cut.** Trim one side in the Cut so the cut falls where both shots agree. It costs nothing, but
+When a matched cut does not hold, or a take fails at one point, choose the cheapest fix that keeps the
+moment, and offer it on a card:
+
+1. **Trim the failure off.** Start the clip after it or end it before it. Shorten the shot if the beat has
+   landed already.
+2. **Move the cut.** Trim one side in the Cut so the cut falls where both shots agree. It costs nothing, but
    needs the overlap.
-2. **Cut inside a movement.** Put the cut in the middle of a gesture, so the change reads as motion.
-3. **Redraw the opening.** Rewrite the next shot's first frame from the end of the shot before it: the same
+3. **Cut away over it.** Cut to the listener, or to what the person is looking at, for the moment the take
+   fails, while its sound plays on; cut back if the take holds again after it. A line's last words over the
+   listener is a cut the scene would want anyway.
+4. **Use another take's part.** A piece of another take of the same shot, or of a shot from the same
+   camera, can stand in for the moment that failed.
+5. **Cut inside a movement.** Put the cut in the middle of a gesture, so the change reads as motion.
+6. **Redraw the opening.** Rewrite the next shot's first frame from the end of the shot before it: the same
    pose, the same hands, the same props, seen from the next shot's own camera. Then its frame and clip are
    made again. Say what that costs.
-4. **Change the camera.**
+7. **Change the camera.**
    - Put a reaction or an insert between the two shots: an insert about a second, a reaction two seconds at
      most, and only where the story has a reason to look there. An insert with no reason shows that
      something is being hidden.
    - Or move the next shot's camera to a clearly different position and size, so it reads as a new moment.
      Never move it across the line.
-5. **Make it deliberate.** Say in the shot that the cut jumps in time or resets the action.
+8. **Make it deliberate.** Say in the shot that the cut jumps in time or resets the action.
 
-A fix that changes a shot already made means making it again: say so, and never rewrite a shot that has
-been paid for without asking.
+Make a new take only when no cut can hide the failure, and say what it costs. A fix that changes a shot
+already made means making it again: say so, and never rewrite a shot that has been paid for without asking.
 
 ## 7 · What a fix must never give up
 

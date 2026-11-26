@@ -122,8 +122,8 @@ it("the local route's skill knows a face the start frame hides comes out a stran
 it("the continuity skill names in the first frame only who is in it (She sits, 2026-11-23)", async () => {
   const continuity = (await loadCraftSkill("continuity-across-cuts"))!.body;
   assert.match(continuity, /Name in the first frame only who is in it/);
-  assert.match(continuity, /Place the camera without naming him/);
-  assert.match(continuity, /leave them out of the first frame's words\s+entirely, their clothes too/);
+  assert.match(continuity, /Place the camera without naming the person/);
+  assert.match(continuity, /leave them out of the first frame's words\s+entirely, their clothes\s+too/);
 });
 
 it("the owner's notes of 2026-11-24 reach the skills: a quoted line, a pause in the voice line, a near hand", async () => {
@@ -172,15 +172,40 @@ it("the sound skill watches and listens to a cut before it is shown (shots 9 to 
   assert.match(sound, /Make each version from the last one that was shown and accepted/);
 });
 
-it("a room tone never repeats, and the body plays a mocking line word by word (the owner, 2026-11-26)", async () => {
-  // A 6-second crowd clip looped nine times under 53 seconds brought the same laugh back; Tunde quoting Ade, sitting up
-  // formal on the quoted words and leaning in on the punchline, was what the owner liked.
+it("a room tone never repeats, and a performance is tied to its words (the owner, 2026-11-26)", async () => {
+  // A short crowd clip looped under a scene brought the same laugh back; a performance written as movements on its
+  // words read as human, where a mood word gave a still face.
   const sound = (await loadCraftSkill("sound-and-pace"))!.body;
   assert.match(sound, /Never let a room tone repeat/);
   assert.match(sound, /each piece used once in the scene/);
   const continuity = (await loadCraftSkill("continuity-across-cuts"))!.body;
-  assert.match(continuity, /Let the body play the line, word by word/);
-  assert.match(continuity, /Tie each movement to the words it goes with/);
+  assert.match(continuity, /Tie each movement to its words/);
+  assert.match(continuity, /A mood word alone \("sarcastic", "solemn"\) gives a still face and a shut mouth/);
+});
+
+it("the craft skills hold general craft only, nothing of any one story (the owner, 2026-11-26)", async () => {
+  // A skill is read for every production. The owner found one production's characters, lines and shots in them:
+  // "The Arke skill should not have anything specific to" the story it was learned on.
+  for (const id of ["continuity-across-cuts", "local-h3-video", "sound-and-pace", "board-seams"]) {
+    const body = (await loadCraftSkill(id))!.body;
+    assert.doesNotMatch(body, /\bon the film\b|\bthe film's\b/i, id);
+    assert.doesNotMatch(body, /\bthe owner\b/i, id);
+    assert.doesNotMatch(body, /\bshots? \d+ (to|and) \d+\b/i, id);
+  }
+});
+
+it("a take that fails at one point is fixed in the edit first, and a laid line's words must be on the lips (2026-11-26)", async () => {
+  // A take that worked until its speaker broke into a laugh would have been made again; the owner asked why the editor
+  // could not cut it out. The laid line's last words had played over that laugh.
+  const continuity = (await loadCraftSkill("continuity-across-cuts"))!.body;
+  assert.match(continuity, /Fix it in the edit first/);
+  assert.match(continuity, /Cut away over it/);
+  assert.match(continuity, /Make a new take only when no cut can hide the failure/);
+  const sound = (await loadCraftSkill("sound-and-pace"))!.body;
+  assert.match(sound, /Check that the take says every word you lay over it/);
+  assert.match(sound, /Fix what you find in the edit first/);
+  const route = (await loadCraftSkill("local-h3-video"))!.body;
+  assert.match(route, /Cut it out in the edit first/);
 });
 
 it("the continuity skill fills the room the place describes, and says who is at a table (the club, 2026-11-23)", async () => {
@@ -190,7 +215,7 @@ it("the continuity skill fills the room the place describes, and says who is at 
   assert.match(continuity, /A place's views are drawn empty/);
   assert.match(continuity, /Write the place's crowd into\s+every shot that sees the room/);
   assert.match(continuity, /never "nobody else is in the picture"/);
-  assert.match(continuity, /A full floor in one shot is full in the next/);
+  assert.match(continuity, /A full room in one shot is full in the next/);
 });
 
 it("the continuity skill keeps a spoken line on the speaker's face (board 15-17, 2026-11-25)", async () => {
@@ -223,7 +248,7 @@ it("the local route's skill knows the first-frame sibling: an exact opening, and
   const route = (await loadCraftSkill("local-h3-video"))!.body;
   assert.match(route, /It opens on the shot's start frame, exactly/);
   assert.match(route, /It takes 2,000 characters at most/);
-  assert.match(route, /start the clip in the Cut just before it/);
+  assert.match(route, /start the\s+clip in the Cut just before it/);
 });
 
 it("the local route's skill knows who comes out a stranger, and where a crossing walks (shots 10 and 11, 2026-11-23)", async () => {
@@ -234,7 +259,7 @@ it("the local route's skill knows who comes out a stranger, and where a crossing
   assert.match(route, /Make such a shot on the reference route/);
   assert.match(route, /may walk through the foreground/);
   assert.match(route, /split the shot/);
-  assert.match(route, /none on another/);
+  assert.match(route, /or none\s+where a hand already moving in the frame carries straight on/);
 });
 
 it("the board skill names the read, the length and each seam command Arke can send (2026-11-25)", async () => {
