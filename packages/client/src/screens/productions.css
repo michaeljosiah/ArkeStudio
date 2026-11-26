@@ -106,6 +106,8 @@
    list opens up from the count into the bench, clear of the column's edge. */
 .fy-gen__cta.fy-gen__cta--press { margin-top: 8px; }
 .fy-shotchecks__panel { right: auto; left: 0; min-width: 340px; }
+/* The cut's count sits in the Cut's header, at the top of the screen: its list opens under it. */
+.fy-cutchecks__panel { bottom: auto; top: calc(100% + 8px); min-width: 320px; }
 .fy-production-settings-sheet .fy-page-sheet__body { display: flex; flex-direction: column; gap: 20px; }
 .fy-production-switch-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 0; border: 0; border-bottom: 1px solid var(--border); background: transparent; color: var(--foreground); text-align: left; cursor: pointer; font: var(--type-ui); }
 .fy-production-switch-row__mark { width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center; background: var(--muted); flex: none; }

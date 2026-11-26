@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   currentTakeChecks,
+  cutChecks, cutChecksCount, CUT_CHECK_NAMES, type ProductionTimeline,
   migrateLegacyCut,
   deriveProductionReadiness,
   episodeScriptFile,
@@ -446,6 +447,12 @@ function editableTimeline(
  * `sheets` is given by the read alone, never by the fence: scene, cast and place are read off the
  * story as it stands, and a renamed scene or a new sheet must not stale an edit to the timeline.
  */
+/** The cut's checks as one row: the count, and each item with the name its list shows. None when the cut has nothing to read. */
+function cutCheckRows(production: ProductionBundle, timeline: ProductionTimeline, artifacts: WorldBundle["artifacts"]): Row[] {
+  const items = cutChecks({ production, timeline, artifacts });
+  return items.length === 0 ? [] : [{ key: "02:cut-checks", value: { kind: "cut-checks", ...cutChecksCount(items), items: items.map((item) => ({ ...item, name: CUT_CHECK_NAMES[item.id] })) } }];
+}
+
 function timelineRows(production: ProductionBundle | undefined, artifacts: WorldBundle["artifacts"], sheets?: readonly Sheet[]): Row[] {
   const story = new Map<string, { scene: { id: string; number: number; title: string }; cast: string[]; place: string | null }>();
   if (production !== undefined && sheets !== undefined) {
@@ -487,6 +494,10 @@ function timelineRows(production: ProductionBundle | undefined, artifacts: World
     const tracks = [...timeline.tracks].sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
     rows.push(
       { key: "01:timeline", value: { kind: "timeline", revision: timeline.revision, frameRate: timeline.frameRate, mix: timeline.mix, migratedCut: timeline.migratedCut ?? false } },
+      // The cut's own checks (design turn 288d) ride with the read, as each clip's story does: they
+      // are read off the scene and the look as they stand, so they stay out of the fence, where a
+      // changed look would otherwise stale an edit to the timeline.
+      ...(production !== undefined && sheets !== undefined ? cutCheckRows(production, timeline, artifacts) : []),
       ...timeline.library.map((item, index) => ({ key: `10:library:${padded(index)}:${item.kind}:${item.kind === "shot" ? item.shotId : item.artifactId}`, value: { kind: "library-item", item } })),
       ...tracks.flatMap((track, trackIndex) => [
         { key: `20:track:${padded(trackIndex)}:${track.id}`, value: { kind: "track", track: { ...track, clips: undefined, cues: undefined, effects: undefined } } },
