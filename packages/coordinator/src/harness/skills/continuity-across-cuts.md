@@ -181,3 +181,28 @@ When a fix costs something, give up the last item in this list first and the fir
 6. the exact geometry of the room
 
 A cut that keeps the laugh and moves a glass is better than one that keeps the glass and loses the laugh.
+## 8 · Whose scene it is
+
+A cut can match at every join and still not tell its scene. Before a cut is shown, say what the scene is
+about, and check that the picture is on it.
+
+- **Open on the place.** Before anyone speaks, show the room the scene lives in and find the people inside
+  it: through the room's own life (a crowd, a street, a doorway) to where they are. Draw them there exactly
+  as the close shots have them: the same seats, the same sides of the frame, the same wall behind each. A
+  wide whose seats differ from the close shots cannot be mended in the cut; leave it out. End the opening
+  on a movement the first close shot carries on.
+- **Count whose face holds the picture.** Add up the seconds each person's face is on screen. The one who
+  talks most is seldom the one the scene is about. When the talker holds more than half of a scene that
+  belongs to the listener, run more of the talk over the listener's face (the sound-and-pace skill's
+  section 4), and cut to what the listener is thinking of.
+- **After a look, the one who looked.** Show the turn of the head, then what is seen, then the face again
+  while it is still looking. Two views of what is seen with no face between them make the scene about the
+  thing watched, not the person watching.
+- **Play the turn on the face of the one who turns.** Where a scene turns on someone deciding, their face
+  is on screen while they decide: caught, then deciding, cut against what caused it, each long enough to
+  read. Never cut from the cause straight to the action already begun.
+- **Make what a shot is for large enough to read.** A wide view with its action small in the distance
+  shows the room and hides the action. If the action matters, the shot has to be closer: ask for the closer
+  shot, or have a sharp take enlarged (about two times holds on a draft).
+- **Look through the takes' unused seconds before asking for a shot.** The second before a line and the
+  seconds after it often hold what a scene is missing: a listener's face, a look away, a head turning back.

@@ -60,7 +60,11 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // v15: look at every cut on a page of cuts, and read the cut's own checks first (2026-11-26: a finished scene
     // had forty cuts and a turn could look at ten, two frames each, and nothing checked a line's place or the room
     // before the owner did).
-    version: 15,
+    // v16: whose scene it is (the owner asked for a cut to be watched as a director would, 2026-11-26: every join
+    // matched and every line was heard, yet the room was never shown, the talker held 53% of the picture, a look
+    // was never followed by the face that looked, the turn was cut from its cause to the action already begun, and
+    // the one gesture the scene needed sat a sixth of the frame high behind dancers).
+    version: 16,
     title: "Continuity across cuts",
     when: "before you plan, review or change a shot beside one that has a take, and before you review a cut",
     bodyPath: "continuity-across-cuts.md",
@@ -110,8 +114,12 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // v7: the commands the Cut now has for a room, named where the craft asks for them: a track that holds under
     // speech, an even-power join, a gate on a take's sound, every line at one loudness, a room laid from pieces
     // (2026-11-26: a scene's sound was mixed by a script outside the Studio because the Cut could do none of them).
+    // v8: measure how long each reply waits and close the wait at the head of its take (the owner, 2026-11-26:
+    // "Ades response is a second or so too late"; measured, 1.4 to 2.9 s, each take's ready second left in); the
+    // room's music may come up a little on a wordless shot of the room; and a sound the page names is not owed to
+    // the screen (the owner on a laid effect for a sound the book describes: "It does not work as an adaption").
     id: "sound-and-pace",
-    version: 7,
+    version: 8,
     title: "Sound and pace in the cut",
     when: "before you change the Cut's music, mix or effects, or where a clip starts and ends, and before you show anyone a cut or an export",
     bodyPath: "sound-and-pace.md",

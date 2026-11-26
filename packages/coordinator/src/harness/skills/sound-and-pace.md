@@ -13,6 +13,10 @@ mix or effects, or where a clip starts and ends, and before you show anyone a cu
   set that track to hold under speech (`set-track` with `ducks` false). Set its level once on the track
   (`levelDb`), not clip by clip.
 - **Fade it only where the scene starts and ends**, over about a second.
+- **Let it come up a little where the picture is the room.** On a shot with nobody speaking that shows the
+  place itself (the shot that opens the scene, a look across the floor, a look held between two people), the
+  room's music may rise by 3 to 6 dB and settle back over about a second before the next word. Keep it
+  small and keep it off the lines: a rise between every pair of lines is the breathing that ducking makes.
 - **Cross one piece into the next at even power.** Where one piece of the room's music ends and the next
   begins, overlap them by about a second and give both fades the even-power shape (`sound-fade` with
   `power` true). Two straight fades dip in the middle of the join; these hold one level through it.
@@ -49,6 +53,14 @@ A line need not stop at its own cut. The voice sits on its own track: trim the p
   picture that much later into its take, so its lips stay on the words.
 - **Cut the waiting.** A generated take holds a second or more before its line and after it. Trim both to
   the beat the moment needs. A pause before a deadpan answer is a choice; a model's run-up is not.
+- **Measure how long each reply waits.** In a quick exchange a reply starts a fifth to a half of a second
+  after the line before it ends, and a retort can start on its last word. A second is a pause, and a pause
+  has to be meant: a look held, a joke left to hang. Take the words' times (`review_export`, or
+  `transcribe_audio` on a stretch), go through the exchange line by line, and name each reply that waits
+  near a second.
+- **Close a wait at the head of the reply's take.** The wait is the reply's take standing ready before its
+  first word, and the take before it running on after its last. Trim those two. Never slide a voice against
+  its own picture to close a gap: the lips go with it.
 - **Cut straight on the beats that land**: a punchline, a name, a look held a beat too long.
 
 A conversation cut with no line crossing a cut, and every take's run-up and tail left in, plays as stitched.
@@ -68,6 +80,10 @@ Splitting the cuts and trimming the waits can take a sixth out of a scene withou
   in two land at the same level, where their files' own figures sit 3 LU apart.
 - **Lay an effect where the take's own sound is faint or off its action.** Place it by its peak on the
   frame where the thing happens. Find that frame in the pictures, not in the sound.
+- **A sound the page names is not owed to the screen.** A book makes a thing felt by naming its sound. On
+  the screen the picture may already show it, and an effect laid to match the page on top of that picture
+  reads as a cue, not as the room. Lay such a sound only where the story needs it heard and the picture
+  does not carry it, and when in doubt show the cut without it.
 - **Measure a made room tone before you use it.** One can come back silent, and one made for a crowd can
   carry words: check its level and transcribe it.
 - **Never let a room tone repeat.** A looped room tone brings back every laugh and every glass on the same
