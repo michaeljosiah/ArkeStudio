@@ -1047,6 +1047,10 @@ describe("a room laid from pieces (SPEC-038 R-61..R-64)", () => {
     refused({ sources: [{ artifactId: BELLS, label: "Bells", outSec: 3, measuredLufs: -25 }] }, /^Bells has 3 s to cut from, and a room's piece is at least 4\.5 s$/);
     refused({ sources: [{ artifactId: BELLS, label: "Bells", outSec: 20, measuredLufs: -60 }] }, /^Bells measures -60 LUFS: a room at -33 LUFS would take a gain of \+27 dB, and a clip's gain is -60 to \+12$/);
     refused({ durationFrames: 3600 * FPS }, /^A room this long takes more than the 240 pieces one command lays; lay it in parts$/);
+    // On a track turned up, a gain that fits the clip can still ask for more than plays: said, as for a clip set to a loudness.
+    assert.throws(() => apply(mixed(), { kind: "add-track", trackId: "tr_air", trackKind: "ambience", name: "Air" }, { kind: "set-track", trackId: "tr_air", levelDb: 12 },
+      room({ trackIds: ["tr_air", "tr_room2"], sources: [{ artifactId: BELLS, label: "Bells", outSec: 20, measuredLufs: -50 }] })),
+      (error: unknown) => error instanceof TimelineOperationRefused && error.reason === "Bells measures -50 LUFS: a room at -33 LUFS would take +17 dB with its track's level of +12 dB, and a clip plays at -60 to +12");
     // Refused whole: a room that fails on its last piece leaves no track behind it.
     assert.throws(() => apply(mixed(), { kind: "add-track", trackId: "tr_room2", trackKind: "ambience", name: "Air" },
       { kind: "place", trackId: "tr_room2", clip: { id: "cl_there", startFrame: 300, durationFrames: 50, sourceInFrames: 0, source: { kind: "artifact", artifactId: BELLS, label: "Bells" } } }, room()), /overlap/);

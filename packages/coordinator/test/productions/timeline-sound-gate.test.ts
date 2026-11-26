@@ -152,6 +152,11 @@ test("a clip set to a loudness becomes the gain that reaches it, measured over t
     assert.rejects(measure(commands, tools), (error: unknown) => error instanceof TimelineCommandRefused && (typeof reason === "string" ? error.reason === reason : reason.test(error.reason)), String(reason));
   await refused([loud(-10)], decoder(sound, { lufs: -30.4 }).tools, "Tunde's line measures -30.4 LUFS: -10 LUFS would take a gain of +23.4 dB, and a clip's gain is -60 to +12");
   await refused([loud(-20)], decoder(sound, { lufs: null }).tools, "Tunde's line is too quiet to measure a loudness from");
+  // A gain that fits the clip can still ask for more than plays: on a track turned up 12 dB, +9.4 on the clip is +21.4 in all.
+  await send([{ kind: "set-track", trackId: "tr_voice", levelDb: 12 }]);
+  await refused([loud(-9)], decoder(sound, { lufs: -30.4 }).tools, "Tunde's line measures -30.4 LUFS: -9 LUFS would take +21.4 dB with its track's level of +12 dB, and a clip plays at -60 to +12");
+  assert.deepEqual(await measure([loud(-20)], decoder(sound, { lufs: -30.4 }).tools), [{ kind: "set-clip-gain", clipId: "cl_line", gainDb: -1.6 }], "and one that does play is the gain less the track's level");
+  await send([{ kind: "set-track", trackId: "tr_voice", levelDb: -3 }]);
   await send([voice("cl_blip", 200, 6) as TimelineCommand]);
   await refused([loud(-20, "cl_blip")], d.tools, "Tunde's line plays too little sound to measure a loudness from");
   await refused([loud(-20, "cl_still")], d.tools, "Choose a clip on an audio track");
@@ -165,6 +170,9 @@ test("a clip set to a loudness becomes the gain that reaches it, measured over t
   assert.deepEqual(batch.map(command => command.kind), ["place", "sound-gate", "set-clip-gain"]);
   assert.deepEqual(batch[1]!.kind === "sound-gate" ? batch[1]!.gate?.open : null, LINES);
   assert.deepEqual(batch[2], { kind: "set-clip-gain", clipId: "cl_new", gainDb: 7.4 }, "on the Voice track at -3 dB: -23 less -27.4, less the track's level");
+  // Commands ahead of a measured one that change nothing by themselves do not refuse it: a track set to the level it has, then a loudness.
+  assert.deepEqual(await measure([{ kind: "set-track", trackId: "tr_voice", levelDb: -3 }, loud(-21)], d.tools),
+    [{ kind: "set-track", trackId: "tr_voice", levelDb: -3 }, { kind: "set-clip-gain", clipId: "cl_line", gainDb: 9.4 }]);
   const before = await raw();
   await assert.rejects(send([{ kind: "sound-gate", clipId: "cl_line", on: true }]), /A gate is measured from the clip's sound before it is set/);
   await assert.rejects(send([loud(-20)]), /set to a loudness by measuring it first/);

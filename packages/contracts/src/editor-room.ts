@@ -213,9 +213,12 @@ export function layRoomSteps(tracks: ReadonlyArray<{ id: string; kind: string; n
   if (pieces.length === 0) throw new Error("None of the room's beds is long enough to cut a piece from");
   pieces.forEach((piece, index) => {
     const source = command.sources[piece.source]!, track = command.trackIds[piece.layer * 2 + piece.row]!;
-    const gainDb = Math.round((loudness[piece.layer]! - source.measuredLufs! - level.get(track)!) * 10) / 10;
+    const played = Math.round((loudness[piece.layer]! - source.measuredLufs!) * 10) / 10, gainDb = Math.round((loudness[piece.layer]! - source.measuredLufs! - level.get(track)!) * 10) / 10;
+    const signed = (value: number) => `${value > 0 ? "+" : ""}${value}`;
     // Said, not clamped: a bed left short of the room's level is found by ear, a piece at a time.
-    if (gainDb > 12 || gainDb < -60) throw new Error(`${source.label} measures ${source.measuredLufs} LUFS: a room at ${command.lufs} LUFS would take a gain of ${gainDb > 0 ? "+" : ""}${gainDb} dB, and a clip's gain is -60 to +12`);
+    if (gainDb > 12 || gainDb < -60) throw new Error(`${source.label} measures ${source.measuredLufs} LUFS: a room at ${command.lufs} LUFS would take a gain of ${signed(gainDb)} dB, and a clip's gain is -60 to +12`);
+    // What plays is the piece's gain and its track's level together, held to the same range (R-52): a gain that fits on a track turned up can still ask for more than plays.
+    if (played > 12 || played < -60) throw new Error(`${source.label} measures ${source.measuredLufs} LUFS: a room at ${command.lufs} LUFS would take ${signed(played)} dB with its track's level of ${signed(level.get(track)!)} dB, and a clip plays at -60 to +12`);
     steps.push({ kind: "place", trackId: track, clip: { id: `${command.clipId}-${index + 1}` as TimelineClipId, startFrame: command.startFrame + piece.startFrame, durationFrames: piece.durationFrames,
       sourceInFrames: piece.sourceInFrames, source: { kind: "artifact", artifactId: source.artifactId, label: source.label }, gainDb, role: "ambience",
       soundFade: { inFrames: cross, outFrames: cross, power: true } } });
