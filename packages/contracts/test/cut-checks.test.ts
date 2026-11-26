@@ -171,6 +171,9 @@ describe("the checks on a cut: set-ups", () => {
     const trimmed = production([{ position: 2 }, { position: 2 }, { position: 3 }], { takes: [pass, first, second],
       selections: { sh_1: { acceptedTakeId: first.id, trimInSec: 0 }, sh_2: { acceptedTakeId: second.id, trimInSec: 1 } } });
     assert.equal(item(cutChecks({ production: trimmed, timeline: timeline(three) }), "set-ups")?.result, "fix");
+    // Played at twice its speed the first segment ends four seconds further into the pass: not straight on (codex on PR 3329).
+    const fast = timeline([{ ...shotClip(1, 0), speed: 2 }, shotClip(2, 120), shotClip(3, 240)]);
+    assert.equal(item(cutChecks({ production: board, timeline: fast }), "set-ups")?.result, "fix");
     const video = production([{ position: 2 }, { position: 2 }], { look: { preset: "music-video" } });
     assert.equal(item(cutChecks({ production: video, timeline: timeline(three.slice(0, 2)) }), "set-ups"), undefined);
   });
@@ -185,6 +188,10 @@ describe("the checks on a cut: the count", () => {
     const items: CutCheck[] = [{ id: "lines", result: "pass", says: "2 under their shots" }, { id: "room", result: "fix", says: "gap at 0:05 · 1.5 s" }];
     assert.deepEqual(cutChecksCount(items), { passed: 1, of: 2, toFix: 1 });
     assert.deepEqual(cutChecksCount([]), { passed: 0, of: 0, toFix: 0 });
+    // A muted Picture track renders black: nothing on screen to hold a line to (codex on PR 3329).
+    const muted = timeline(three, [{ kind: "dialogue", clips: [file("cl_l1", AR(1), 10, 60)] }]);
+    muted.tracks[0]!.muted = true;
+    assert.deepEqual(cutChecks({ production: production([{}, {}, {}]), timeline: muted, artifacts: [{ id: AR(1), links: ["sh_1"] }] }), []);
     assert.deepEqual(cutChecks({ production: production([{}]), timeline: { tracks: null } as unknown as ProductionTimeline }), []);
   });
 });

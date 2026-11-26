@@ -59,7 +59,8 @@ export function cutChecks(input: CutChecksInput): CutCheck[] {
 
 function read({ production, timeline, artifacts = [] }: CutChecksInput): CutCheck[] {
   const rate = timeline.frameRate, base = basePictureTrack(timeline);
-  if (base === null) return [];
+  // A muted Picture track renders black: there is no picture on screen to hold a line or a cut to.
+  if (base === null || base.muted) return [];
   const story = new Map<string, { scene: SceneRecord; shot: Shot; at: number }>();
   for (const scene of production.scenes) {
     let shots: Shot[];
@@ -219,8 +220,11 @@ function read({ production, timeline, artifacts = [] }: CutChecksInput): CutChec
       judged++;
       if (from !== to) continue;
       if (into.at === out.at + 1 && (into.shot.continuity?.openOnPrevious === true || into.shot.continuity?.continuesPrevious === true)) continue;
+      // Straight on means at its own speed, forwards: a clip played faster or backwards ends somewhere else in its file.
+      const plain = (clip: TimelineClip) => (clip.speed === undefined || clip.speed === 1) && clip.reverse !== true;
       const a = sourceAt(before.clip), b = sourceAt(after.clip);
-      if (a !== null && b !== null && a.key === b.key && Math.abs(a.fromSec + before.clip.durationFrames / rate - b.fromSec) <= 2 / rate) continue;
+      if (plain(before.clip) && plain(after.clip) && a !== null && b !== null && a.key === b.key
+        && Math.abs(a.fromSec + before.clip.durationFrames / rate - b.fromSec) <= 2 / rate) continue;
       twice.push({ clipId: after.clip.id, says: `shots ${out.shot.number}, ${into.shot.number}` });
     }
     if (judged > 0) {
