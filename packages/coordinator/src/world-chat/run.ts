@@ -219,6 +219,19 @@ export interface RunDeps {
     requests: readonly ModelEditorRequest[];
   }) => Promise<void>;
   /**
+   * This turn's editor requests with every sound measurement made (SPEC-038 R-60): a gate
+   * carrying the stretches it keeps, and a clip set to a loudness as the gain that reaches it.
+   *
+   * Before the validation above, because that applies each command as written, and a gate nobody
+   * measured is one no reducer will set. What comes back is what is validated, shown on the card
+   * and applied on Accept, so nothing is decoded then. A sound that cannot be measured refuses
+   * the turn as a corrective problem, in words the model can answer.
+   */
+  measureEditorRequests?: (input: {
+    entryContext: WorldChatContext | undefined;
+    requests: readonly ModelEditorRequest[];
+  }) => Promise<readonly ModelEditorRequest[]>;
+  /**
    * The version of the scene a scene thread is about, read when the prompt is built (SPEC-036
    * R-38) — the fence any rename this turn returns is checked against, for the same reason the
    * bible's version travels with its text. Null for a thread that is not about a scene.
@@ -1213,7 +1226,7 @@ export class WorldChatRunner {
      * card nor an orphaned bible edit, and the corrective retry starts from the base it was
      * shown. The write below follows the bible's; what remains after it is the append.
      */
-    const requests = outcome.turn.editorRequests;
+    let requests = outcome.turn.editorRequests;
     if (requests.length > 0) {
       if (!this.deps.validateEditorRequests || !this.deps.prepareActions || !this.deps.bindActions) {
         return {
@@ -1227,6 +1240,8 @@ export class WorldChatRunner {
         };
       }
       try {
+        // Measured first: the requests go on from here as they will be applied (SPEC-038 R-60).
+        if (this.deps.measureEditorRequests) requests = await this.deps.measureEditorRequests({ entryContext: folded.entryContext, requests });
         await this.deps.validateEditorRequests({ conversationId, entryContext: folded.entryContext, requests });
       } catch (err) {
         return {

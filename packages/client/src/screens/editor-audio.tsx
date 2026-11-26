@@ -483,7 +483,7 @@ export function TypedTrackRows({
                 const selected = clip.id === selectedClipId || selectedClipIds?.has(clip.id) === true;
                 const name = shownName(clip);
                 // A text chip shows its first line; its name aloud is all its words (SPEC-065 R-33).
-                const label = `${clipSpokenName(clip, name)}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${silenced ? ", silent" : ""}${clip.gainDb !== undefined && clip.gainDb !== 0 ? `, ${clip.gainDb} dB` : ""}${clip.soundFade?.inFrames ? ", fades in" : ""}${clip.soundFade?.outFrames ? ", fades out" : ""}${clip.soundFade?.power ? ", even power" : ""}`;
+                const label = `${clipSpokenName(clip, name)}, ${formatFrames(clip.startFrame, frameRate)} to ${formatFrames(clip.startFrame + clip.durationFrames, frameRate)}${silenced ? ", silent" : ""}${clip.gainDb !== undefined && clip.gainDb !== 0 ? `, ${clip.gainDb} dB` : ""}${clip.soundFade?.inFrames ? ", fades in" : ""}${clip.soundFade?.outFrames ? ", fades out" : ""}${clip.soundFade?.power ? ", even power" : ""}${clip.soundGate !== undefined ? ", gated" : ""}`;
                 const isGhost = moving && clip.id === laneDrag.clipId;
                 const artifact = artifactOf(clip);
                 const picture = !audio && artifact !== null ? artifactPicturePath(artifact) : null;
@@ -523,6 +523,7 @@ export function TypedTrackRows({
                     {clip.source.kind === "text" ? <TextChip label={name} /> : <span className="fy-typedclip__name">{name}</span>}
                     {clip.gainDb !== undefined && clip.gainDb !== 0 && <span className="fy-typedclip__gain">{clip.gainDb > 0 ? `+${clip.gainDb}` : clip.gainDb} dB</span>}
                     {clip.soundFade !== undefined && <span className="fy-typedclip__gain">FADE</span>}
+                    {clip.soundGate !== undefined && <span className="fy-typedclip__gain">GATE</span>}
                     {clip.audio === "mute" && <span className="fy-typedclip__gain">MUTE</span>}
                     <span className="fy-pictclip__grip fy-pictclip__grip--end" onPointerDown={begin(track, clip.id, "trim-end")} aria-hidden="true"><i /></span>
                   </button>
@@ -649,6 +650,49 @@ export function ClipGain({
   );
 }
 
+/**
+ * A sound clip's gate, and its gain set by a loudness (SPEC-038 R-57, R-59, R-60). Both are
+ * measured from the clip's sound by the coordinator, so each is one press and the answer comes
+ * back as the clip: GATE on it, or the gain the figure took. The target is the Inspector's and
+ * not the clip's: what is stored is the gain.
+ */
+export function ClipSoundMeasure({ clip, disabled, onCommands }: {
+  clip: TimelineClip; disabled: boolean;
+  onCommands: (commands: TimelineClipCommand[], label?: string) => void;
+}) {
+  const [lufs, setLufs] = useState(-20);
+  // A reviewed performance is one clean voice placed by its own timing: it has no room to gate, and its level is its recording's.
+  if (clip.source.kind !== "artifact" && clip.source.kind !== "take") return null;
+  const gated = clip.soundGate !== undefined;
+  return <>
+    <div className="fy-cutinspect__row">
+      <span>Gate</span>
+      <strong>
+        <button type="button" className="fy-takepick__use" aria-label={gated ? "Remove gate" : "Gate sound"} aria-pressed={gated} disabled={disabled}
+          onClick={() => onCommands([{ kind: "sound-gate", clipId: clip.id, on: !gated }], gated ? "Remove gate" : "Gate sound")}>
+          {gated ? "On" : "Off"}
+        </button>
+      </strong>
+    </div>
+    <div className="fy-cutinspect__row fy-framestep">
+      <span>Loudness</span>
+      <strong>
+        <button type="button" className="fy-trim__step" aria-label="Target 1 LUFS quieter" disabled={disabled || lufs <= -50} onClick={() => setLufs(value => Math.max(-50, value - 1))}>
+          −
+        </button>
+        <span className="fy-mono">{lufs} LUFS</span>
+        <button type="button" className="fy-trim__step" aria-label="Target 1 LUFS louder" disabled={disabled || lufs >= -5} onClick={() => setLufs(value => Math.min(-5, value + 1))}>
+          +
+        </button>
+        <button type="button" className="fy-takepick__use" aria-label={`Set clip to ${lufs} LUFS`} disabled={disabled}
+          onClick={() => onCommands([{ kind: "match-loudness", clipId: clip.id, lufs }], "Set clip loudness")}>
+          Set
+        </button>
+      </strong>
+    </div>
+  </>;
+}
+
 /** A sound clip's fades at its own edges, as times, under its gain (SPEC-038 R-37, R-44). */
 export function ClipSoundFade({ clip, frameRate, disabled, onCommands, resetToken }: {
   clip: TimelineClip; frameRate: FrameRate; disabled: boolean; resetToken?: number | string;
@@ -665,7 +709,7 @@ export function ClipSoundFade({ clip, frameRate, disabled, onCommands, resetToke
     <div className="fy-cutinspect__row">
       <span>Even power</span>
       <strong>
-        <button type="button" className="fy-takepick__use" aria-pressed={clip.soundFade?.power === true} disabled={disabled || clip.soundFade === undefined}
+        <button type="button" className="fy-takepick__use" aria-label="Even-power fade" aria-pressed={clip.soundFade?.power === true} disabled={disabled || clip.soundFade === undefined}
           onClick={() => onCommands([{ kind: "sound-fade", clipId: clip.id, power: clip.soundFade?.power !== true }], "Set fade shape")}>
           {clip.soundFade?.power === true ? "On" : "Off"}
         </button>

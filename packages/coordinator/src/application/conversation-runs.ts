@@ -17,7 +17,8 @@ import { readVoices } from "../productions/voices.js";
 import { readAudiobook } from "../productions/audiobook.js";
 import { readAudiobookQuiet } from "../productions/audiobook-quiet.js";
 import type { AudioMediaTools } from "../audio/media-tools.js";
-import { stageEditorRequests } from "../productions/editor-requests.js";
+import { productionOfContext, stageEditorRequests } from "../productions/editor-requests.js";
+import { measureEditorRequestSound } from "../productions/timeline-sound.js";
 import { applySceneEdits, sceneVersionFor } from "../productions/scene-edits.js";
 import { BibleStaleError, readBible } from "../world/bible.js";
 import { MarkdownFile } from "../world/text-files.js";
@@ -237,6 +238,9 @@ export function conversationRunDependencies(store: WorldStore, deps: Conversatio
     validateEditorRequests: async ({ conversationId, entryContext, requests }) => {
       await stageEditorRequests(store, { conversationId, entryContext, requests, now: store.now(), dryRun: true });
     },
+    // A gate and a clip set to a loudness, measured from the clips' own sound before the dry run above (SPEC-038 R-60).
+    measureEditorRequests: ({ entryContext, requests }) =>
+      measureEditorRequestSound(store, productionOfContext(entryContext), requests, deps.agentMediaTools, store.closingSignal),
     sceneVersion: (context) => sceneVersionFor(store, context),
     validateSceneEdits: ({ entryContext, edits, baseVersion }) =>
       applySceneEdits(store, { entryContext, edits, baseVersion, dryRun: true }),

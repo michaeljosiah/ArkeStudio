@@ -44,6 +44,7 @@ import { textPictureFrame, textPicturePath } from "./editor-text-pictures.js";
 import { clipRetimed, clipSourceInSec } from "./editor-clip-speed.js";
 import type { TextFrame } from "./editor-text.js";
 import { soundFadeAt } from "./editor-sound-fade.js";
+import { soundGateAt, soundGateWindows } from "./editor-sound-gate.js";
 
 /**
  * One render plan, two executors (SPEC-038 R-1..R-11, D1; issue #680).
@@ -436,6 +437,32 @@ export function trackedGainDb(clip: Pick<TimelineClip, "gainDb">, track: Pick<Ti
   return Math.max(-60, Math.min(12, (clip.gainDb ?? 0) + (track.levelDb ?? 0)));
 }
 
+/**
+ * The file a sound clip plays, for a clip of an artifact or a take: its path in the world, the
+ * seconds into it the clip's own in-point is counted from, and where a filed segment's sound has
+ * to stop. One answer for the plan and for whoever measures the clip's sound (SPEC-038 R-58,
+ * R-59): a gate measured from another file than the plan plays would keep the wrong stretches.
+ */
+export function clipSoundFile(clip: Pick<TimelineClip, "source">, production: ProductionBundle, artifacts: readonly RenderArtifact[]):
+  { ok: true; path: string; segmentInSec: number; sourceOutSec: number | undefined } | { ok: false; reason: string } {
+  if (clip.source.kind === "artifact") {
+    const resolved = resolveProductionArtifact(artifacts, clip.source.artifactId, production.meta.id);
+    if (!resolved.ok) return { ok: false, reason: `${clip.source.label} cites ${resolved.reason}` };
+    const artifact = resolved.artifact;
+    const carries = artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true);
+    if (!carries) return { ok: false, reason: `${clip.source.label} is not known to carry sound` };
+    return { ok: true, path: `artifacts/${artifact.file}`, segmentInSec: 0, sourceOutSec: undefined };
+  }
+  if (clip.source.kind === "take") {
+    // A pass segment plays its pass's file from the segment's in-point (round nine), the
+    // same resolution the placement check and the base track apply.
+    const resolved = resolveTakeMedia(production, clip.source.takeId);
+    if (resolved === null) return { ok: false, reason: `${clip.source.label} cites a take with no media` };
+    return { ok: true, path: resolved.path, segmentInSec: resolved.inSec + (clip.source.offsetSec ?? 0), sourceOutSec: resolved.outSec };
+  }
+  return { ok: false, reason: `${clip.source.label} has no sound file of its own` };
+}
+
 /** Typed audio tracks become mixed sound (R-12, R-13, R-19); each clip conformed to its window. */
 function audioFromTimeline(
   timeline: ProductionTimeline,
@@ -454,23 +481,10 @@ function audioFromTimeline(
       let segmentInSec = 0;
       let physicalInSec: number | undefined;
       let sourceOutSec: number | undefined;
-      if (clip.source.kind === "artifact") {
-        const artifactId = clip.source.artifactId;
-        const resolved = resolveProductionArtifact(artifacts, artifactId, production.meta.id);
-        if (!resolved.ok) return { ok: false, reason: `${clip.source.label} cites ${resolved.reason}` };
-        const artifact = resolved.artifact;
-        const carries = artifact.kind === "audio" || (artifact.kind === "video" && artifact.mediaInfo?.hasAudio === true);
-        if (!carries) return { ok: false, reason: `${clip.source.label} is not known to carry sound` };
-        path = `artifacts/${artifact.file}`;
-      } else if (clip.source.kind === "take") {
-        // A pass segment plays its pass's file from the segment's in-point (round nine), the
-        // same resolution the placement check and the base track apply.
-        const takeId = clip.source.takeId;
-        const resolved = resolveTakeMedia(production, takeId);
-        if (resolved === null) return { ok: false, reason: `${clip.source.label} cites a take with no media` };
-        path = resolved.path;
-        segmentInSec = resolved.inSec + (clip.source.offsetSec ?? 0);
-        sourceOutSec = resolved.outSec;
+      if (clip.source.kind === "artifact" || clip.source.kind === "take") {
+        const file = clipSoundFile(clip, production, artifacts);
+        if (!file.ok) return file;
+        ({ path, segmentInSec, sourceOutSec } = file);
       } else if (clip.source.kind === "performance") {
         const calculated = performanceClipTiming(clip, production.performances, slots, frameRate);
         if (!calculated.ok) return calculated;
@@ -485,17 +499,20 @@ function audioFromTimeline(
       } else {
         return { ok: false, reason: `${clip.source.label} is a shot on ${track.name}; shots are picture` };
       }
+      const sourceInSec = physicalInSec ?? (segmentInSec + clipSourceInSec(clip, frameRate));
       const sound = segmentSound({
         path,
         startSec,
         endSec,
         gainDb: trackedGainDb(clip, track),
         role: effectiveAudioRole(track, clip),
-        sourceInSec: physicalInSec ?? (segmentInSec + clipSourceInSec(clip, frameRate)),
+        sourceInSec,
         clipId: clip.id,
         // Said only where it differs, so a plan from a cut with no such track is the plan it was (R-53).
         ...(track.ducks === false ? { ducks: false as const } : {}),
         ...soundFadeWindows(clip, frameRate),
+        // A gate's kept stretches, moved from the file's seconds to the film's (R-57); a clip with no gate carries none.
+        ...soundGateWindows(clip, { startSec, endSec, sourceInSec }),
       }, sourceOutSec);
       audio.push(...sound);
       if (effectiveAudioRole(track, clip) === "dialogue") speech.push(...sound.map(item => ({ startSec: item.startSec, endSec: item.endSec })));
@@ -881,6 +898,8 @@ export function windowPlan(plan: RenderPlan, startSec: number, endSec: number, s
     const fades = {
       ...(clip.fadeIn ? { fadeIn: { ...clip.fadeIn, startSec: clip.fadeIn.startSec - startSec } } : {}),
       ...(clip.fadeOut ? { fadeOut: { ...clip.fadeOut, startSec: clip.fadeOut.startSec - startSec } } : {}),
+      // A gate's kept stretches move with them, whole: a window that opens inside one starts open, as the whole film is there (R-57).
+      ...(clip.gate ? { gate: clip.gate.map((window) => ({ startSec: window.startSec - startSec, endSec: window.endSec - startSec })) } : {}),
     };
     return [{ ...cut, ...fades, ...(head === 0 ? {} : { sourceInSec: clip.sourceInSec + head }) }];
   });
@@ -1019,8 +1038,9 @@ export function audioGainDbAt(plan: Pick<RenderPlan, "mix" | "speech">, item: Pi
  * (R-38). Linear because a fade reaches silence, which no figure in dB states. The browser sets
  * its gain node to this, and the export's two volume stages multiply to the same number.
  */
-export function audioLevelAt(plan: Pick<RenderPlan, "mix" | "speech">, item: Pick<RenderAudioItem, "gainDb" | "role" | "ducks" | "fadeIn" | "fadeOut">, sec: number): number {
-  return Math.pow(10, audioGainDbAt(plan, item, sec) / 20) * soundFadeAt(item, sec);
+export function audioLevelAt(plan: Pick<RenderPlan, "mix" | "speech">, item: Pick<RenderAudioItem, "gainDb" | "role" | "ducks" | "fadeIn" | "fadeOut" | "gate">, sec: number): number {
+  // A gate is one more share of the level, as a fade is (R-57): whole where the sound is kept, 15 dB down where it is not.
+  return Math.pow(10, audioGainDbAt(plan, item, sec) / 20) * soundFadeAt(item, sec) * soundGateAt(item, sec);
 }
 
 /** The sound mixed under one moment, each at the gain it plays at and how far through a fade it is (R-12..R-19, R-37). */

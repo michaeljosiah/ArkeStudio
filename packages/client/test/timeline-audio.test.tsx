@@ -312,7 +312,7 @@ describe("typed tracks on the editor (issue 681)", () => {
       await act(async () => byLabel(screen, "Track is lowered under speech").click());
       assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "set-track", trackId, ducks: false }]);
       assert.equal(commandsSent(screen).at(-1)?.label, "Hold track under speech");
-      assert.equal(byLabel(screen, "Off").disabled, true, "with no fade there is no shape to set");
+      assert.equal(byLabel(screen, "Even-power fade").disabled, true, "with no fade there is no shape to set");
 
       // What the coordinator would send back: the track says its level and its hold, in the Inspector and on its name.
       state.world!.productions[0]!.timeline = { status: "ready", timeline: applyTimelineCommands(timeline, [{ kind: "set-track", trackId, levelDb: -6, ducks: false }, { kind: "sound-fade", clipId: id, inFrames: 12 }]) };
@@ -324,14 +324,55 @@ describe("typed tracks on the editor (issue 681)", () => {
       await act(async () => hold.click());
       assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "set-track", trackId, ducks: true }]);
       await advance(state);
-      await act(async () => byLabel(screen, "Off").click());
+      assert.equal(byLabel(screen, "Even-power fade").textContent, "Off");
+      await act(async () => byLabel(screen, "Even-power fade").click());
       assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "sound-fade", clipId: id, power: true }]);
       assert.equal(commandsSent(screen).at(-1)?.label, "Set fade shape");
 
       state.world!.productions[0]!.timeline = { status: "ready", timeline: applyTimelineCommands(timeline, [{ kind: "sound-fade", clipId: id, inFrames: 12, power: true }]) };
       await act(async () => __setStateForTest(structuredClone(state) as ClientState));
-      assert.equal(byLabel(screen, "On").getAttribute("aria-pressed"), "true");
+      assert.deepEqual([byLabel(screen, "Even-power fade").getAttribute("aria-pressed"), byLabel(screen, "Even-power fade").textContent], ["true", "On"]);
       assert.match(screen.container.querySelector<HTMLButtonElement>(`[data-clip='${id}']`)!.getAttribute("aria-label") ?? "", /, fades in, even power$/);
+    } finally {
+      await close(screen);
+    }
+  });
+
+  it("gates a sound clip and sets it to a loudness from the Inspector, each one command the coordinator measures (SPEC-038 R-57..R-60)", async () => {
+    const { state, timeline } = migratedState(), id = "cl_ov-01J8G0000000000000000000A1";
+    const screen = await mountCut(state);
+    try {
+      await act(async () => screen.container.querySelector<HTMLButtonElement>(`[data-clip='${id}']`)!.click());
+      const inspector = screen.container.querySelector(".fy-cutinspect")!.innerHTML, gateAt = inspector.indexOf('aria-label="Gate sound"');
+      assert.ok(inspector.indexOf("Gain 1 dB quieter") < gateAt && gateAt < inspector.indexOf('aria-label="Sound fade"'), "under Gain, over the fades");
+      // A gate is asked for, not made here: the command carries no measurement, and the coordinator fills it in.
+      await act(async () => byLabel(screen, "Gate sound").click());
+      assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "sound-gate", clipId: id, on: true }]);
+      assert.equal(commandsSent(screen).at(-1)?.label, "Gate sound");
+      assert.equal(byLabel(screen, "Target 1 LUFS quieter").disabled, true, "while a command is on its way the rows wait, as every row does");
+      await advance(state);
+      // A loudness: the target is the Inspector's, and what comes back is the clip's gain.
+      await act(async () => byLabel(screen, "Target 1 LUFS quieter").click());
+      await act(async () => byLabel(screen, "Target 1 LUFS quieter").click());
+      assert.match(screen.container.querySelector(".fy-cutinspect")!.textContent ?? "", /Loudness\s*−\s*-22 LUFS/);
+      const sentBefore = commandsSent(screen).length;
+      assert.equal(sentBefore, 1, "choosing a target sends nothing");
+      await act(async () => byLabel(screen, "Set clip to -22 LUFS").click());
+      assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "match-loudness", clipId: id, lufs: -22 }]);
+      assert.equal(commandsSent(screen).at(-1)?.label, "Set clip loudness");
+
+      // What the coordinator would send back: the clip says it is gated, to the eye and aloud, and the row takes the gate off.
+      state.world!.productions[0]!.timeline = { status: "ready", timeline: applyTimelineCommands(timeline, [
+        { kind: "sound-gate", clipId: id, on: true, gate: { thresholdDb: -42, open: [[0.2, 1.1]] } }, { kind: "set-clip-gain", clipId: id, gainDb: 5.4 }]) };
+      await act(async () => __setStateForTest(structuredClone(state) as ClientState));
+      const gated = screen.container.querySelector<HTMLButtonElement>(`[data-clip='${id}']`)!;
+      assert.match(gated.getAttribute("aria-label") ?? "", /, 5\.4 dB, gated$/);
+      assert.equal([...gated.querySelectorAll(".fy-typedclip__gain")].some((chip) => chip.textContent === "GATE"), true);
+      const off = byLabel(screen, "Remove gate");
+      assert.deepEqual([off.getAttribute("aria-pressed"), off.textContent], ["true", "On"]);
+      await act(async () => off.click());
+      assert.deepEqual(commandsSent(screen).at(-1)?.commands, [{ kind: "sound-gate", clipId: id, on: false }]);
+      assert.equal(commandsSent(screen).at(-1)?.label, "Remove gate");
     } finally {
       await close(screen);
     }
