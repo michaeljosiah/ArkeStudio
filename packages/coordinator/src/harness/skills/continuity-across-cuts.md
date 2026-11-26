@@ -105,18 +105,21 @@ Words that match prove nothing about the pictures. When shots have takes, look a
 - **Answer from the pictures what they can show**: which hand holds the glass, which wrist wears the
   jewellery, what is on the table. Never ask the person what a take already shows.
 - **A contact sheet shows no cut.** `cut_contact_sheet` takes one frame from the middle of each shot. Use it
-  to find where the shots are, then look at the cuts themselves.
+  to find where the shots are. To see the cuts, ask it for them (`seams` true): a page of pairs, the last
+  frame before each cut beside the first frame after it, twelve cuts to a page.
+- **Read the cut's own checks first.** `get_timeline` gives the checks on the cut as it is drawn: a line that
+  plays under another shot or under no picture, a gap or a repeat in a scene's room, the same set-up back to
+  back. Each names the clips it found. They read the cut, not the pictures, so look as well.
 
-- **When the scene has been exported**, call `list_exports` for the latest export of the production, then
-  `cut_contact_sheet` on it for each shot's start and end. Then call `sample_video` on the export at each
-  cut, from 0.2 s before the cut to 0.2 s after it, with a count of 2: the last frame before the cut and the
-  first after it.
+- **When there is a film to look at**, look at every cut in it: `cut_contact_sheet` with `seams` true, on the
+  latest export of the production (`list_exports`) or on a film that was cut elsewhere and filed on the
+  shelf. A page is one image however many cuts it holds, so a whole scene's cuts cost a page or two.
 - **When the takes are not cut yet**, call `sample_video` on the accepted take of each shot: the last
   0.2 s of one and the first 0.2 s of the next, a count of 1 each.
-- **Spend frames where they decide something.** A turn can see about 24 frames in all. Look closer (a
-  count of 4, or a region round a face or a hand) only at a cut in doubt. Look at no more than ten cuts in
-  one turn, and say which cuts are left for the next.
-- Say which frames you looked at, and their times.
+- **Spend frames where they decide something.** A turn can see about 24 images in all, and a page of cuts
+  is one of them. Look closer with `sample_video` (a count of 4, or a region round a face or a hand) only at
+  a cut in doubt.
+- Say which cuts you looked at, by their shots and times.
 
 How to judge:
 

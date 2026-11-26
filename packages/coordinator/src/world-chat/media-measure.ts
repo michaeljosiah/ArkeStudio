@@ -12,6 +12,9 @@ import { frameMotion, measureMouthSync, measureSoundtrackSync } from "../media/m
 import { SONG_MAP_PROFILE, songBeats, stepLevels, voiceIntervals } from "../media/song-map.js";
 import { RetrievalError } from "./retrieval.js";
 import type { InspectionSource } from "./media-inspection.js";
+import { AGENT_REVIEW_SPEECH_LIMITS, orderedShots, type Shot } from "@arke-studio/contracts";
+import { filmWordFindings, filmWordsAgainstScript, type FilmLine } from "../media/film-words.js";
+import { castNames, lineOf, type HeardWord } from "../takes/checks.js";
 
 /*
  * The measurements of epic #3070 that read a second source. The take is already open as a
@@ -230,10 +233,16 @@ export async function contactSheetInSnapshot(store: WorldStore, tools: AgentMedi
    * A page of cuts needs shots that follow one another. A cut with a second Picture track lists
    * every clip of every track, and two of those can start together or lie one over the other:
    * that is no run of cuts, and a cut whose two frames were one time was refused by the receipt's
-   * own schema once every frame had been decoded (codex on PR 3330). Its cuts are found in the
-   * picture instead, which is the film as it was composed.
+   * own schema once every frame had been decoded (codex on PR 3330). Nor is a cut with a hole
+   * between two clips, or after the last: the export fills it with black, and the cut to black
+   * and the cut back are both cuts the clip list holds one of (codex on PR 3333). Either way its
+   * cuts are found in the picture instead, which is the film as it was composed. Clips meet on
+   * the cut's own frames, so one follows the last exactly; the window's ends are the film's
+   * length, which is held to a twentieth of a second.
    */
-  const fromTimeline = timeline && (!seams || timeline.shots.every((shot, i) => i === 0 || shot.startSec >= timeline.shots[i - 1]!.endSec - 1e-6)) ? timeline : null;
+  const follow = (shots: readonly SheetShot[]) => shots.every((shot, i) => Math.abs(shot.startSec - (i === 0 ? from : shots[i - 1]!.endSec)) <= (i === 0 ? .05 : 1e-6)) &&
+    Math.abs(shots[shots.length - 1]!.endSec - to) <= .05;
+  const fromTimeline = timeline && (!seams || follow(timeline.shots)) ? timeline : null;
   let shots: SheetShot[] = fromTimeline?.shots ?? await pictureShots(tools, film, from, to, signal);
   if (shots.length > AGENT_SHEET_LIMITS.maxShots) throw new RetrievalError("bad-argument", `This window holds ${shots.length} shots, more than a sheet shows (${AGENT_SHEET_LIMITS.maxShots}); name a shorter window.`);
   const round = (value: number) => Math.round(value * 1000) / 1000, { seamsPerPage, maxPages } = AGENT_SHEET_LIMITS;
@@ -293,6 +302,7 @@ export const REVIEW_LIMITATIONS = [
   "Signal measurement: length, stream format, EBU R128 loudness, repeated frames per shot, and for each clip whose own sound is muted in the cut, that sound against the film's mix.",
   "Shots and their clips come from the production's timeline only when its cut is unchanged since this export; otherwise cuts are found in the picture and no clip's sync can be measured.",
   "A muted clip's sound is set against the whole mix: a sung take that follows the song is in step; a clip whose sound is not meant to be heard (a film shot's own ambience) will show as not following, which is expected.",
+  "Lines are set against recognised words: a recogniser can mishear, and how a line is said (its delivery, its accent, whether a name is said right) was not judged.",
   "Captions, colour, faces, likeness, the mix's balance and the meaning of the film were not reviewed.",
 ];
 
@@ -303,7 +313,7 @@ export const REVIEW_LIMITATIONS = [
  */
 export async function reviewInSnapshot(store: WorldStore, tools: AgentMediaTools, signal: AbortSignal,
   film: { path: string; video: Stream; audio: Stream | null; startSec: number; endSec: number; viewStartSec: number; whole: boolean }, source: AgentMediaSource,
-  resolve: (source: AgentMediaSource) => Promise<InspectionSource>): Promise<AgentExportReview> {
+  resolve: (source: AgentMediaSource) => Promise<InspectionSource>, hearing?: FilmHearing): Promise<AgentExportReview> {
   const { grayFrames, monoAudio, loudness } = tools;
   if (!grayFrames || !monoAudio || !loudness) throw new RetrievalError("unavailable", "Local film review is unavailable on this host.");
   const from = film.viewStartSec, length = film.endSec - film.startSec, to = from + length, rate = parseStreamRate(film.video.frameRate);
@@ -334,10 +344,10 @@ export async function reviewInSnapshot(store: WorldStore, tools: AgentMediaTools
     steps.push(...read.steps); stepTimes.push(...read.times.slice(1));
   }
 
-  // The film's own mix, once, for the clips' sync; each clip's source read from its own snapshot.
-  const mix = film.audio && cut ? await decodeMono(monoAudio, film.path, film.audio, film.startSec, film.endSec, signal) : null;
+  // The film's own mix, once, for the clips' sync and the room under each shot; each clip's source read from its own snapshot.
+  const mix = film.audio ? await decodeMono(monoAudio, film.path, film.audio, film.startSec, film.endSec, signal) : null;
   // A window that opens inside a clip reads the clip's sound from that point in, not from its in-point.
-  const syncs = await inParallel(shots, signal, async (shot, each) => mix && shot.clip ? clipSync(store, tools, each, resolve, cut!, shot.clip, mix,
+  const syncs = await inParallel(shots, signal, async (shot, each) => mix && cut && shot.clip ? clipSync(store, tools, each, resolve, cut, shot.clip, mix,
     shot.startSec - from, shot.endSec - shot.startSec, Math.max(0, shot.startSec - shot.clip.startSec)) : null);
 
   const loud = film.audio ? await loudness(film.path, film.audio, film.startSec, film.endSec, signal) : null;
@@ -358,6 +368,66 @@ export async function reviewInSnapshot(store: WorldStore, tools: AgentMediaTools
       repeatedFrames: cadence?.repeatedFrames ?? null, repeatPeriod: cadence?.repeatPeriod ?? null, motionFps: cadence?.motionFps ?? null,
       jumpedSteps: dropped.jumps, jumpPeriod: dropped.jumpPeriod, sync };
   });
+  /*
+   * The room under each shot: its quiet, the tenth of its tenth-of-a-second levels that is lowest.
+   * A bed that stops or a song that reaches its end drops it under the talk, and the ear hears the
+   * room go. Held against the film's own middle, so a film mixed quiet throughout says nothing.
+   */
+  if (mix) {
+    const levels = stepLevels(mix, 16000, .1), floors = reviewed.map(shot => {
+      if (shot.endSec - shot.startSec < ROOM_SHOT_SEC) return null;
+      const own = Array.from(levels.slice(Math.round((shot.startSec - from) * 10), Math.round((shot.endSec - from) * 10))).sort((a, b) => a - b);
+      return own.length ? own[Math.floor(own.length / 10)]! : null;
+    });
+    const known = floors.filter((floor): floor is number => floor !== null).sort((a, b) => a - b), middle = known.length >= 3 ? known[known.length >> 1]! : null;
+    for (const [i, floor] of floors.entries()) {
+      if (middle === null || floor === null || middle - floor < ROOM_DROP_DB) continue;
+      findings.push(`${name(shots[i]!, i + 1)}: the room drops ${Math.round(middle - floor)} dB under it against the rest of the film, as a bed or a song that stops does.`);
+    }
+  }
+  // The film's words against the lines it is held to, when it has lines and this host can hear.
+  const held = hearing ? filmLines(store, fromTimeline?.productionId ?? null, shots, hearing.script) : null;
+  let speech: AgentExportReview["speech"];
+  if (held?.over) findings.unshift(`The scene holds ${held.over} spoken lines, more than a review sets beside a film (${AGENT_REVIEW_SPEECH_LIMITS.maxLines}), so its lines were not checked.`);
+  else if (held && hearing && film.audio) {
+    const heard = await hearing.hear(signal);
+    if (heard === null) findings.unshift("The film's words could not be read on this host, so its lines were not checked.");
+    else {
+      const whole = heard.readSec >= length - .5;
+      // Only the lines the read reached: a line of a shot past it was not listened for, so it is not "not heard".
+      const lines = whole || held.from === "script" ? held.lines : held.lines.filter(line => line.shot !== null && reviewed[line.shot - 1]!.startSec < from + heard.readSec);
+      const words = lines.length ? filmWordsAgainstScript(lines, heard.words, castNames(store.getBundle().sheets)) : null;
+      if (words === null) findings.unshift("The film and its lines are too long to set side by side in one read; name a shorter window.");
+      else {
+        /*
+         * A script is the whole scene, in the film's order. Only a film read from its first second
+         * to its last was listened to for all of it: there, a line not heard is a line the film
+         * does not have. A window, or a read that stopped at five minutes, covers part of the
+         * scene, and which part is known only by what was heard: the lines from the first one
+         * heard to the last. A window on the second half of a film reported every line of the
+         * first half as not heard (codex on PR 3333).
+         */
+        const all = held.from === "cut" || film.whole && whole;
+        const first = all ? 0 : words.lines.findIndex(line => line.said !== "not-heard"), end = all ? words.lines.length : words.lines.reduce((last, line, i) => (line.said === "not-heard" ? last : i + 1), 0);
+        const keptLines = first < 0 ? [] : words.lines.slice(first, end), numbers = new Set(keptLines.map(line => line.number));
+        const kept = { lines: keptLines, unwritten: words.unwritten, misplaced: words.misplaced.filter(moved => numbers.has(moved.number)) };
+        /*
+         * Which shot is on screen at a time, to find a line under the wrong one. A cut with a
+         * second Picture track holds two clips at one time, and which of them the film shows is
+         * the render's to say, not this list's: a line spoken by an insert laid over the base read
+         * as under the base (codex on PR 3333). Such a cut's lines are heard and not placed.
+         */
+        const layered = reviewed.some((shot, i) => i > 0 && shot.startSec < reviewed[i - 1]!.endSec - 1e-6);
+        const shotAt = held.from === "cut" && !layered ? (seconds: number) => { const at = reviewed.findIndex(shot => seconds >= shot.startSec && seconds < shot.endSec); return at < 0 ? null : at + 1; } : undefined;
+        const said = filmWordFindings(lines, kept, shotAt);
+        if (keptLines.length === 0) said.push("None of the scene's lines is heard in this part of the film.");
+        if (!whole) said.push(`Words were read for the first ${Math.round(heard.readSec)} s of this window; name a later window for the rest.`);
+        findings.unshift(...said);
+        if (kept.lines.length) speech = { linesFrom: held.from, lines: kept.lines.map(line => ({ number: line.number, shot: line.shot, said: line.said, startSec: line.startSec === null ? null : round(line.startSec) })),
+          unwritten: kept.unwritten.length, misplaced: kept.misplaced.length, readSec: round(Math.min(length, heard.readSec)) };
+      }
+    }
+  }
   const expectedSec = film.whole && cut && cut.endSec !== null ? round(cut.endSec) : null, differenceSec = expectedSec === null ? null : round(length - expectedSec);
   if (differenceSec !== null && rate && Math.abs(differenceSec) > 1 / rate) findings.unshift(`The film runs ${round(length, 2)} s and its cut ${expectedSec} s: ${Math.abs(differenceSec)} s ${differenceSec > 0 ? "longer" : "shorter"}.`);
   if (!film.audio) findings.unshift("The film has no sound.");
@@ -376,7 +446,61 @@ export async function reviewInSnapshot(store: WorldStore, tools: AgentMediaTools
     length: { durationSec: round(length), expectedSec, differenceSec },
     format: { videoStreamIndex: film.video.index, width: film.video.width!, height: film.video.height!, frameRate: rate && round(rate, 3), videoCodec: film.video.codec,
       audioStreamIndex: film.audio?.index ?? null, sampleRate: film.audio?.sampleRate ?? null, channels: film.audio?.channels ?? null, audioCodec: film.audio?.codec ?? null },
-    loudness: loud, shots: reviewed, findings: shown });
+    loudness: loud, shots: reviewed, findings: shown, ...(speech ? { speech } : {}) });
+}
+
+/** A shot shorter than this has too little quiet between its words to say what its room is. */
+const ROOM_SHOT_SEC = 2;
+/** The room under a shot this far below the film's middle has dropped: a bed that stopped, a song that ended. */
+const ROOM_DROP_DB = 9;
+
+/**
+ * How a review hears its film: the words of the window on the window's own clock, as far as
+ * they were read, or null where this host cannot hear; and the scene whose script a film with no
+ * cut behind it is held to.
+ */
+export interface FilmHearing {
+  hear: (signal: AbortSignal) => Promise<{ words: HeardWord[]; readSec: number } | null>;
+  script?: { productionId: string; sceneId: string } | undefined;
+}
+
+/**
+ * The lines a film is held to. A scene named in the call gives its script's spoken lines in the
+ * script's order: that is a cut made outside the Studio, which has no shots of the production's
+ * to say whose line is whose. Otherwise the cut's own story shots give theirs, each with the
+ * shot it belongs to, so a line can be found under the wrong one. Null when there are none.
+ */
+function filmLines(store: WorldStore, productionId: string | null, shots: ReadonlyArray<{ clip: CutClip | null }>, script: FilmHearing["script"]): { from: "cut" | "script"; lines: FilmLine[]; over?: number } | null {
+  const bundle = store.getBundle(), most = AGENT_REVIEW_SPEECH_LIMITS.maxLines;
+  if (script) {
+    const scene = bundle.productions.find(row => row.meta.id === script.productionId)?.scenes.find(row => row.id === script.sceneId);
+    if (!scene) throw new RetrievalError("bad-argument", "That scene is not in this world: name the production and the scene whose script the film is held to.");
+    const spoken = (scene.script?.blocks ?? []).filter(block => block.kind === "dialogue" && block.text.trim());
+    // More lines than a review sets beside a film. Cut short at the limit, the lines past it were read as words nobody wrote (codex on PR 3333).
+    if (spoken.length > most) return { from: "script", lines: [], over: spoken.length };
+    const lines = spoken.map((block, i) => ({ number: i + 1, shot: null, text: block.text }));
+    return lines.length ? { from: "script", lines } : null;
+  }
+  const production = bundle.productions.find(row => row.meta.id === productionId);
+  if (!production) return null;
+  const story = new Map<string, Shot>();
+  for (const scene of production.scenes) {
+    try { for (const shot of orderedShots(scene)) story.set(shot.id, shot); } catch { /* a scene whose flow will not order has no shots to take lines from */ }
+  }
+  const lines: FilmLine[] = [], said = new Map<string, FilmLine>();
+  for (const [i, entry] of shots.entries()) {
+    const source = entry.clip?.source, covered = source?.kind === "take" ? production.takes.find(take => take.id === source.takeId)?.coversShots : undefined;
+    const shot = story.get(source?.kind === "shot" ? source.shotId : covered?.length === 1 ? covered[0]! : "");
+    const line = shot ? lineOf(shot) : null;
+    if (!shot || !line) continue;
+    // A story shot split round an insert is two clips of the cut and says its line once: the later clip is another of the line's own shots.
+    const before = said.get(shot.id);
+    if (before) { before.shots = [...(before.shots ?? [before.shot!]), i + 1]; continue; }
+    if (lines.length >= most) continue;
+    const held: FilmLine = { number: lines.length + 1, shot: i + 1, text: line };
+    lines.push(held); said.set(shot.id, held);
+  }
+  return lines.length ? { from: "cut", lines } : null;
 }
 
 /** A long window of mono sound, read in 60 s pieces. */

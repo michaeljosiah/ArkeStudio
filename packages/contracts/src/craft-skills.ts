@@ -57,7 +57,10 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // v14: general craft only, nothing of any one story: no production, character, line or shot (the owner,
     // 2026-11-26). A performance's movements are tied to its words in general terms, and a take that fails at one
     // point is fixed in the edit before it is made again.
-    version: 14,
+    // v15: look at every cut on a page of cuts, and read the cut's own checks first (2026-11-26: a finished scene
+    // had forty cuts and a turn could look at ten, two frames each, and nothing checked a line's place or the room
+    // before the owner did).
+    version: 15,
     title: "Continuity across cuts",
     when: "before you plan, review or change a shot beside one that has a take, and before you review a cut",
     bodyPath: "continuity-across-cuts.md",
@@ -102,8 +105,10 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // v5: general craft only, nothing of any one story: no production, character, line or shot (the owner,
     // 2026-11-26). Check that a take says every word laid over it (a laid line's end played over a laugh), and fix
     // in the edit first.
+    // v6: the listening before a cut is shown is one call, `review_export`, which hears the film against its lines
+    // and names where the room drops (2026-11-26: transcribing a film a minute at a time was refused on film sound).
     id: "sound-and-pace",
-    version: 5,
+    version: 6,
     title: "Sound and pace in the cut",
     when: "before you change the Cut's music, mix or effects, or where a clip starts and ends, and before you show anyone a cut or an export",
     bodyPath: "sound-and-pace.md",
