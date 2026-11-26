@@ -10,6 +10,7 @@ import {
   type WorldChatMessage,
 } from "@arke-studio/contracts";
 import { WorldChatRunner, type RunDeps } from "../../src/world-chat/run.js";
+import { EditorRequestRefused } from "../../src/productions/editor-requests.js";
 import { SceneEditRefused } from "../../src/productions/scene-edits.js";
 import { describeEntryContext } from "../../src/world-chat/entry-context.js";
 import { conversationDir, WorldChatStore } from "../../src/world-chat/store.js";
@@ -102,6 +103,8 @@ async function setup(
     chapterBrief?: RunDeps["chapterBrief"];
     prepareActions?: RunDeps["prepareActions"];
     bindActions?: RunDeps["bindActions"];
+    validateEditorRequests?: RunDeps["validateEditorRequests"];
+    measureEditorRequests?: RunDeps["measureEditorRequests"];
     onTurnSaved?: RunDeps["onTurnSaved"];
     prepareImages?: RunDeps["prepareImages"];
     resolveLanguageModel?: RunDeps["resolveLanguageModel"];
@@ -136,6 +139,8 @@ async function setup(
     ...(options.chapterBrief ? { chapterBrief: options.chapterBrief } : {}),
     ...(options.prepareActions ? { prepareActions: options.prepareActions } : {}),
     ...(options.bindActions ? { bindActions: options.bindActions } : {}),
+    ...(options.validateEditorRequests ? { validateEditorRequests: options.validateEditorRequests } : {}),
+    ...(options.measureEditorRequests ? { measureEditorRequests: options.measureEditorRequests } : {}),
     ...(options.onTurnSaved ? { onTurnSaved: options.onTurnSaved } : {}),
     ...(options.prepareImages ? { prepareImages: options.prepareImages } : {}),
     ...(options.resolveLanguageModel ? { resolveLanguageModel: options.resolveLanguageModel } : {}),
@@ -279,6 +284,49 @@ function goodAnswer(said: string, quote: string, messageId: string): string {
     groupOperations: [],
   });
 }
+
+describe("a turn's editor requests are measured before they are checked (SPEC-038 R-60)", () => {
+  const production = { kind: "production" as const, productionId: "saltlight" };
+  const answer = (summary: string, commands: object[]) => JSON.stringify({ reply: "Ready for you to approve.", candidateOperations: [], groupOperations: [], editorRequests: [{ summary, commands }] });
+
+  it("what was measured is what is checked and what is prepared", async () => {
+    const gate = { thresholdDb: -42, open: [[1.5, 2.6]] };
+    const measured = [{ kind: "sound-gate", clipId: "cl_line", on: true, gate }, { kind: "set-clip-gain", clipId: "cl_line", gainDb: 7.4 }];
+    const order: string[] = [], checked: unknown[] = [], prepared: unknown[] = [];
+    const h = await setup(fakeAdapter([answer("Cut the room under the line", [{ kind: "sound-gate", clipId: "cl_line", on: true }, { kind: "match-loudness", clipId: "cl_line", lufs: -20 }])]), {
+      entryContext: production,
+      measureEditorRequests: async ({ entryContext, requests }) => {
+        order.push("measure"); assert.deepEqual(entryContext, production);
+        assert.deepEqual(requests.map(request => request.commands.map(command => command.kind)), [["sound-gate", "match-loudness"]], "it is handed the requests as the model wrote them");
+        return requests.map(request => ({ ...request, commands: measured })) as never;
+      },
+      validateEditorRequests: async ({ requests }) => { order.push("check"); checked.push(...requests.map(request => request.commands)); },
+      prepareActions: async turn => { order.push("prepare"); prepared.push(...turn.editorRequests.map(request => request.commands)); return []; },
+      bindActions: async () => {},
+    });
+    assert.equal((await h.runner.send(h.store, h.conversationId, "Cut the room under his line")).status, "completed");
+    assert.deepEqual(order, ["measure", "check", "prepare"]);
+    assert.deepEqual([checked, prepared], [[measured], [measured]]);
+  });
+
+  it("a sound that cannot be measured sends the turn back with the reason, before anything is checked", async () => {
+    const prompts: string[] = [], order: string[] = [];
+    const reason = "\"Bring the line right up\" cannot apply: Tunde's line measures -30.4 LUFS: -10 LUFS would take a gain of +20.4 dB, and a clip's gain is -60 to +12";
+    const h = await setup(fakeAdapter([answer("Bring the line right up", [{ kind: "match-loudness", clipId: "cl_line", lufs: -10 }]),
+      JSON.stringify({ reply: "That line cannot come up that far.", candidateOperations: [], groupOperations: [] })], { prompts }), {
+      entryContext: production,
+      measureEditorRequests: async () => { order.push("measure"); throw new EditorRequestRefused(reason); },
+      validateEditorRequests: async () => { order.push("check"); },
+      prepareActions: async turn => { if (turn.editorRequests.length) order.push("prepare"); return []; },
+      bindActions: async () => {},
+    });
+    assert.equal((await h.runner.send(h.store, h.conversationId, "Bring his line right up")).status, "completed");
+    assert.deepEqual(order, ["measure"]);
+    assert.equal(prompts.length, 2);
+    assert.ok(prompts[1]!.includes(`The editor request was refused: ${reason}`), "the corrective turn reads why");
+    assert.equal((await h.view()).messages.at(-1)!.text, "That line cannot come up that far.");
+  });
+});
 
 describe("taking a turn", () => {
   it("corrects editorial advice into a bounded manuscript and retains the explicit drafting intent", async () => {

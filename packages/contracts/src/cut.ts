@@ -13,6 +13,7 @@ import { containedPictureRect, EFFECT_SLATE_STYLE, type EffectRenderProjection, 
 import type { PictureBlendMode } from "./editor-effects.js";
 import { pictureMotionAt } from "./editor-picture-motion.js";
 import type { SoundFadeWindow } from "./editor-sound-fade.js";
+import { SOUND_GATE, type SoundGateWindow } from "./editor-sound-gate.js";
 import { pictureSourceSec, PICTURE_SAMPLE_TOLERANCE_SEC } from "./editor-clip-speed.js";
 import { timelinePictureLookFilters, type TimelinePictureLook } from "./editor-picture-look.js";
 
@@ -518,6 +519,24 @@ export interface ExportAudioClip {
    */
   fadeIn?: SoundFadeWindow;
   fadeOut?: SoundFadeWindow;
+  /** A gated clip's kept stretches, as windows in film seconds (SPEC-038 R-57). The clip's, like its fades: a part keeps the whole's. */
+  gate?: SoundGateWindow[];
+}
+
+/**
+ * A clip's gate as an FFmpeg expression in film seconds (SPEC-038 R-57): the gate's floor, and the
+ * rest of the way up inside a kept stretch, over the attack before one and the release after it.
+ * The same lines `soundGateAt` draws for the browser. Only the stretches this item can hear are
+ * written, and they are joined as a balanced tree of `max`: a take can keep dozens of stretches,
+ * and one nested inside the next would be an expression as deep as it is long.
+ */
+function gateExpression(clip: ExportAudioClip): string | null {
+  if (clip.gate === undefined) return null;
+  const floor = Math.pow(10, SOUND_GATE.floorDb / 20), { attackSec: attack, releaseSec: release } = SOUND_GATE;
+  let level = clip.gate.filter(window => window.endSec + release > clip.startSec && window.startSec - attack < clip.endSec).map(({ startSec: from, endSec: to }) =>
+    `if(between(t,${from},${to}),1,if(between(t,${from - attack},${from}),1-((${from})-t)/${attack},if(between(t,${to},${to + release}),1-(t-(${to}))/${release},0)))`);
+  while (level.length > 1) level = level.flatMap((value, i) => i % 2 ? [] : [i + 1 < level.length ? `max(${value},${level[i + 1]})` : value]);
+  return `(${floor}+${1 - floor}*(${level[0] ?? "0"}))`;
 }
 
 /**
@@ -934,7 +953,8 @@ export function buildCanonicalAudioGraph(plan: Pick<ExportPlan, "audio" | "mix" 
      * back to 1,024 made FFmpeg n8.1.2 stop the film's closing `apad` early: a four-second film
      * came out 3.54 seconds long. One regroup per chain keeps the length, mixed or alone.
      */
-    const fade = fadeExpression(clip);
+    // A gate shares the fade's stage (R-57): it too moves faster than a decoder's frame, and one regroup a chain is the rule above.
+    const fade = [fadeExpression(clip), gateExpression(clip)].filter((part): part is string => part !== null).join("*") || null;
     const faded = fade === null ? "" : `,asetnsamples=n=64:p=0,volume=eval=frame:volume='${fade}'`;
     /*
      * Every sound is brought to the film's format before anything else is done to it (SPEC-038

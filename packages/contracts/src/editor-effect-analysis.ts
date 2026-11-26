@@ -42,6 +42,8 @@ export const EffectAudioContributionSchema = z.object({ path, clipId: z.string()
   startSec: second, endSec: second, sourceInSec: second, gainDb: z.number().finite().min(-60).max(12),
   role: z.enum(["dialogue", "ambience", "music", "picture", "unspecified"]), ducks: z.literal(false).optional(),
   fadeIn: fadeWindow.optional(), fadeOut: fadeWindow.optional(),
+  // A gate's kept stretches shape what is heard as a fade does (R-57). A start may be negative for the reason a fade's may.
+  gate: z.array(z.object({ startSec: z.number().finite(), endSec: z.number().finite() }).strict()).max(400).optional(),
 }).strict().refine(value => value.endSec > value.startSec, "audio contributions must have positive duration");
 export const EffectAudioSourceDescriptorSchema = z.object({
   profileId: z.literal("audible-pcm-v1"), binding: EffectAudioInputSchema,

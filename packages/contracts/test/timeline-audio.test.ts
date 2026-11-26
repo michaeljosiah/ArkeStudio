@@ -27,6 +27,10 @@ import {
   soundFadeAt,
   soundFadeWindows,
   sourceLengthFramesFor,
+  SOUND_GATE,
+  SoundGateSchema,
+  soundGateAt,
+  soundGateFromLevels,
   trackEndFrame,
   trackedGainDb,
   undoTimelineHistory,
@@ -778,11 +782,133 @@ describe("a track's level, a track that holds under speech, and even-power fades
 
   it("Arke's request may carry them, and the guide says what each is for", () => {
     const asked = (command: unknown) => ModelEditorRequestSchema.safeParse({ summary: "Bring the room down", commands: [command] }).success;
+    assert.match(TIMELINE_EDITOR_COMMAND_GUIDE, /sound-gate \(clipId, on, gate\)/);
+    assert.match(TIMELINE_EDITOR_COMMAND_GUIDE, /match-loudness \(clipId, lufs\)/);
+    assert.match(TIMELINE_EDITOR_COMMAND_GUIDE, /sound-gate's on true keeps a take's or a file's sound where it stands over its own floor/);
+    assert.match(TIMELINE_EDITOR_COMMAND_GUIDE, /leave gate out, it is measured from the clip's sound when the request is made/);
+    assert.match(TIMELINE_EDITOR_COMMAND_GUIDE, /match-loudness's lufs, -50 to -5, sets a clip's gain so the stretch it plays measures that loudness in the film's mix, its track's level counted/);
+    assert.deepEqual([asked({ kind: "sound-gate", clipId: "cl_song", on: true }), asked({ kind: "match-loudness", clipId: "cl_song", lufs: -20 }),
+      asked({ kind: "match-loudness", clipId: "cl_song", lufs: -4 }), asked({ kind: "sound-gate", clipId: "cl_song" })], [true, true, false, false]);
     assert.deepEqual([asked({ kind: "set-track", trackId: "tr_music", levelDb: -6, ducks: false }), asked({ kind: "sound-fade", clipId: "cl_song", inFrames: 30, power: true }),
       asked({ kind: "set-track", trackId: "tr_music", levelDb: 13 }), asked({ kind: "sound-fade", clipId: "cl_song", power: "even" })], [true, true, false, false]);
     assert.match(TIMELINE_EDITOR_COMMAND_GUIDE, /set-track \(trackId, name, defaultRole, muted, solo, order, levelDb, ducks, language\)/);
     assert.match(TIMELINE_EDITOR_COMMAND_GUIDE, /set-track's levelDb is added to the gain of every clip on an audio track/);
     assert.match(TIMELINE_EDITOR_COMMAND_GUIDE, /ducks false holds that track's level under speech/);
     assert.match(TIMELINE_EDITOR_COMMAND_GUIDE, /power true draws both fades as even-power curves/);
+  });
+});
+
+/*
+ * A gate on a take's own sound, and a clip set to a loudness (2026-11-26). Each generated take
+ * makes a room of its own, and the room jumps at every cut. The film's assembler kept each take's
+ * voice and cut its room, and matched every line to one loudness; the Cut had neither.
+ */
+describe("a gate on a sound clip, and a clip set to a loudness (SPEC-038 R-57..R-60)", () => {
+  const clipOf = (timeline: ProductionTimeline, id: string): TimelineClip => timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === id)!;
+  const planOf = (timeline: ProductionTimeline): RenderPlan => {
+    const result = buildRenderPlan({ production: production(), artifacts, timeline: { status: "ready", timeline }, scope: { kind: "production" }, preset: "review-cut" });
+    if (!result.ok) assert.fail(result.reason);
+    return result.plan;
+  };
+  const itemOf = (plan: RenderPlan, id: string) => plan.audio.find((clip) => clip.clipId === id)!;
+  const near = (actual: number, expected: number, message?: string) => assert.ok(Math.abs(actual - expected) < 1e-9, `${message ?? "level"}: ${actual} is not ${expected}`);
+  const FLOOR = Math.pow(10, -15 / 20);
+  // Kept from 1 s to 2.5 s and from 4 s to 6 s of the song's own file.
+  const GATE = { thresholdDb: -42, open: [[1, 2.5], [4, 6]] as Array<[number, number]> };
+  const gated = (): ProductionTimeline => valid(apply(mixed(), { kind: "sound-gate", clipId: "cl_song", on: true, gate: GATE }));
+  /** A sound's level a hundredth of a second at a time: a room, with voice over it where the spans say. */
+  const levels = (seconds: number, room: number, voice: number, spans: Array<[number, number]>) =>
+    Array.from({ length: Math.round(seconds * 100) }, (_, step) => (spans.some(([from, to]) => step >= Math.round(from * 100) && step < Math.round(to * 100)) ? voice : room));
+
+  it("is measured from the sound's own floor: kept where it stands 8 dB over the level a fifth of it sits under", () => {
+    // Two lines over a room at -50 dBFS, with a tenth of a second between two words of the first.
+    const take = soundGateFromLevels(levels(6, -50, -20, [[1, 1.8], [1.9, 2.6], [4, 5]]));
+    assert.deepEqual(take, { thresholdDb: -42, open: [[1, 2.6], [4, 5]] }, "a quiet shorter than the hold stays open");
+    assert.equal(SoundGateSchema.safeParse(take).success, true);
+    // A click alone is not kept; nor is anything in a sound with nothing over its floor.
+    assert.deepEqual(soundGateFromLevels(levels(4, -50, -20, [[1, 1.02], [2, 3]])).open, [[2, 3]]);
+    assert.deepEqual(soundGateFromLevels(levels(4, -50, -50, [])).open, []);
+    // A take that is voice for most of its length keeps its words. Measured from its middle step,
+    // as the assembler did, its floor is the voice itself and every word is cut.
+    const dense = soundGateFromLevels(levels(5, -50, -20, [[0, 3.8]]));
+    assert.deepEqual(dense, { thresholdDb: -42, open: [[0, 3.8]] });
+    // The limit, said rather than hidden: with under a fifth of it room, the level a fifth sits under is the voice.
+    assert.deepEqual(soundGateFromLevels(levels(5, -50, -20, [[0, 4.2]])), { thresholdDb: -12, open: [] });
+    // Held to what a level can be: digital silence under a voice, and a room as loud as the voice.
+    assert.equal(soundGateFromLevels(levels(4, -120, -20, [[1, 2]])).thresholdDb, SOUND_GATE.minThresholdDb);
+    assert.equal(soundGateFromLevels(levels(4, -10, -3, [[1, 2]])).thresholdDb, SOUND_GATE.maxThresholdDb);
+    assert.deepEqual(soundGateFromLevels([]), { thresholdDb: -6, open: [] });
+    // More stretches than a clip holds are joined across their shortest quiets, never dropped.
+    const busy = soundGateFromLevels(levels(250, -50, -20, Array.from({ length: 500 }, (_, i): [number, number] => [i * .5, i * .5 + .2])));
+    assert.equal(busy.open.length, SOUND_GATE.maxRegions); assert.equal(busy.open.at(-1)![1], 249.7);
+    assert.equal(SoundGateSchema.safeParse(busy).success, true);
+  });
+
+  it("is set with its measurement, removed without one, and never set unmeasured", () => {
+    let current = gated();
+    assert.deepEqual(clipOf(current, "cl_song").soundGate, GATE);
+    assert.deepEqual([clipOf(current, "cl_song").gainDb, clipOf(current, "cl_song").role], [-6, "music"], "the gain and the role are their own settings");
+    assert.throws(() => apply(current, { kind: "sound-gate", clipId: "cl_song", on: true, gate: GATE }), /changes nothing/, "measured again from the same sound, it is the gate it was");
+    assert.throws(() => apply(mixed(), { kind: "sound-gate", clipId: "cl_song", on: true }), /A gate is measured from the clip's sound before it is set/);
+    assert.throws(() => apply(mixed(), { kind: "match-loudness", clipId: "cl_song", lufs: -20 }), /set to a loudness by measuring it first/);
+    assert.throws(() => apply(mixed(), { kind: "sound-gate", clipId: "cl_sh-1", on: true, gate: GATE }), /clip on an audio track/, "a video's own sound has none until it is detached");
+    assert.throws(() => apply(mixed(), { kind: "sound-gate", clipId: "cl_gone", on: false }), /clip on an audio track/);
+    assert.throws(() => apply(mixed(), { kind: "sound-gate", clipId: "cl_song", on: false }), /changes nothing/);
+
+    // It survives the file, and it is one Undo.
+    const saved = ProductionTimelineSchema.parse(JSON.parse(JSON.stringify(current)));
+    assert.equal("soundGate" in clipOf(undoTimelineHistory(saved), "cl_song"), false);
+    assert.deepEqual(clipOf(redoTimelineHistory(undoTimelineHistory(saved)), "cl_song").soundGate, GATE);
+    // A split keeps it on both halves and a duplicate copies it: the stretches are the source's, not the clip's.
+    const cut = valid(apply(current, { kind: "split", clipId: "cl_song", atFrame: 100, newClipId: "cl_song2" }));
+    assert.deepEqual([clipOf(cut, "cl_song").soundGate, clipOf(cut, "cl_song2").soundGate], [GATE, GATE]);
+    assert.deepEqual(clipOf(valid(apply(current, { kind: "duplicate", clipId: "cl_song", newClipId: "cl_copy" })), "cl_copy").soundGate, GATE);
+    current = valid(apply(current, { kind: "sound-gate", clipId: "cl_song", on: false }));
+    assert.equal("soundGate" in clipOf(current, "cl_song"), false);
+    assert.deepEqual([describeTimelineCommand({ kind: "sound-gate", clipId: "cl_song", on: true }), describeTimelineCommand({ kind: "sound-gate", clipId: "cl_song", on: false }),
+      describeTimelineCommand({ kind: "match-loudness", clipId: "cl_song", lufs: -20 })], ["Gate sound", "Remove gate", "Set cl_song to -20 LUFS"]);
+
+    // A record that says otherwise is refused: a gate on a picture clip, and stretches out of order or touching nothing.
+    const record = { ...mixed(), history: { undo: [], redo: [] } };
+    const onPicture = { ...record, tracks: record.tracks.map((track) => (track.id === "tr_picture" ? { ...track, clips: track.clips.map((clip, index) => (index === 0 ? { ...clip, soundGate: GATE } : clip)) } : track)) };
+    assert.deepEqual(ProductionTimelineSchema.safeParse(onPicture).error!.issues.map((issue) => issue.message), ["A gate belongs only to a take's or a file's sound on an audio track"]);
+    for (const wrong of [{ thresholdDb: -42, open: [[2, 1]] }, { thresholdDb: -42, open: [[1, 3], [2, 4]] }, { thresholdDb: -42, open: [[1, 1]] }, { thresholdDb: 3, open: [] }, { open: [[1, 2]] }]) {
+      assert.equal(SoundGateSchema.safeParse(wrong).success, false, JSON.stringify(wrong));
+    }
+  });
+
+  it("plays one level in the plan's function and the export's graph: whole where the sound is kept, 15 dB down where it is not", () => {
+    // The song moved to start two seconds in: its file's 1 s is the film's 3 s.
+    const plan = planOf(valid(apply(gated(), { kind: "move-to-frame", clipId: "cl_song", startFrame: 50 }, { kind: "set-track", trackId: "tr_music", ducks: false }))), song = itemOf(plan, "cl_song");
+    assert.deepEqual(song.gate, [{ startSec: 3, endSec: 4.5 }, { startSec: 6, endSec: 8 }]);
+    assert.equal(itemOf(plan, "cl_line").gate, undefined, "a clip with no gate carries none");
+    for (const [sec, share] of [[3.5, 1], [2.5, FLOOR], [2.995, FLOOR + (1 - FLOOR) * .5], [3, 1], [4.5, 1], [4.575, FLOOR + (1 - FLOOR) * .5], [4.65, FLOOR], [5, FLOOR], [7.9, 1], [9, FLOOR]] as const) {
+      near(soundGateAt(song, sec), share, `gate at ${sec}s`);
+    }
+    near(soundGateAt({}, 3), 1, "no gate is no change");
+    near(soundGateAt({ gate: [] }, 3), FLOOR, "a gate that kept nothing is down throughout");
+    // Gain, then the gate (R-57): -6 dB where the sound is kept, 15 dB under that where it is not.
+    near(audioLevelAt(plan, song, 3.5), Math.pow(10, -6 / 20));
+    near(audioLevelAt(plan, song, 5), Math.pow(10, -21 / 20));
+    assert.equal(audioGainDbAt(plan, song, 5), -6, "the figure in dB is the gain alone");
+
+    // The export spells the same lines in film seconds, in the fade's stage, the last of the clip's chain.
+    const graph = graphOf(buildFfmpegArgs(plan, "/w", "/out.mp4", "/f.ttf"));
+    assert.ok(graph.includes(`volume=-6dB,asetnsamples=n=64:p=0,volume=eval=frame:volume='(${FLOOR}+${1 - FLOOR}*(max(if(between(t,3,4.5),1,if(between(t,2.99,3),1-((3)-t)/0.01,if(between(t,4.5,4.65),1-(t-(4.5))/0.15,0))),if(between(t,6,8),1,`), graph);
+    assert.equal((graph.match(/asetnsamples/g) ?? []).length, 1, "one regroup in a chain");
+    // With a fade as well, the two share the stage.
+    const both = graphOf(buildFfmpegArgs(planOf(valid(apply(gated(), { kind: "sound-fade", clipId: "cl_song", inFrames: 50 }))), "/w", "/out.mp4", "/f.ttf"));
+    assert.ok(both.includes(`volume='clip((t-(0))/2,0,1)*(${FLOOR}+`), both);
+    assert.equal((both.match(/asetnsamples/g) ?? []).length, 1);
+    assert.equal(EffectAudioContributionSchema.safeParse(song).success, true, "an analysed contribution carries its gate");
+
+    // Only the stretches an item can hear are in its plan, and a part of the film plays what the whole plays.
+    const tail = planOf(valid(apply(gated(), { kind: "trim", clipId: "cl_song", edge: "start", deltaFrames: 75 })));
+    assert.deepEqual(itemOf(tail, "cl_song").gate, [{ startSec: 4, endSec: 6 }], "trimmed past the first stretch, it is gone from the plan and still on the clip");
+    const part = windowPlan(plan, 3.2, 7, { kind: "production" }), cut = itemOf(part, "cl_song");
+    // Moved by the part's own start and not rounded again, so a slope falls where the whole film's does.
+    assert.equal(cut.gate!.length, 2);
+    for (const [index, [from, to]] of ([[-0.2, 1.3], [2.8, 4.8]] as const).entries()) { near(cut.gate![index]!.startSec, from, "a kept stretch's start"); near(cut.gate![index]!.endSec, to, "a kept stretch's end"); }
+    for (const offset of [0, 0.5, 1.3, 1.36, 2, 2.795, 3.5]) near(audioLevelAt(part, cut, offset), audioLevelAt(plan, song, 3.2 + offset), `level ${offset}s into the part`);
   });
 });

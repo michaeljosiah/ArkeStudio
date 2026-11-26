@@ -89,6 +89,23 @@ export function carriesSoundLevels(raw: string): boolean {
 }
 
 /**
+ * SPEC-038 R-60: a sound clip's gate, on a clip, in Undo or Redo, or in a request's commands. A
+ * strict clip field an older Cut refuses to read, and one that read past it would play every
+ * gated take's own room at full level over the room laid beneath them. A `match-loudness` in a
+ * request counts too, though it is measured into a plain gain before it is stored: an older
+ * build's request reader refuses the kind.
+ */
+export function carriesSoundGate(raw: string): boolean {
+  const carries = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.some(carries);
+    if (!value || typeof value !== "object") return false;
+    const row = value as Record<string, unknown>;
+    return row.kind === "sound-gate" || row.kind === "match-loudness" || Object.hasOwn(row, "soundGate") || Object.values(row).some(carries);
+  };
+  try { return carries(JSON.parse(raw)); } catch { return false; }
+}
+
+/**
  * SPEC-038 R-45..R-50: a picture look, on the record or in Undo or Redo, where it is the entry's
  * before and after. Both are strict fields an older Cut refuses to read. Its own field name is
  * what lets this be read from the raw record: a title's source has a `look` of its own, which

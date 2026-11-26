@@ -457,6 +457,7 @@ import { applySceneCommand, sceneCommandFrom } from "./productions/scene-command
 import { assertStageReferencesCurrent, filePlayblast } from "./productions/stage-playblast.js";
 import { fileBoardAnimatic } from "./productions/stage-animatic.js";
 import { assembleTimelineScene, applyHumanTimelineCommand, applyTimelineCommand, placementsLiveOnTimeline, TimelineCommandRefused } from "./productions/timeline.js";
+import { measureTimelineSound } from "./productions/timeline-sound.js";
 import { importEditorMedia } from "./productions/editor-import.js";
 import { importAudioStudioMedia } from "./productions/audio-studio-import.js";
 import { decideEditorRequest, EditorRequestRefused, readEditorRequest } from "./productions/editor-requests.js";
@@ -10933,7 +10934,8 @@ export class Coordinator {
               : msg.kind === "timeline-command"
                 ? {
                     kind: "commands",
-                    commands: msg.commands,
+                    // A gate or a loudness is measured from the clip's sound first, outside the write (SPEC-038 R-58, R-59).
+                    commands: await measureTimelineSound(store, msg.productionId, msg.commands, this.opts.agentMediaTools, store.closingSignal),
                     baseRevision: msg.baseRevision,
                     sourceFingerprint: msg.sourceFingerprint,
                     ...(msg.label !== undefined ? { label: msg.label } : {}),

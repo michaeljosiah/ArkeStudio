@@ -93,7 +93,7 @@ export function compileProductionTimelineRequest(store: WorldStore, action: Acti
       if (!audioTrack || !AUDIO_TRACK_KINDS.has(audioTrack.kind) || audioTrack.muted || audioTrack.solo || audio?.source.kind !== "artifact" || audio.source.artifactId !== clip.source.artifactId ||
         audio.startFrame !== clip.startFrame || audio.durationFrames !== clip.durationFrames || audio.sourceInFrames !== clip.sourceInFrames ||
         // A faded twin is edited sound: kept picture sound has no fade to carry it (SPEC-038 R-39), so rejoining would drop it.
-        (audio.gainDb ?? 0) !== (clip.gainDb ?? 0) || audio.soundFade !== undefined || (audio.role ?? "unspecified") !== (clip.role ?? "unspecified") || audio.audio === "mute" || clip.audio !== "mute") throw new Error("Rejoin requires the unchanged audio twin of this muted overlay. Independently edited audio must be kept.");
+        (audio.gainDb ?? 0) !== (clip.gainDb ?? 0) || audio.soundFade !== undefined || audio.soundGate !== undefined || (audio.role ?? "unspecified") !== (clip.role ?? "unspecified") || audio.audio === "mute" || clip.audio !== "mute") throw new Error("Rejoin requires the unchanged audio twin of this muted overlay. Independently edited audio must be kept.");
       commands.push({ kind: "set-clip-audio", clipId: clip.id, audio: "keep" }, { kind: "delete", clipId: audio.id });
       if (audioTrack.clips.length === 1 && !(audioTrack.cues?.length)) commands.push({ kind: "remove-track", trackId: audioTrack.id });
     }

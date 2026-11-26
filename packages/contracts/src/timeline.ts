@@ -5,6 +5,7 @@ import { EffectCommandSchema, isEffectCommand, patchEffect, moveEffect, trimEffe
 import { PictureAppearanceSchema, PictureAppearanceCommandSchema, isPictureAppearanceCommand, applyPictureAppearanceCommand, duplicatePictureAppearance, pictureAppearanceStructureProblem, pictureAppearanceProtectionProblem, type PictureAppearanceCommand } from "./editor-picture-appearance.js";
 import { PictureMotionSchema, PictureFadeSchema, PictureMotionCommandSchema, isPictureMotionCommand, applyPictureMotionCommand, splitPictureFade, pictureMotionStructureProblem, type PictureMotionCommand } from "./editor-picture-motion.js";
 import { SoundFadeSchema, SoundFadeCommandSchema, isSoundFadeCommand, applySoundFadeCommand, splitSoundFade } from "./editor-sound-fade.js";
+import { SoundGateSchema, SoundGateCommandSchema, MatchLoudnessCommandSchema, isSoundGateCommand, isMatchLoudnessCommand, applySoundGateCommand, soundGateProblem } from "./editor-sound-gate.js";
 import { ClipSpeedSchema, ClipSpeedCommandSchema, isClipSpeedCommand, clipRetimed, clipSourceInSec, clipSpeedProblem, clipSpeedStructureProblem,
   retimedClip, retimedSourceFrames, reversedClip, splitSourceIns, trimmedSourceIn } from "./editor-clip-speed.js";
 import { TimelinePictureLookSchema, TimelinePictureLookCommandSchema, timelinePictureLookWritten, type TimelinePictureLook, type TimelinePictureLookCommand } from "./editor-picture-look.js";
@@ -135,6 +136,8 @@ const TimelineClipObjectSchema = z
     fade: PictureFadeSchema.optional(),
     /** Audio clips: a fade in and out of the clip's sound at its own edges (SPEC-038 R-37). */
     soundFade: SoundFadeSchema.optional(),
+    /** Audio clips: where the clip's sound stands over its own floor, kept; the rest plays 15 dB down (SPEC-038 R-57). */
+    soundGate: SoundGateSchema.optional(),
     /**
      * A video's speed and direction on a Picture track (SPEC-037 R-35). Absent is its own speed,
      * forwards. At another speed `sourceInFrames` and `durationFrames` count frames of the
@@ -556,6 +559,8 @@ export const TimelineCommandSchema = z.discriminatedUnion("kind", [
   ...PictureAppearanceCommandSchema.options,
   ...PictureMotionCommandSchema.options,
   SoundFadeCommandSchema,
+  SoundGateCommandSchema,
+  MatchLoudnessCommandSchema,
   ...ClipSpeedCommandSchema.options,
   TextSetCommandSchema,
   z.object({ kind: z.literal("set-performance-source"), clipId: TimelineClipIdSchema, sourceClipId: TimelineClipIdSchema.nullable() }).strict(),
@@ -653,9 +658,11 @@ export type TimelineClipCommand = Exclude<TimelineCommand, { kind: "switch-take"
 
 /** Why a clip cannot sit on a track of this kind, or null when it can (R-22). */
 export function sourceProblem(kind: TimelineTrackKind,
-  clip: Pick<TimelineClip, "source" | "audio" | "performanceSourceClipId" | "role"> & Partial<Pick<TimelineClip, "gainDb" | "linkedClipId" | "sourceInFrames" | "soundFade" | "speed" | "reverse">>): string | null {
+  clip: Pick<TimelineClip, "source" | "audio" | "performanceSourceClipId" | "role"> & Partial<Pick<TimelineClip, "gainDb" | "linkedClipId" | "sourceInFrames" | "soundFade" | "soundGate" | "speed" | "reverse">>): string | null {
   // A placed or pasted clip can arrive with one; a video's kept sound has no fade, as it has no gain (SPEC-038 R-39).
   if (clip.soundFade !== undefined && !AUDIO_TRACK_KINDS.has(kind)) return "A sound fade belongs only to a clip on an audio track";
+  // A gate is a sound clip's too, and only of a take's or a file's own sound (R-57).
+  if (clip.soundGate !== undefined && soundGateProblem(kind, clip) !== null) return "A gate belongs only to a take's or a file's sound on an audio track";
   // Text first, so it is named on whatever track it was put: it is picture, with no sound, gain, link or in-point (SPEC-065 R-2).
   if (clip.source.kind === "text") return kind === "picture" ? textClipProblem(clip) : "Text belongs on a Picture track";
   if (kind === "effect") return "an effect track holds procedural effects, not media clips";
@@ -684,6 +691,8 @@ export function describeTimelineCommand(command: TimelineCommand): string {
   if (isPictureAppearanceCommand(command)) return command.kind === "picture-appearance" ? "Change picture appearance" : command.kind === "picture-protect" ? "Protect picture appearance" : "Release picture protection";
   if (isPictureMotionCommand(command)) return command.kind === "picture-fade" ? "Set picture fade" : command.motion ? "Set picture motion" : "Remove picture motion";
   if (isSoundFadeCommand(command)) return "Set sound fade";
+  if (isSoundGateCommand(command)) return command.on ? "Gate sound" : "Remove gate";
+  if (isMatchLoudnessCommand(command)) return `Set ${command.clipId} to ${command.lufs} LUFS`;
   if (isClipSpeedCommand(command)) return command.kind === "set-clip-speed" ? `Set speed to ${command.speed}x` : command.reverse ? "Play backwards" : "Play forwards";
   if (isTextSetCommand(command)) return command.clipIds.length === 1 ? "Change text" : `Change text on ${command.clipIds.length} clips`;
   switch (command.kind) {
@@ -1579,6 +1588,19 @@ function applyClipCommand(working: Working, command: TimelineClipCommand): void 
     } catch (error) { throw new TimelineOperationRefused(error instanceof Error ? error.message : String(error)); }
     return;
   }
+  if (isSoundGateCommand(command)) {
+    try {
+      // A gate already held comes back as the same clip, touches nothing and writes no revision (SPEC-038 R-58).
+      const next = applySoundGateCommand(working.tracks, command);
+      for (const track of working.tracks) for (const clip of track.clips) {
+        if (next.find(row => row.id === track.id)?.clips.find(row => row.id === clip.id) !== clip) touch(working, track.id, clip.id, clip);
+      }
+      working.tracks = next;
+    } catch (error) { throw new TimelineOperationRefused(error instanceof Error ? error.message : String(error)); }
+    return;
+  }
+  // Never applied as it is: the coordinator measures the clip and applies the gain that reaches the figure (R-59).
+  if (isMatchLoudnessCommand(command)) throw new TimelineOperationRefused("A clip is set to a loudness by measuring it first; this host did not");
   if (isTextSetCommand(command)) {
     try {
       // All of it or none: the command refuses before a clip is touched, and a clip that comes back

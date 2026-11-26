@@ -57,7 +57,7 @@ import {
 } from "../productions/scene-record.js";
 import { atomicWriteFile, renameWithRetry } from "./atomic.js";
 import { completesFoundingLook } from "../references/master-look.js";
-import { carriesEditorEffects, carriesEditorTransitions, carriesEditorAppearance, carriesPictureMotion, carriesEditorText, carriesClipSpeed, carriesSoundFade, carriesPictureLook, carriesSoundLevels } from "../productions/timeline-record.js";
+import { carriesEditorEffects, carriesEditorTransitions, carriesEditorAppearance, carriesPictureMotion, carriesEditorText, carriesClipSpeed, carriesSoundFade, carriesPictureLook, carriesSoundLevels, carriesSoundGate } from "../productions/timeline-record.js";
 import { appendChanges, readChanges } from "./change-writer.js";
 import { fromPortable, toExtendedLength } from "./paths.js";
 import { JsonFile, MarkdownFile, sha256 } from "./text-files.js";
@@ -710,6 +710,8 @@ export const EDITOR_PICTURE_LOOK_SCHEMA_VERSION = 134;
  * (153 follows 152, the film review's speech; no open branch held it.)
  */
 export const EDITOR_SOUND_LEVELS_SCHEMA_VERSION = 153;
+/** SPEC-038 R-60: a sound clip's gate is a strict clip field an older Cut would refuse to read, on a clip, in Undo or Redo, or in a request. */
+export const EDITOR_SOUND_GATE_SCHEMA_VERSION = 154;
 /**
  * Issue 3185: what a production's or a shot's clips are made from is a strict field on
  * production.json and on a shot's continuity. An older build would refuse the production or the
@@ -1252,6 +1254,7 @@ export class Committer {
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesSoundFade(f.newContent)) ? EDITOR_SOUND_FADE_SCHEMA_VERSION : 0,
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesPictureLook(f.newContent)) ? EDITOR_PICTURE_LOOK_SCHEMA_VERSION : 0,
       files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesSoundLevels(f.newContent)) ? EDITOR_SOUND_LEVELS_SCHEMA_VERSION : 0,
+      files.some(f => /^productions\/[^/]+\/(timeline|editor-requests)\.json$/.test(f.path) && f.newContent != null && carriesSoundGate(f.newContent)) ? EDITOR_SOUND_GATE_SCHEMA_VERSION : 0,
       files.some(f => (classify(f.path).track === "production-meta" || classify(f.path).track === "scene") && f.newContent != null && CLIPS_FROM_KEY.test(f.newContent)) ? CLIPS_FROM_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "production-meta" && f.newContent != null && PRODUCTION_LOOK_KEY.test(f.newContent)) ? PRODUCTION_LOOK_SCHEMA_VERSION : 0,
       files.some(f => classify(f.path).track === "scene" && f.newContent != null && LIP_SYNC_KEY.test(f.newContent)) ? LIP_SYNC_SCHEMA_VERSION : 0,
