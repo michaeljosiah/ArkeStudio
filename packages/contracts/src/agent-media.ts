@@ -123,8 +123,10 @@ export const AgentMediaObservationSchema: z.ZodType<AgentMediaObservation> = z.o
         transcript.words.some(word => Math.abs(word.viewStartSec - (value.range!.startSec + word.startSec)) > .000001 ||
           Math.abs(word.viewEndSec - (value.range!.startSec + word.endSec)) > .000001 ||
           Math.abs(word.sourceStartSec - (value.sourceStartSec + word.viewStartSec)) > .000001 ||
-          Math.abs(word.sourceEndSec - (value.sourceStartSec + word.viewEndSec)) > .000001)) {
-        context.addIssue({ code: z.ZodIssueCode.custom, message: "Speech word times must retain the selected stream and source/view interval" });
+          Math.abs(word.sourceEndSec - (value.sourceStartSec + word.viewEndSec)) > .000001) ||
+        transcript.stretches?.some(stretch => Math.abs(stretch.viewStartSec - (value.range!.startSec + stretch.startSec)) > .000001 ||
+          Math.abs(stretch.viewEndSec - (value.range!.startSec + stretch.endSec)) > .000001)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, message: "Speech word and stretch times must retain the selected stream and source/view interval" });
       }
     }
     if (value.range && (value.sourceEndSec === null || value.sourceStartSec + value.range.endSec > value.sourceEndSec + .000001)) context.addIssue({ code: z.ZodIssueCode.custom, message: "Evidence interval exceeds its source" });

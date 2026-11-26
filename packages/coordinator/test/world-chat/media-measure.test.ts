@@ -289,6 +289,14 @@ test("cut_contact_sheet on a film with no cut behind it: shots found where the p
   assert.equal(h.store.getBundle().meta.schemaVersion, 143);
 });
 
+test("a contact sheet with no image left for its pages is refused before the film is read or a media call spent", async () => {
+  const h = await harness();
+  for (let i = 0; i < 3; i++) assert.equal((await h.retrieval.call(h.lease.token, "sample_video", { source: h.take, range: { startSec: 0, endSec: 1 }, count: 8 })).receipt.status, "complete");
+  const outcome = await h.retrieval.call(h.lease.token, "cut_contact_sheet", { source: h.film });
+  assert.deepEqual(outcome.result, { unavailable: true, reason: "cut_contact_sheet: this run has reached its 24-image inspection limit. Left this run: 4 speech, 13 media and 2 listening calls, 0 images." });
+  assert.deepEqual(h.calls.filter(call => call.what === "tile" || call.what === "film@10"), []);
+});
+
 /** A two-clip cut of the fixture's production, both clips' own sound muted under the mix, and an export stamped with that cut. */
 async function cutAndExport(h: Awaited<ReturnType<typeof harness>>, id: string, options: { label?: string; bed?: boolean } = {}) {
   const production = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;

@@ -16,7 +16,9 @@ runner, with no shell, remote protocols or metadata tags in results.
 Video sampling returns up to eight metadata-free PNG frames within a take-relative interval
 of at most 60 seconds. Receipts distinguish requested times, decoded source times and segment
 view times. Images share `view_image`'s pinned model capability, privacy policy, cloud disclosure
-and 24-image/20 MB encoded run budgets. Gaps between samples, continuous motion, flicker and
+and 24-image/20 MB encoded run budgets. A request for more frames than the run has images left
+samples as many as are left, spread over the interval, and says so; with none left it is refused
+before a media call is spent. Gaps between samples, continuous motion, flicker and
 audiovisual sync remain unreviewed. This does not establish native video-model input.
 
 Audio measurements decode original channels at the original sample rate into bounded float
@@ -28,17 +30,28 @@ local; these tools do not send an audio attachment to a model.
 
 Local speech tools make a separate canonical mono 16 kHz PCM16 WAV for the requested stream and
 interval. Its hash, size, duration and profile remain distinct from the original-channel signal
-measurements. The exact derivative reaches supervised Voxa's measured-word endpoint; older or
-unavailable runtimes refuse, with no cloud fallback. Receipts retain engine id/version/model,
+measurements. The interval is read in stretches: the parts where a voice is likely, judged by
+level against the interval's own quiet (coordinator `media/speech-stretches.ts`). Given a whole
+window of film sound, the measured-word reader refused it for one pause over room tone, which is
+never quiet enough for it to end a word at. Each stretch reaches supervised Voxa's measured-word
+endpoint as a canonical slice of the derivative; the hash stays the whole interval's. A stretch
+that reader still refuses goes to the same local runtime's plain text reader and is kept as
+`text-only` (its text, no word times) or `silent` (no words heard). Sound outside the stretches
+is not read, and an interval with no voice in it is answered with no stretches and no reader
+call. Older or unavailable runtimes refuse, with no cloud fallback. Receipts retain the stretches,
+engine id/version/model when a stretch was timed,
 recognized text and interval/source/view word times, including segment offsets. Evidence requires
 the existing validated timing-engine identity and rejects overlapping/inconsistent word evidence.
 Live measured-word readiness is checked before source snapshots, decoding or budget consumption;
 a runtime that starts later becomes usable in the same conversation. Word probabilities
-are uncalibrated and the recognition can miss or hallucinate words. Empty recognition is unavailable,
-not proof of silence. Each run allows four recognition attempts within the shared sixteen-call
-media budget, at most 60 seconds/12,000 text characters/1,000 words per call, with a 120-second
-recognition deadline. Stop aborts the local request and withholds late results; this does not
-promise to interrupt computation inside an uncooperative sidecar.
+are uncalibrated and the recognition can miss or hallucinate words; the plain reader can invent
+words over room tone. No words is not proof of silence. Each run allows four answered speech
+reads within the shared sixteen-call media budget: a refused read, or one that finds no voice,
+uses none of the four. A read is at most 60 seconds/12,000 text characters/1,000 words/twelve
+stretches, with one 120-second deadline for the whole interval. Stop aborts the local request
+and withholds late results; this does not
+promise to interrupt computation inside an uncooperative sidecar. Every media result, and every
+refusal in a running turn, says what remains of the run's speech, media, listening and image budgets.
 
 `review_audio_content` also takes an explicit reference script and returns its exact accepted text,
 hash and the existing NFKC/whitespace wording diff. A supplied reference is not verified canon.
@@ -51,8 +64,9 @@ identity, emotion, delivery, pronunciation quality and sync remain unreviewed. T
 author subtitles or accept takes; approved timeline subtitle transcription remains a separate action.
 
 Receipts persist as `media.receipt`, replay into the bounded workspace projection, and raise
-the world reader boundary to schema 79 for metadata/frames/signal, or schema 80 for speech evidence.
-Schema-79 readers refuse worlds with the new speech receipts. Each observation records the profile and both ffprobe
+the world reader boundary to schema 79 for metadata/frames/signal, or schema 150 for speech evidence
+(80 before a transcript carried stretches; a schema-80 reader holds every transcript to one timed read).
+Older readers refuse worlds with the new speech receipts. Each observation records the profile and both ffprobe
 and ffmpeg versions, including when the host resolves them to different installations.
 A performance source names its production and immutable performance ID from list_performances,
 never the current line selection. Its landed provenance hash and contained file pass the same
@@ -76,9 +90,11 @@ explicit streams, segment offsets and budgets. Native fixture tests can be requi
 Take-review frame counts deduplicate exact source/stream/time/rendition identities across receipts.
 
 Validation of speech covers real multi-track/windowed extraction, exact derivative bytes through
-the Voxa protocol, script negation differences, malformed/unavailable responses, uncertain word
-probabilities, cancellation/staleness, MCP delivery and durable replay. Recognizer fixtures validate
-protocol and authority, not live speech recognition accuracy or perceptual audio quality.
+the Voxa protocol, stretches found over synthetic room tone, timed/text-only/silent stretches,
+script negation differences, malformed/unavailable responses, uncertain word
+probabilities, cancellation/staleness, budgets, MCP delivery and durable replay. Recognizer fixtures validate
+protocol and authority, not live speech recognition accuracy or perceptual audio quality; the
+stretch levels are starting values that no test has tried on real film sound.
 
 Optional local `listen_audio` now sends actual bounded WAV excerpts to a configured offline
 Qwen2-Audio worker, with music/emotion/voice-delivery focuses and subjective model interpretation
