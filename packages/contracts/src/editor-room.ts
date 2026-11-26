@@ -55,8 +55,7 @@ export type RoomSource = z.infer<typeof RoomSourceSchema>;
  * Lay a room. Two track ids lay one layer, alternating between them, because pieces that cross
  * cannot share a track; four lay a second layer on the last two. A track that is not on the
  * timeline is made, as an Ambience track that holds under speech (R-53); one that is there is used
- * as it is. The pieces are `clipId-1`, `clipId-2` and on, in the order they play, the first
- * layer's first.
+ * as it is. The pieces are `clipId-1`, `clipId-2` and on, in the order they start.
  *
  * `lufs` is the room as a whole, both layers together. Nothing here listens: the coordinator
  * measures each bed and fills in its length and loudness before the command is applied or a
@@ -124,12 +123,15 @@ export function roomFrames(frameRate: number): { cross: number; least: number } 
  * Where each piece of a room plays (R-61). Pure, and all of it in whole frames, so a join is
  * exactly as long on the timeline as the fades that cross it and the room ends on its last frame.
  *
- * Each bed is cut into pieces end to end. They are shuffled, then laid one after another, each
- * starting one join before the last one ends. The piece taken next is one used least so far. Of
- * those, it is one from a bed the other layer is not playing then, and from another bed than the
- * piece before it, where there is one; the other layer's rule comes first, because one bed on
- * both layers at once is the same sound twice. So nothing is heard twice while anything is
- * unheard, and what repeats in a room longer than its beds repeats as late as it can.
+ * Each bed is cut into pieces end to end. They are shuffled, then laid one after another on each
+ * layer, each starting one join before the last one ends. The two layers are laid together, in
+ * the order their pieces start, so "used" always means heard by then: laid one layer after the
+ * other, the second would take as unused a piece the first had already played, and bring it
+ * round while half the room's pieces were still unheard. The piece taken next is one used least
+ * so far. Of those, it is one from a bed the other layer is not playing then, and from another
+ * bed than the piece before it, where there is one; the other layer's rule comes first, because
+ * one bed on both layers at once is the same sound twice. So nothing is heard twice while
+ * anything is unheard, and what repeats in a room longer than its beds repeats as late as it can.
  *
  * A piece that would leave less than a piece's least for the last one is shortened to leave
  * exactly that, so no clip is ever shorter than its own two fades.
@@ -152,24 +154,25 @@ export function roomPieces(input: { sources: ReadonlyArray<{ inSec: number; outS
   for (let i = cuts.length - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); [cuts[i], cuts[j]] = [cuts[j]!, cuts[i]!]; }
 
   const pieces: RoomPiece[] = [];
-  for (const layer of (input.layers === 2 ? [0, 1] : [0]) as Array<0 | 1>) {
-    const offset = layer === 0 ? 0 : Math.round(ROOM.secondLayerOffsetSec * fps);
-    // A room too short to hold a second layer's first piece has one layer.
-    if (total - offset < least) continue;
-    let at = offset, count = 0, last = -1;
-    for (;;) {
-      const fewest = Math.min(...cuts.map(cut => cut.uses)), free = cuts.filter(cut => cut.uses === fewest);
-      const busy = (cut: { source: number; frames: number }) => pieces.some(piece => piece.layer !== layer && piece.source === cut.source && piece.startFrame < at + cut.frames && at < piece.startFrame + piece.durationFrames);
-      const pick = free.find(cut => cut.source !== last && !busy(cut)) ?? free.find(cut => !busy(cut)) ?? free.find(cut => cut.source !== last) ?? free[0]!;
-      const remaining = total - at;
-      let frames = pick.frames;
-      if (frames >= remaining) frames = remaining;
-      else { const after = remaining - (frames - cross); if (after < least) frames -= least - after; }
-      pieces.push({ layer, row: (count % 2) as 0 | 1, source: pick.source, sourceInFrames: pick.inFrames, startFrame: at, durationFrames: frames });
-      pick.uses++; last = pick.source; count++;
-      if (at + frames >= total) break;
-      at += frames - cross;
-    }
+  // Where each layer's next piece starts. A room too short to hold a second layer's first piece has one layer.
+  const layers = ((input.layers === 2 ? [0, 1] : [0]) as Array<0 | 1>).map(layer => ({ layer, at: layer === 0 ? 0 : Math.round(ROOM.secondLayerOffsetSec * fps), count: 0, last: -1 }))
+    .filter(row => total - row.at >= least);
+  for (;;) {
+    // The layer whose next piece starts soonest, the first layer where they start together.
+    const row = layers.reduce<(typeof layers)[number] | null>((first, next) => next.at < total && (first === null || next.at < first.at) ? next : first, null);
+    if (row === null) break;
+    const { layer, at, last } = row;
+    const fewest = Math.min(...cuts.map(cut => cut.uses)), free = cuts.filter(cut => cut.uses === fewest);
+    const busy = (cut: { source: number; frames: number }) => pieces.some(piece => piece.layer !== layer && piece.source === cut.source && piece.startFrame < at + cut.frames && at < piece.startFrame + piece.durationFrames);
+    const pick = free.find(cut => cut.source !== last && !busy(cut)) ?? free.find(cut => !busy(cut)) ?? free.find(cut => cut.source !== last) ?? free[0]!;
+    const remaining = total - at;
+    let frames = pick.frames;
+    if (frames >= remaining) frames = remaining;
+    else { const after = remaining - (frames - cross); if (after < least) frames -= least - after; }
+    pieces.push({ layer, row: (row.count % 2) as 0 | 1, source: pick.source, sourceInFrames: pick.inFrames, startFrame: at, durationFrames: frames });
+    pick.uses++; row.last = pick.source; row.count++;
+    // A layer that has reached the room's end is done: its next start is the end itself.
+    row.at = at + frames >= total ? total : at + frames - cross;
   }
   return pieces;
 }
@@ -199,18 +202,19 @@ export function layRoomSteps(tracks: ReadonlyArray<{ id: string; kind: string; n
     if (!window.ok) throw new Error(window.reason);
     return window;
   });
+  const pieces = roomPieces({ sources: windows, durationFrames: command.durationFrames, frameRate, layers, seed: command.seed! });
+  if (pieces.length === 0) throw new Error("None of the room's beds is long enough to cut a piece from");
+  // Counted from what was laid, not from what was asked: a room too short for its second layer is one layer, at the room's own
+  // figure and on the tracks it uses. Held to two layers' share it played 1.5 dB under what was asked, beside two empty tracks.
+  const loudness = roomLayerLufs(command.lufs, pieces.some(piece => piece.layer === 1) ? 2 : 1);
   const steps: TimelineClipCommand[] = [], level = new Map<string, number>();
   command.trackIds.forEach((id, index) => {
     const track = tracks.find(row => row.id === id);
-    if (track === undefined) {
-      steps.push({ kind: "add-track", trackId: id, trackKind: "ambience", name: `Room ${index + 1}` }, { kind: "set-track", trackId: id, ducks: false });
-      level.set(id, 0);
-    } else if (!SOUND_TRACK_KINDS.has(track.kind)) throw new Error(`${track.name ?? id} is not an audio track, and a room is sound`);
-    else level.set(id, track.levelDb ?? 0);
+    if (track !== undefined && !SOUND_TRACK_KINDS.has(track.kind)) throw new Error(`${track.name ?? id} is not an audio track, and a room is sound`);
+    if (!pieces.some(piece => piece.layer * 2 + piece.row === index)) return;
+    if (track === undefined) steps.push({ kind: "add-track", trackId: id, trackKind: "ambience", name: `Room ${index + 1}` }, { kind: "set-track", trackId: id, ducks: false });
+    level.set(id, track?.levelDb ?? 0);
   });
-  const loudness = roomLayerLufs(command.lufs, layers);
-  const pieces = roomPieces({ sources: windows, durationFrames: command.durationFrames, frameRate, layers, seed: command.seed! });
-  if (pieces.length === 0) throw new Error("None of the room's beds is long enough to cut a piece from");
   pieces.forEach((piece, index) => {
     const source = command.sources[piece.source]!, track = command.trackIds[piece.layer * 2 + piece.row]!;
     const played = Math.round((loudness[piece.layer]! - source.measuredLufs!) * 10) / 10, gainDb = Math.round((loudness[piece.layer]! - source.measuredLufs! - level.get(track)!) * 10) / 10;

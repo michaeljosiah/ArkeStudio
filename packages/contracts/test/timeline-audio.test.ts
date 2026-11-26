@@ -981,6 +981,13 @@ describe("a room laid from pieces (SPEC-038 R-61..R-64)", () => {
     const uses = new Map<number, number>();
     for (const piece of scarce) uses.set(piece.sourceInFrames, (uses.get(piece.sourceInFrames) ?? 0) + 1);
     assert.ok(Math.max(...uses.values()) - Math.min(...uses.values()) <= 1, JSON.stringify([...uses]));
+    // Two layers over beds too short for them: nothing comes round until everything has been heard once, counted as the
+    // room plays and not layer by layer. Laid a layer at a time, the second took as unused a piece the first had played.
+    const tight = roomPieces({ sources: [{ inSec: 0, outSec: 20 }, { inSec: 0, outSec: 20 }, { inSec: 0, outSec: 20 }], durationFrames: 60 * FPS, frameRate: FPS, layers: 2, seed: 42 })
+      .slice().sort((a, b) => a.startFrame - b.startFrame || a.layer - b.layer).map((piece) => `${piece.source}@${piece.sourceInFrames}`);
+    const repeat = tight.findIndex((id, index) => tight.indexOf(id) < index);
+    assert.ok(repeat > 0, "the room is longer than its beds, so something repeats");
+    assert.equal(new Set(tight.slice(0, repeat)).size, new Set(tight).size, `the first repeat is piece ${repeat + 1} of ${tight.length}, after every one of the ${new Set(tight).size} had started`);
     assert.deepEqual(roomPieces({ sources: AMPLE, durationFrames: 60 * FPS, frameRate: FPS, layers: 2, seed: 42 }), pieces, "the same seed lays the same room");
     assert.notDeepEqual(roomPieces({ sources: AMPLE, durationFrames: 60 * FPS, frameRate: FPS, layers: 2, seed: 43 }), pieces, "another seed lays another");
     // Each layer's loudness, so the two together are the room's: they add as powers.
@@ -1020,6 +1027,10 @@ describe("a room laid from pieces (SPEC-038 R-61..R-64)", () => {
     for (const clip of upper) assert.equal(clip.gainDb, clip.source.kind === "artifact" && clip.source.artifactId === BELLS ? -13.5 : -20.1, "-33, less 1.5 for the two together, less 4, less what the bed measures");
     assert.deepEqual(two.tracks.filter((track) => track.id.startsWith("tr_room")).map((track) => track.name), ["Room 1", "Room 2", "Room 3", "Room 4"]);
 
+    // A room too short to hold its second layer is one layer, at the room's own figure, and makes only the tracks it lays on.
+    const brief = valid(apply(mixed(), room({ trackIds: ["tr_room1", "tr_room2", "tr_room3", "tr_room4"], durationFrames: 4 * FPS, sources: [{ artifactId: BELLS, label: "Bells", outSec: 20, measuredLufs: -25 }] })));
+    assert.deepEqual(clipsOf(brief, "cl_room-").map((clip) => [clip.trackId, clip.durationFrames, clip.gainDb]), [["tr_room1", 4 * FPS, -8]], "-8 dB, as two track ids would give it, not -9.5");
+    assert.deepEqual(brief.tracks.filter((track) => track.id.startsWith("tr_room")).map((track) => track.id), ["tr_room1"]);
     // A track that is there is used as it is: its level is counted in each piece's gain, and nothing about it is changed.
     const kept = valid(apply(mixed(), { kind: "add-track", trackId: "tr_air", trackKind: "ambience", name: "Air" }, { kind: "set-track", trackId: "tr_air", levelDb: -6 }, room({ trackIds: ["tr_air", "tr_room2"] })));
     const air = kept.tracks.find((track) => track.id === "tr_air")!;
