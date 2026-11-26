@@ -51,8 +51,15 @@ const grooveAt = (sec: number) => {
   return .8 * Math.exp(-sinceBeat / .04) * Math.sin(2 * Math.PI * 60 * sinceBeat) + .4 * Math.exp(-sinceBeat / .003) * Math.sin(1e5 * sec * sec);
 };
 const stemAt = (sec: number) => sec >= 2 && sec < 9 || sec >= 14 && sec < 20 ? .3 * Math.sin(2 * Math.PI * 220 * sec) : 0;
-/** A 20 s film cut at 3.2, 7.5 and 12.1 s, for a contact sheet found in the picture; and a 6 s export of a two-clip timeline. */
-const FILM = Buffer.from("FILM fixture"), EXPORT = Buffer.from("EXPORT fixture"), FILM_CUTS = [3.2, 7.5, 12.1];
+/**
+ * A 20 s film, for a contact sheet found in the picture, and a 6 s export of a two-clip timeline.
+ * The film's shots change on its own 30 fps frames 97, 225 and 362: 3.233, 7.5 and 12.067 s. Read
+ * ten frames a second they are found at 3.2, 7.5 and 12.1 s, because the resampler's frame for a
+ * tenth is the film's last frame before a twentieth of a second past it. So the first cut falls a
+ * frame after the time it is found at, and the last a frame before.
+ */
+const FILM = Buffer.from("FILM fixture"), EXPORT = Buffer.from("EXPORT fixture"), FILM_CUT_FRAMES = [97, 225, 362];
+const filmFrame = (frame: number, pixels: number) => new Uint8Array(pixels).fill(40 + 50 * FILM_CUT_FRAMES.filter(cut => cut <= frame).length + frame % 3);
 const filmInventory = (durationSec: number): AgentMediaInventory => ({ durationSec, streams: [{ index: 0, kind: "video", codec: "fixture", width: 1280, height: 720, frameRate: "30/1", durationSec, startTimeSec: 0 }] });
 /** A second, sharper 1080p version of the take for clip_quality's comparison. */
 const TAKE2 = Buffer.from("TAKE2 fixture");
@@ -127,16 +134,20 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
       tile: async (_path, _stream, atSec, size) => { calls.push({ what: "tile", startSec: atSec, endSec: atSec }); return new Uint8Array(size.width * size.height * 4).fill(Math.round(atSec * 10) % 256); },
       grayFrames: async (path, stream, startSec, endSec, frameOptions) => {
         if (frameOptions.fps === 10 && await which(path) === "film") {
-          // Each shot a flat grey of its own, with a little movement inside it.
+          // Each shot a flat grey of its own, with a little movement inside it; each tenth shows the film's last frame before a twentieth past it.
           calls.push({ what: "film@10", startSec, endSec });
-          return { frames: Array.from({ length: Math.round((endSec - startSec) * 10) }, (_, k) => {
-            const t = startSec + k / 10, shot = FILM_CUTS.filter(cut => cut <= t + 1e-9).length;
-            return new Uint8Array(64 * 36).fill(40 + 50 * shot + (k % 3));
-          }), width: 64, height: 36, fps: 10 };
+          return { frames: Array.from({ length: Math.round((endSec - startSec) * 10) }, (_, k) => filmFrame(Math.ceil((startSec + k / 10 + .05) * 30 - 1e-6) - 1, 64 * 36)),
+            width: 64, height: 36, fps: 10 };
         }
         if (frameOptions.fps === null) {
           const kind = await which(path), size = frameOptions.size ?? (() => { const g = regionGeometry(stream.width!, stream.height!, frameOptions.region, frameOptions.edge); return { width: g.outWidth, height: g.outHeight }; })();
           calls.push({ what: `${kind}@${size.width}x${size.height}`, startSec, endSec, region: frameOptions.region });
+          if (kind === "film") {
+            // The film's own frames in the interval, each at its own time from the read's start.
+            const first = Math.ceil(startSec * 30 - 1e-6), count = Math.ceil(endSec * 30 - 1e-6) - first;
+            const frames = Array.from({ length: count }, (_, k) => filmFrame(first + k, size.width * size.height));
+            return { frames, width: size.width, height: size.height, fps: 30, ...(frameOptions.times ? { times: frames.map((_, k) => (first + k) / 30 - startSec) } : {}) };
+          }
           const count = Math.round((endSec - startSec) * 30), first = Math.round(startSec * 30);
           const frames = Array.from({ length: count }, (_, k) => {
             const n = first + k, shown = Math.floor(n * 24 / 30) * 2.5;
@@ -293,12 +304,17 @@ test("cut_contact_sheet with seams: the frame either side of each cut, three cut
   const h = await harness();
   const outcome = await h.retrieval.call(h.lease.token, "cut_contact_sheet", { source: h.film, seams: true });
   const sheet = outcome.receipt.media!.sheet!;
-  // The first frame after is the one at the cut. A cut found in the picture is the first of ten frames a second to show
-  // the new shot, so the frame before it is taken a tenth of a second and one of this 30 fps film's frames earlier.
-  assert.deepEqual(sheet.seams, [{ shot: 2, atSec: 3.2, beforeSec: 3.067, afterSec: 3.2 }, { shot: 3, atSec: 7.5, beforeSec: 7.367, afterSec: 7.5 }, { shot: 4, atSec: 12.1, beforeSec: 11.967, afterSec: 12.1 }]);
+  /*
+   * Each cut is placed on the film's own frames: the first frame of the new shot and the frame
+   * before it. Found ten frames a second they read 3.2, 7.5 and 12.1 s; the film's frame at 3.2 s
+   * is still the old shot, and its frame at 12.1 s is the new shot's second (codex on PR 3330).
+   */
+  assert.deepEqual(sheet.seams, [{ shot: 2, atSec: 3.233, beforeSec: 3.2, afterSec: 3.233 }, { shot: 3, atSec: 7.5, beforeSec: 7.467, afterSec: 7.5 }, { shot: 4, atSec: 12.067, beforeSec: 12.033, afterSec: 12.067 }]);
+  // The frames around each found time are read small, every one of them, to find the step that is the cut.
+  assert.deepEqual(h.calls.filter(call => call.what === "film@64x36").map(call => [Math.round(call.startSec * 10) / 10, Math.round(call.endSec * 10) / 10]).sort((a, b) => a[0]! - b[0]!), [[2.9, 3.3], [7.2, 7.6], [11.8, 12.2]]);
   // Each is asked for a hair before its frame's time: the decoder gives the next frame at or after the time it is asked for.
-  assert.deepEqual(h.calls.filter(call => call.what === "tile").map(call => Math.round(call.startSec * 1000) / 1000).sort((a, b) => a - b), [3.066, 3.199, 7.366, 7.499, 11.966, 12.099]);
-  assert.equal(sheet.shots.length, 4, "the shots' table rides with the cuts");
+  assert.deepEqual(h.calls.filter(call => call.what === "tile").map(call => Math.round(call.startSec * 1000) / 1000).sort((a, b) => a - b), [3.199, 3.232, 7.466, 7.499, 12.032, 12.066]);
+  assert.deepEqual(sheet.shots.map(shot => [shot.startSec, shot.endSec]), [[0, 3.233], [3.233, 7.5], [7.5, 12.067], [12.067, 20]], "the shots' table rides with the cuts, on the same frames");
   assert.deepEqual(sheet.pages.map(page => [page.firstShot, page.lastShot, page.image.width]), [[2, 4, 1196]]);
   assert.equal(outcome.imageContent!.length, 1, "one image of the budget, however many cuts it holds");
   assert.match(outcome.receipt.media!.limitations.join(" "), /Two still frames a cut/);
@@ -309,11 +325,14 @@ test("cut_contact_sheet with seams: the frame either side of each cut, three cut
 });
 
 /** A two-clip cut of the fixture's production, both clips' own sound muted under the mix, and an export stamped with that cut. */
-async function cutAndExport(h: Awaited<ReturnType<typeof harness>>, id: string, options: { label?: string; bed?: boolean } = {}) {
+async function cutAndExport(h: Awaited<ReturnType<typeof harness>>, id: string, options: { label?: string; bed?: boolean; over?: boolean } = {}) {
   const production = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
   // A bed that runs on past the picture: the export trims sound to the picture's end.
   const bed: TimelineClipCommand[] = options.bed ? [{ kind: "add-track", trackId: "tr_bed", trackKind: "audio", name: "Bed" },
     { kind: "place", trackId: "tr_bed", clip: { id: "cl_bed", startFrame: 0, durationFrames: 400, sourceInFrames: 0, source: { kind: "artifact", artifactId: h.song.id, label: "Bed" } } }] : [];
+  // A second Picture track that is shown: its clip starts with the opening and lies over it.
+  const over: TimelineClipCommand[] = options.over ? [{ kind: "add-track", trackId: "tr_over", trackKind: "picture", name: "Over" },
+    { kind: "place", trackId: "tr_over", clip: { id: "cl_over", startFrame: 0, durationFrames: 48, sourceInFrames: 0, audio: "mute", source: { kind: "artifact", artifactId: h.take2Id, label: "Over the opening" } } }] : [];
   await applyHumanTimelineCommand(h.store, "saltlight", { kind: "commands", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production), commands: [
     { kind: "place", trackId: "tr_picture", clip: { id: "cl_open", startFrame: 0, durationFrames: 96, sourceInFrames: 0, audio: "mute", source: { kind: "artifact", artifactId: h.takeId, label: options.label ?? "The opening" } } },
     ...bed,
@@ -321,7 +340,8 @@ async function cutAndExport(h: Awaited<ReturnType<typeof harness>>, id: string, 
     // A muted upper track puts nothing in the export, so its clip is no shot of the sheet or the review.
     { kind: "add-track", trackId: "tr_hidden", trackKind: "picture", name: "Hidden" },
     { kind: "place", trackId: "tr_hidden", clip: { id: "cl_hidden", startFrame: 24, durationFrames: 24, sourceInFrames: 0, source: { kind: "artifact", artifactId: h.take2Id, label: "Not shown" } } },
-    { kind: "set-track", trackId: "tr_hidden", muted: true }] });
+    { kind: "set-track", trackId: "tr_hidden", muted: true },
+    ...over] });
   const current = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
   assert.equal(current.timeline?.status, "ready");
   await mkdir(join(h.store.dir, "exports"), { recursive: true }); await writeFile(join(h.store.dir, "exports", `${id}.mp4`), EXPORT);
@@ -345,6 +365,24 @@ test("cut_contact_sheet on an export whose production still holds its cut: the t
   await recordCompletedExport(h.store, { ...stamp, id: "ex_old", output: "exports/ex_old.mp4", sourceFingerprint: "production-export-v1:an-older-cut" });
   const old = await h.retrieval.call(h.lease.token, "cut_contact_sheet", { source: { kind: "export", exportId: "ex_old" } });
   assert.equal(old.receipt.media!.sheet!.shotsFrom, "picture");
+});
+
+test("a page of cuts of an export whose picture clips overlap finds its cuts in the picture: two clips that start together are no cut", async () => {
+  const h = await harness(); await cutAndExport(h, "ex_over", { over: true });
+  const source = { kind: "export" as const, exportId: "ex_over" };
+  // The sheet of shots still lists every clip the export shows, the upper track's with the base's.
+  const plain = (await h.retrieval.call(h.lease.token, "cut_contact_sheet", { source })).receipt.media!.sheet!;
+  assert.equal(plain.shotsFrom, "timeline"); assert.deepEqual(plain.shots.map(shot => [shot.clipId, shot.startSec]), [["cl_over", 0], ["cl_open", 0], ["cl_close", 4]]);
+  /*
+   * Its page of cuts cannot: "cl_open" would be a cut at 0 s whose two frames are one time, which
+   * the receipt's schema refused once every frame had been decoded (codex on PR 3330). The cuts
+   * are found in the film's own picture instead, and each is placed on its frames.
+   */
+  const outcome = await h.retrieval.call(h.lease.token, "cut_contact_sheet", { source, seams: true });
+  const sheet = outcome.receipt.media!.sheet!;
+  assert.equal(sheet.shotsFrom, "picture"); assert.equal(sheet.productionId, null); assert.equal(sheet.seams!.length, sheet.shots.length - 1);
+  assert.ok(sheet.seams!.every(seam => seam.beforeSec < seam.atSec && seam.afterSec === seam.atSec), JSON.stringify(sheet.seams));
+  assert.equal(WorldChatCheckReceiptSchema.safeParse(outcome.receipt).success, true);
 });
 
 test("review_export: length against the cut, format, loudness, the shots that repeat frames and the clip 120 ms late, in findings; schema 144", async () => {
