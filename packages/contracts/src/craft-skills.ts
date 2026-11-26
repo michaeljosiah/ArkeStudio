@@ -107,8 +107,11 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // in the edit first.
     // v6: the listening before a cut is shown is one call, `review_export`, which hears the film against its lines
     // and names where the room drops (2026-11-26: transcribing a film a minute at a time was refused on film sound).
+    // v7: the commands the Cut now has for a room, named where the craft asks for them: a track that holds under
+    // speech, an even-power join, a gate on a take's sound, every line at one loudness, a room laid from pieces
+    // (2026-11-26: a scene's sound was mixed by a script outside the Studio because the Cut could do none of them).
     id: "sound-and-pace",
-    version: 6,
+    version: 7,
     title: "Sound and pace in the cut",
     when: "before you change the Cut's music, mix or effects, or where a clip starts and ends, and before you show anyone a cut or an export",
     bodyPath: "sound-and-pace.md",
