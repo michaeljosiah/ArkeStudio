@@ -26,6 +26,29 @@ export interface FfmpegRunner {
   run(args: string[], onProgress: (percent: number) => void, signal: AbortSignal, onSeconds?: (seconds: number) => void): Promise<void>;
 }
 
+/**
+ * Past this many characters of arguments, an encode's filter graph goes to FFmpeg in a file.
+ * Windows gives a process 32,767 characters in all, counting the program's own path and every
+ * quote and space. A cut of one scene reaches that long before it is large: each sound is a chain
+ * in the graph, a gated take's chain spells every stretch it keeps, and a room laid from pieces
+ * is a chain a piece. The effects export has always written its graph to a file for this reason;
+ * the plain export did not, and failed before it started (`spawn ENAMETOOLONG`).
+ */
+export const INLINE_ARGUMENTS_MOST = 24_000;
+
+/**
+ * The arguments as the encoder should get them: as they were built while they are short, and
+ * with the graph in `graphFile` once they are long and the runner can say which option reads
+ * one. The graph is local job data, never shell code. The caller removes the file.
+ */
+export async function graphInFile(args: string[], runner: Pick<FfmpegRunner, "graphFileOption">, graphFile: string, signal: AbortSignal): Promise<string[]> {
+  const at = args.indexOf("-filter_complex");
+  if (at < 0 || at + 1 >= args.length || !runner.graphFileOption || args.reduce((sum, arg) => sum + arg.length + 3, 0) <= INLINE_ARGUMENTS_MOST) return args;
+  const option = await runner.graphFileOption(signal);
+  await writeFile(toExtendedLength(graphFile), args[at + 1]!, "utf8");
+  return [...args.slice(0, at), option, graphFile, ...args.slice(at + 2)];
+}
+
 export interface ExportHandle {
   id: string;
   cancel(): void;
@@ -86,6 +109,8 @@ export function runExport(
   const output = join(worldDir, "exports", outName);
   const sidecarStage = sidecar === undefined ? null : join(worldDir, ".cache", "exports", `${id}-${sidecar.name}`);
   const sidecarOutput = sidecar === undefined ? null : join(worldDir, "exports", sidecar.name);
+  // Where a long graph waits while the encoder reads it; gone with the stage, whatever the encode did.
+  const graphStage = join(worldDir, ".cache", "exports", `${id}.ffgraph`);
   const done = (async () => {
     try {
       await lifecycle?.prepare?.();
@@ -96,7 +121,7 @@ export function runExport(
       if (controller.signal.aborted) throw new Error("cancelled before start");
       if (sidecar !== undefined && sidecarStage !== null) await writeFile(toExtendedLength(sidecarStage), sidecar.text, "utf8");
       if (lifecycle) await lifecycle.render(stage, controller.signal);
-      else await runner.run(buildArgs(stage), onProgress, controller.signal);
+      else await runner.run(await graphInFile(buildArgs(stage), runner, graphStage, controller.signal), onProgress, controller.signal);
       if (controller.signal.aborted) throw new Error("cancelled");
       const publish = async () => {
       await rename(toExtendedLength(stage), toExtendedLength(output));
@@ -125,6 +150,7 @@ export function runExport(
       return { status: "failed" as const, error: err instanceof Error ? err.message : String(err) };
     } finally {
       lifecycle?.signal.removeEventListener("abort", close);
+      if (!lifecycle) await rm(toExtendedLength(graphStage), { force: true }).catch(() => {});
       await lifecycle?.cleanup().catch(() => {});
     }
   })();
