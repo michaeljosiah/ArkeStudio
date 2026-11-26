@@ -127,7 +127,7 @@ export class ConversationMediaInspection {
       // A run that has stopped or ended has nothing left to plan with.
       if (this.signals.get(lease.runId)?.aborted !== false) throw refusal;
       const left = this.remaining(lease.runId);
-      throw new RetrievalError(refusal.kind, `${refusal.message} Left this run: ${left.speechCalls} speech, ${left.mediaCalls} media and ${left.listeningCalls} listening calls, ${left.images} images.`);
+      throw new RetrievalError(refusal.kind, `${refusal.message} Left in this run: ${left.speechCalls} speech, ${left.mediaCalls} media and ${left.listeningCalls} listening calls, ${left.images} images.`);
     });
     this.tail = result.then(() => {}, () => {}); return result;
   }

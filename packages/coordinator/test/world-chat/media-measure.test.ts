@@ -293,7 +293,7 @@ test("a contact sheet with no image left for its pages is refused before the fil
   const h = await harness();
   for (let i = 0; i < 3; i++) assert.equal((await h.retrieval.call(h.lease.token, "sample_video", { source: h.take, range: { startSec: 0, endSec: 1 }, count: 8 })).receipt.status, "complete");
   const outcome = await h.retrieval.call(h.lease.token, "cut_contact_sheet", { source: h.film });
-  assert.deepEqual(outcome.result, { unavailable: true, reason: "cut_contact_sheet: this run has reached its 24-image inspection limit. Left this run: 4 speech, 13 media and 2 listening calls, 0 images." });
+  assert.deepEqual(outcome.result, { unavailable: true, reason: "cut_contact_sheet: this run has reached its 24-image inspection limit. Left in this run: 4 speech, 13 media and 2 listening calls, 0 images." });
   assert.deepEqual(h.calls.filter(call => call.what === "tile" || call.what === "film@10"), []);
 });
 

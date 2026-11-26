@@ -45,7 +45,7 @@ const filmSound = (lines: Array<[number, number]>) => (start: number, end: numbe
 };
 const unplaced = () => new Error("a word has no usable timing or an unresolved pause");
 /** What a refusal says is left of the run's budgets. */
-const left = (speech: number, media: number, listening = 2, images = 24) => ` Left this run: ${speech} speech, ${media} media and ${listening} listening calls, ${images} images.`;
+const left = (speech: number, media: number, listening = 2, images = 24) => ` Left in this run: ${speech} speech, ${media} media and ${listening} listening calls, ${images} images.`;
 async function harness(options: { sourceBytes?: Uint8Array; listener?: AgentAudioListener; speech?: AgentSpeechReader; speechText?: AgentSpeechTextReader; sound?: (start: number, end: number) => Float32Array; speechReady?: (signal: AbortSignal) => Promise<boolean>; local?: boolean; allowed?: boolean; supported?: boolean; inventory?: AgentMediaInventory; missing?: boolean; duringProbe?: () => Promise<void>; duringFrame?: () => Promise<void>; duringPublish?: () => Promise<void> } = {}) {
   const bytes = options.sourceBytes ?? png;
   const dir = await makeTempWorld(), store = await WorldStore.open(dir); closeOnCleanup(() => store.close());
@@ -99,7 +99,7 @@ test("a safe Voxa refusal after successful decode stays a speech refusal and spe
       assert.deepEqual(outcome.result, { unavailable: true, reason: "Local speech recognition unavailable: the recognizer grouped multiple words under one timestamp." + left(4, 15 - i) });
     }
     assert.equal(recognized, 16); assert.equal(h.counts().snapshots, 16);
-    await assert.rejects(h.retrieval.call(h.lease.token, "transcribe_audio", args), /media inspection call budget\. Left this run: 4 speech, 0 media/);
+    await assert.rejects(h.retrieval.call(h.lease.token, "transcribe_audio", args), /media inspection call budget\. Left in this run: 4 speech, 0 media/);
     assert.equal(h.store.getBundle().meta.schemaVersion, before); assert.equal((await h.loaded())!.mediaReceipts, undefined);
   } finally { client.dispose(); }
 });
@@ -115,7 +115,7 @@ test("four answered speech reads are the budget, and the refusals between them t
     assert.equal(answered.receipt.status, "complete");
     assert.deepEqual((answered.result as { remaining: unknown }).remaining, { speechCalls: 3 - i, mediaCalls: 14 - 2 * i, listeningCalls: 2, images: 24 });
   }
-  await assert.rejects(h.retrieval.call(h.lease.token, "transcribe_audio", args), /four speech recognition calls\. Left this run: 0 speech, 8 media/);
+  await assert.rejects(h.retrieval.call(h.lease.token, "transcribe_audio", args), /four speech recognition calls\. Left in this run: 0 speech, 8 media/);
   assert.equal(reads, 8); assert.equal((await h.loaded())!.mediaReceipts!.length, 4);
 });
 
