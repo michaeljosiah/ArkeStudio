@@ -54,7 +54,10 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // table looked over his shoulder from behind him).
     // v13: let the body play a mocking line word by word while the mouth keeps speaking (the owner, 2026-11-26,
     // on shot 20: the body movement "enhanced the mocking making this feel more human").
-    version: 13,
+    // v14: general craft only, nothing of any one story: no production, character, line or shot (the owner,
+    // 2026-11-26). A performance's movements are tied to its words in general terms, and a take that fails at one
+    // point is fixed in the edit before it is made again.
+    version: 14,
     title: "Continuity across cuts",
     when: "before you plan, review or change a shot beside one that has a take, and before you review a cut",
     bodyPath: "continuity-across-cuts.md",
@@ -76,8 +79,10 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // v7: quote a spoken line whole, a silence cut into the voice line holds a wordless beat, and a take's sound
     // may carry music (the owner's notes, 2026-11-24: shot 4 invented words until its line was quoted; the goat's
     // face got its second from a 1.25 s pause; the lull's take had the club's drum under it).
+    // v8: general craft only, nothing of any one story: no production, character, line or shot (the owner,
+    // 2026-11-26). A mouth with no line is cut out in the edit before a take is made again.
     id: "local-h3-video",
-    version: 7,
+    version: 8,
     title: "Writing for local H3 Reference Video",
     when: "before you write or change a shot's prompt for either local H3 video route (Reference Video, or the first-frame H3 Video)",
     bodyPath: "local-h3-video.md",
@@ -94,8 +99,11 @@ export const CRAFT_SKILLS: readonly CraftSkill[] = [
     // room's level shot by shot, and each version made from the last one accepted (the owner, 2026-11-26: a cut
     // sent with shots 19 and 20 silent, their lines over shot 9, and the previous day's sound notes undone), and
     // a room tone that never repeats (the same day: a 6 s crowd clip looped nine times, "the same laughing").
+    // v5: general craft only, nothing of any one story: no production, character, line or shot (the owner,
+    // 2026-11-26). Check that a take says every word laid over it (a laid line's end played over a laugh), and fix
+    // in the edit first.
     id: "sound-and-pace",
-    version: 4,
+    version: 5,
     title: "Sound and pace in the cut",
     when: "before you change the Cut's music, mix or effects, or where a clip starts and ends, and before you show anyone a cut or an export",
     bodyPath: "sound-and-pace.md",

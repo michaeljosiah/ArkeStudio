@@ -6,8 +6,8 @@ mix or effects, or where a clip starts and ends, and before you show anyone a cu
 ## 1 · Music the room plays
 
 - **Music playing in the place itself is part of the room**: a club, a party, a car radio. Keep it under the
-  whole scene, from the first frame to the last, at one low level: about 8 to 10 LU under the voices. On the
-  film, the voices sat about -20 LUFS and the club's music about -29.
+  whole scene, from the first frame to the last, at one low level: about 8 to 10 LU under the voices, for
+  example voices about -20 LUFS and the room's music about -29.
 - **Turn ducking off for it.** Ducking drops the music under each line and lifts it between lines, so the
   room seems to breathe in and out. Set the mix's ducking to 0 dB and lower the music clip's own gain
   instead. Ducking is set for the whole Cut: if score elsewhere needs it, say so and ask.
@@ -46,36 +46,37 @@ A line need not stop at its own cut. The voice sits on its own track: trim the p
   the beat the moment needs. A pause before a deadpan answer is a choice; a model's run-up is not.
 - **Cut straight on the beats that land**: a punchline, a name, a look held a beat too long.
 
-On the film (2026-11-25), no line crossed a cut. Every shot waited 0.5 to 1.7 s before its line and up to 2.4 s
-after it, and the scene played as stitched. Splitting the cuts and trimming the waits took about 20 s out of
-each two-minute part, and no line was lost.
+A conversation cut with no line crossing a cut, and every take's run-up and tail left in, plays as stitched.
+Splitting the cuts and trimming the waits can take a sixth out of a scene without losing a line.
 
 ## 5 · One room under every take
 
 - **Each take makes its own room tone, and it changes at every cut.** Lay one room tone for each place
-  under the whole of it: the club, the car, the house.
+  under the whole of it.
 - **Keep a take's own sound only for what it does well**: its voice, and an action sound that lands on its
   action and stands clear of its room by about 10 dB. Gate the rest of it away, so the shared room runs
   beneath.
 - **Lay an effect where the take's own sound is faint or off its action.** Place it by its peak on the
   frame where the thing happens. Find that frame in the pictures, not in the sound.
-- **Measure a made room tone before you use it.** One came back silent, and one made for a club can carry
-  words: check its level and transcribe it.
+- **Measure a made room tone before you use it.** One can come back silent, and one made for a crowd can
+  carry words: check its level and transcribe it.
 - **Never let a room tone repeat.** A looped room tone brings back every laugh and every glass on the same
   beat, and the ear finds it within a minute. Make several takes of the place's sound, from different
   corners and distances. Lay pieces of a few seconds from them end to end, each overlapping the last by
   about a second with fades, each piece used once in the scene. Two such rows, a few seconds apart, the
-  second a little quieter, make a fuller room. On the film, a 6-second crowd clip looped nine times under
-  53 seconds, and the owner heard "the same laughing repeating over and over".
+  second a little quieter, make a fuller room.
 
 ## 6 · A laid line sits on the take's voice
 
 - **When a take speaks the line in its own reading** and the recorded line is laid instead, place the
   recording by the take's voice, not by where it was sent. The lips follow the take's voice. Compare the
-  two with `transcribe_audio` word times. On the film, five such lines sat 60 to 120 ms off, and one
-  drifted.
+  two with `transcribe_audio` word times; they can sit a tenth of a second apart, and drift.
+- **Check that the take says every word you lay over it.** Set the take's own words beside the laid line's.
+  A take can stop speaking before its line ends: break into a laugh, take a sip, look away. The words it
+  never said then play over a mouth that is not saying them. Cut to the listener for those words (an
+  L-cut), and keep the speaker's face only while their mouth says the line.
 - **Check the sync at the end of a cut as well as at its start.** Drift adds up cut by cut: a picture one
-  frame short at each cut put the voices 0.7 s off the lips by the end of a two-minute part.
+  frame short at each cut puts the voices most of a second off the lips by the end of a two-minute scene.
 
 ## 7 · Watch and listen before you show it
 
@@ -88,15 +89,16 @@ A cut is not ready because it was built. Play it through and check it before any
   A line heard anywhere else, or twice, means a sound has lost its place in the mix.
 - **Look at the mouths while the lines play.** `sample_video` with a region round the mouth, at each line's
   words and in the silences between them, wherever the speaker's own face is on screen. A speaker's mouth
-  that moves with nothing heard, and the speaker's own shut mouth on screen while their line plays, are the
-  same fault. A listener's still face under the end of a split line is not.
+  that moves with nothing heard, and the speaker's own shut or laughing mouth on screen while their words
+  play, are the same fault. A listener's still face under the end of a split line is not.
 - **Measure the room shot by shot.** The quiet between lines should stay within about 3 dB from shot to shot.
-  A song that reaches its own ending, or a bed that stops, drops the room under the talk. Bring the next song
-  in under the ending, as the DJ would.
+  A song that reaches its own ending, or a bed that stops, drops the room under the talk. Bring the next
+  piece of the room's music in under the ending.
 - **Make each version from the last one that was shown and accepted.** Every note already given then stays
   done. Before you show a new version, check the notes that earlier versions answered.
+- **Fix what you find in the edit first**: trim, move a cut, cut to the listener, or use another take's part
+  (the continuity skill's section 6). Make a take again only when no cut can hide the fault.
 
-On the film (2026-11-26), a cut of shots 9 to 20 was built from an older list than the last one shown. It lost
-the club's room tone, the gated takes and the effects the owner had asked for the day before. Three sounds also
-lost their place: shots 19 and 20 moved their mouths in silence while their lines played over shot 9. The owner
-heard it first: "Watch and listen to this before sending this to me."
+A cut built from an older version can quietly lose notes already answered: its room tone, gated takes and
+effects. A sound that loses its place in the mix can play a line over the wrong shot while the right shot's
+mouth moves in silence. Both are found only by watching and listening to the whole cut.
