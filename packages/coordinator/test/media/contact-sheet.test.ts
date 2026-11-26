@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AGENT_SHEET_LIMITS, AgentContactSheetSchema } from "@arke-studio/contracts";
 import { setTimeout as delay } from "node:timers/promises";
-import { composeSheetPage, findCuts, tileLabel } from "../../src/media/contact-sheet.js";
+import { composeSeamPage, composeSheetPage, findCuts, tileLabel } from "../../src/media/contact-sheet.js";
 import { inParallel } from "../../src/world-chat/media-measure.js";
 
 test("the decode pool stops at the first failure, tells the decodes in flight to stop, and answers only once they have", async () => {
@@ -48,6 +48,21 @@ test("a page lays tiles five to a row with their labels drawn beneath", () => {
   assert.ok(lit > 40, String(lit));
 });
 
+test("a page of cuts lays the frame before and the frame after each cut side by side, two cuts to a row", () => {
+  const { tileWidth: w, tileHeight: h } = AGENT_SHEET_LIMITS;
+  const tile = (level: number) => new Uint8Array(w * h * 4).fill(level);
+  const page = composeSeamPage(Array.from({ length: 3 }, (_, i) => ({ before: tile(90), after: tile(210), label: tileLabel(i + 2, 4 + i * 3) })));
+  assert.equal(page.width, 8 * 2 + 2 * (2 * w + 2) + 24); assert.equal(page.height, 2 * (h + 22) + 3 * 8);
+  const at = (x: number, y: number) => page.pixels[(y * page.width + x) * 4];
+  // The first cut: its outgoing frame, the join, its incoming frame; then the gap to the second cut.
+  assert.deepEqual([at(8, 8), at(8 + w - 1, 8), at(8 + w, 8), at(8 + w + 2, 8), at(8 + 2 * w + 1, 8), at(8 + 2 * w + 2, 8)], [90, 90, 24, 210, 210, 24]);
+  assert.equal(at(8 + 2 * w + 2 + 24, 8), 90, "the second cut's outgoing frame");
+  assert.equal(at(8, 8 + h + 22 + 8), 90, "the third cut starts the next row");
+  let lit = 0;
+  for (let y = 8 + h + 4; y < 8 + h + 18; y++) for (let x = 10; x < 120; x++) if (at(x, y)! > 220) lit++;
+  assert.ok(lit > 40, "its number and time are drawn beneath");
+});
+
 test("the sheet schema numbers shots in order and lays every shot on one page", () => {
   const image = { id: "x", label: "Contact sheet", sourceHash: `sha256:${"a".repeat(64)}`, renditionHash: `sha256:${"b".repeat(64)}`, width: 1488, height: 1160, posterOnly: true };
   const shots = [{ number: 1, startSec: 0, endSec: 4, frameSec: 2, label: "Still", clipId: "cl_still" }, { number: 2, startSec: 4, endSec: 6, frameSec: 5, label: "Film", clipId: "cl_film" }];
@@ -57,4 +72,10 @@ test("the sheet schema numbers shots in order and lays every shot on one page", 
   assert.equal(AgentContactSheetSchema.safeParse({ ...sheet, pages: [{ image, firstShot: 1, lastShot: 1 }] }).success, false);
   assert.equal(AgentContactSheetSchema.safeParse({ ...sheet, shotsFrom: "picture" }).success, false);
   assert.equal(AgentContactSheetSchema.safeParse({ ...sheet, shots: [{ ...shots[0]!, frameSec: 4 }, shots[1]] }).success, false);
+  // A page of cuts: one cut for each shot after the first, a frame from either side of it, its pages from shot 2.
+  const cuts = { ...sheet, seams: [{ shot: 2, atSec: 4, beforeSec: 3.96, afterSec: 4.01 }], pages: [{ image, firstShot: 2, lastShot: 2 }] };
+  assert.equal(AgentContactSheetSchema.safeParse(cuts).success, true);
+  assert.equal(AgentContactSheetSchema.safeParse({ ...cuts, pages: sheet.pages }).success, false, "its pages do not start at shot 1");
+  assert.equal(AgentContactSheetSchema.safeParse({ ...cuts, seams: [{ shot: 2, atSec: 4, beforeSec: 4, afterSec: 4.01 }] }).success, false, "the frame before is before the cut");
+  assert.equal(AgentContactSheetSchema.safeParse({ ...cuts, seams: [{ shot: 2, atSec: 3, beforeSec: 2.9, afterSec: 3.01 }] }).success, false, "the cut is where the shot starts");
 });

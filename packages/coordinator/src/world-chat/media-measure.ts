@@ -4,7 +4,7 @@ import { AGENT_QUALITY_LIMITS, AGENT_REVIEW_LIMITS, AGENT_SHEET_LIMITS, AGENT_SY
 import { hashContainedProductionMedia, withContainedProductionMedia } from "../world/reference-files.js";
 import { parseStreamRate, regionGeometry, type AgentMediaTools } from "../media/agent-media-tools.js";
 import { cadenceFromSteps, droppedFromSteps, measureCadence, measureDetail } from "../media/clip-quality.js";
-import { composeSheetPage, findCuts, tileLabel } from "../media/contact-sheet.js";
+import { composeSeamPage, composeSheetPage, findCuts, tileLabel } from "../media/contact-sheet.js";
 import { encodePngAsync } from "../references/png-runner.js";
 import { readCompletedExports } from "../productions/export-receipts.js";
 import type { WorldStore } from "../world/store.js";
@@ -191,31 +191,103 @@ async function pictureShots(tools: AgentMediaTools, film: { path: string; stream
   return bounds.slice(1).map((end, i) => ({ startSec: bounds[i]!, endSec: end, label: null, clipId: null }));
 }
 
+/** How far before and after a found cut's time the film's own frames are read to place it on them. */
+const FOUND_CUT_BEFORE_SEC = .3, FOUND_CUT_AFTER_SEC = .1;
+
+/**
+ * A cut found in the picture, placed on the film's own frames: the time of the frame it leads into
+ * and of the frame before that. It was found ten frames a second, and the resampler's frame for a
+ * tenth is the film's last frame up to a twentieth of a second past it, so the new shot's first
+ * frame lies a frame or more either side of the time found. Asked for that time, the decoder gave
+ * the old shot on both sides of a cut that fell just after it, and the page hid the cut it was
+ * made to show (codex on PR 3330). The frames around the time are read small, every one of them,
+ * and the cut is the largest step between two: found cuts are half a second apart at least, so
+ * no other lies in the read.
+ */
+async function foundCutFrames(grayFrames: NonNullable<AgentMediaTools["grayFrames"]>, film: { path: string; stream: Stream; startSec: number; endSec: number; viewStartSec: number },
+  atSec: number, signal: AbortSignal): Promise<{ beforeSec: number; atSec: number }> {
+  const from = film.viewStartSec, low = Math.max(from, atSec - FOUND_CUT_BEFORE_SEC), high = Math.min(from + (film.endSec - film.startSec), atSec + FOUND_CUT_AFTER_SEC);
+  const read = await grayFrames(film.path, film.stream, film.startSec + (low - from), film.startSec + (high - from), { fps: null, edge: 64, times: true }, signal);
+  const steps = frameMotion(read.frames), times = read.times;
+  if (!times || times.length !== read.frames.length || !steps.length) throw new RetrievalError("unavailable", "The film's frames carry no times to place its cuts on.");
+  let most = 0;
+  for (let i = 1; i < steps.length; i++) if (steps[i]! > steps[most]!) most = i;
+  return { beforeSec: low + times[most]!, atSec: low + times[most + 1]! };
+}
+
 /**
  * The shots of a window of a film and a sheet of their frames. `film` times are the decoder's;
  * shots are on the source's own clock (its view), as every receipt's times are.
  */
 export async function contactSheetInSnapshot(store: WorldStore, tools: AgentMediaTools, signal: AbortSignal,
-  film: { path: string; stream: Stream; startSec: number; endSec: number; viewStartSec: number }, source: AgentMediaSource):
+  film: { path: string; stream: Stream; startSec: number; endSec: number; viewStartSec: number }, source: AgentMediaSource, seams = false):
   Promise<{ sheet: Omit<AgentContactSheet, "pages">; pages: Array<{ bytes: Uint8Array; firstShot: number; lastShot: number }> }> {
   const { tile, grayFrames } = tools;
   if (!tile || !grayFrames) throw new RetrievalError("unavailable", "Local contact sheets are unavailable on this host.");
   const from = film.viewStartSec, to = film.viewStartSec + (film.endSec - film.startSec), decodeAt = (view: number) => film.startSec + (view - film.viewStartSec);
-  const fromTimeline = await timelineShots(store, source, from, to);
-  const shots: SheetShot[] = fromTimeline?.shots ?? await pictureShots(tools, film, from, to, signal);
+  const timeline = await timelineShots(store, source, from, to);
+  /*
+   * A page of cuts needs shots that follow one another. A cut with a second Picture track lists
+   * every clip of every track, and two of those can start together or lie one over the other:
+   * that is no run of cuts, and a cut whose two frames were one time was refused by the receipt's
+   * own schema once every frame had been decoded (codex on PR 3330). Its cuts are found in the
+   * picture instead, which is the film as it was composed.
+   */
+  const fromTimeline = timeline && (!seams || timeline.shots.every((shot, i) => i === 0 || shot.startSec >= timeline.shots[i - 1]!.endSec - 1e-6)) ? timeline : null;
+  let shots: SheetShot[] = fromTimeline?.shots ?? await pictureShots(tools, film, from, to, signal);
   if (shots.length > AGENT_SHEET_LIMITS.maxShots) throw new RetrievalError("bad-argument", `This window holds ${shots.length} shots, more than a sheet shows (${AGENT_SHEET_LIMITS.maxShots}); name a shorter window.`);
-  const round = (value: number) => Math.round(value * 1000) / 1000;
+  const round = (value: number) => Math.round(value * 1000) / 1000, { seamsPerPage, maxPages } = AGENT_SHEET_LIMITS;
+  // For a page of found cuts: the time of the last frame before each, once the cut is placed on the film's frames.
+  let lastBefore: number[] | null = null;
+  if (seams) {
+    if (shots.length < 2) throw new RetrievalError("bad-argument", "This window is one shot: it has no cut to show.");
+    if (shots.length - 1 > seamsPerPage * maxPages) throw new RetrievalError("bad-argument", `This window holds ${shots.length - 1} cuts, more than its pages show (${seamsPerPage * maxPages}); name a shorter window.`);
+    if (!fromTimeline) {
+      const placed = await inParallel(shots.slice(1), signal, (shot, each) => foundCutFrames(grayFrames, film, shot.startSec, each));
+      shots = shots.map((shot, i) => ({ ...shot, startSec: i ? placed[i - 1]!.atSec : shot.startSec, endSec: i < placed.length ? placed[i]!.atSec : shot.endSec }));
+      lastBefore = placed.map(cut => cut.beforeSec);
+    }
+  }
   const numbered = shots.map((shot, i) => ({ number: i + 1, startSec: round(shot.startSec), endSec: round(shot.endSec),
     frameSec: round(Math.min(shot.endSec - .001, (shot.startSec + shot.endSec) / 2)), label: shot.label, clipId: shot.clipId }));
   const size = { width: AGENT_SHEET_LIMITS.tileWidth, height: AGENT_SHEET_LIMITS.tileHeight }, pages = [];
+  const about = { streamIndex: film.stream.index, startSec: round(from), endSec: round(to), shotsFrom: fromTimeline ? "timeline" as const : "picture" as const,
+    productionId: fromTimeline?.productionId ?? null, shots: numbered };
+  if (seams) {
+    /*
+     * The last frame before each cut and the first after it, by the film's own frames. The first
+     * frame after is the one at the cut. The last before is one frame earlier for a timeline's
+     * cut, which is exact, and the frame a found cut was placed after. A fixed lead would not do:
+     * at 24 frames a second, 40 ms before a cut is already past the last frame's own time, and
+     * the decoder, asked for a time, gives the next frame at or after it, which is the new
+     * shot's (codex on PR 3330).
+     */
+    const frame = 1 / (parseStreamRate(film.stream.frameRate) ?? 30);
+    const cuts = numbered.slice(1).map((shot, i) => ({ shot: shot.number, atSec: shot.startSec,
+      beforeSec: round(Math.max(numbered[i]!.startSec, lastBefore ? lastBefore[i]! : shot.startSec - frame)), afterSec: shot.startSec }));
+    // Asked for a hair before a frame's time, the decoder's next frame is that frame, whatever rounding did to the time.
+    const frameAt = (view: number) => Math.max(film.startSec, decodeAt(view) - .001);
+    for (let first = 0; first < cuts.length; first += seamsPerPage) {
+      const group = cuts.slice(first, first + seamsPerPage);
+      const pairs = await inParallel(group, signal, async (cut, each) => ({ before: await tile(film.path, film.stream, frameAt(cut.beforeSec), size, each),
+        after: await tile(film.path, film.stream, frameAt(cut.afterSec), size, each), label: tileLabel(cut.shot, cut.atSec) }));
+      pages.push({ bytes: await encodePngAsync(composeSeamPage(pairs), {}, signal), firstShot: group[0]!.shot, lastShot: group[group.length - 1]!.shot });
+    }
+    return { sheet: { ...about, seams: cuts }, pages };
+  }
   for (let first = 0; first < numbered.length; first += AGENT_SHEET_LIMITS.perPage) {
     const group = numbered.slice(first, first + AGENT_SHEET_LIMITS.perPage);
     const tiles = await inParallel(group, signal, async (shot, each) => ({ rgba: await tile(film.path, film.stream, decodeAt(shot.frameSec), size, each), label: tileLabel(shot.number, shot.startSec) }));
     pages.push({ bytes: await encodePngAsync(composeSheetPage(tiles), {}, signal), firstShot: group[0]!.number, lastShot: group[group.length - 1]!.number });
   }
-  return { sheet: { streamIndex: film.stream.index, startSec: round(from), endSec: round(to), shotsFrom: fromTimeline ? "timeline" : "picture",
-    productionId: fromTimeline?.productionId ?? null, shots: numbered }, pages };
+  return { sheet: about, pages };
 }
+
+export const SEAM_LIMITATIONS = [
+  "Two still frames a cut, the last before it and the first after it: the movement across a cut, sound and sync were not reviewed.",
+  "Shots are the production's picture clips when its cut is unchanged since this export and no two of them overlap; otherwise cuts found where the picture jumps, which misses dissolves and slow fades. A found cut is placed on the film's own frames, at the largest change within a few tenths of a second of where it was found.",
+  "Each pair is labelled with the number of the shot the cut leads into and the cut's time; clip names are in the shot table.",
+];
 
 export const REVIEW_LIMITATIONS = [
   "Signal measurement: length, stream format, EBU R128 loudness, repeated frames per shot, and for each clip whose own sound is muted in the cut, that sound against the film's mix.",
