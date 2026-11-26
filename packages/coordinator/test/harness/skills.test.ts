@@ -178,6 +178,15 @@ it("the continuity skill keeps a spoken line on the speaker's face (board 15-17,
   assert.match(continuity, /A grin, a sip or a straight face\s+goes before the first word or after the last/);
 });
 
+it("the continuity skill keeps where a watcher looks, and shows what they see through their eyes (board 18-20, 2026-11-26)", async () => {
+  // Ade turned his head to his left in his close shots, while every view of her table looked over his shoulder
+  // from behind him: the owner saw him look two ways, with a shoulder that did not sit where his seat was.
+  const continuity = (await loadCraftSkill("continuity-across-cuts"))!.body;
+  assert.match(continuity, /Keep where they look for someone/);
+  assert.match(continuity, /the watcher turns the same way and as far every time/);
+  assert.match(continuity, /Show what they see through their eyes/);
+});
+
 it("the local route's skill says it speaks a line anew and can garble it (shot 8, 2026-11-23)", async () => {
   const route = (await loadCraftSkill("local-h3-video"))!.body;
   assert.match(route, /It says the line again, in its own way/);
