@@ -159,6 +159,30 @@ it("the owner's notes of 2026-11-25 reach the skills: a moving camera, split cut
   assert.match(sound, /Check the sync at the end of a cut as well as at its start/);
 });
 
+it("the sound skill watches and listens to a cut before it is shown (shots 9 to 20, 2026-11-26)", async () => {
+  // A cut went to the owner with shots 19 and 20 silent while their lines played over shot 9, built from a list older
+  // than the one last shown, so the room tone, gating and effects asked for the day before were gone.
+  const sound = (await loadCraftSkill("sound-and-pace"))!.body;
+  assert.match(sound, /Watch and listen before you show it/);
+  assert.match(sound, /Each line plays in the shot of the person who\s+says it/);
+  // The split cuts section 4 asks for are not faults: a line may run over the listener on purpose.
+  assert.match(sound, /where you split that cut on purpose/);
+  assert.match(sound, /A listener's still face under the end of a split line is not/);
+  assert.match(sound, /The quiet between lines should stay within about 3 dB/);
+  assert.match(sound, /Make each version from the last one that was shown and accepted/);
+});
+
+it("a room tone never repeats, and the body plays a mocking line word by word (the owner, 2026-11-26)", async () => {
+  // A 6-second crowd clip looped nine times under 53 seconds brought the same laugh back; Tunde quoting Ade, sitting up
+  // formal on the quoted words and leaning in on the punchline, was what the owner liked.
+  const sound = (await loadCraftSkill("sound-and-pace"))!.body;
+  assert.match(sound, /Never let a room tone repeat/);
+  assert.match(sound, /each piece used once in the scene/);
+  const continuity = (await loadCraftSkill("continuity-across-cuts"))!.body;
+  assert.match(continuity, /Let the body play the line, word by word/);
+  assert.match(continuity, /Tie each movement to the words it goes with/);
+});
+
 it("the continuity skill fills the room the place describes, and says who is at a table (the club, 2026-11-23)", async () => {
   // "Nobody else is in the picture", written to keep strangers out of the booth, emptied a busy club in
   // every shot that saw the room.
