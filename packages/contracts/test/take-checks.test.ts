@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { currentTakeChecks, takeCheckSource, takeChecksCount, takeIsCheckable, TakeChecksRecordSchema, type Take, type TakeChecksRecord } from "../src/index.js";
+import { currentTakeChecks, takeCheckSource, takeChecksCount, takeChecksUnchecked, takeIsCheckable, TakeChecksRecordSchema, type Take, type TakeChecksRecord } from "../src/index.js";
 
 /** A take's checks (design turn 287): measured once, read only while they are of the take's media. */
 const record: TakeChecksRecord = {
@@ -28,7 +28,16 @@ describe("a take's checks", () => {
   });
 
   it("counts what passed, and the hard items to fix: a cut inside is, the camera is advice", () => {
-    assert.deepEqual(takeChecksCount(record), { passed: 1, of: 3, hardToFix: 1 });
+    assert.deepEqual(takeChecksCount(record), { passed: 1, of: 3, hardToFix: 1, unchecked: 0 });
+  });
+
+  it("counts an item the host could not measure as owed and not passed, never as nothing (2026-11-26)", () => {
+    // A take whose words could not be read used to show "2 of 2" in green: the list left the words out.
+    const unread: TakeChecksRecord = { ...record, items: [{ id: "cuts-inside", result: "pass", says: "none" }, { id: "camera", result: "pass", says: "handheld · 7 px" }],
+      skipped: [{ id: "unwritten-voice", reason: "unavailable" }, { id: "words", reason: "unavailable" }, { id: "lip-sync", reason: "no-voice-sent" }, { id: "light", reason: "no-neighbour" }] };
+    assert.deepEqual(takeChecksCount(unread), { passed: 2, of: 4, hardToFix: 0, unchecked: 2 });
+    assert.deepEqual(takeChecksUnchecked(unread), ["words", "unwritten-voice"], "in the list's order; what the take has nothing for is not owed");
+    assert.deepEqual(takeChecksUnchecked(record), []);
   });
 
   it("measures a clip of one shot, its own or its range of a pass, and nothing else", () => {
