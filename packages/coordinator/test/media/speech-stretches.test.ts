@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AGENT_TRANSCRIPT_LIMITS } from "@arke-studio/contracts";
 import { voiceIntervals } from "../../src/media/song-map.js";
-import { SPEECH_STRETCH_PROFILE, voicedStretches } from "../../src/media/speech-stretches.js";
+import { halvedStretch, SPEECH_STRETCH_PROFILE, voicedStretches } from "../../src/media/speech-stretches.js";
 
 const RATE = 16000;
 function random(seed: number) {
@@ -79,4 +79,17 @@ test("paddings never overlap, and more lines than a read may hold are joined acr
   assert.equal(stretches.length, AGENT_TRANSCRIPT_LIMITS.stretches); assert.ok(apart(stretches), JSON.stringify(stretches));
   for (const at of words) assert.ok(stretches.some(stretch => stretch.startSec <= at && stretch.endSec >= at + .3), `the word at ${at} s is inside a stretch`);
   assert.ok(!stretches.some(stretch => stretch.startSec < 15.5 && stretch.endSec > 19.5), "the long pause is still left out");
+});
+
+test("a refused stretch is halved at the quietest step of its middle third, and one under six seconds is left whole", () => {
+  // Eleven seconds of talk over a loud room, with half a second of room alone at 6 s: too short a quiet to end the stretch.
+  const samples = speak(speak(room(13, -35), 1, 6), 6.5, 12), { stretches } = voicedStretches(samples, RATE);
+  assert.deepEqual(stretches, [{ startSec: .7, endSec: 12.3 }]);
+  const halves = halvedStretch(samples, RATE, stretches[0]!)!;
+  assert.equal(halves[0].startSec, .7); assert.equal(halves[1].endSec, 12.3); assert.equal(halves[0].endSec, halves[1].startSec);
+  assert.ok(halves[0].endSec >= 6 && halves[0].endSec < 6.5, `in the room alone: ${halves[0].endSec}`);
+  // The cut stays in the middle third even when the quietest step of the stretch is outside it.
+  const early = halvedStretch(speak(speak(room(13, -35), 1.6, 12), .9, 1.2), RATE, { startSec: .7, endSec: 12.3 })!;
+  assert.ok(early[0].endSec >= .7 + 11.6 / 3 - .05 && early[0].endSec <= .7 + 11.6 * 2 / 3, String(early[0].endSec));
+  assert.equal(halvedStretch(samples, RATE, { startSec: 1, endSec: 1 + SPEECH_STRETCH_PROFILE.halveSec - .05 }), null);
 });

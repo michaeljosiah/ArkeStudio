@@ -170,6 +170,33 @@ test("a stretch the measured reader still refuses keeps the plain reader's text 
   assert.equal(untimed.engine, undefined, "no engine timed anything"); assert.deepEqual(untimed.words, []); assert.equal(untimed.text, "Not yet Not yet");
 });
 
+test("a long stretch the measured reader refuses is halved at its quietest point and each half timed, before any text is kept without times", async () => {
+  // Seven seconds of talk over a room, with a breath in it too short to end the stretch: the reader cannot place its words whole.
+  const talk = { ...input, bytes: scene([[1, 4.4], [4.6, 8]]), durationSec: 10 }, calls: number[] = [];
+  const read = async (wav: Uint8Array) => { calls.push(seconds(wav)); if (seconds(wav) > 5) throw unplaced(); return spoken(calls.length === 2 ? "Stay here" : "Not yet", wav); };
+  const value = await readAgentSpeech({ ...talk, read, readText: async () => { throw new Error("the plain reader is not needed"); } });
+  const [first, second] = value.stretches!;
+  assert.deepEqual(value.stretches!.map(stretch => [stretch.read, stretch.text]), [["timed", "Stay here"], ["timed", "Not yet"]]);
+  // Cut inside the breath, the two halves meeting there; the whole stretch was tried first, then each half.
+  assert.ok(first!.endSec >= 4.4 - 1e-9 && first!.endSec < 4.6, String(first!.endSec)); assert.equal(second!.startSec, first!.endSec);
+  close([first!.startSec, second!.endSec], [.7, 8.3]); close(calls, [7.6, first!.endSec - .7, 8.3 - first!.endSec]);
+  close(value.words.map(word => word.startSec), [1, 1.3, first!.endSec + .3, first!.endSec + .6]);
+  // A stretch under six seconds is not halved: its halves would be a word or two.
+  let reads = 0;
+  const short = await readAgentSpeech({ ...film, read: async () => { reads++; throw unplaced(); }, readText: async () => "Not yet" });
+  assert.equal(reads, 2); assert.deepEqual(short.stretches!.map(stretch => stretch.read), ["text-only", "text-only"]);
+});
+
+test("a refused stretch is halved only while the transcript has room for one stretch more", async () => {
+  // A long line and then short ones, two seconds apart: with eleven short ones the transcript is full at twelve stretches.
+  const lines = (short: number): Array<[number, number]> => [[1, 4.4], [4.6, 8], ...Array.from({ length: short }, (_, i): [number, number] => [10 + i * 2, 10.5 + i * 2])];
+  const read = async (wav: Uint8Array) => { if (seconds(wav) > 5) throw unplaced(); return spoken("Yes", wav); };
+  const full = await readAgentSpeech({ ...input, bytes: scene(lines(11), 34), durationSec: 34, read, readText: async () => "Stay here not yet" });
+  assert.equal(full.stretches!.length, AGENT_TRANSCRIPT_LIMITS.stretches); assert.deepEqual(full.stretches!.slice(0, 2).map(stretch => stretch.read), ["text-only", "timed"]);
+  const room = await readAgentSpeech({ ...input, bytes: scene(lines(10), 34), durationSec: 34, read, readText: async () => "Stay here not yet" });
+  assert.equal(room.stretches!.length, AGENT_TRANSCRIPT_LIMITS.stretches); assert.ok(room.stretches!.every(stretch => stretch.read === "timed"));
+});
+
 test("an interval with no voice in it is answered without calling a reader, and a review of it is still compared", async () => {
   let calls = 0;
   const value = await readAgentSpeech({ ...input, bytes: writeSpeechWav({ rate: 16000, samples: new Float32Array(3 * 16000) }), durationSec: 3,
