@@ -1907,14 +1907,17 @@ desktop screenshot regression. Reports are local `.dev/` evidence, not agent/coo
 acceptance. The author approved implementation on 2026-10-13.
 
 Shared media evidence: from `packages/coordinator`, run
-`node --import tsx --test test/media/agent-media-tools.test.ts test/media/agent-speech.test.ts test/world-chat/media-inspection.test.ts`.
+`node --import tsx --test test/media/agent-media-tools.test.ts test/media/agent-speech.test.ts test/media/speech-stretches.test.ts test/world-chat/media-inspection.test.ts`.
 The first file uses real FFmpeg stereo and VFR fixtures; set `ARKE_AGENT_MEDIA_NATIVE_REQUIRED=1`
 to fail when FFmpeg is unavailable, and optionally set `ARKE_FFMPEG`/`ARKE_FFPROBE` to host binaries.
 Contract coverage and original-channel arithmetic live in `packages/contracts/test/agent-media.test.ts`.
-`test/agent-audio.test.ts` covers script bounds. Speech tests exercise canonical multi-track
-extraction, exact bytes through the Voxa protocol, word/source/view times, script wording diffs,
-bad recognition, abort/late results, leases, budgets and schema-80 replay. The recognizer is a
-deterministic fixture: these tests do not establish live model accuracy or perceptual listening.
+`test/agent-audio.test.ts` covers script bounds and what a transcript's stretches may claim. Speech
+tests exercise canonical multi-track extraction, exact bytes through the Voxa protocol, stretches
+found over synthetic room tone, timed/text-only/silent stretches, word/source/view times, script
+wording diffs, bad recognition, abort/late results, leases, budgets (a refused or voiceless read
+spends no speech call) and schema-150 replay. The recognizer is a
+deterministic fixture: these tests do not establish live model accuracy or perceptual listening,
+and the stretch levels are untried on real film sound.
 Existing image, leased MCP, replay and take-review suites remain required regressions.
 
 Retained World Chat drafts (#2048): run coordinator `test/world-chat/retrieval.test.ts`,

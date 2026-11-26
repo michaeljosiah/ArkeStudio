@@ -20994,6 +20994,11 @@ export class Coordinator {
         if (!this.voiceService?.localSpeechConfigured) throw new Error("Local speech recognition is unavailable");
         return this.voiceService.transcribeWords(bytes, signal);
       },
+      // The same local runtime's text alone, as the take checks use it: raw audio never leaves the machine.
+      agentSpeechText: (wav, signal) => {
+        if (!this.voiceService?.localSpeechConfigured) throw new Error("Local speech recognition is unavailable");
+        return this.voiceService.transcribe(wav, "audio/wav", signal);
+      },
       agentSpeechReady: async signal => {
         const voice = this.voiceService;
         if (!voice?.localSpeechConfigured) return false;

@@ -22,6 +22,8 @@ export const ViewImageArgsSchema = z.discriminatedUnion("kind", [
   ProductionTakeImageArgsSchema,
 ]);
 const hash = (bytes: Uint8Array) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+/** One count for view_image, sampled frames and contact sheet pages alike. */
+const IMAGES_PER_RUN = 24;
 const imageFiles = (value: unknown): string[] => {
   if (!value || typeof value !== "object") return [];
   return Object.entries(value).flatMap(([key, child]) =>
@@ -47,6 +49,8 @@ export class ConversationImages {
       provider: destination?.provider ?? adapter?.id ?? "unknown", local: destination?.local === true, ...(signal ? { signal } : {}) });
   }
   release(runId: string): void { this.sessions.delete(runId); this.counts.delete(runId); this.bytesByRun.delete(runId); }
+  /** Images a run may still look at, so video sampling can ask for no more than are left. */
+  remaining(runId: string): number { return Math.max(0, IMAGES_PER_RUN - (this.counts.get(runId) ?? 0)); }
   async validate(lease: QueryLease): Promise<void> { await this.access(lease); }
   private async access(lease: QueryLease) {
     this.leases.verify(lease.token, "view_image");
@@ -120,7 +124,7 @@ export class ConversationImages {
   async prepareFrame(lease: QueryLease, input: { id: string; label: string; sourceHash: string; bytes: Uint8Array }) {
     await this.access(lease);
     const count = this.counts.get(lease.runId) ?? 0;
-    if (count >= 24) throw new RetrievalError("unavailable", "sample_video: this run has reached its 24-image inspection limit.");
+    if (count >= IMAGES_PER_RUN) throw new RetrievalError("unavailable", "sample_video: this run has reached its 24-image inspection limit.");
     this.counts.set(lease.runId, count + 1);
     const rendition = await imageRendition(input.bytes, ".png", undefined, (await this.access(lease)).signal);
     const total = (this.bytesByRun.get(lease.runId) ?? 0) + 4 * Math.ceil(rendition.data.length / 3);
@@ -143,7 +147,7 @@ export class ConversationImages {
   private async readOnce(lease: QueryLease, args: Record<string, unknown>): Promise<RetrievalOutcome> {
     const session = await this.access(lease);
     const count = this.counts.get(lease.runId) ?? 0;
-    if (count >= 24) throw new RetrievalError("unavailable", "view_image: this run has reached its 24-image inspection limit.");
+    if (count >= IMAGES_PER_RUN) throw new RetrievalError("unavailable", "view_image: this run has reached its 24-image inspection limit.");
     this.counts.set(lease.runId, count + 1);
     const source = await this.source(lease, args, session.signal);
     let rendition;

@@ -1633,10 +1633,16 @@ Contracts `src/agent-listening.ts` owns subjective listening evidence (schema 81
 owns bounded offline native execution; `local-audio-listener.py` passes actual PCM to Qwen2-Audio.
 Desktop/Node hosts opt in through local Python/model paths. See [setup and limits](audio-listening.md).
 
-Contracts `src/agent-audio.ts` owns speech derivative, word-time and content-review evidence.
-Coordinator `src/media/agent-speech.ts` bounds local Voxa recognition and reuses
-`audio/transcript-comparison.ts` for script wording diffs. `application/conversation-runs.ts`
-injects the supervised `VoiceService.transcribeWords` seam; recognized speech raises schema 80.
+Contracts `src/agent-audio.ts` owns speech derivative, stretch, word-time and content-review evidence.
+Coordinator `src/media/speech-stretches.ts` finds where a voice is likely in an interval, by level
+against the interval's own quiet. `src/media/agent-speech.ts` reads each stretch (`readAgentSpeech`)
+through bounded local Voxa recognition (`recognizeAgentSpeech`, which the take checks also use on a
+whole take), falls back to the local text reader for a stretch whose words cannot be placed in time,
+and reuses `audio/transcript-comparison.ts` for script wording diffs. `application/conversation-runs.ts`
+injects the supervised `VoiceService.transcribeWords` and `VoiceService.transcribe` seams; recognized
+speech raises schema 150 (80 before stretches). `world-chat/media-inspection.ts` counts a speech read
+when it is answered, clamps `sample_video` to the images a run has left, and says what remains of
+the run's budgets with every result and refusal.
 The current harness interprets speech meaning from text; no audio-model listening is implied.
 
 Sheet-list proposals open the shared `PageSheet` from `world.tsx`; the existing connected proposal owns gate and revision commands. `cast.css` constrains only this review surface so its decision controls remain visible while content scrolls.
