@@ -24,6 +24,12 @@ export interface FilmLine {
   number: number;
   /** The shot the line belongs to, by its number in the cut, when the cut says. */
   shot: number | null;
+  /**
+   * Every shot of the cut that shows the line's own story shot, `shot` first, when there is more
+   * than one. A clip split round an insert is two shots of the cut and one line: counted for each,
+   * a line said once read as said and then not heard (codex on PR 3333).
+   */
+  shots?: number[];
   text: string;
 }
 
@@ -31,7 +37,7 @@ export interface FilmLineHeard {
   number: number;
   shot: number | null;
   said: "as-written" | "by-sound" | "partly" | "not-heard";
-  /** When its first and last matched words were heard; null when none was heard as written. */
+  /** When its first and last heard words were heard, as written or by sound; null when none was heard with a time. */
   startSec: number | null;
   endSec: number | null;
   /** How many words the line has, and how many of them were heard, as written or by sound. */
@@ -79,7 +85,13 @@ export function filmWordsAgainstScript(lines: readonly FilmLine[], heard: readon
 
   const result: FilmLineHeard[] = lines.map((line, at) => {
     const own = script.flatMap((word, i) => (word.at === at ? [i] : []));
-    const heardAt = own.flatMap((i) => (exact.has(i) ? [spoken[exact.get(i)!]!.startSec] : [])).filter((time): time is number => time !== null);
+    /*
+     * A word found by sound has a time too: where the heard words it was found in begin. Left out,
+     * a name heard in the recogniser's spelling under the line's own shot dropped from the line's
+     * span, and a split cut read as a line wholly under the next shot (codex on PR 3333).
+     */
+    const heardAt = own.flatMap((i) => (exact.has(i) ? [spoken[exact.get(i)!]!.startSec] : sound.at.has(i) ? [spoken[sound.at.get(i)!]!.startSec] : []))
+      .filter((time): time is number => time !== null);
     const missing = own.filter((i) => !said.has(i)).map((i) => script[i]!.text);
     const share = own.length === 0 ? 1 : (own.length - missing.length) / own.length;
     return { number: line.number, shot: line.shot,
@@ -131,6 +143,10 @@ const clock = (seconds: number) => `${Math.floor(seconds / 60)}:${(seconds % 60 
 /** Where something was heard, when its words had times: a stretch read as text alone has none, and the sentence goes without. */
 const at = (seconds: number | null) => (seconds === null ? "" : ` at ${clock(seconds)}`);
 const quoted = (text: string, most = 48) => `"${text.length > most ? `${text.slice(0, most - 1).trimEnd()}…` : text}"`;
+/** The first few of a line's words that were not heard, and how many more: a long line half heard would list fifty. */
+const some = (words: readonly string[], most = 8) => (words.length > most ? `${words.slice(0, most).join(" ")} and ${words.length - most} more` : words.join(" "));
+/** A receipt holds a finding of at most this many characters, and one over it refuses the whole review (codex on PR 3333). */
+const FINDING_MOST = 300;
 
 /**
  * The film's words as findings, plain sentences each naming its line or its time, in the script's
@@ -145,6 +161,7 @@ const quoted = (text: string, most = 48) => `"${text.length > most ? `${text.sli
  */
 export function filmWordFindings(lines: readonly FilmLine[], words: FilmWords, shotAt?: (seconds: number) => number | null): string[] {
   const findings: string[] = [], text = new Map(lines.map((line) => [line.number, line.text])), moved = new Set(words.misplaced.map((line) => line.number));
+  const shots = new Map(lines.map((line) => [line.number, line.shots ?? (line.shot === null ? [] : [line.shot])]));
   const unheard = (line: FilmLineHeard | undefined) => line !== undefined && line.said === "not-heard" && !moved.has(line.number) && line.heardWords < line.words * BARELY;
   for (const line of words.misplaced) findings.push(`Line ${line.number} ${quoted(text.get(line.number) ?? "")} is not heard in its place; words like it are heard${at(line.atSec)}.`);
   for (let i = 0; i < words.lines.length; i++) {
@@ -157,15 +174,17 @@ export function filmWordFindings(lines: readonly FilmLine[], words: FilmWords, s
       continue;
     }
     if (line.said === "not-heard" && !moved.has(line.number)) findings.push(`Line ${line.number} ${quoted(text.get(line.number) ?? "")} is barely heard${at(line.startSec)}: ${line.heardWords} of its ${line.words} words; listen to it.`);
-    else if (line.unclearNames.length > 0) findings.push(`Line ${line.number}: nothing like the name ${line.unclearNames.join(" ")} is heard${line.startSec === null ? "" : ` (the line is at ${clock(line.startSec)})`}; listen to it.`);
-    else if (line.said === "partly") findings.push(`Line ${line.number} is partly heard${at(line.startSec)}: not heard, ${line.missing.join(" ")}.`);
-    if (shotAt && line.shot !== null && line.startSec !== null && line.endSec !== null && line.said !== "not-heard") {
+    else if (line.unclearNames.length > 0) findings.push(`Line ${line.number}: nothing like the name ${some(line.unclearNames)} is heard${line.startSec === null ? "" : ` (the line is at ${clock(line.startSec)})`}; listen to it.`);
+    else if (line.said === "partly") findings.push(`Line ${line.number} is partly heard${at(line.startSec)}: not heard, ${some(line.missing)}.`);
+    const own = shots.get(line.number) ?? [];
+    if (shotAt && own.length > 0 && line.startSec !== null && line.endSec !== null && line.said !== "not-heard") {
       const first = shotAt(line.startSec), last = shotAt(line.endSec);
-      if (first !== null && last !== null && first !== line.shot && last !== line.shot && (first > line.shot || last < line.shot)) {
-        findings.push(`Line ${line.number} is heard at ${clock(line.startSec)} under shot ${first}, not its own shot ${line.shot}.`);
+      // Starting or ending under any of its own shots, or lying between two of them over an insert, is its place.
+      if (first !== null && last !== null && !own.includes(first) && !own.includes(last) && (first > Math.max(...own) || last < Math.min(...own))) {
+        findings.push(`Line ${line.number} is heard at ${clock(line.startSec)} under shot ${first}, not its own shot ${own[0]}.`);
       }
     }
   }
   for (const run of words.unwritten) findings.push(`Words nobody wrote${at(run.atSec)}: ${quoted(run.text)}.`);
-  return findings;
+  return findings.map((finding) => (finding.length > FINDING_MOST ? `${finding.slice(0, FINDING_MOST - 1)}…` : finding));
 }

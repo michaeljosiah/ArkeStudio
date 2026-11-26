@@ -38,7 +38,8 @@ describe("a film's words against its script", () => {
     assert.deepEqual(words.unwritten, [{ atSec: 1.5, text: "oh no" }]);
     assert.deepEqual(filmWordFindings(LINES, words, shotAt), [
       "Line 3 \"The goat was in the boot, Tunde.\" is not heard.",
-      "Line 4: nothing like the name adeyemi akinola is heard (the line is at 0:14.3); listen to it.",
+      // The line starts where its first heard word does, and "abeg" is heard there by sound, as "a bag".
+      "Line 4: nothing like the name adeyemi akinola is heard (the line is at 0:13.7); listen to it.",
       "Words nobody wrote at 0:01.5: \"oh no\".",
     ]);
   });
@@ -87,6 +88,38 @@ describe("a film's words against its script", () => {
     const words = filmWordsAgainstScript(LINES, heard, NAMES)!;
     assert.deepEqual([words.lines[2]!.said, words.lines[2]!.startSec, words.unwritten], ["partly", null, []]);
     assert.deepEqual(filmWordFindings(LINES, words, shotAt), ["Line 3: nothing like the name tunde is heard; listen to it."]);
+  });
+
+  it("a word found by sound has a time: a name heard under the line's own shot keeps a split cut from reading as a lost line", () => {
+    // The name is heard in the recogniser's spelling under shot 3, and the rest of the line under shot 4.
+    const name: FilmLine[] = [...LINES.slice(0, 2), { number: 3, shot: 3, text: "Adeyemi Akinola, go and greet her." }];
+    const heard = film(say("It is not possible", .2), say("Ade I am telling you the goat looked at me like this", 2.4), say("the Yemi Aki Nola", 11), say("go and greet her", 12.3));
+    const words = filmWordsAgainstScript(name, heard, NAMES)!;
+    assert.deepEqual([words.lines[2]!.said, words.lines[2]!.startSec, words.lines[2]!.endSec], ["by-sound", 11, 13.2]);
+    assert.deepEqual(filmWordFindings(name, words, shotAt), []);
+  });
+
+  it("a shot shown in two clips of the cut says its line once, under either of them or over the insert between", () => {
+    // Shot 2 of the cut is split round an insert: the line belongs to shots 2 and 4, with shot 3 between them.
+    const split: FilmLine[] = [LINES[0]!, { ...LINES[1]!, shots: [2, 4] }];
+    const at = (seconds: number) => (seconds < 2 ? 1 : seconds < 4 ? 2 : seconds < 6 ? 3 : seconds < 10 ? 4 : 5);
+    const under = (from: number) => filmWordFindings(split, filmWordsAgainstScript(split, film(say("It is not possible", .2), say("Ade I am telling you the goat looked at me like this", from, .1)), NAMES)!, at);
+    assert.deepEqual(under(6.5), [], "wholly under its second clip");
+    assert.deepEqual(under(4.5), [], "over the insert between its two clips");
+    assert.deepEqual(under(10.5), ["Line 2 is heard at 0:10.5 under shot 5, not its own shot 2."]);
+  });
+
+  it("a long line half heard names a few of its missing words, and no finding outgrows a receipt", () => {
+    const long = Array.from({ length: 100 }, (_, i) => `word${String(i).padStart(3, "0")}x`);
+    const line: FilmLine[] = [{ number: 1, shot: null, text: long.join(" ") }];
+    const words = filmWordsAgainstScript(line, say(long.slice(0, 60).join(" "), 0, .1), NAMES)!;
+    assert.equal(words.lines[0]!.said, "partly"); assert.equal(words.lines[0]!.missing.length, 40);
+    const [finding] = filmWordFindings(line, words);
+    assert.equal(finding, `Line 1 is partly heard at 0:00.0: not heard, ${long.slice(60, 68).join(" ")} and 32 more.`);
+    // Whatever a word is, a finding is held to the 300 characters a receipt takes.
+    const wide: FilmLine[] = [{ number: 1, shot: null, text: `heard ${"w".repeat(80)} ${"x".repeat(80)} ${"y".repeat(80)} ${"z".repeat(80)} one two three four five six` }];
+    const held = filmWordFindings(wide, filmWordsAgainstScript(wide, say("heard one two three four five six", 0), NAMES)!);
+    assert.ok(held.length === 1 && held[0]!.length === 300 && held[0]!.endsWith("…"), `${held[0]!.length}`);
   });
 
   it("does not take a lone short word for a voice, and does take a lone word that is one", () => {

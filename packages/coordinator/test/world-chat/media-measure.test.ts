@@ -367,7 +367,7 @@ test("a contact sheet with no image left for its pages is refused before the fil
 });
 
 /** A two-clip cut of the fixture's production, both clips' own sound muted under the mix, and an export stamped with that cut. */
-async function cutAndExport(h: Awaited<ReturnType<typeof harness>>, id: string, options: { label?: string; bed?: boolean; over?: boolean } = {}) {
+async function cutAndExport(h: Awaited<ReturnType<typeof harness>>, id: string, options: { label?: string; bed?: boolean; over?: boolean; hole?: boolean } = {}) {
   const production = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
   // A bed that runs on past the picture: the export trims sound to the picture's end.
   const bed: TimelineClipCommand[] = options.bed ? [{ kind: "add-track", trackId: "tr_bed", trackKind: "audio", name: "Bed" },
@@ -376,7 +376,8 @@ async function cutAndExport(h: Awaited<ReturnType<typeof harness>>, id: string, 
   const over: TimelineClipCommand[] = options.over ? [{ kind: "add-track", trackId: "tr_over", trackKind: "picture", name: "Over" },
     { kind: "place", trackId: "tr_over", clip: { id: "cl_over", startFrame: 0, durationFrames: 48, sourceInFrames: 0, audio: "mute", source: { kind: "artifact", artifactId: h.take2Id, label: "Over the opening" } } }] : [];
   await applyHumanTimelineCommand(h.store, "saltlight", { kind: "commands", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production), commands: [
-    { kind: "place", trackId: "tr_picture", clip: { id: "cl_open", startFrame: 0, durationFrames: 96, sourceInFrames: 0, audio: "mute", source: { kind: "artifact", artifactId: h.takeId, label: options.label ?? "The opening" } } },
+    // With a hole, the opening stops a second short of the close, and the export shows black between them.
+    { kind: "place", trackId: "tr_picture", clip: { id: "cl_open", startFrame: 0, durationFrames: options.hole ? 72 : 96, sourceInFrames: 0, audio: "mute", source: { kind: "artifact", artifactId: h.takeId, label: options.label ?? "The opening" } } },
     ...bed,
     { kind: "place", trackId: "tr_picture", clip: { id: "cl_close", startFrame: 96, durationFrames: 48, sourceInFrames: 0, audio: "mute", source: { kind: "artifact", artifactId: h.take2Id, label: "The close" } } },
     // A muted upper track puts nothing in the export, so its clip is no shot of the sheet or the review.
@@ -427,6 +428,16 @@ test("a page of cuts of an export whose picture clips overlap finds its cuts in 
   assert.equal(WorldChatCheckReceiptSchema.safeParse(outcome.receipt).success, true);
 });
 
+test("a page of cuts of an export with a hole between two clips finds its cuts in the picture: black is two cuts, and the clips hold one", async () => {
+  const h = await harness(); await cutAndExport(h, "ex_hole", { hole: true });
+  const source = { kind: "export" as const, exportId: "ex_hole" };
+  const plain = (await h.retrieval.call(h.lease.token, "cut_contact_sheet", { source })).receipt.media!.sheet!;
+  assert.equal(plain.shotsFrom, "timeline"); assert.deepEqual(plain.shots.map(shot => [shot.clipId, shot.startSec, shot.endSec]), [["cl_open", 0, 3], ["cl_close", 4, 6]]);
+  // From the clips, the page would show the cut out of black at 4 s and miss the cut into it at 3 s (codex on PR 3333).
+  const sheet = (await h.retrieval.call(h.lease.token, "cut_contact_sheet", { source, seams: true })).receipt.media!.sheet!;
+  assert.equal(sheet.shotsFrom, "picture"); assert.equal(sheet.productionId, null);
+});
+
 test("review_export: length against the cut, format, loudness, the shots that repeat frames and the clip 120 ms late, in findings; schema 144", async () => {
   const h = await harness(), { rate } = await cutAndExport(h, "ex_review");
   const outcome = await h.retrieval.call(h.lease.token, "review_export", { source: { kind: "export", exportId: "ex_review" } });
@@ -472,12 +483,14 @@ test("review_export of a film with no cut behind it finds its shots in the pictu
 });
 
 /** A cut of two of the fixture's story shots, shot 12's voice-over then shot 14's line, and an export stamped with it. */
-async function storyCutAndExport(h: Awaited<ReturnType<typeof harness>>, id: string) {
+async function storyCutAndExport(h: Awaited<ReturnType<typeof harness>>, id: string, options: { split?: boolean } = {}) {
   const production = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
   const shot = (clipId: `cl_${string}`, shotId: string, number: number, startFrame: number, durationFrames: number): TimelineClipCommand => ({ kind: "place", trackId: "tr_picture",
     clip: { id: clipId, startFrame, durationFrames, sourceInFrames: 0, source: { kind: "shot", shotId: shotId as never, sceneNumber: 4, shotNumber: number, label: `SC 4 · SH ${number}` } } });
   await applyHumanTimelineCommand(h.store, "saltlight", { kind: "commands", baseRevision: null, sourceFingerprint: storyTimelineFingerprint(production),
-    commands: [shot("cl_verse", "sh_12", 12, 0, 96), shot("cl_rest", "sh_14", 14, 96, 48)] });
+    // Split: shot 12 shown in two clips, with shot 14 between them as an insert would be.
+    commands: options.split ? [shot("cl_verse", "sh_12", 12, 0, 48), shot("cl_rest", "sh_14", 14, 48, 48), shot("cl_verse_on", "sh_12", 12, 96, 48)]
+      : [shot("cl_verse", "sh_12", 12, 0, 96), shot("cl_rest", "sh_14", 14, 96, 48)] });
   const current = h.store.getBundle().productions.find(row => row.meta.id === "saltlight")!;
   assert.equal(current.timeline?.status, "ready");
   await mkdir(join(h.store.dir, "exports"), { recursive: true }); await writeFile(join(h.store.dir, "exports", `${id}.mp4`), EXPORT);
@@ -515,6 +528,17 @@ test("review_export finds a line the mix moved under another shot, words nobody 
   assert.equal(deaf.store.getBundle().meta.schemaVersion, 144, "a review with no words in it is the review it was");
 });
 
+test("review_export holds a shot shown in two clips of the cut to its line once", async () => {
+  // Shot 12 runs to 2 s, shot 14 to 4 s, and shot 12 again to 6 s: the voice-over is said once, under the first of them.
+  const h = await harness({ said: () => [...say("the verse under the water", .3), ...say("tell you the rest after", 2.2)] });
+  await storyCutAndExport(h, "ex_split", { split: true });
+  const review = (await h.retrieval.call(h.lease.token, "review_export", { source: { kind: "export", exportId: "ex_split" } })).receipt.media!.review!;
+  assert.equal(review.shots.length, 3);
+  // Counted for each clip, the line read as said and then not heard (codex on PR 3333).
+  assert.deepEqual(review.speech!.lines, [{ number: 1, shot: 1, said: "as-written", startSec: .3 }, { number: 2, shot: 2, said: "as-written", startSec: 2.2 }]);
+  assert.deepEqual(review.findings.filter(line => /^Line |^Words nobody/.test(line)), [], review.findings.join(" | "));
+});
+
 test("review_export keeps a line the measured reader cannot time: heard, with no time, and its stretch is never words nobody wrote", async () => {
   // Film sound: the second line sits over a room the measured reader refuses, and the plain reader adds words of its own after it.
   const h = await harness({ said: () => [...say("the verse under the water", .5), ...say("tell you the rest after la la", 4.3, .2).map(word => ({ ...word, untimed: true }))] });
@@ -545,7 +569,18 @@ test("review_export holds a cut made outside the Studio to the script of the sce
   assert.deepEqual(review.speech!.lines.map(line => [line.number, line.shot, line.said]), [[1, null, "as-written"], [2, null, "not-heard"], [3, null, "partly"]]);
   assert.equal(review.speech!.linesFrom, "script");
   const heard = review.findings.filter(line => line.startsWith("Line "));
-  assert.deepEqual(heard, ["Line 2 \"Tell you the rest after.\" is not heard.", "Line 3: nothing like the name maren kest is heard (the line is at 0:04.2); listen to it."], review.findings.join(" | "));
+  assert.deepEqual(heard, ["Line 2 \"Tell you the rest after.\" is not heard.", "Line 3: nothing like the name maren kest is heard (the line is at 0:03.8); listen to it."], review.findings.join(" | "));
+  /*
+   * A window on the film's second half hears only the third line. The lines before the first one
+   * heard were not listened for, so they are not reported: the first read "not heard" for line 1,
+   * which the film says in its first two seconds (codex on PR 3333).
+   */
+  const later = (await h.retrieval.call(h.lease.token, "review_export", { source, window: { startSec: 2.5, endSec: 6 }, script: { productionId: "saltlight", sceneId: "sc_04" } })).receipt.media!.review!;
+  assert.deepEqual(later.speech!.lines.map(line => [line.number, line.said]), [[3, "partly"]]);
+  assert.deepEqual(later.findings.filter(line => line.startsWith("Line ")), ["Line 3: nothing like the name maren kest is heard (the line is at 0:03.8); listen to it."], later.findings.join(" | "));
+  // A window with none of the scene's lines in it says so, rather than nothing at all.
+  const none = (await h.retrieval.call(h.lease.token, "review_export", { source, window: { startSec: 5.5, endSec: 6 }, script: { productionId: "saltlight", sceneId: "sc_04" } })).receipt.media!.review!;
+  assert.equal(none.speech, undefined); assert.ok(none.findings.includes("None of the scene's lines is heard in this part of the film."), none.findings.join(" | "));
   // Without the scene named it has no lines to be held to, and says nothing of words.
   const unheld = (await h.retrieval.call(h.lease.token, "review_export", { source })).receipt.media!.review!;
   assert.equal(unheld.speech, undefined); assert.equal(unheld.findings.some(line => /^Line |words could not/.test(line)), false);

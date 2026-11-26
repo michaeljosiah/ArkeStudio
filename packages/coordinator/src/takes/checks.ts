@@ -110,8 +110,9 @@ export function alike(a: string, b: string): number {
  * past the one before it, so a long take whose words match nothing costs a little, not the
  * fourteen seconds a hundred such words took when every run was tried against every run.
  */
-export function heardBySound(line: readonly string[], heard: readonly string[], used: ReadonlyArray<{ line: number; heard: number }>): { line: Set<number>; heard: Set<number> } {
-  const found = { line: new Set<number>(), heard: new Set<number>() };
+export function heardBySound(line: readonly string[], heard: readonly string[], used: ReadonlyArray<{ line: number; heard: number }>): { line: Set<number>; heard: Set<number>; at: Map<number, number> } {
+  // `at` is where each word found by sound begins: the first heard word it was found in, for a caller that needs its time.
+  const found = { line: new Set<number>(), heard: new Set<number>(), at: new Map<number, number>() };
   const edges = [{ line: -1, heard: -1 }, ...used, { line: line.length, heard: heard.length }];
   for (let e = 1; e < edges.length; e++) {
     const from = edges[e - 1]!, to = edges[e]!;
@@ -136,7 +137,7 @@ export function heardBySound(line: readonly string[], heard: readonly string[], 
           if (score >= ALIKE && (!best || score > best.score)) best = { start, end, score };
         }
       }
-      if (best) { found.line.add(from.line + 1); for (let j = best.start; j <= best.end; j++) found.heard.add(j); }
+      if (best) { found.line.add(from.line + 1); found.at.set(from.line + 1, best.start); for (let j = best.start; j <= best.end; j++) found.heard.add(j); }
       continue;
     }
     let at = 0;
@@ -158,7 +159,7 @@ export function heardBySound(line: readonly string[], heard: readonly string[], 
         }
       }
       if (!best) continue;
-      found.line.add(i);
+      found.line.add(i); found.at.set(i, owner[best.start]!);
       for (let k = best.start; k < best.end; k++) found.heard.add(owner[k]!);
       at = best.end;
     }

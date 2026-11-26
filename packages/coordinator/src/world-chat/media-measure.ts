@@ -233,10 +233,16 @@ export async function contactSheetInSnapshot(store: WorldStore, tools: AgentMedi
    * A page of cuts needs shots that follow one another. A cut with a second Picture track lists
    * every clip of every track, and two of those can start together or lie one over the other:
    * that is no run of cuts, and a cut whose two frames were one time was refused by the receipt's
-   * own schema once every frame had been decoded (codex on PR 3330). Its cuts are found in the
-   * picture instead, which is the film as it was composed.
+   * own schema once every frame had been decoded (codex on PR 3330). Nor is a cut with a hole
+   * between two clips, or after the last: the export fills it with black, and the cut to black
+   * and the cut back are both cuts the clip list holds one of (codex on PR 3333). Either way its
+   * cuts are found in the picture instead, which is the film as it was composed. Clips meet on
+   * the cut's own frames, so one follows the last exactly; the window's ends are the film's
+   * length, which is held to a twentieth of a second.
    */
-  const fromTimeline = timeline && (!seams || timeline.shots.every((shot, i) => i === 0 || shot.startSec >= timeline.shots[i - 1]!.endSec - 1e-6)) ? timeline : null;
+  const follow = (shots: readonly SheetShot[]) => shots.every((shot, i) => Math.abs(shot.startSec - (i === 0 ? from : shots[i - 1]!.endSec)) <= (i === 0 ? .05 : 1e-6)) &&
+    Math.abs(shots[shots.length - 1]!.endSec - to) <= .05;
+  const fromTimeline = timeline && (!seams || follow(timeline.shots)) ? timeline : null;
   let shots: SheetShot[] = fromTimeline?.shots ?? await pictureShots(tools, film, from, to, signal);
   if (shots.length > AGENT_SHEET_LIMITS.maxShots) throw new RetrievalError("bad-argument", `This window holds ${shots.length} shots, more than a sheet shows (${AGENT_SHEET_LIMITS.maxShots}); name a shorter window.`);
   const round = (value: number) => Math.round(value * 1000) / 1000, { seamsPerPage, maxPages } = AGENT_SHEET_LIMITS;
@@ -392,11 +398,21 @@ export async function reviewInSnapshot(store: WorldStore, tools: AgentMediaTools
       const words = lines.length ? filmWordsAgainstScript(lines, heard.words, castNames(store.getBundle().sheets)) : null;
       if (words === null) findings.unshift("The film and its lines are too long to set side by side in one read; name a shorter window.");
       else {
-        // A script is in the film's order: read in part, the lines after the last one heard were not reached either.
-        const reached = whole || held.from === "cut" ? lines.length : words.lines.reduce((last, line, i) => (line.said === "not-heard" ? last : i + 1), 0);
-        const kept = { lines: words.lines.slice(0, reached), unwritten: words.unwritten, misplaced: words.misplaced.filter(moved => moved.number <= reached) };
+        /*
+         * A script is the whole scene, in the film's order. Only a film read from its first second
+         * to its last was listened to for all of it: there, a line not heard is a line the film
+         * does not have. A window, or a read that stopped at five minutes, covers part of the
+         * scene, and which part is known only by what was heard: the lines from the first one
+         * heard to the last. A window on the second half of a film reported every line of the
+         * first half as not heard (codex on PR 3333).
+         */
+        const all = held.from === "cut" || film.whole && whole;
+        const first = all ? 0 : words.lines.findIndex(line => line.said !== "not-heard"), end = all ? words.lines.length : words.lines.reduce((last, line, i) => (line.said === "not-heard" ? last : i + 1), 0);
+        const keptLines = first < 0 ? [] : words.lines.slice(first, end), numbers = new Set(keptLines.map(line => line.number));
+        const kept = { lines: keptLines, unwritten: words.unwritten, misplaced: words.misplaced.filter(moved => numbers.has(moved.number)) };
         const shotAt = held.from === "cut" ? (seconds: number) => { const at = reviewed.findIndex(shot => seconds >= shot.startSec && seconds < shot.endSec); return at < 0 ? null : at + 1; } : undefined;
-        const said = filmWordFindings(lines.slice(0, reached), kept, shotAt);
+        const said = filmWordFindings(lines, kept, shotAt);
+        if (keptLines.length === 0) said.push("None of the scene's lines is heard in this part of the film.");
         if (!whole) said.push(`Words were read for the first ${Math.round(heard.readSec)} s of this window; name a later window for the rest.`);
         findings.unshift(...said);
         if (kept.lines.length) speech = { linesFrom: held.from, lines: kept.lines.map(line => ({ number: line.number, shot: line.shot, said: line.said, startSec: line.startSec === null ? null : round(line.startSec) })),
@@ -460,12 +476,18 @@ function filmLines(store: WorldStore, productionId: string | null, shots: Readon
   for (const scene of production.scenes) {
     try { for (const shot of orderedShots(scene)) story.set(shot.id, shot); } catch { /* a scene whose flow will not order has no shots to take lines from */ }
   }
-  const lines: FilmLine[] = [];
+  const lines: FilmLine[] = [], said = new Map<string, FilmLine>();
   for (const [i, entry] of shots.entries()) {
     const source = entry.clip?.source, covered = source?.kind === "take" ? production.takes.find(take => take.id === source.takeId)?.coversShots : undefined;
     const shot = story.get(source?.kind === "shot" ? source.shotId : covered?.length === 1 ? covered[0]! : "");
     const line = shot ? lineOf(shot) : null;
-    if (line && lines.length < most) lines.push({ number: lines.length + 1, shot: i + 1, text: line });
+    if (!shot || !line) continue;
+    // A story shot split round an insert is two clips of the cut and says its line once: the later clip is another of the line's own shots.
+    const before = said.get(shot.id);
+    if (before) { before.shots = [...(before.shots ?? [before.shot!]), i + 1]; continue; }
+    if (lines.length >= most) continue;
+    const held: FilmLine = { number: lines.length + 1, shot: i + 1, text: line };
+    lines.push(held); said.set(shot.id, held);
   }
   return lines.length ? { from: "cut", lines } : null;
 }
