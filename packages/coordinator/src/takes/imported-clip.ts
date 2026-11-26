@@ -6,6 +6,7 @@ import {
   orderedShots, TAKE_MEDIA_IDENTITY_SCHEMA_VERSION, TakeSchema,
   type Shot, type Take,
 } from "@arke-studio/contracts";
+import { containedArtifactFile } from "../artifacts/contained.js";
 import type { AgentMediaTools } from "../media/agent-media-tools.js";
 import { findCuts } from "../media/contact-sheet.js";
 import { frameMotion } from "../media/measure-sync.js";
@@ -36,17 +37,46 @@ export const IMPORTABLE_CLIPS = ["mp4", "mov", "webm"] as const;
 export class ClipImportError extends Error {}
 
 /**
+ * The file of a video on the shelf, or null when it is not one. A sidecar's file name is only a
+ * string the scan accepted: one that climbs out of the shelf, or names a link to a file of the
+ * host's, would be copied into the world on an approval that showed a shelf video and no file
+ * picker (codex on PR 3328). So it is resolved as the shelf's posters and borrowing resolve
+ * theirs: a plain file, itself inside `artifacts/`.
+ */
+export async function shelfClipFile(worldDir: string, artifacts: ReadonlyArray<{ id: string; kind: string; file: string }>, artifactId: string): Promise<string | null> {
+  const artifact = artifacts.find(candidate => candidate.id === artifactId);
+  return artifact?.kind === "video" ? containedArtifactFile(worldDir, artifact.file) : null;
+}
+
+/** The picture is read a minute at a time, each minute starting a second inside the last so a cut on the join is in one of them. */
+const SCAN_SEC = 60, SCAN_OVERLAP_SEC = 1;
+/** A clip longer than this is not a board made as one clip, and is not read to be divided. */
+const LONGEST_SCAN_SEC = 600;
+
+/**
  * A clip's length and where its picture cuts, read as the checks after a take read a take: ten
- * frames a second, over its first minute. Null on a host with no picture tools or a file with no
- * picture; a clip of several shots cannot be divided then, and is refused by name.
+ * frames a second, over the whole of it. The whole, because the cuts are trusted to be all of
+ * them: read for its first minute only, a ninety-second clip of two shots with a stray cut at 15 s
+ * and its real one at 75 s had one cut found, and one seam, and was divided at 15 (codex on
+ * PR 3328). Null on a host with no picture tools, a file with no picture, or a clip too long to
+ * be one; a clip of several shots cannot be divided then, and is refused by name.
  */
 export async function clipCuts(tools: AgentMediaTools, path: string, signal: AbortSignal): Promise<{ durationSec: number; cuts: number[] } | null> {
   if (!tools.grayFrames) return null;
   const inventory = await tools.probe(path, signal), video = inventory.streams.find(stream => stream.kind === "video");
   const durationSec = inventory.durationSec;
-  if (!video || durationSec === null || !(durationSec > 0)) return null;
-  const picture = await tools.grayFrames(path, video, 0, Math.min(durationSec, 60), { fps: 10, edge: 256 }, signal);
-  return { durationSec, cuts: findCuts([...frameMotion(picture.frames)], 10) };
+  if (!video || durationSec === null || !(durationSec > 0) || durationSec > LONGEST_SCAN_SEC) return null;
+  const cuts: number[] = [];
+  for (let from = 0; from < durationSec; from += SCAN_SEC - SCAN_OVERLAP_SEC) {
+    const picture = await tools.grayFrames(path, video, from, Math.min(durationSec, from + SCAN_SEC), { fps: 10, edge: 256 }, signal);
+    for (const cut of findCuts([...frameMotion(picture.frames)], 10)) {
+      const at = round(from + cut);
+      // The second two readings share finds the same cut twice.
+      if (!cuts.some(found => Math.abs(found - at) < .15)) cuts.push(at);
+    }
+    if (from + SCAN_SEC >= durationSec) break;
+  }
+  return { durationSec, cuts: cuts.sort((a, b) => a - b) };
 }
 
 /** A model's cut can land this far from where it was asked for and still be that cut. */
@@ -59,10 +89,12 @@ export interface SegmentBounds { from: "cuts" | "plan"; bounds: Array<{ shotId: 
 /**
  * Where each shot of a clip made as several shots sits in it. `planned` is the shots in order with
  * the seconds each was written to run; the clip came back `durationSec` long with its picture
- * cutting at `cuts`. With exactly one cut a seam, the cuts are the seams. With more or fewer, each
- * seam takes the nearest cut within reach of where the plan put it, and if any seam finds none the
- * whole clip is divided by the plan (scaled to its real length): half of it snapped and half not
- * would put one shot's frames in two segments.
+ * cutting at `cuts`. With exactly one cut a seam, the cuts are the seams, so long as each is in its
+ * seam's part of the clip: a clip whose model cut once in the wrong place and not at all at its
+ * seam has the right number of cuts and none of them a seam. With more or fewer, each seam takes
+ * the nearest cut within reach of where the plan put it, and if any seam finds none the whole
+ * clip is divided by the plan (scaled to its real length): half of it snapped and half not would
+ * put one shot's frames in two segments.
  */
 export function segmentBounds(planned: ReadonlyArray<{ shotId: string; sec: number }>, durationSec: number, cuts: readonly number[]): SegmentBounds {
   const total = planned.reduce((sum, shot) => sum + shot.sec, 0), scale = total > 0 ? durationSec / total : 0;
@@ -73,7 +105,9 @@ export function segmentBounds(planned: ReadonlyArray<{ shotId: string; sec: numb
   const usable = (edges: readonly number[]) => [0, ...edges, durationSec].every((edge, i, all) => i === 0 || edge - all[i - 1]! >= SHORTEST_SEGMENT_SEC);
   const found = [...cuts].filter(cut => cut > 0 && cut < durationSec).sort((a, b) => a - b);
   if (seams.length === 0) return from([], "cuts");
-  if (found.length === seams.length && usable(found)) return from(found, "cuts");
+  // As many cuts as seams: a model's timing wanders further than one cut's reach, but not into another shot's part of the clip.
+  const wander = Math.max(CUT_REACH_SEC, durationSec / 4);
+  if (found.length === seams.length && usable(found) && found.every((cut, i) => Math.abs(cut - seams[i]!) <= wander)) return from(found, "cuts");
   const taken = new Set<number>(), snapped: number[] = [];
   for (const seam of seams) {
     let best = -1;

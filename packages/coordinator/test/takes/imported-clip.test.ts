@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { takeCheckSource, takeIsCheckable, type AgentMediaInventory } from "@arke-studio/contracts";
-import { clipCuts, ClipImportError, recordImportedClipTakes, segmentBounds } from "../../src/takes/imported-clip.js";
+import { clipCuts, ClipImportError, recordImportedClipTakes, segmentBounds, shelfClipFile } from "../../src/takes/imported-clip.js";
 import type { AgentMediaTools } from "../../src/media/agent-media-tools.js";
 import { WorldStore } from "../../src/world/store.js";
 import { makeTempWorld } from "../world/helpers.js";
@@ -38,6 +38,14 @@ describe("where a clip of several shots is cut", () => {
     assert.deepEqual(scaled.bounds.map(bound => [bound.inSec, bound.outSec]), [[0, 3], [3, 7.5], [7.5, 15]]);
   });
 
+  it("does not take a stray cut for the seam because there is one of each (codex on PR 3328)", () => {
+    // Two shots, the seam written at 75 s of 90. The model cut once, at 15 s, and not at its seam at all.
+    const two = [{ shotId: "sh_1", sec: 75 }, { shotId: "sh_2", sec: 15 }];
+    assert.deepEqual(segmentBounds(two, 90, [15]), { from: "plan", bounds: [{ shotId: "sh_1", inSec: 0, outSec: 75 }, { shotId: "sh_2", inSec: 75, outSec: 90 }] });
+    // With its real cut found as well, the seam takes the one beside it.
+    assert.deepEqual(segmentBounds(two, 90, [15, 75.4]).bounds.map(bound => bound.inSec), [0, 75.4]);
+  });
+
   it("does not make a shot of a flash, and leaves a clip of one shot whole", () => {
     assert.equal(segmentBounds(board, 15, [6.2, 6.3]).from, "plan", "two cuts a tenth apart are not two seams");
     assert.deepEqual(segmentBounds([{ shotId: "sh_21", sec: 5 }], 6.4, [3]), { from: "cuts", bounds: [{ shotId: "sh_21", inSec: 0, outSec: 6.4 }] });
@@ -48,13 +56,41 @@ describe("a clip's cuts", () => {
   it("finds them in the picture, and says nothing on a host that cannot read one", async () => {
     const inventory: AgentMediaInventory = { durationSec: 6, streams: [
       { index: 0, kind: "video", codec: "fixture", width: 1280, height: 720, frameRate: "30/1", durationSec: 6, startTimeSec: 0 }] };
-    // A grey room that cuts to a bright one at 3 s, with a little movement so nothing is a still.
-    const frame = (i: number) => { const picture = new Uint8Array(64 * 36).fill(i < 30 ? 60 : 190); picture[i % 64] = 255; return picture; };
-    const tools = { probe: async () => inventory,
-      grayFrames: async (_path: string, _stream: unknown, startSec: number, endSec: number, options: { fps?: number }) => ({
-        frames: Array.from({ length: Math.round((endSec - startSec) * 10) }, (_, i) => frame(i)), width: 64, height: 36, fps: options.fps }) } as unknown as AgentMediaTools;
-    assert.deepEqual(await clipCuts(tools, "clip.mp4", new AbortController().signal), { durationSec: 6, cuts: [3] });
+    // A room that changes at each cut, with a little movement so nothing is a still.
+    const pictureOf = (cutsAt: number[]) => (i: number) => {
+      const picture = new Uint8Array(64 * 36).fill(60 + 60 * cutsAt.filter(cut => i >= cut * 10).length); picture[i % 64] = 255; return picture; };
+    const reading = (seconds: number, cutsAt: number[]) => {
+      const windows: Array<[number, number]> = [], frame = pictureOf(cutsAt);
+      const tools = { probe: async () => ({ ...inventory, durationSec: seconds }),
+        grayFrames: async (_path: string, _stream: unknown, startSec: number, endSec: number, options: { fps?: number }) => {
+          windows.push([startSec, endSec]);
+          return { frames: Array.from({ length: Math.round((endSec - startSec) * 10) }, (_, i) => frame(Math.round(startSec * 10) + i)), width: 64, height: 36, fps: options.fps };
+        } } as unknown as AgentMediaTools;
+      return { tools, windows };
+    };
+    assert.deepEqual(await clipCuts(reading(6, [3]).tools, "clip.mp4", new AbortController().signal), { durationSec: 6, cuts: [3] });
     assert.equal(await clipCuts({ probe: async () => inventory } as unknown as AgentMediaTools, "clip.mp4", new AbortController().signal), null);
+    // The whole clip, a minute at a time: a cut past the first minute, and one on the join of two readings, found once each.
+    const long = reading(90, [15, 59.5, 75]);
+    assert.deepEqual(await clipCuts(long.tools, "clip.mp4", new AbortController().signal), { durationSec: 90, cuts: [15, 59.5, 75] });
+    assert.deepEqual(long.windows, [[0, 60], [59, 90]]);
+    assert.equal(await clipCuts(reading(601, []).tools, "clip.mp4", new AbortController().signal), null, "ten minutes is not a board");
+  });
+});
+
+describe("a video on the shelf", () => {
+  it("is its own plain file inside the shelf, or it is not there (codex on PR 3328)", async () => {
+    const dir = await tempDir("arke-shelf-");
+    await mkdir(join(dir, "artifacts"));
+    await writeFile(join(dir, "artifacts", "clip.mp4"), "CLIP");
+    await writeFile(join(dir, "outside.mp4"), "PRIVATE");
+    const shelf = [{ id: "ar_1", kind: "video", file: "clip.mp4" }, { id: "ar_2", kind: "video", file: "../outside.mp4" }, { id: "ar_3", kind: "image", file: "clip.mp4" },
+      { id: "ar_4", kind: "video", file: "gone.mp4" }];
+    assert.equal((await readFile((await shelfClipFile(dir, shelf, "ar_1"))!)).toString(), "CLIP");
+    assert.equal(await shelfClipFile(dir, shelf, "ar_2"), null, "a name that climbs out of the shelf");
+    assert.equal(await shelfClipFile(dir, shelf, "ar_3"), null, "a picture is not a clip");
+    assert.equal(await shelfClipFile(dir, shelf, "ar_4"), null);
+    assert.equal(await shelfClipFile(dir, shelf, "ar_9"), null);
   });
 });
 

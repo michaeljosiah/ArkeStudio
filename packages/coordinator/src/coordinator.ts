@@ -444,7 +444,7 @@ import { manuscriptChapters, productionShape, type StructuredDocument } from "@a
 import { voicedBlocks, type ChapterContinuity, type ChapterVoices } from "@arke-studio/contracts";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import { checkTake, type TakeCheckPorts } from "./takes/checks.js";
-import { clipCuts, ClipImportError, IMPORTABLE_CLIPS, recordImportedClipTakes } from "./takes/imported-clip.js";
+import { clipCuts, ClipImportError, IMPORTABLE_CLIPS, recordImportedClipTakes, shelfClipFile } from "./takes/imported-clip.js";
 import { readContinuationSource } from "./productions/continuation.js";
 
 import type { TakeQcAnalyzer } from "./takes/qc.js";
@@ -19964,9 +19964,9 @@ export class Coordinator {
       if (last < first) return { status: "failed", detail: "Those shots are no longer a run in this scene." };
       let sourcePath: string;
       if (action.artifactId !== undefined) {
-        const artifact = store.getBundle().artifacts.find((candidate) => candidate.id === action.artifactId);
-        if (artifact?.kind !== "video") return { status: "failed", detail: "That video is no longer on the shelf." };
-        sourcePath = join(store.dir, "artifacts", artifact.file);
+        const onShelf = await shelfClipFile(store.dir, store.getBundle().artifacts, action.artifactId);
+        if (onShelf === null) return { status: "failed", detail: "That video is no longer on the shelf." };
+        sourcePath = onShelf;
       } else {
         const chosen = await this.opts.pickFiles?.({ accept: [...IMPORTABLE_CLIPS] }) ?? [];
         if (chosen.length === 0) return { status: "cancelled", detail: "No video was selected." };
