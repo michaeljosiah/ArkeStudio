@@ -1,4 +1,4 @@
-import { applyTimelineCommands, clipSoundFile, clipSourceInSec, framesToSeconds, isMatchLoudnessCommand, isSoundGateCommand, migrateLegacyCut,
+import { clipSoundFile, clipSourceInSec, compileTrustedTimelineSteps, finishTrustedTimelineSteps, framesToSeconds, isMatchLoudnessCommand, isSoundGateCommand, migrateLegacyCut,
   needsSoundMeasure, seedFirstPictureTimeline, soundGateFromLevels, soundGateProblem, sourceLengthFramesFor, SOUND_GATE, TimelineOperationRefused,
   type ModelEditorRequest, type ProductionBundle, type ProductionTimeline, type SoundGate, type TimelineClip, type TimelineClipCommand, type TimelineCommand,
   type TimelineTrack } from "@arke-studio/contracts";
@@ -95,9 +95,13 @@ async function loudnessGain(tools: SoundTools, path: string, fromSec: number, to
   if (!(end - fromSec >= .4)) return refuse(`${label} plays too little sound to measure a loudness from`);
   const measured = (await tools.loudness(path, audio, fromSec, end, signal, "film")).integratedLufs;
   if (measured === null) return refuse(`${label} is too quiet to measure a loudness from`);
-  const gain = Math.round((lufs - measured - (track.levelDb ?? 0)) * 10) / 10;
+  const level = track.levelDb ?? 0, played = Math.round((lufs - measured) * 10) / 10, gain = Math.round((lufs - measured - level) * 10) / 10;
+  const signed = (value: number) => `${value > 0 ? "+" : ""}${value}`;
   // Said, not clamped: a clip quietly left 9 dB short of what was asked would be found by ear in the mix.
-  if (gain > 12 || gain < -60) return refuse(`${label} measures ${measured} LUFS: ${lufs} LUFS would take a gain of ${gain > 0 ? "+" : ""}${gain} dB, and a clip's gain is -60 to +12`);
+  if (gain > 12 || gain < -60) return refuse(`${label} measures ${measured} LUFS: ${lufs} LUFS would take a gain of ${signed(gain)} dB, and a clip's gain is -60 to +12`);
+  // What plays is the clip's gain and its track's level together, held to the same range (R-52). A gain that fits
+  // on a track turned up can still ask for more than plays, and the clip would sit short of its figure unsaid.
+  if (played > 12 || played < -60) return refuse(`${label} measures ${measured} LUFS: ${lufs} LUFS would take ${signed(played)} dB with its track's level of ${signed(level)} dB, and a clip plays at -60 to +12`);
   return gain;
 }
 
@@ -119,7 +123,10 @@ export async function measureTimelineSound(store: WorldStore, productionId: stri
     const pure = measured.filter((command): command is TimelineClipCommand => command.kind !== "switch-take");
     if (pure.length === 0) return base;
     try {
-      return applyTimelineCommands(base, pure, { effectAuthority: "human", label: "measure", sourceLength: sourceLengthFramesFor(production, artifacts), sources: { production, artifacts } });
+      // The commands before a measured one may change nothing on their own (a track set to the level it has, a gate
+      // set again): only the whole batch is held to changing something, so here "unchanged" is the timeline as it was.
+      const options = { label: "measure", sourceLength: sourceLengthFramesFor(production, artifacts), sources: { production, artifacts } };
+      return finishTrustedTimelineSteps(base, compileTrustedTimelineSteps(base, [{ id: "measure", authority: "human", commands: pure }], options), options).timeline;
     } catch (error) { return error instanceof TimelineOperationRefused ? refuse(error.reason) : (() => { throw error; })(); }
   };
   const clipFor = (clipId: string, what: "gate" | "loudness") => {
