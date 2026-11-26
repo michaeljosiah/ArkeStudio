@@ -597,6 +597,30 @@ do not carry the command. Start with contracts `test/editor-picture-look.test.ts
 `test/productions/timeline-picture-look.test.ts` and `test/media/picture-look-native.test.ts`
 (real FFmpeg, skipped without it), and client `test/editor-look.test.tsx`.
 
+A sound clip's level beyond its own gain (SPEC-038 R-52..R-66) is in four places. A track's
+`levelDb` and `ducks: false` are fields of contracts `timeline.ts`, and a fade's even-power shape
+is `power` in `editor-sound-fade.ts`; `render-plan.ts` sums the level into each item
+(`trackedGainDb`) and `audioLevelAt` is the one function the Viewer's gain and the export's graph
+(`cut.ts`) both read. A gate is measured stretches kept on the clip: contracts
+`editor-sound-gate.ts` holds the record, `soundGateFromLevels` and `soundGateAt`. A clip set to a
+loudness (`match-loudness`) and a room laid from pieces of several beds (`lay-room`, contracts
+`editor-room.ts`: `roomPieces` lays it out from a seed, `layRoomSteps` turns it into ordinary
+track and clip commands) are never applied as written. Coordinator
+`productions/timeline-sound.ts` measures first, off a verified private copy and outside the
+world's write gate: `measureTimelineSound` for a person's command, and
+`measureEditorRequestSound` ahead of a turn's validation in `world-chat/run.ts`, so Arke's card
+shows what Accept will apply. Compatibility floors 153 to 155 are read from the raw record in
+`productions/timeline-record.ts`. The Inspector's rows are in client `screens/editor-audio.tsx`.
+Two things under it: a delayed sound's chain counts its timestamps again from its samples
+(`asetpts=N/SR/TB` in `cut.ts`), without which a clip cut from partway into a take's own file
+played at the film's start; and `takes/export.ts` `graphInFile` hands a long filter graph to
+FFmpeg in a file, since a scene's cut outruns Windows' process arguments. Start with contracts
+`test/timeline-audio.test.ts`; coordinator `test/productions/timeline-sound-levels.test.ts`,
+`timeline-sound-gate.test.ts`, `timeline-room.test.ts` and `test/takes/export-graph-file.test.ts`;
+the real-FFmpeg `test/media/sound-levels-native.test.ts`, `sound-gate-native.test.ts`,
+`sound-room-native.test.ts` and `sound-placement-native.test.ts` (skipped without it); and client
+`test/timeline-audio.test.tsx`.
+
 Inspect `TimelineCommandRefused` and existing migration/history handling when changing edits. A client drag preview is not a successful persisted edit. Start with coordinator `test/productions/timeline.test.ts`, `timeline-migration.test.ts` and client `test/timeline-editing-guards.test.tsx`, `plan-playback.test.ts`.
 
 Render planning, migration and inspector validation receive the whole world's artifact catalog. Contracts `artifact-access.ts` (`resolveProductionArtifact`) distinguishes missing media from another production's scoped material; the same decision guards timeline/Library placement, editor-request preparation and legacy writes. Render planning's `legacyArtifactScopeRefusal` checks unmigrated audio and song masters before preview or export; `legacyCutArtifactReferences` normalizes both legacy audio encodings for the planner and bulk-save validation. New picker offers remain scoped to the current production, while existing unavailable Library memberships stay visible for removal (SPEC-020 R-13).
