@@ -109,9 +109,22 @@ export function currentTakeChecks(production: { takeChecks?: Readonly<Record<str
   return record !== undefined && source !== null && record.sourceHash === source.hash ? record : null;
 }
 
-/** The count beside the take: how many measured items passed, of how many were measured. */
-export function takeChecksCount(record: TakeChecksRecord): { passed: number; of: number; hardToFix: number } {
+/**
+ * The count beside the take: how many items passed, of how many the take has to be measured on.
+ * An item the host could not measure counts, and as not passed. It used to be left out, so a take
+ * whose words could not be read showed "3 of 3" in green with the one check that mattered missing
+ * from the list. An item the take has nothing for (no line, no sound, a sung shot, no read sent,
+ * no neighbour) is not owed and is not counted.
+ */
+export function takeChecksCount(record: TakeChecksRecord): { passed: number; of: number; hardToFix: number; unchecked: number } {
   const passed = record.items.filter(item => item.result === "pass").length;
   const hardToFix = record.items.filter(item => item.result === "fix" && HARD_TAKE_CHECKS.has(item.id)).length;
-  return { passed, of: record.items.length, hardToFix };
+  const unchecked = takeChecksUnchecked(record).length;
+  return { passed, of: record.items.length + unchecked, hardToFix, unchecked };
+}
+
+/** The items a take should have been measured on and was not, in the list's order. */
+export function takeChecksUnchecked(record: TakeChecksRecord): TakeCheckId[] {
+  const unavailable = new Set(record.skipped.filter(item => item.reason === "unavailable").map(item => item.id));
+  return TAKE_CHECKS.filter(id => unavailable.has(id));
 }

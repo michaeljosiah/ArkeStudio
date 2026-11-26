@@ -74,6 +74,19 @@ describe("a take's checks on the bench (design turn 288c)", () => {
     assert.equal(container.querySelector(".fy-takechecks__panel small, .fy-takechecks__panel p"), null, "no caption");
   });
 
+  it("counts and lists a check that could not be made, so a take is never all green with one missing (2026-11-26)", async () => {
+    const unread: TakeChecksRecord = { ...RECORD, items: [{ id: "cuts-inside", result: "pass", says: "none" }, { id: "camera", result: "pass", says: "handheld · 7 px" }],
+      skipped: [{ id: "words", reason: "unavailable" }, { id: "unwritten-voice", reason: "unavailable" }, { id: "lip-sync", reason: "no-voice-sent" }] };
+    const { container } = await mount({ ...SALTLIGHT, takeChecks: { [CLIP.id]: unread } }, CLIP);
+    const count = container.querySelector(".fy-takechecks__count")!;
+    assert.equal(count.textContent, "Checks · 2 of 4", "it read 2 of 2");
+    assert.ok(count.querySelector(".fy-dot--warn"));
+    await click(count);
+    const rows = [...container.querySelectorAll(".fy-takechecks__row")].map((row) => [row.querySelector(".fy-takechecks__label")!.textContent, row.querySelector(".fy-takechecks__result")!.textContent]);
+    assert.deepEqual(rows, [["Cuts inside", "none"], ["Camera", "handheld · 7 px"], ["Words", "not checked"], ["Voice nobody wrote", "not checked"]],
+      "what the take has nothing for (no read sent) is not listed");
+  });
+
   it("checks a take without checks of its media the first time it is shown, and offers Check if that is refused", async () => {
     const stale = { ...RECORD, sourceHash: "sha256:ffffffffffffffff" };
     const production = { ...SALTLIGHT, takeChecks: { [CLIP.id]: stale } };

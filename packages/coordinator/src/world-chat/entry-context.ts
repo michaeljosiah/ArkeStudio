@@ -36,7 +36,7 @@ const CUT_CHECKS_LINE = "get_timeline's cut-checks row says what was read of the
  * The checks after a take (design turn 287), for the places takes are judged. Measured when a
  * clip lands; a fix is the first thing to answer, and a remake asks for what the last take missed.
  */
-const TAKE_CHECKS_LINE = "Each clip's checks in list_takes say what was measured when it landed; answer a fix there first: end a take that runs on at its endAtSec on the Cut, or remake it with production-take-generation, naming the failed checks in its instruction.";
+const TAKE_CHECKS_LINE = "Each clip's checks in list_takes say what was measured when it landed; answer a fix there first: end a take that runs on at its endAtSec on the Cut, or remake it with production-take-generation, naming the failed checks in its instruction. A check skipped as unavailable was not made: make it yourself with your tools before you rely on the take. Words that say a name is unclear mean the recogniser heard nothing like that name: listen to that part and ask the person to confirm how it is said, since a wrong name passes for nobody.";
 
 /**
  * Before a shot is made (design turn 287), and how many to make at once. The owner, 2026-11-25:
