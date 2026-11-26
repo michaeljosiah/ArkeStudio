@@ -444,6 +444,7 @@ import { manuscriptChapters, productionShape, type StructuredDocument } from "@a
 import { voicedBlocks, type ChapterContinuity, type ChapterVoices } from "@arke-studio/contracts";
 import { recordTakesFromJob } from "./takes/arrival.js";
 import { checkTake, type TakeCheckPorts } from "./takes/checks.js";
+import { clipCuts, ClipImportError, IMPORTABLE_CLIPS, recordImportedClipTakes, shelfClipFile } from "./takes/imported-clip.js";
 import { readContinuationSource } from "./productions/continuation.js";
 
 import type { TakeQcAnalyzer } from "./takes/qc.js";
@@ -19951,6 +19952,46 @@ export class Coordinator {
     const takeId = `tk_${mutation.requestId.slice(4)}` as never;
     const existing = production.takes.find((take) => take.id === takeId);
     if (existing) return { status: "completed", id: existing.id };
+    if (action.media === "clip") {
+      /*
+       * A clip made outside the Studio (2026-11-26). The shelf's own copy is used when the action
+       * names one, so a film whose clips were made elsewhere can be filed without anyone at the
+       * file picker; otherwise the person picks one video. The takes are checked as a landed
+       * job's are, and nothing is accepted: filing a clip is not choosing it.
+       */
+      const ordered = orderedShots(scene), first = ordered.findIndex((shot) => shot.id === action.shotId);
+      const last = action.throughShotId === undefined ? first : ordered.findIndex((shot) => shot.id === action.throughShotId);
+      if (last < first) return { status: "failed", detail: "Those shots are no longer a run in this scene." };
+      let sourcePath: string;
+      if (action.artifactId !== undefined) {
+        const onShelf = await shelfClipFile(store.dir, store.getBundle().artifacts, action.artifactId);
+        if (onShelf === null) return { status: "failed", detail: "That video is no longer on the shelf." };
+        sourcePath = onShelf;
+      } else {
+        const chosen = await this.opts.pickFiles?.({ accept: [...IMPORTABLE_CLIPS] }) ?? [];
+        if (chosen.length === 0) return { status: "cancelled", detail: "No video was selected." };
+        if (chosen.length !== 1) return { status: "failed", detail: "Choose one video." };
+        if (!this.stillOpen(store)) return { status: "cancelled", detail: "That world is no longer open." };
+        sourcePath = chosen[0]!;
+      }
+      const tools = this.opts.agentMediaTools;
+      try {
+        const filed = await recordImportedClipTakes(store, {
+          productionId: action.productionId, shotIds: ordered.slice(first, last + 1).map((shot) => shot.id), sourcePath, takeId,
+          ...(action.madeWith !== undefined ? { madeWith: action.madeWith } : {}),
+          ...(action.prompt !== undefined ? { prompt: action.prompt } : {}),
+          ...(tools ? { measure: (path: string) => clipCuts(tools, path, AbortSignal.any([this.runtimeStop.signal, store.closingSignal])) } : {}),
+          ...mutation,
+        });
+        this.refreshIfStillOpen(store);
+        for (const take of filed.takes) this.checkTakeInBackground(store, action.productionId, take.id);
+        return { status: "completed", id: filed.clip.id, detail: filed.segmentsFrom === null ? "The clip was recorded as an unselected immutable take."
+          : filed.segmentsFrom === "cuts" ? `The clip was recorded, and one take a shot (${filed.takes.length}), cut where its picture cuts.`
+          : `The clip was recorded, and one take a shot (${filed.takes.length}), divided by the shots' written lengths: its cuts could not be found, so check where each begins.` };
+      } catch (error) {
+        return { status: "failed", detail: error instanceof ClipImportError ? error.message : "The clip could not be filed." };
+      }
+    }
     const chosen = await this.opts.pickFiles?.({ accept: [...IMPORTABLE_IMAGES] }) ?? [];
     if (chosen.length === 0) return { status: "cancelled", detail: "No image was selected." };
     if (chosen.length !== 1) return { status: "failed", detail: ONE_IMAGE_ONLY };

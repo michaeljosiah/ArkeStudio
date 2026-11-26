@@ -1020,15 +1020,30 @@ export const ProductionBoardExportModelActionSchema = z
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
+/**
+ * A take from outside: a still for the shot's frame (the default), or with `media: "clip"` a
+ * video made on a route the Studio does not have. A clip may hold a run of consecutive shots
+ * (`throughShotId` is the last of them), as one made on another site as a board does; it is filed
+ * as that clip and a segment a shot, cut where its picture cuts. `artifactId` names a video
+ * already on the shelf, so nobody has to pick the file again. What made it and the words it was
+ * made from are said here because the Studio sent nothing: they are the take's only record of them.
+ */
 const ProductionTakeImportModelActionSchema = z
   .object({
     kind: z.literal("production-take-import"),
     productionId: SlugSchema,
     sceneId: SceneIdSchema,
     shotId: ShotIdSchema,
+    media: z.enum(["frame", "clip"]).optional(),
+    throughShotId: ShotIdSchema.optional(),
+    artifactId: ArtifactIdSchema.optional(),
+    madeWith: z.string().trim().min(1).max(120).optional(),
+    prompt: z.string().trim().min(1).max(20_000).optional(),
     checkReceiptIds: CompleteReadIdsSchema,
   })
   .strict();
+/** The fields of a take import that only a clip has; a still carrying one is refused when its card is prepared. */
+export const CLIP_IMPORT_FIELDS = ["throughShotId", "artifactId", "madeWith", "prompt"] as const;
 const ProductionFrameRunStartModelActionSchema = z.object({
   kind: z.literal("production-frame-run-start"), productionId: SlugSchema,
   sceneId: SceneIdSchema, mode: z.enum(["per-shot", "board"]), scope: z.enum(["missing", "all"]), modelId: z.string().min(1).max(300).optional(), shotId: ShotIdSchema.optional(),
