@@ -204,6 +204,24 @@ it("the sound skill names what the Cut does for a room: a held track, an even-po
   assert.match(sound, /with less, pieces come round again/);
 });
 
+it("the skills say whose scene it is, and how long a reply waits (a cut watched as a director would, 2026-11-26)", async () => {
+  // A cut passed every check of words, lips and levels and still did not tell its scene: no shot of the room, the
+  // talker on screen for more than half of it, replies a second or more late, and a turn with no face on it.
+  const continuity = (await loadCraftSkill("continuity-across-cuts"))!.body;
+  assert.match(continuity, /## 8 · Whose scene it is/);
+  assert.match(continuity, /Open on the place/);
+  assert.match(continuity, /Count whose face holds the picture/);
+  assert.match(continuity, /After a look, the one who looked/);
+  assert.match(continuity, /Play the turn on the face of the one who turns/);
+  assert.match(continuity, /Make what a shot is for large enough to read/);
+  assert.match(continuity, /Look through the takes' unused seconds before asking for a shot/);
+  const sound = (await loadCraftSkill("sound-and-pace"))!.body;
+  assert.match(sound, /Measure how long each reply waits/);
+  assert.match(sound, /Never slide a voice against\s+its own picture to close a gap/);
+  assert.match(sound, /Let it come up a little where the picture is the room/);
+  assert.match(sound, /A sound the page names is not owed to the screen/);
+});
+
 it("the craft skills hold general craft only, nothing of any one story (the owner, 2026-11-26)", async () => {
   // A skill is read for every production. The owner found one production's characters, lines and shots in them:
   // "The Arke skill should not have anything specific to" the story it was learned on.
