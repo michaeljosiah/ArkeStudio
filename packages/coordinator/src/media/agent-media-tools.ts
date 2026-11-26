@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { AGENT_MEDIA_LIMITS, AgentMediaInventorySchema, measureAudioSignal, type AgentMediaInventory, type AgentMediaRegion, type AudioSignal } from "@arke-studio/contracts";
+import { AGENT_MEDIA_LIMITS, AgentMediaInventorySchema, measureAudioSignal, MIX_FORMAT, type AgentMediaInventory, type AgentMediaRegion, type AudioSignal } from "@arke-studio/contracts";
 import type { MediaProcessRunner } from "../audio/media-tools.js";
 import { decodePngAsync as decodePng } from "../references/png-runner.js";
 import { writeSpeechWav } from "../audio/speech-wav.js";
@@ -12,8 +12,12 @@ export interface AgentMediaTools {
   frame(path: string, streamIndex: number, sourceTimeSec: number, endSec: number, signal: AbortSignal, region?: AgentMediaRegion): Promise<{
     bytes: Uint8Array; width: number; height: number; sourceTimeSec: number;
   }>;
-  /** EBU R128 over a window of a sound stream (#3073): integrated loudness, range, true peak and the loudest short-term second. */
-  loudness?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, signal: AbortSignal): Promise<{
+  /**
+   * EBU R128 over a window of a sound stream (#3073): integrated loudness, range, true peak and the loudest short-term second.
+   * `as: "film"` measures it as the Cut's mix plays it, at the film's rate in its two channels (SPEC-038 R-51, R-59): a
+   * one-channel take lands whole in both, so it plays 3 LU louder in a film than its own file measures.
+   */
+  loudness?(path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number, signal: AbortSignal, as?: "film"): Promise<{
     integratedLufs: number | null; rangeLu: number | null; truePeakDbtp: number | null; shortTermMaxLufs: number | null }>;
   /** One frame fitted, letterboxed, into exactly width x height of RGBA, for a contact sheet's tile. */
   tile?(path: string, stream: AgentMediaInventory["streams"][number], atSec: number, size: { width: number; height: number }, signal: AbortSignal): Promise<Uint8Array>;
@@ -189,12 +193,18 @@ export function createAgentMediaTools(runner: MediaProcessRunner): AgentMediaToo
     // A plain function, not a method: callers take it off the object.
     monoAudio: (path, stream, startSec, endSec, rate, signal) => pcmAudio(path, stream, startSec, endSec, { rate, channels: 1 }, signal),
     pcmAudio,
-    async loudness(path, stream, startSec, endSec, signal) {
+    async loudness(path, stream, startSec, endSec, signal, as) {
       const duration = endSec - startSec;
       if (stream.kind !== "audio" || !Number.isFinite(startSec) || startSec < 0 || !Number.isFinite(duration) || duration <= 0 || duration > 900 + WINDOW_EPSILON) throw new Error("Audio exceeds the loudness profile");
-      // ebur128 logs a line each 100 ms (about 1.8 KB a second of sound) and a summary; nothing goes to stdout.
+      /*
+       * The window is cut in the filter chain, ahead of the meter. FFmpeg applies an output's
+       * `-ss` and `-t` after the filters, so with those the meter heard the stream from its first
+       * sample to the window's end, and a window that did not start at zero came back as the
+       * loudness of everything before it as well: a quiet line after a loud one read 6 LU high.
+       * ebur128 logs a line each 100 ms (about 1.8 KB a second of sound) and a summary; nothing goes to stdout.
+       */
       const result = await run("ffmpeg", ["-hide_banner", "-nostats", "-loglevel", "info", "-threads", "1", "-protocol_whitelist", "file,pipe", "-format_whitelist", FORMATS,
-        "-i", path, "-ss", String(startSec), "-t", String(duration), "-map", `0:${stream.index}`, "-vn", "-sn", "-af", "ebur128=peak=true", "-f", "null", "-"],
+        "-i", path, "-map", `0:${stream.index}`, "-vn", "-sn", "-af", `atrim=start=${startSec}:duration=${duration},${as === "film" ? `${MIX_FORMAT},` : ""}ebur128=peak=true`, "-f", "null", "-"],
         signal, 4096, MEASURE_TIMEOUT_MS, Math.ceil(duration * 2400) + 65_536);
       return parseLoudness(result.stderr);
     },

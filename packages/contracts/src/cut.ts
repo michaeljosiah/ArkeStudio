@@ -889,8 +889,10 @@ export const MIX_FORMAT = "aresample=48000,pan=stereo|FL=FL+FC|FR=FR+FC";
  * (SPEC-038 R-51). The sound analysis folds it into its decoder identity. Without it, an analysis
  * made on the mix before would pass for the mix after wherever the observed format is the same: a
  * film whose first sound was already 48 kHz stereo, whose one-channel sounds are now 3 dB up.
+ * 3 is a delayed sound's timestamps counted again from its samples (R-19): the films it mends
+ * were mixed with a take's sound at their start, or with none.
  */
-export const MIX_GRAPH_REVISION = 2;
+export const MIX_GRAPH_REVISION = 3;
 
 /** The canonical audible graph shared by export and SPEC-053 analysis. Paths are resolved by the host.
  * Optional contribution taps preserve the complete mix; callers must consume every tap.
@@ -942,9 +944,20 @@ export function buildCanonicalAudioGraph(plan: Pick<ExportPlan, "audio" | "mix" 
      * and its stereo, and a film was delivered that way before anyone measured it. Converting
      * after the mixer does not mend this; it converts a mix already made narrow. So the step
      * heads each chain, which also leaves the fade the last stage, as it has to be.
+     *
+     * After the delay the chain's timestamps are counted again from its samples (R-19). A take's
+     * own file holds picture as well as sound, and a clip cut from partway into one delivers its
+     * first sound late: the seek has to read picture up to the in-point before any sound comes.
+     * `adelay`, asked for output before that first frame, writes its silence with no timestamps
+     * at all, and the film's closing `atrim` throws frames like that away. So a film whose only
+     * sound was one such clip played it from the film's first frame and ended early by the delay,
+     * and a film with two of them and nothing placed at its start came out silent, one second
+     * long. The samples were always right and in order; only their clock was wrong, and counting
+     * it from them is exact. The expressions after this read `t`, which is now the film's clock
+     * on every such film and is what it always was on the rest.
      */
     filters.push(
-      `[${index}:a]${MIX_FORMAT},apad=whole_dur=${d},atrim=duration=${d},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,${volume}${faded}[ac${i}]`,
+      `[${index}:a]${MIX_FORMAT},apad=whole_dur=${d},atrim=duration=${d},asetpts=PTS-STARTPTS,adelay=${delayMs}:all=1,asetpts=N/SR/TB,${volume}${faded}[ac${i}]`,
     );
     if (tapContributions) filters.push(`[ac${i}]asplit[am${i}][at${i}]`);
     audioLabels.push(tapContributions ? `[am${i}]` : `[ac${i}]`);
