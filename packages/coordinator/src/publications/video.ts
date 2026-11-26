@@ -7,7 +7,7 @@ import {
 } from "@arke-studio/contracts";
 import { validatePlacedPerformanceBytes } from "../audio/performance-placement.js";
 import type { MediaProbe } from "../media/probe.js";
-import type { FfmpegRunner } from "../takes/export.js";
+import { graphInFile, type FfmpegRunner } from "../takes/export.js";
 import { toExtendedLength } from "../world/paths.js";
 import { scanWorld } from "../world/scan.js";
 import type { WorldStore } from "../world/store.js";
@@ -224,7 +224,10 @@ async function renderCapturedVideoPublication(
     // Camera tags and source chapters belong to the editing inputs, not the published edition.
     args.splice(args.length - 1, 0, "-map_metadata", "-1", "-map_metadata:s", "-1", "-map_chapters", "-1",
       "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart");
-    await options.encoder.run(args, options.onProgress ?? (() => {}), signal);
+    // A long graph goes to the encoder in a file, as an export's does, and is gone before the folder becomes a package.
+    const graph = join(directory, "movie.ffgraph");
+    try { await options.encoder.run(await graphInFile(args, options.encoder, graph, signal), options.onProgress ?? (() => {}), signal); }
+    finally { await rm(toExtendedLength(graph), { force: true }).catch(() => {}); }
     signal.throwIfAborted();
     const info = await options.probe.info(movie, { signal });
     if (!info || info.hasVideo !== true || !Number.isFinite(info.durationSec) ||
