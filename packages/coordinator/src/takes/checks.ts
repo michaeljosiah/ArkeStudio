@@ -54,20 +54,79 @@ function matchedHeard(line: readonly string[], heard: readonly string[]): Array<
 
 /** A word the recogniser is this sure of is a voice; below it, a breath or the room can read as one. */
 const SURE = .5;
+/**
+ * One word alone has to be surer than two together. Two was the rule, and it let a take's single
+ * invented word through: a "Hmm?" after a line, the stub of a word begun before a cut. One unsure
+ * word is still a breath.
+ */
+const SURE_ALONE = .8;
+/** Two spellings this alike are one sound: "boot" and "boat", "Oya" and "Oh yeah", "Tunde" and "Tundi". */
+const ALIKE = .5;
+
+/** How alike two runs of letters are, 0 to 1: one less the edits that turn one into the other, over the longer's length. */
+export function alike(a: string, b: string): number {
+  if (a.length === 0 || b.length === 0) return 0;
+  let row = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j]! + 1, next[j - 1]! + 1, row[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    row = next;
+  }
+  return 1 - row[b.length]! / Math.max(a.length, b.length);
+}
 
 /**
- * The words heard against the line, and any voice nobody wrote: words outside the line's run, two
- * or more of them, which is what 69 and 72 did after their lines ended. A voice after the line
- * says where the take could end. A shot with no line has no words to compare; any voice in it is
- * one nobody wrote. Words heard without times (the recogniser's text alone, when it could not
- * place a word) still judge the line; a voice nobody wrote then says where it is, not when.
+ * The line's words the recogniser spelled another way. It knows English words, so a name or a word
+ * of another language comes back as the English it sounds like, split where it likes: "Adeyemi
+ * Akinola" as "the Yemi Aki Nola". Word for word nothing matches, and a line passed or failed on
+ * its other words alone: a take that said the name wrong passed at thirteen words of sixteen.
+ * So each run of the line's words left unmatched is set, as letters, against the run of heard
+ * words in the same gap that is most like it. Alike enough, the line's words were said and those
+ * heard words are theirs; otherwise they were not heard, and the take said something else there.
+ */
+function heardBySound(line: readonly string[], heard: readonly string[], used: ReadonlyArray<{ line: number; heard: number }>): { line: Set<number>; heard: Set<number> } {
+  const found = { line: new Set<number>(), heard: new Set<number>() };
+  const edges = [{ line: -1, heard: -1 }, ...used, { line: line.length, heard: heard.length }];
+  for (let e = 1; e < edges.length; e++) {
+    const from = edges[e - 1]!, to = edges[e]!;
+    if (to.line - from.line < 2 || to.heard - from.heard < 2) continue;
+    const target = line.slice(from.line + 1, to.line).join("");
+    let best: { start: number; end: number; score: number } | null = null;
+    for (let start = from.heard + 1; start < to.heard; start++) {
+      let text = "";
+      // A run much longer than the words it stands for is not them, however it scores.
+      for (let end = start; end < to.heard && text.length + heard[end]!.length <= target.length * 2 + 3; end++) {
+        text += heard[end]!;
+        const score = alike(target, text);
+        if (!best || score > best.score) best = { start, end, score };
+      }
+    }
+    if (!best || best.score < ALIKE) continue;
+    for (let i = from.line + 1; i < to.line; i++) found.line.add(i);
+    for (let j = best.start; j <= best.end; j++) found.heard.add(j);
+  }
+  return found;
+}
+
+/**
+ * The words heard against the line, and any voice nobody wrote: words outside the line's run,
+ * which is what 69 and 72 did after their lines ended. A voice after the line says where the take
+ * could end. A shot with no line has no words to compare; any voice in it is one nobody wrote.
+ * Words heard without times (the recogniser's text alone, when it could not place a word) still
+ * judge the line; a voice nobody wrote then says where it is, not when.
+ *
+ * `names` are the words of the cast's names. A line can lose a few words to the recogniser and
+ * pass; it cannot lose a name. Gold on Gold's "Adeyemi Akinola, abeg" came back with the name said
+ * wrong, the check passed it on the rest of the line, and it was found by a friend of the owner's
+ * after the scene was cut. The recogniser cannot say a name was said right, only that it heard
+ * nothing like it, so the item says which name to listen for.
  */
 export type HeardWord = { text: string; startSec: number | null; probability: number };
-export function judgeWords(line: string | null, heard: readonly HeardWord[]): { words: TakeCheck | null; voice: TakeCheck } {
+export function judgeWords(line: string | null, heard: readonly HeardWord[], names: ReadonlySet<string> = new Set()): { words: TakeCheck | null; voice: TakeCheck } {
   const spoken = heard.flatMap(word => spokenWords(word.text).map(text => ({ text, startSec: word.startSec, probability: word.probability })));
   const voiceAt = (words: typeof spoken, trimmable: boolean, where: string): TakeCheck => {
     const sure = words.filter(word => word.probability >= SURE);
-    if (sure.length < 2) return { id: "unwritten-voice", result: "pass", says: "none" };
+    if (sure.length === 0 || sure.length === 1 && sure[0]!.probability < SURE_ALONE) return { id: "unwritten-voice", result: "pass", says: "none" };
     const at = sure[0]!.startSec;
     if (at === null) return { id: "unwritten-voice", result: "fix", says: where };
     return { id: "unwritten-voice", result: "fix", says: `at ${sec(at)}`, ...(trimmable && at - .15 >= .5 ? { endAtSec: round1(at - .15) } : {}) };
@@ -75,24 +134,29 @@ export function judgeWords(line: string | null, heard: readonly HeardWord[]): { 
   const lineWords = line === null ? [] : spokenWords(line);
   if (lineWords.length === 0) return { words: null, voice: voiceAt(spoken, true, "heard") };
   if (spoken.length === 0) return { words: { id: "words", result: "fix", says: "nothing heard" }, voice: { id: "unwritten-voice", result: "pass", says: "none" } };
-  const used = matchedHeard(lineWords, spoken.map(word => word.text));
-  const share = used.length / lineWords.length;
-  const heardText = spoken.map(word => word.text).join(" ");
-  const words: TakeCheck = share === 1 ? { id: "words", result: "pass", says: "as written" }
-    : share >= .6 ? { id: "words", result: "pass", says: `${used.length} of ${lineWords.length} words` }
-    : { id: "words", result: "fix", says: `heard “${heardText.length > 48 ? `${heardText.slice(0, 47)}…` : heardText}”` };
-  if (used.length === 0) return { words, voice: voiceAt(spoken, false, "heard") };
+  const texts = spoken.map(word => word.text);
+  const used = matchedHeard(lineWords, texts), sound = heardBySound(lineWords, texts, used);
+  const said = new Set([...used.map(pair => pair.line), ...sound.line]);
+  const missing = lineWords.filter((_, i) => !said.has(i)), unclear = [...new Set(missing.filter(word => names.has(word)))];
+  const share = said.size / lineWords.length;
+  const short = (text: string, most: number) => (text.length > most ? `${text.slice(0, most - 1)}…` : text);
+  const words: TakeCheck = share < .6 ? { id: "words", result: "fix", says: `heard “${short(texts.join(" "), 48)}”` }
+    : unclear.length > 0 ? { id: "words", result: "fix", says: short(`name unclear: ${unclear.join(" ")}`, 80) }
+    : share < 1 ? { id: "words", result: "pass", says: short(`${said.size} of ${lineWords.length} words · not heard: ${missing.join(" ")}`, 80) }
+    : { id: "words", result: "pass", says: sound.line.size === 0 ? "as written" : sound.line.size === lineWords.length ? "by sound" : `as written, ${sound.line.size} by sound` };
+  if (said.size === 0) return { words, voice: voiceAt(spoken, false, "heard") };
   /*
-   * Words outside the run are a voice nobody wrote only past the line's own words that were not
-   * matched on that side: a recogniser spells "Ehn-ehn" as "Eh, eh", and on 0.5.138 the two
-   * misheard words that open shot 4's line read as a voice before it. So a side's spare words are
-   * those beyond the line words left unmatched there.
+   * Words outside the line's run are a voice nobody wrote only past the line's own words that
+   * were not heard on that side: a recogniser spells "Ehn-ehn" as "Eh, eh", and on 0.5.138 the
+   * two misheard words that open shot 4's line read as a voice before it. Words the line was
+   * heard in by sound are the line's; of the rest, as many as the line still misses on that side
+   * are left to it, nearest the line first.
    */
-  const first = used[0]!, last = used[used.length - 1]!;
-  const spare = (words: typeof spoken, unmatched: number, end: "start" | "finish") =>
-    words.length - unmatched >= 2 ? (end === "start" ? words.slice(0, words.length - unmatched) : words.slice(unmatched)) : [];
-  const after = voiceAt(spare(spoken.slice(last.heard + 1), lineWords.length - 1 - last.line, "finish"), true, "after the line");
-  return { words, voice: after.result === "fix" ? after : voiceAt(spare(spoken.slice(0, first.heard), first.line, "start"), false, "before the line") };
+  const lineHeard = [...used.map(pair => pair.heard), ...sound.heard], firstHeard = Math.min(...lineHeard), lastHeard = Math.max(...lineHeard);
+  const firstSaid = Math.min(...said), lastSaid = Math.max(...said);
+  const before = spoken.slice(0, firstHeard), after = spoken.slice(lastHeard + 1);
+  const trailing = voiceAt(after.slice(lineWords.length - 1 - lastSaid), true, "after the line");
+  return { words, voice: trailing.result === "fix" ? trailing : voiceAt(before.slice(0, Math.max(0, before.length - firstSaid)), false, "before the line") };
 }
 
 // ---------- Cuts inside ----------
@@ -249,11 +313,18 @@ export function judgeSync(result: { lagSec: number | null; follows: boolean }): 
   return { id: "lip-sync", result: "fix", says: `${ms > 0 ? "late" : "early"} ${Math.abs(ms)} ms` };
 }
 
-/** The read a take was sent to follow in time: a performance or a slice of the song, not a voice to sound like. */
+/**
+ * The read a take was sent to follow in time: a performance or a slice of the song, not a voice to
+ * sound like. A segment of a pass carries the whole pass's reads, and only the one sent for its
+ * own shot is its: held against the pass's first read, every segment but that read's own was
+ * measured against another shot's line, from that line's start, and read as not following it.
+ */
 function syncReference(take: Take): CharacterAudioPlan["references"][number] | null {
   const plan = take.params["audioReferences"] as CharacterAudioPlan | undefined;
   if (!plan || plan.disabled || !Array.isArray(plan.references)) return null;
-  return plan.references.find(ref => ref.intent === "performance-sync") ?? null;
+  const reads = plan.references.filter(ref => ref.intent === "performance-sync");
+  const shotOf = (ref: (typeof reads)[number]) => ("master" in ref ? ref.master.shotId : "performance" in ref ? ref.performance.target.shotId : undefined);
+  return reads.find(ref => shotOf(ref) === take.coversShots[0]) ?? (take.segment === undefined ? reads[0] ?? null : null);
 }
 
 /** The hash a sent read is fenced on: its prepared file's name says it; an unprepared performance carries it. */
@@ -291,6 +362,15 @@ function placeOf(production: ProductionBundle, shotId: string): { scene: SceneRe
     return { scene, shot: shots[index]!, neighbours: { before: chosen(index - 1), after: chosen(index + 1) } };
   }
   return null;
+}
+
+/** Words a sheet's name can hold that are not the name: "The Driver", "Old Tunde", "Mrs Akinola". */
+const NOT_A_NAME = new Set(["the", "a", "an", "of", "and", "mr", "mrs", "ms", "miss", "dr", "sir", "old", "young", "big", "little"]);
+
+/** The cast's names and aliases as the words a line would say them in. */
+export function castNames(sheets: ReadonlyArray<{ type: string; name: string; aliases?: readonly string[] }>): Set<string> {
+  return new Set(sheets.filter(sheet => sheet.type === "character").flatMap(sheet => [sheet.name, ...(sheet.aliases ?? [])])
+    .flatMap(spokenWords).filter(word => !NOT_A_NAME.has(word)));
 }
 
 const SPOKEN_KINDS = new Set(["dialogue", "vo", "voice", "voice-over", "voiceover", "line", "speech"]);
@@ -353,6 +433,7 @@ export async function measureTake(store: WorldStore, productionId: string, takeI
   if (!place) return null;
   const items: TakeCheck[] = [], skipped: TakeCheckSkip[] = [];
   const line = lineOf(place.shot);
+  const names = castNames(store.getBundle().sheets);
   const sync = syncReference(take);
   // Set inside the read below; cast so the checker does not keep them at their first null.
   let level = null as { first: number; last: number } | null;
@@ -419,7 +500,7 @@ export async function measureTake(store: WorldStore, productionId: string, takeI
         skipped.push({ id: "unwritten-voice", reason: "unavailable" });
         if (line !== null) skipped.push({ id: "words", reason: "unavailable" });
       } else {
-        const judged = judgeWords(line, heard);
+        const judged = judgeWords(line, heard, names);
         if (judged.words) items.push(judged.words);
         items.push(judged.voice);
       }

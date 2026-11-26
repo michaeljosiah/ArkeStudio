@@ -5,7 +5,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { currentTakeChecks, MEASURED_WORD_TIMING_ENGINE, type AgentMediaInventory } from "@arke-studio/contracts";
 import {
-  askedCamera, cameraPath, checkTake, judgeCamera, judgeCuts, judgeLight, judgeSync, judgeWords, spokenWords,
+  alike, askedCamera, cameraPath, castNames, checkTake, judgeCamera, judgeCuts, judgeLight, judgeSync, judgeWords, spokenWords,
 } from "../../src/takes/checks.js";
 import type { AgentMediaTools } from "../../src/media/agent-media-tools.js";
 import { writeSpeechWav } from "../../src/audio/speech-wav.js";
@@ -67,6 +67,41 @@ describe("the checks after a take: words", () => {
 
   it("compares words, not their spelling on the page", () => {
     assert.deepEqual(spokenWords("“Ehn-ehn.” He’s IN front!"), ["ehn", "ehn", "he's", "in", "front"]);
+  });
+
+  it("takes one sure word nobody wrote for a voice, and one unsure word for a breath (2026-11-26)", () => {
+    // A take answered "What?" with a "Hmm?" of its own before the next line: one word, so it passed.
+    const hmm = judgeWords("What?", [word("what", .4), word("hmm", 2.1, .92)]).voice;
+    assert.equal(hmm.result, "fix");
+    assert.equal(hmm.says, "at 2.1 s");
+    assert.ok(hmm.endAtSec !== undefined && hmm.endAtSec < 2.1, "and the take could end before it");
+    assert.equal(judgeWords("What?", [word("what", .4), word("mm", 2.1, .6)]).voice.result, "pass", "one word it was not sure of is a breath");
+    assert.equal(judgeWords(null, [word("you", 3.3, .95)]).voice.says, "at 3.3 s", "and in a shot with no line");
+  });
+
+  it("hears a name the recogniser spells its own way, and says when it heard nothing like it (2026-11-26)", () => {
+    const line = "Adeyemi Akinola, abeg, go and greet her before I die of shame on your behalf.";
+    const names = castNames([{ type: "character", name: "Adeyemi \"Ade\" Akinola" }, { type: "character", name: "The Driver", aliases: ["Old Tunde"] }, { type: "location", name: "Greet Street" }]);
+    assert.deepEqual([...names].sort(), ["ade", "adeyemi", "akinola", "driver", "tunde"], "the cast's names as words, without the words around them");
+    const rest = ["go", "and", "greet", "her", "before", "i", "die", "of", "shame", "on", "your", "behalf"];
+    const heardAs = (opening: string[]) => [...opening, ...rest].map((w, i) => word(w, .2 + i * .3));
+    // Said right: the recogniser's English for it, split where it liked.
+    const right = judgeWords(line, heardAs(["the", "yemi", "aki", "nola", "abeg"]), names);
+    assert.deepEqual(right.words, { id: "words", result: "pass", says: "as written, 2 by sound" });
+    assert.equal(right.voice.result, "pass", "the words the name was heard in are the line's, not a voice before it");
+    // Said wrong: twelve words of fifteen passed, and the name reached the cut.
+    assert.deepEqual(judgeWords(line, heardAs(["i", "do", "it", "in", "a", "bag"]), names).words, { id: "words", result: "fix", says: "name unclear: adeyemi akinola" });
+    // The same loss with no name in it is a recogniser's slip, and says which words it lost.
+    assert.deepEqual(judgeWords(line, heardAs(["i", "do", "it", "in", "a", "bag"])).words, { id: "words", result: "pass", says: "12 of 15 words · not heard: adeyemi akinola abeg" });
+  });
+
+  it("hears a word of another language in the English the recogniser made of it", () => {
+    const oya = judgeWords("Oya!", [word("oh", .5), word("yeah", .7)]);
+    assert.deepEqual(oya.words, { id: "words", result: "pass", says: "by sound" });
+    assert.equal(oya.voice.result, "pass", "and does not take it for a voice nobody wrote");
+    assert.equal(alike("boot", "boat"), .75);
+    assert.equal(alike("tunde", "tony"), .4, "not everything is alike");
+    assert.equal(alike("", "tony"), 0);
   });
 });
 
@@ -255,6 +290,29 @@ describe("a take checked when it lands", () => {
     const record = currentTakeChecks(production, production.takes.find(t => t.id === segmentId)!)!;
     assert.equal(record.sourceHash, sha(passBytes), "fenced on the pass's clip");
     assert.deepEqual(record.items.find(item => item.id === "cuts-inside"), { id: "cuts-inside", result: "fix", says: "at 1.0 s" }, "the pass's cut at 3 s is 1 s into the segment that starts at 2");
+  });
+
+  it("holds a segment's lip sync against the read sent for its own shot, never another shot's (2026-11-26)", async () => {
+    const { store, ports } = await landed();
+    const dir = store.dir, passBytes = Buffer.from("PASS with a read");
+    const base = JSON.parse(await readFile(join(dir, "productions/saltlight/takes/tk_01J8C0000000000000000000C3/take.json"), "utf8"));
+    const passId = "tk_01M8CHECK00000000000000005", firstId = "tk_01M8CHECK00000000000000006", secondId = "tk_01M8CHECK00000000000000007";
+    // The pass was sent one line to follow, shot 13's; every segment carries the pass's reads.
+    const params = { ...base.params, audioReferences: { references: [{ intent: "performance-sync", performance: { target: { shotId: "sh_13" }, provenance: { outputHash: `sha256:${"a".repeat(64)}` } } }] } };
+    const { media: _media, ...unfiled } = base;
+    const pass = { ...base, id: passId, coversShots: ["sh_12", "sh_13"], mediaHash: sha(passBytes), params };
+    const segment = (id: string, shotId: string, inSec: number, outSec: number) => ({ ...unfiled, id, coversShots: [shotId], params, segment: { passTakeId: passId, inSec, outSec } });
+    await store.commit({ kind: "media-fixture", source: "test", files: [
+      { path: `productions/saltlight/takes/${passId}/take.json`, action: "create", baseHash: null, content: JSON.stringify(pass) },
+      { path: `productions/saltlight/takes/${passId}/clip.mp4`, action: "create", baseHash: null, encoding: "base64", content: passBytes.toString("base64") },
+      { path: `productions/saltlight/takes/${firstId}/take.json`, action: "create", baseHash: null, content: JSON.stringify(segment(firstId, "sh_12", 0, 3)) },
+      { path: `productions/saltlight/takes/${secondId}/take.json`, action: "create", baseHash: null, content: JSON.stringify(segment(secondId, "sh_13", 3, 6)) },
+    ] });
+    for (const id of [firstId, secondId]) assert.equal(await checkTake(store, "saltlight", id, ports, new AbortController().signal), "checked");
+    const production = store.getBundle().productions.find(p => p.meta.id === "saltlight")!;
+    const lipSync = (id: string) => currentTakeChecks(production, production.takes.find(t => t.id === id)!)!.skipped.find(item => item.id === "lip-sync");
+    assert.deepEqual(lipSync(firstId), { id: "lip-sync", reason: "no-voice-sent" }, "shot 12 was sent no read: shot 13's line is not held against it");
+    assert.deepEqual(lipSync(secondId), { id: "lip-sync", reason: "unavailable" }, "shot 13's own read is its (this fixture has no sound to measure it with)");
   });
 
   it("hears a take nobody speaks in as nothing heard, not as unavailable (0.5.136)", async () => {

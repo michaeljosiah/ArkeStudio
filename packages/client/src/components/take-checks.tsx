@@ -1,4 +1,4 @@
-import { currentTakeChecks, takeChecksCount, takeIsCheckable, TAKE_CHECK_NAMES, type ProductionBundle, type Take } from "@arke-studio/contracts";
+import { currentTakeChecks, takeChecksCount, takeChecksUnchecked, takeIsCheckable, TAKE_CHECK_NAMES, type ProductionBundle, type Take } from "@arke-studio/contracts";
 import { useEffect, useState } from "react";
 import { checkTake, subscribeCommandFailures } from "../lib/store.js";
 import { isRemoteSession } from "../lib/remote-session.js";
@@ -43,6 +43,8 @@ export function TakeChecks({ worldId, production, take }: { worldId: string; pro
     return <Button variant="ghost" disabled={checking} onClick={check}>{checking ? "Checking…" : "Check"}</Button>;
   }
   const count = takeChecksCount(record);
+  // What could not be measured is listed with what was: left out, the list read as all passed.
+  const notChecked = takeChecksUnchecked(record), rows = record.items.length + notChecked.length;
   return (
     <span className="fy-takechecks">
       <button ref={press} type="button" className={`fy-takechip fy-takechecks__count${open ? " fy-takechip--on" : ""}`} aria-expanded={open}
@@ -53,12 +55,19 @@ export function TakeChecks({ worldId, production, take }: { worldId: string; pro
       {open && (
         <div ref={panel} className="fy-takechecks__panel" role="group" aria-label="After the take">
           <div className="fy-takechecks__head">After the take</div>
-          <div className={`fy-takechecks__list${record.items.length > 3 ? " fy-takechecks__list--two" : ""}`}>
+          <div className={`fy-takechecks__list${rows > 3 ? " fy-takechecks__list--two" : ""}`}>
             {record.items.map((item) => (
               <div key={item.id} className="fy-takechecks__row" data-result={item.result}>
                 <span className={`fy-dot fy-dot--${item.result === "pass" ? "ok" : "warn"}`} />
                 <span className="fy-takechecks__label">{TAKE_CHECK_NAMES[item.id]}</span>
                 <span className="fy-takechecks__result">{item.says}</span>
+              </div>
+            ))}
+            {notChecked.map((id) => (
+              <div key={id} className="fy-takechecks__row" data-result="fix">
+                <span className="fy-dot fy-dot--warn" />
+                <span className="fy-takechecks__label">{TAKE_CHECK_NAMES[id]}</span>
+                <span className="fy-takechecks__result">not checked</span>
               </div>
             ))}
           </div>
