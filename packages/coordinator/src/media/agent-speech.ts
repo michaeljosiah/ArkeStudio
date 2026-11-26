@@ -3,7 +3,7 @@ import { AcousticWordsSchema, AGENT_SPEECH_STRETCH_READER, AGENT_TRANSCRIPT_LIMI
   AgentTranscriptTextSchema, type AcousticWords, type AgentSpeechStretch, type AgentSpeechTranscript } from "@arke-studio/contracts";
 import { compareAudioTranscript } from "../audio/transcript-comparison.js";
 import { readSpeechWav, sliceSpeech, writeSpeechWav } from "../audio/speech-wav.js";
-import { voicedStretches } from "./speech-stretches.js";
+import { halvedStretch, voicedStretches } from "./speech-stretches.js";
 
 /** Only the supervised local Voxa seam is composed here; no provider or cloud fallback. */
 export type AgentSpeechReader = (bytes: Uint8Array, signal: AbortSignal) => Promise<AcousticWords>;
@@ -56,8 +56,9 @@ const STOPPED = "Speech recognition was stopped or exceeded its deadline";
 /**
  * An interval read a stretch at a time, where a voice is likely (speech-stretches.ts). Film sound
  * given whole to the measured reader was refused for one pause over room tone, and the refusal
- * took every word in the interval with it. Here each stretch is read for itself, and one the
- * measured reader still refuses falls to the plain local reader: its text is kept without word
+ * took every word in the interval with it. Here each stretch is read for itself. One the measured
+ * reader refuses is halved at its quietest point and each half read, and a piece it still refuses
+ * falls to the plain local reader: its text is kept without word
  * times, or the stretch is called silent when that reader hears no words either. Where no voice is
  * found nothing is read at all, and the transcript is empty. The derivative and its hash stay the
  * whole interval's; a reader is given a canonical slice of it.
@@ -84,7 +85,10 @@ export async function readAgentSpeech(input: { bytes: Uint8Array; durationSec: n
   try {
     const stretches: AgentSpeechStretch[] = [], words: AgentSpeechTranscript["words"] = [];
     let engine: AgentSpeechTranscript["engine"];
-    for (const { startSec, endSec } of voicedStretches(pcm.samples, pcm.rate).stretches) {
+    // In order, the next to read last: a refused stretch puts its two halves back on top.
+    const waiting = voicedStretches(pcm.samples, pcm.rate).stretches.reverse();
+    while (waiting.length) {
+      const { startSec, endSec } = waiting.pop()!;
       const piece = sliceSpeech(pcm, startSec, endSec), wav = writeSpeechWav(piece);
       const bounds = { startSec, endSec, viewStartSec: input.viewStartSec + startSec, viewEndSec: input.viewStartSec + endSec };
       let timed: AgentSpeechTranscript;
@@ -93,6 +97,9 @@ export async function readAgentSpeech(input: { bytes: Uint8Array; durationSec: n
           sourceStartSec: input.sourceStartSec + startSec, viewStartSec: input.viewStartSec + startSec, read: input.read, signal });
       } catch (refusal) {
         if (signal.aborted) throw new Error(STOPPED);
+        // Halved before its times are given up, while the transcript has room for one stretch more (speech-stretches.ts says why).
+        const halves = stretches.length + waiting.length + 2 <= AGENT_TRANSCRIPT_LIMITS.stretches ? halvedStretch(pcm.samples, pcm.rate, { startSec, endSec }) : null;
+        if (halves) { waiting.push(halves[1], halves[0]); continue; }
         // With no plainer reader to turn to, one refused stretch refuses the read, as it always did.
         if (!input.readText) throw refusal;
         let text: string;

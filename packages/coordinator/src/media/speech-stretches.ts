@@ -35,6 +35,8 @@ export const SPEECH_STRETCH_PROFILE = Object.freeze({
   loudFraction: .95, silentDbfs: -50,
   /** As many as a transcript may hold; more are joined across their shortest pauses. */
   maxStretches: AGENT_TRANSCRIPT_LIMITS.stretches,
+  /** A stretch the measured reader refuses is halved while it is this long: shorter, its halves are a word or two with no pause left between them to cut out. */
+  halveSec: 6,
 });
 
 /**
@@ -85,4 +87,24 @@ export function voicedStretches(samples: Float32Array, rate: number): { stretche
   }
   // The last step's end is the interval's: the samples past it, less than a step, are not left off.
   return { thresholdDbfs, stretches: pieces.map(([a, b]) => ({ startSec: a * size / rate, endSec: b === steps ? samples.length / rate : b * size / rate })) };
+}
+
+/**
+ * A stretch the measured reader refused, cut in two at its quietest step between a third and two
+ * thirds of it, as an over-long one is cut above; null when it is too short to halve.
+ *
+ * What the reader refuses is a pause it cannot trim a word at, and under a music bed or a loud
+ * room level never found that pause, or it would have ended the stretch there. Halved at the
+ * quietest point, each part ends nearer its own last word. Tried on a real 128 s scene under club
+ * music with the installed runtime: a stretch at a time the reader timed 43 s of the 94 s of
+ * voice and left four stretches, 49 s, as text alone; with what it refused halved it timed 83 s.
+ */
+export function halvedStretch(samples: Float32Array, rate: number, stretch: { startSec: number; endSec: number }): [{ startSec: number; endSec: number }, { startSec: number; endSec: number }] | null {
+  const profile = SPEECH_STRETCH_PROFILE, size = Math.max(1, Math.round(rate * profile.stepSec));
+  if (stretch.endSec - stretch.startSec < profile.halveSec) return null;
+  const from = Math.round(stretch.startSec * rate), levels = stepLevels(samples.subarray(from, Math.round(stretch.endSec * rate)), rate, profile.stepSec);
+  let cut = Math.ceil(levels.length / 3);
+  for (let s = cut; s < levels.length * 2 / 3; s++) if (levels[s]! < levels[cut]!) cut = s;
+  const atSec = (from + cut * size) / rate;
+  return [{ startSec: stretch.startSec, endSec: atSec }, { startSec: atSec, endSec: stretch.endSec }];
 }
