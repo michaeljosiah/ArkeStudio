@@ -6,7 +6,7 @@ import {
   ArkeGenerationBodySchema, ConversationGenerationWorkSchema, ConversationIdSchema, JobSchema, ModelWorldChatActionSchema, isReplayableFinalization, ulid,
   CODEX_IMAGE_PLAN_LABEL, usesCodexImagePlan,
   type ArkeGenerationBody, type ConversationActionCard, type ModelWorldChatAction, type WorldBundle,
-  SceneIdSchema, SlugSchema, CHAT_SEQUENCING_SCHEMA_VERSION,
+  SceneIdSchema, SlugSchema, CHAT_SEQUENCING_SCHEMA_VERSION, CLIP_STORYBOARD_SCHEMA_VERSION,
   CharacterAudioPlanSchema, ReferenceMediaBindingsSchema, referenceAudioMediaPath,
 } from "@arke-studio/contracts";
 import type { EnqueueInput } from "../queue/dispatcher.js";
@@ -170,6 +170,8 @@ export class GenerationQuotes {
   async prepare(action: ModelWorldChatAction, id: string, at: string, scope?: GenerationQuoteScope, prospectiveWorld?: WorldBundle): Promise<ArkeGenerationBody> {
     if (scope?.sceneDependencies?.length) await this.store.ensureSchemaVersion(CHAT_SEQUENCING_SCHEMA_VERSION, "world-chat-sequencing");
     const compiled = await this.compile(action, id, at, scope, prospectiveWorld);
+    // The quote and the card both keep the rows, and an older build reads neither with them.
+    if (compiled.body.storyboard) await this.store.ensureSchemaVersion(CLIP_STORYBOARD_SCHEMA_VERSION, "clip-storyboard");
     const existing = await this.read(id);
     if (existing) {
       if (existing.actionDigest !== conversationActionDigest(action) || existing.fingerprint !== compiled.fingerprint || existing.body.quoteDigest !== sealedDigest(existing)) throw new Error("Generation inputs changed. Prepare a fresh card.");

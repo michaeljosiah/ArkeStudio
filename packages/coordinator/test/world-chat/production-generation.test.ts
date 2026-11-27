@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readFile, mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { newId, type ManifestModel, type ModelManifest, type ModelWorldChatAction, type ConversationActionCard, type LedgerEntry } from "@arke-studio/contracts";
+import { CLIP_STORYBOARD_SCHEMA_VERSION, newId, type ManifestModel, type ModelManifest, type ModelWorldChatAction, type ConversationActionCard, type LedgerEntry } from "@arke-studio/contracts";
 import { productionGenerationSource } from "../../src/world-chat/production-generation.js";
 import { GenerationQuotes } from "../../src/world-chat/generation-quotes.js";
 import { WorldStore } from "../../src/world/store.js";
@@ -63,6 +63,22 @@ describe("quoted production take generation (SPEC-051 R-4..7, R-11..12)", () => 
     const id = newId("act");
     const body = await h.quotes().prepare(action, id, AT);
     assert.equal(body.quantity, mode === "image" ? 4 : 1);
+    if (mode === "video") {
+      // The card reads the clip's shots out in the order they play, each with the seconds its take is
+      // cut at, and the prompt under them asks for the same shots as one clip (SPEC-041 R-75a).
+      assert.deepEqual(body.storyboard?.map(shot => [shot.shotId, shot.number, shot.startSec]), [["sh_12", 12, 0], ["sh_13", 13, 4], ["sh_14", 14, 10], ["sh_15", 15, 15]]);
+      assert.equal(body.storyboard?.at(-1)?.endSec, body.durationSec, "the last shot runs to the clip's end");
+      assert.deepEqual(body.storyboard?.[0]?.line, { speaker: "Maren Kest", text: "the verse, under the water" });
+      assert.equal(body.storyboard?.[1]?.line, undefined, "bells are a sound, not a line anybody says");
+      assert.equal(body.storyboard?.[2]?.camera, "MS · handheld");
+      assert.match(body.prompt, /One continuous clip: 19\.5s, 16:9, 4 shots\./);
+      assert.match(body.prompt, /\[shot 14 · 5s\][^[]*Bray Half-Hitch, dialogue: "…tell you the rest after\."/);
+      // An older build reads neither the quote nor the card with these rows, so the world is raised first.
+      assert.equal(h.store.getBundle().meta.schemaVersion, CLIP_STORYBOARD_SCHEMA_VERSION);
+    } else {
+      assert.equal(body.storyboard, undefined, "start frames are not a clip");
+      assert.ok((h.store.getBundle().meta.schemaVersion ?? 0) < CLIP_STORYBOARD_SCHEMA_VERSION, "and a card without rows raises nothing");
+    }
     await h.quotes().dispatch(action, id);
     await until(() => h.queue.listJobs().length === body.quantity && h.queue.listJobs().every(job => job.finalization?.status === "complete"), "board candidate filing", 30_000);
     await h.store.reload();
@@ -104,6 +120,8 @@ describe("quoted production take generation (SPEC-051 R-4..7, R-11..12)", () => 
     assert.equal(body.quantity, 1);
     assert.ok(body.estimatedMicroUsd! > 0);
     assert.match(body.prompt, /Keep the camera steady/);
+    // One shot's clip is a storyboard of one row: its seconds, and no picture where none is sent.
+    assert.deepEqual(body.storyboard?.map(shot => [shot.shotId, shot.startSec, shot.endSec, shot.picture]), [["sh_12", 0, body.durationSec, undefined]]);
     assert.equal(h.fake.submitCount, 0);
     assert.equal(h.queue.listJobs().length, 0);
     assert.deepEqual(await h.quotes().prepare(action, id, AT), body);
@@ -153,6 +171,7 @@ describe("quoted production take generation (SPEC-051 R-4..7, R-11..12)", () => 
     assert.equal(input.params.taskMode, "first-frame");
     assert.equal(input.params.route, "first-frame-route");
     const path = (input.params.references as string[])[0]!;
+    assert.equal(body.storyboard?.[0]?.picture, path, "the shot's row shows the picture that is sent with it");
     const changed = pngBytes(); changed[10] = 9;
     await writeFile(join(h.dir, path), changed);
     await assert.rejects(h.quotes().dispatch(action, fresh), /changed/);

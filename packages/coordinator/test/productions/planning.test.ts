@@ -17,6 +17,8 @@ import {
   resolveCast,
   assembleBlocks,
   assembleBoardPrompt,
+  ArkeGenerationShotSchema,
+  clipStoryboard,
   assemblePrompt,
   shotPlaceId,
   UNTITLED_SHOT,
@@ -1369,6 +1371,92 @@ describe("SPEC-019 prompt structure (R-5..R-8, D5..D7)", () => {
     assert.match(head, /^The Vigil, night, 16:9\. /, "the setting, then who stands in it");
     assert.ok(!/\.,|\.\.(\s|$)/.test(head), `no ".," or ".." joins: ${head}`);
     assert.match(head, /Continuous cast, light and grade across every cell\.$/);
+    await store.close();
+  });
+
+  it("asks for a board made as one clip in a clip's words: seconds, moves, beats and each line with its speaker", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const maren = bundle.sheets.find((sheet) => sheet.id === "maren-kest")!;
+    const bray = bundle.sheets.find((sheet) => sheet.id === "bray-half-hitch")!;
+    const one: Shot = {
+      ...shot(1, 5, "@maren-kest watches @bray-half-hitch across the table"),
+      framing: { size: "medium two-shot", lens: "85mm", movement: "slow push in" },
+      beats: [{ span: "0–2s", text: "she sets the cup down" }],
+      audio: { kind: "dialogue", speaker: "maren-kest", line: "You came back." },
+    };
+    const two: Shot = {
+      ...shot(2, 3, "@bray-half-hitch answers @maren-kest"),
+      audio: { kind: "dialogue", speaker: "bray-half-hitch", line: "I said I would.", ambience: "rain on the glass" },
+    };
+    const both = scene([one, two]);
+    const clip = assembleBoardPrompt({ world: bundle.meta, sheets: bundle.sheets, scene: both, shots: [one, two], aspect: "16:9", capability: "video" });
+    const [structure, head] = clip.split("\n\n");
+    assert.equal(structure, "One continuous clip: 8s, 16:9, 2 shots. Cut between shots only at the boundaries given below, in that order.");
+    assert.match(head!, /^The Vigil, night\. /, "the frame is said once, in the clip's shape");
+    assert.match(head!, /Continuous cast, light and grade across every shot\.$/);
+    assert.ok(!clip.includes("cell"), "a clip has no cells");
+    assert.match(clip, /\[shot 1 · 5s\] /);
+    assert.match(clip, /\n\[shot 2 · 3s\] /, "one beat a line, as a pass writes them");
+    assert.match(clip, /slow push in/, "the move a still drops");
+    assert.match(clip, /Shot timing 0–2s: she sets the cup down\./);
+    assert.ok(clip.includes(`${maren.name}, dialogue: "You came back."`), `a line names who says it: ${clip}`);
+    assert.ok(clip.includes(`${bray.name}, dialogue: "I said I would."`));
+    assert.ok(!clip.includes(`."."`) && !clip.includes(`.".`), `a line that ends inside its quotation marks is not ended twice: ${clip}`);
+    assert.match(clip, /Ambience: rain on the glass\./);
+
+    // The sheet of stills is asked for in the words it always was.
+    const still = assembleBoardPrompt({ world: bundle.meta, sheets: bundle.sheets, scene: both, shots: [one, two], aspect: "16:9" });
+    assert.match(still, /across every cell\.\n\n1\. /);
+    for (const dropped of ["slow push in", "Shot timing", "You came back.", "rain on the glass", "One continuous clip", "[shot 1"]) {
+      assert.ok(!still.includes(dropped), `a still does not say: ${dropped}`);
+    }
+    // One shot's own clip keeps its line as it was: the name is for a clip of several faces.
+    const single = assemblePrompt(bundle.meta, bundle.sheets, both, one, undefined, undefined, "video");
+    assert.ok(single.includes(`dialogue: "You came back."`) && !single.includes(`${maren.name}, dialogue`));
+
+    // A beat written by hand for the clip is the beat; one written for the still is the still's alone.
+    const written = (capability?: "image" | "video"): Shot => ({ ...two, promptOverride: { text: "Bray, written by hand.", ...(capability ? { capability } : {}), sheetVersions: {} } });
+    const boardOf = (member: Shot) => assembleBoardPrompt({ world: bundle.meta, sheets: bundle.sheets, scene: scene([one, member]), shots: [one, member], aspect: "16:9", capability: "video" });
+    assert.match(boardOf(written("video")), /\[shot 2 · 3s\] Bray, written by hand\.$/);
+    assert.match(boardOf(written()), /\[shot 2 · 3s\] Bray, written by hand\.$/, "an override for no medium in particular owns the clip's beat too");
+    assert.ok(!boardOf(written("image")).includes("written by hand"));
+    await store.close();
+  });
+
+  it("reads a clip's shots out for its card: seconds, picture, camera, the line and who says it (SPEC-041 R-75a)", async () => {
+    const { store } = await open();
+    const bundle = store.getBundle();
+    const maren = bundle.sheets.find((sheet) => sheet.id === "maren-kest")!;
+    const bray = bundle.sheets.find((sheet) => sheet.id === "bray-half-hitch")!;
+    const one: Shot = {
+      ...shot(1, 5, "@maren-kest watches @bray-half-hitch across the table"),
+      camera: "From the stair",
+      framing: { size: "medium two-shot", lens: "85mm", movement: "slow push in", lighting: "one lamp", grade: "cold" },
+      beats: [{ span: "0–2s", text: "she sets the cup down" }, { span: " ", text: "dropped: no span" }],
+      audio: { kind: "dialogue", speaker: "maren-kest", line: "You came back." },
+    };
+    const two: Shot = { ...shot(2, 3, "@bray-half-hitch answers"), title: UNTITLED_SHOT, audio: { kind: "sfx", line: "a door slams" } };
+    const three: Shot = { ...shot(3, 4, "@maren-kest alone"), audio: { kind: "silence", speaker: "maren-kest", line: "Left over from before it went quiet." } };
+    const rows = clipStoryboard({
+      scene: scene([one, two, three]),
+      sheets: bundle.sheets,
+      plan: [{ shot: one, startSec: 0, endSec: 5 }, { shot: two, startSec: 5, endSec: 8 }, { shot: three, startSec: 8, endSec: 12 }],
+      pictureOf: (shotId) => (shotId === one.id ? "artifacts/frame-one.png" : undefined),
+    });
+    assert.deepEqual(rows.map((row) => [row.shotId, row.number, row.startSec, row.endSec, row.picture]),
+      [["sh_1", 1, 0, 5, "artifacts/frame-one.png"], ["sh_2", 2, 5, 8, undefined], ["sh_3", 3, 8, 12, undefined]]);
+    assert.equal(rows[0]!.camera, "From the stair · medium two-shot, 85mm, slow push in", "the lens and the move; light and grade are the scene's");
+    assert.equal(rows[0]!.action, `${maren.name} watches ${bray.name} across the table`, "a mention is read as the name");
+    assert.deepEqual(rows[0]!.beats, [{ span: "0–2s", text: "she sets the cup down" }]);
+    assert.deepEqual(rows[0]!.line, { speaker: maren.name, text: "You came back." });
+    assert.equal(rows[1]!.title, "Shot 2", "an unnamed shot is its number");
+    assert.equal(rows[1]!.line, undefined, "a sound effect is not a line anybody says");
+    assert.equal(rows[1]!.camera, undefined);
+    assert.equal(rows[2]!.line, undefined, "a silent shot says nothing");
+    for (const row of rows) ArkeGenerationShotSchema.parse(row);
+    assert.throws(() => ArkeGenerationShotSchema.parse({ ...rows[0]!, picture: "C:/Users/someone/frame.png" }), /world-relative/);
+    assert.throws(() => ArkeGenerationShotSchema.parse({ ...rows[0]!, startSec: 5, endSec: 5 }), /ends after it starts/);
     await store.close();
   });
 

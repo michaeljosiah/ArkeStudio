@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import {
-  attachmentFor, characterAudioRoute, characterImageEstimateIsUsable, foldBenchSession, keyframePlan, orderedShots, resolveCast, scenePlaceApplies,
+  attachmentFor, characterAudioRoute, characterImageEstimateIsUsable, clipStoryboard, foldBenchSession, keyframePlan, orderedShots, resolveCast, scenePlaceApplies, sceneUnderLook,
   type AppSettings, type ArkeGenerationBody, type ModelManifest,
 } from "@arke-studio/contracts";
 import { resolveSubjectCastVoices } from "../audio/reference-inputs.js";
@@ -54,6 +54,15 @@ export function productionGenerationSource(store: WorldStore, ports: {
       const authorities: unknown[] = [];
       const audioSubjects: import("@arke-studio/contracts").VisualBenchSubject[] = [];
       let durationSec: number | undefined;
+      let storyboard: ArkeGenerationBody["storyboard"];
+      // The picture a shot starts from, where the world holds one: its filed frame, else the still it accepted before frames were filed.
+      const frameOf = (shotId: string): string | undefined => {
+        const selection = production.selections[shotId];
+        const artifact = selection?.startFrameArtifactId ? world.artifacts.find(candidate => candidate.id === selection.startFrameArtifactId) : undefined;
+        if (artifact?.kind === "image") return `artifacts/${artifact.file}`;
+        const still = selection?.acceptedTakeId ? production.takes.find(take => take.id === selection.acceptedTakeId && (take.kind === "frame" || take.kind === "still") && take.media !== undefined) : undefined;
+        return still ? `productions/${production.meta.id}/takes/${still.id}/${still.media}` : undefined;
+      };
       // A board of start frames means one ordinary candidate frame per member, not an accepted grid.
       for (const target of targets) {
         const prepared = await prepareBenchSubject(resolvedWorld, { productionId: action.productionId,
@@ -98,6 +107,23 @@ export function productionGenerationSource(store: WorldStore, ports: {
           const filing = snapshot.filing;
           if (!filing) throw new Error("The production filing plan is unavailable.");
           if (filing.kind === "board") durationSec = filing.members.at(-1)!.endSec;
+          // A clip's card reads its shots out (SPEC-041 R-75a). The seconds are the filing's, which is where
+          // each shot's take will be cut from the clip; a frame shows only where this route carries it.
+          if (filing.kind === "board" && action.mode === "video" && storyboard === undefined) {
+            const sent = new Set<string>();
+            for (const ref of prefill.references) {
+              if (ref.subjectRole !== "board-frame" || !active.has(ref.token)) continue;
+              if (ref.source.source === "world-file") sent.add(ref.source.path);
+              if (ref.source.source !== "artifact") continue;
+              const artifactId = ref.source.artifactId;
+              const artifact = world.artifacts.find(candidate => candidate.id === artifactId);
+              if (artifact) sent.add(`artifacts/${artifact.file}`);
+            }
+            const rows = clipStoryboard({ scene: sceneUnderLook(scene, production.meta.look), sheets: world.sheets,
+              plan: filing.members.flatMap(member => shots.filter(shot => shot.id === member.shotId).map(shot => ({ shot, startSec: member.startSec, endSec: member.endSec }))),
+              pictureOf: shotId => { const path = frameOf(shotId); return path !== undefined && sent.has(path) ? path : undefined; } });
+            if (rows.length > 0) storyboard = rows;
+          }
           const coversShots = filing.kind === "shot" ? [filing.shotId] : filing.members.map(m => m.shotId);
           const shotPlan = filing.kind === "board" ? filing.members.map(({ shotId, number, startSec, endSec }) => ({ shotId, number, startSec, endSec })) : undefined;
           // These are direct shot/pass jobs; Bench reservation names are not their identity.
@@ -133,6 +159,7 @@ export function productionGenerationSource(store: WorldStore, ports: {
         references: [...offered.values()], exclusions, provider: model.provider, model: model.id, quantity: inputs.length,
         output: "New takes on the named shots to choose from", cost: "Pending quote",
         ...(durationSec ? { durationSec } : {}),
+        ...(storyboard ? { storyboard } : {}),
         options: [{ label: "Model choice", value: action.modelId ? "Named in this request" : production.meta.models?.[action.mode] ? "Production model" : "Settings routing default" },
           ...(model.limits.providerSelectedSize ? [{ label: "Dimensions", value: "Provider-selected" }] : []),
           ...Object.entries(inputs[0]!.params).filter(([key]) => !(model.limits.providerSelectedSize && key === "output") && !["prompt", "provenance", "references", "audioReferences", "referenceMedia", "shotPlan", "generationQuoteProduction"].includes(key))
