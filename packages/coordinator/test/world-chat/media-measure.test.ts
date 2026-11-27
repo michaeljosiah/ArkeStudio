@@ -61,7 +61,14 @@ const stemAt = (sec: number) => sec >= 2 && sec < 9 || sec >= 14 && sec < 20 ? .
  */
 const FILM = Buffer.from("FILM fixture"), EXPORT = Buffer.from("EXPORT fixture"), FILM_CUT_FRAMES = [97, 225, 362];
 const filmFrame = (frame: number, pixels: number) => new Uint8Array(pixels).fill(40 + 50 * FILM_CUT_FRAMES.filter(cut => cut <= frame).length + frame % 3);
-const filmInventory = (durationSec: number): AgentMediaInventory => ({ durationSec, streams: [{ index: 0, kind: "video", codec: "fixture", width: 1280, height: 720, frameRate: "30/1", durationSec, startTimeSec: 0 }] });
+/** The film's picture, and sound of `soundSec` when it has any: a sound can stop before its picture, as Seedance's boards' do. */
+const filmInventory = (durationSec: number, soundSec?: number): AgentMediaInventory => ({ durationSec, streams: [
+  { index: 0, kind: "video", codec: "fixture", width: 1280, height: 720, frameRate: "30/1", durationSec, startTimeSec: 0 },
+  ...(soundSec === undefined ? [] : [{ index: 1, kind: "audio" as const, codec: "fixture", sampleRate: 48000, channels: 2, durationSec: soundSec, startTimeSec: 0 }])] });
+/** As FFmpeg's decoders do, through the media tools' own check: a read past a stream's own end decodes short, and is refused. */
+const covers = (stream: AgentMediaInventory["streams"][number], endSec: number, slack: number) => {
+  if (stream.durationSec !== null && endSec > (stream.startTimeSec ?? 0) + stream.durationSec + slack) throw new Error("Decoded audio does not cover the requested interval");
+};
 /** A second, sharper 1080p version of the take for clip_quality's comparison. */
 const TAKE2 = Buffer.from("TAKE2 fixture");
 const take2Inventory: AgentMediaInventory = { durationSec: 6, streams: [{ index: 0, kind: "video", codec: "fixture", width: 1920, height: 1080, frameRate: "30/1", durationSec: 6, startTimeSec: 0 }] };
@@ -85,7 +92,7 @@ const songInventory: AgentMediaInventory = { durationSec: 10, streams: [{ index:
 
 /** A word of the film's sound, on the film's own clock, for a harness that can hear; `untimed` is one the measured reader cannot place. */
 type Said = { text: string; startSec: number; probability?: number; untimed?: boolean };
-async function harness(options: { songStreams?: AgentMediaInventory["streams"]; noMeasure?: boolean; said?: () => Said[] } = {}) {
+async function harness(options: { songStreams?: AgentMediaInventory["streams"]; noMeasure?: boolean; said?: () => Said[]; filmSoundSec?: number; exportSoundSec?: number } = {}) {
   const dir = await makeTempWorld(), store = await WorldStore.open(dir); closeOnCleanup(() => store.close());
   const cv = newId("cv"), runId = newId("run"), takeId = newId("ar"), songId = newId("ar"), chat = new WorldChatStore(conversationDir(dir, cv));
   await chat.create(cv, "2026-11-17T00:00:00Z"); await chat.append({ type: "conversation.created", title: "Sync", entryContext: { kind: "world" } });
@@ -110,8 +117,8 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
       const kind = await which(path);
       if (kind === "groove" || kind === "stem") return { durationSec: GROOVE_SEC, streams: [{ ...songInventory.streams[0]!, durationSec: GROOVE_SEC }] };
       if (kind === "take2") return take2Inventory;
-      if (kind === "film") return filmInventory(20);
-      if (kind === "export") return { durationSec: 6, streams: [...filmInventory(6).streams, { index: 1, kind: "audio", codec: "fixture", sampleRate: 48000, channels: 2, durationSec: 6, startTimeSec: 0 }] };
+      if (kind === "film") return filmInventory(20, options.filmSoundSec);
+      if (kind === "export") return filmInventory(6, options.exportSoundSec ?? 6);
       return kind === "song" ? { ...songInventory, streams: options.songStreams ?? songInventory.streams } : takeInventory;
     },
     frame: async (_path, _stream, at, end, _signal, region) => { calls.push({ what: "frame", startSec: at, endSec: end, region }); return { bytes: FRAME_PNG, width: 3, height: 2, sourceTimeSec: at }; },
@@ -126,12 +133,16 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
         }
         return out;
       },
-      monoAudio: async (path, _stream, startSec, endSec, rate) => {
+      monoAudio: async (path, stream, startSec, endSec, rate) => {
         const kind = await which(path), songSide = kind === "song"; calls.push({ what: kind, startSec, endSec });
+        covers(stream, endSec, .05);
         assert.equal(rate, RATE);
         const out = new Float32Array(Math.round((endSec - startSec) * rate));
-        // The export's mix is the song from the slice; a take carries that same sound 120 ms late.
-        for (let i = 0; i < out.length; i++) { const t = startSec + i / rate; out[i] = songSide ? songAt(t) : kind === "export" ? songAt(SLICE + t) : songAt(SLICE + t - SOUND_LATE); }
+        // The export's mix is the song from the slice; a take carries that same sound 120 ms late; a film's sound is a steady tone, the same room under every shot.
+        for (let i = 0; i < out.length; i++) {
+          const t = startSec + i / rate;
+          out[i] = songSide ? songAt(t) : kind === "export" ? songAt(SLICE + t) : kind === "film" ? .05 * Math.sin(2 * Math.PI * 220 * t) : songAt(SLICE + t - SOUND_LATE);
+        }
         return out;
       },
       loudness: async () => ({ integratedLufs: -14, rangeLu: 5, truePeakDbtp: -.4, shortTermMaxLufs: -11 }),
@@ -141,8 +152,9 @@ async function harness(options: { songStreams?: AgentMediaInventory["streams"]; 
        * twentieth of a second holds that step's number, which is how the readers below know where
        * in the window a stretch they are handed begins.
        */
-      ...(options.said ? { speechAudio: async (_path: string, _stream: unknown, startSec: number, endSec: number) => {
+      ...(options.said ? { speechAudio: async (_path: string, stream: AgentMediaInventory["streams"][number], startSec: number, endSec: number) => {
         heardFrom = startSec; calls.push({ what: "speech", startSec, endSec });
+        covers(stream, endSec, .025);
         const samples = new Float32Array(Math.round((endSec - startSec) * 16000));
         for (const word of options.said!()) {
           const from = Math.round((word.startSec - startSec) * 16000);
@@ -516,6 +528,30 @@ test("review_export hears the film: every line of the cut's shots heard under it
   assert.deepEqual(h.calls.filter(call => call.what === "speech").map(call => [call.startSec, call.endSec]), [[0, 6]], "read once, a minute at a time");
   assert.equal(WorldChatCheckReceiptSchema.safeParse(outcome.receipt).success, true);
   assert.equal(h.store.getBundle().meta.schemaVersion, AGENT_REVIEW_SPEECH_SCHEMA_VERSION);
+});
+
+test("review_export reads a film whose sound stops before its picture as far as the sound runs, and says when the rest is silent", async () => {
+  // Seedance's 20.04 s boards carry 19.97 s of sound: the mix was read to the picture's end, and the film refused outright (2026-11-27).
+  const near = await harness({ filmSoundSec: 19.93 });
+  const review = (await near.retrieval.call(near.lease.token, "review_export", { source: near.film })).receipt.media!.review!;
+  assert.equal(review.length.durationSec, 20); assert.deepEqual(review.loudness, { integratedLufs: -14, rangeLu: 5, truePeakDbtp: -.4, shortTermMaxLufs: -11 });
+  assert.deepEqual(near.calls.filter(call => call.what === "film").map(call => [call.startSec, call.endSec]), [[0, 19.93]]);
+  assert.ok(!review.findings.some(line => /silent|room drops/.test(line)), review.findings.join(" | "));
+  // Ten seconds short is said once, and the shot wholly past the sound has no room to call dropped.
+  const early = await harness({ filmSoundSec: 10 });
+  const half = (await early.retrieval.call(early.lease.token, "review_export", { source: early.film })).receipt.media!.review!;
+  assert.ok(half.findings.includes("The sound stops at 10 s, 10 s before the picture: the rest is silent."), half.findings.join(" | "));
+  assert.ok(!half.findings.some(line => /room drops/.test(line)), half.findings.join(" | "));
+});
+
+test("review_export hears a film whose sound stops short of its picture to the sound's end, and counts the silence after it as heard", async () => {
+  const h = await harness({ exportSoundSec: 5.93, said: () => [...say("the verse under the water", .5), ...say("tell you the rest after", 4.3)] });
+  await storyCutAndExport(h, "ex_short");
+  const review = (await h.retrieval.call(h.lease.token, "review_export", { source: { kind: "export", exportId: "ex_short" } })).receipt.media!.review!;
+  assert.deepEqual(review.speech, { linesFrom: "cut", unwritten: 0, misplaced: 0, readSec: 6,
+    lines: [{ number: 1, shot: 1, said: "as-written", startSec: .5 }, { number: 2, shot: 2, said: "as-written", startSec: 4.3 }] });
+  assert.deepEqual(h.calls.filter(call => call.what === "speech").map(call => [call.startSec, call.endSec]), [[0, 5.93]]);
+  assert.ok(!review.findings.some(line => /could not be read|Words were read for the first/.test(line)), review.findings.join(" | "));
 });
 
 test("review_export finds a line the mix moved under another shot, words nobody wrote, and says when it cannot hear", async () => {
