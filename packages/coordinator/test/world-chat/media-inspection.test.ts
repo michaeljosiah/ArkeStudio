@@ -433,6 +433,15 @@ test("inspection range, immutable identity and host call budgets are enforced", 
   for (let i = 0; i < 15; i++) await h.retrieval.call(h.lease.token, "inspect_media", { source: h.source });
   await assert.rejects(h.retrieval.call(h.lease.token, "inspect_media", { source: h.source }), /call budget/);
 });
+test("an interval that overshoots the end by a rounding is read to the end, and a longer one is refused with the length", async () => {
+  const h = await harness();
+  // The fixture film is 10 s long. "8 to 10.3" is its length read off loosely: a 15.567 s cut was asked for as 0 to 15.6 and refused.
+  const outcome = await h.retrieval.call(h.lease.token, "analyze_audio_signal", { source: h.source, range: { startSec: 8, endSec: 10.3 } });
+  assert.equal(outcome.receipt.status, "complete");
+  assert.deepEqual(outcome.receipt.media!.range, { startSec: 8, endSec: 10 }, "the receipt says what was read");
+  await assert.rejects(h.retrieval.call(h.lease.token, "analyze_audio_signal", { source: h.source, range: { startSec: 8, endSec: 10.6 } }), /exceeds this immutable media source, which is 10 s long/);
+  await assert.rejects(h.retrieval.call(h.lease.token, "analyze_audio_signal", { source: h.source, range: { startSec: 10, endSec: 10.3 } }), /exceeds this immutable media source/, "an interval that begins at the end has nothing to read");
+});
 test("a trimmed segment reports both take-relative and actual source times", async () => {
   const h = await harness({ listener, speech: async () => speechAnswer }), production = h.store.getBundle().productions.find(value => value.meta.id === "saltlight")!, base = production.takes.find(take => take.kind === "clip")!;
   const parentId = newId("tk"), segmentId = newId("tk"), parent: Take = { ...base, id: parentId, media: "source.mp4", mediaHash: hash(png) };

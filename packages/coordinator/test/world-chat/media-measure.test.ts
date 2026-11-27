@@ -284,6 +284,10 @@ test("song_map reads a window on the source's clock and refuses one past the end
   assert.ok(song.beats.every(beat => beat >= 10 && beat <= 25) && song.beats.length >= 20);
   assert.ok(h.calls.filter(call => call.what.startsWith("groove")).every(call => call.startSec >= 10 && call.endSec <= 25));
   await assert.rejects(h.retrieval.call(h.lease.token, "song_map", { source: h.groove, window: { startSec: 20, endSec: 40 } }), /past the end/);
+  // A window that overshoots the end by a rounding is the song to its end, and the result says so; a longer one is told the length.
+  const loose = await h.retrieval.call(h.lease.token, "song_map", { source: h.groove, window: { startSec: 10, endSec: GROOVE_SEC + .4 } });
+  assert.equal(loose.receipt.media!.song!.endSec, GROOVE_SEC);
+  await assert.rejects(h.retrieval.call(h.lease.token, "song_map", { source: h.groove, window: { startSec: 10, endSec: GROOVE_SEC + .6 } }), new RegExp(`past the end of the source, which is ${GROOVE_SEC} s long`));
   await assert.rejects(h.retrieval.call(h.lease.token, "song_map", { source: h.groove, window: { startSec: 0, endSec: 1000 } }), /song_map/);
 });
 
@@ -612,6 +616,24 @@ test("review_export holds a cut made outside the Studio to the script of the sce
   const unheld = (await h.retrieval.call(h.lease.token, "review_export", { source })).receipt.media!.review!;
   assert.equal(unheld.speech, undefined); assert.equal(unheld.findings.some(line => /^Line |words could not/.test(line)), false);
   await assert.rejects(h.retrieval.call(h.lease.token, "review_export", { source, script: { productionId: "saltlight", sceneId: "sc_99" } }), /not in this world/);
+});
+
+test("review_export holds an outside cut to the scene's shots where they say more lines than its script's dialogue", async () => {
+  // A script written as prose keeps speech inside an action block. The scene's shots hold both lines, each by itself.
+  const h = await harness({ said: () => [...say("the verse under the water", .5), ...say("tell you the rest after", 3, .2)] });
+  const scenePath = "productions/saltlight/scenes/04-the-verse-rises.json", raw = await readFile(join(h.store.dir, scenePath));
+  const scene = JSON.parse(raw.toString("utf8"));
+  scene.script = { blocks: [{ id: "blk_verse", kind: "dialogue", speaker: "maren-kest", text: "The verse, under the water." },
+    { id: "blk_stair", kind: "action", text: "Bray on the stair: \"Tell you the rest after.\" The water goes wrong." }] };
+  await h.store.commit({ kind: "media-fixture", source: "test", files: [{ path: scenePath, action: "replace", baseHash: hash(raw), content: JSON.stringify(scene, null, 2) }] });
+  await mkdir(join(h.store.dir, "exports"), { recursive: true }); await writeFile(join(h.store.dir, "exports", "ex_outside.mp4"), EXPORT);
+  await recordCompletedExport(h.store, { worldId: h.store.worldId, productionId: "saltlight", status: "done", createdAt: "2026-11-27T00:00:00Z", deliveryKind: "video",
+    id: "ex_outside", output: "exports/ex_outside.mp4", sourceFingerprint: "production-export-v1:a-cut-made-elsewhere" });
+  const review = (await h.retrieval.call(h.lease.token, "review_export", { source: { kind: "export", exportId: "ex_outside" }, script: { productionId: "saltlight", sceneId: "sc_04" } })).receipt.media!.review!;
+  // Two lines from the shots, in shot order, against one in the script's dialogue: the second is a line, heard as written.
+  assert.deepEqual(review.speech!.lines.map(line => [line.number, line.shot, line.said]), [[1, null, "as-written"], [2, null, "as-written"]], review.findings.join(" | "));
+  assert.equal(review.speech!.unwritten, 0, "the line the script keeps in its action is not words nobody wrote");
+  assert.deepEqual(review.findings.filter(line => /^Line |^Words nobody/.test(line)), [], review.findings.join(" | "));
 });
 
 test("sample_video looks closely at a box: the region reaches the decoder and the receipt, and raises schema 143", async () => {
