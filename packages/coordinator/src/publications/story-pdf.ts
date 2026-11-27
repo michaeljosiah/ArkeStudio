@@ -70,7 +70,8 @@ async function loadFonts(): Promise<Fonts> {
 }
 export async function storyPdfIdentity(): Promise<typeof STORY_PDF_IDENTITY> { await loadFonts(); return STORY_PDF_IDENTITY; }
 
-type Piece = { text: string; face: Face; width: number };
+/** `reads` is what the PDF's own text says for the piece, where the font draws less than the piece's characters. */
+type Piece = { text: string; face: Face; width: number; reads?: string };
 type Line = { pieces: Piece[]; width: number; indent: number };
 type DrawLine = Line & { x: number; y: number; size: number; key: string; role: "H1" | "P" | "TOCI" | "Artifact"; context: string; goTo?: string };
 type Page = { lines: DrawLine[]; cover?: true; chapter?: number; opening?: true; label: string };
@@ -98,6 +99,20 @@ class Typesetter {
     }
     return em * size;
   }
+  /**
+   * The emoji font is one colour, and its shaping keeps less than it is given: a hand with a skin
+   * tone (U+1F447 U+1F3FE) is the hand's own glyph and claims the hand alone, and a walking woman
+   * (person, skin tone, joiner, female sign, selector) is the walking person's. The page then
+   * says the pictograph that is drawn, not the five characters behind it, and a check that held
+   * the page to the manuscript's characters refused a novel for one gossip-page headline: "PDF
+   * text verification failed", twice, five weeks apart (2026-11-27). The manuscript's text is
+   * the piece's `text` still, which the planning check reads; `reads` is what the font keeps.
+   */
+  private reads(text: string, face: Face): { reads?: string } {
+    if (face !== "NotoEmoji.ttf") return {};
+    const kept = String.fromCodePoint(...this.fonts.get(face)!.font.layout(text).glyphs.flatMap(glyph => glyph.codePoints));
+    return kept === text ? {} : { reads: kept };
+  }
   pieces(runs: ManuscriptRun[], size: number, context: string): Piece[] {
     const result: Piece[] = [];
     for (const run of runs) {
@@ -106,7 +121,7 @@ class Typesetter {
       const fallback = fontNames.sans[style]!;
       for (const token of run.text.split(/([^\S\u00a0\u202f]+)/u).filter(Boolean)) {
         let text = ""; let face: Face | undefined;
-        const flush = () => { if (text && face) result.push({ text, face, width: this.width(text, face, size) }); text = ""; };
+        const flush = () => { if (text && face) result.push({ text, face, width: this.width(text, face, size), ...this.reads(text, face) }); text = ""; };
         for (const { segment } of segmenter.segment(token)) {
           for (const char of segment) {
             if (/\p{Letter}/u.test(char) && !/\p{Script_Extensions=Latin}/u.test(char)) throw new Error(`${context}: PDF v1 supports Latin prose; unsupported text U+${char.codePointAt(0)!.toString(16).toUpperCase()}.`);
@@ -492,7 +507,7 @@ async function validatePdf(bytes: Uint8Array, plan: Plan, frame: ReturnType<type
           const top = line.role === "Artifact" ? 0 : frame.top;
           if (item.transform[4]! < frame.left - 0.7 || right > frame.width - frame.left + 0.7 || baseline < frame.height - frame.bottom - 0.7 || baseline + item.height > frame.height - top + line.size * 0.3) throw new Error(`${line.context}: text lies outside the PDF page frame.`);
         }
-        const wanted = normalized(line.pieces.map(piece => piece.text).join(""));
+        const wanted = normalized(line.pieces.map(piece => piece.reads ?? piece.text).join(""));
         if (normalized(actual) !== wanted && normalized(spaced) !== wanted) throw new Error(`${line.context}: PDF text verification failed. Prepare again or change the unsupported text.`);
         checked++;
       }
