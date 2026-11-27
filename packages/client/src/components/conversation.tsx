@@ -8,7 +8,7 @@ import { FrameRunReport, ConversationFrameRunCard } from "./conversation-frame-r
 import { StagePlayblastReceipt } from "./production-stage-card.js";
 import { TimelineCardHistory } from "./timeline-card-history.js";
 import { ProductionCardBody } from "./production-card-body.js";
-import { GenerationReferences, GenerationResults } from "./generation-card-body.js";
+import { GenerationReferences, GenerationResults, GenerationStoryboard } from "./generation-card-body.js";
 import { ProductionExportReceipt } from "./production-export-card.js";
 import { TakeComparisonCard } from "./take-comparison-card.js";
 import { ConversationActionGroup } from "./conversation-action-group.js";
@@ -610,7 +610,10 @@ function GenerationBody({ action, body, terminal }: { action: ConversationAction
     {body.quoteDigest && <><p>Digest · {body.quoteDigest}</p><p>Expires · {body.quoteExpiresAt ? new Date(body.quoteExpiresAt).toLocaleString() : ""}</p></>}
   </>;
   return <div className="fy-actioncard__body">
-    <p>{body.prompt}</p>
+    {/* A clip's shots first: the pictures and the lines are read before the words that ask for them. */}
+    <GenerationStoryboard action={action} />
+    {/* The words as they are sent, with their own lines: a clip's prompt is a beat a line, and run together it could not be read. */}
+    <p className="fy-generation-card__prompt">{body.prompt}</p>
     <GenerationReferences action={action} />
     <div className="fy-actioncard__line"><strong>{facts}</strong><span>{usesCodexImagePlan(body) ? CODEX_IMAGE_PLAN_LABEL : body.estimatedMicroUsd !== undefined ? formatMicroUsd(body.estimatedMicroUsd) : body.cost}</span></div>
     {body.estimateMayVary && <p className="fy-actioncard__notice">Estimate only. Actual provider cost may differ.</p>}

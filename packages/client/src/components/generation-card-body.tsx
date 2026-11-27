@@ -27,6 +27,43 @@ function SelectResult({ action, takeId, shotId }: { action: ConversationActionCa
   }}>{busy ? "Preparing…" : "Select"}</Button><span role="status">{result}</span></div>;
 }
 
+/** "0–5s" on the clip's own clock, without the zeros nobody says. */
+function clipSpan(startSec: number, endSec: number): string {
+  const said = (sec: number) => String(Math.round(sec * 10) / 10);
+  return `${said(startSec)}–${said(endSec)}s`;
+}
+
+/** A shot's words, short until asked for: a film shot can run to a page, and its row is read for the picture and the line first. */
+function ShotWords({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  if (text.length <= 280) return <p data-action>{text}</p>;
+  return <><p data-action>{open ? text : `${text.slice(0, 240).replace(/\s+\S*$/, "").replace(/[,;:]$/, "")}…`}</p>
+    <Button variant="ghost" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? "Less" : "More"}</Button></>;
+}
+
+/**
+ * The clip's shots, read before it is made (SPEC-041 R-75a): each in the order it plays, with the
+ * picture sent for it, its seconds, the camera, the line and what happens. The prompt under it is
+ * what is sent; this is how a person reads the same request. A shot shows a picture only where one
+ * is sent for it, so a row without one is a shot the model draws from words.
+ */
+export function GenerationStoryboard({ action }: { action: ConversationActionCard }) {
+  const world = useWorld();
+  const body = action.shown.body;
+  if (body.family !== "generation" || !body.storyboard?.length) return null;
+  const slug = world?.meta.worldId === action.worldId ? world.meta.slug : null;
+  return <ol className="fy-storyboard" aria-label="Shots">{body.storyboard.map(shot => <li key={shot.shotId}>
+    {shot.picture && slug && <img src={mediaUrl(slug, shot.picture)} alt={`Shot ${shot.number} start picture`} draggable={false} />}
+    <div>
+      <p><strong>{shot.number} · {shot.title}</strong> · {clipSpan(shot.startSec, shot.endSec)}</p>
+      {shot.camera && <p data-camera>{shot.camera}</p>}
+      {shot.line && <p data-line>{shot.line.speaker && <strong>{shot.line.speaker} </strong>}“{shot.line.text}”</p>}
+      {shot.action && <ShotWords text={shot.action} />}
+      {shot.beats?.map(beat => <p key={`${beat.span}/${beat.text}`} data-beat>{beat.span} · {beat.text}</p>)}
+    </div>
+  </li>)}</ol>;
+}
+
 export function GenerationReferences({ action }: { action: ConversationActionCard }) {
   const world = useWorld();
   if (world?.meta.worldId !== action.worldId || !action.generationWork?.media.length) return null;

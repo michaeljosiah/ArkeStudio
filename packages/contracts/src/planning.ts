@@ -50,6 +50,7 @@ import type { Selections } from "./scene.js";
 import type { Take } from "./take.js";
 import { quotedNickname, type Sheet, type WorldMeta } from "./world.js";
 import type { Prop } from "./prop.js";
+import type { ArkeGenerationShot } from "./arke-actions.js";
 
 /**
  * Dispatch planning (SPEC-012 §2.8–§2.11): prompts assembled from the world, mentions as the
@@ -350,7 +351,9 @@ export function resolvePropStates(
 function sentence(text: string): string {
   const trimmed = text.trim();
   if (trimmed.length === 0) return "";
-  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+  // A line that ends inside its quotation marks has ended: `dialogue: "Good evening."` went out
+  // as `"Good evening.".`, a second stop after every spoken line (seen on a card, 2026-11-27).
+  return /[.!?]["'”’)\]]*$/.test(trimmed) ? trimmed : `${trimmed}.`;
 }
 
 /** The first clause of a named section, which is how a sheet's prose enters a prompt. */
@@ -428,6 +431,12 @@ export interface AssembleInput {
    * preview with no model chosen — they are omitted, which is the prior behaviour exactly.
    */
   capability?: string;
+  /**
+   * Say whose line it is. One clip of several shots puts several faces on screen, and a line with
+   * no name on it is spoken by whichever mouth the model picks: a board of two people answering
+   * each other is the case this exists for. A single shot keeps the words it has always had.
+   */
+  nameSpeaker?: boolean;
 }
 
 /**
@@ -474,6 +483,20 @@ export function framingClause(framing: ShotFraming): string {
     .map((value) => value?.trim() ?? "")
     .filter((value) => value.length > 0);
   return said.length > 0 ? said.join(", ") : "";
+}
+
+/**
+ * A shot's words with every mention read as the thing's name. Whole mentions only, locations and
+ * dangling world slugs included: a missing attachment token is never sent to a provider, and a
+ * prefix of another identity is never replaced.
+ */
+function describedByName(description: string, sheets: readonly Sheet[]): string {
+  let said = description;
+  for (const span of mentionSpans(said).reverse()) {
+    const name = sheets.find((sheet) => sheet.id === span.slug)?.name ?? span.slug;
+    said = said.slice(0, span.start) + name + said.slice(span.end);
+  }
+  return said;
 }
 
 export function assembleBlocks(input: AssembleInput): PromptBlocks {
@@ -525,14 +548,7 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
 
   // 3 — body: the shot's direction, mentions resolved to names. The appearance clause is not
   // inlined here at all now: it is said once above, or carried as an image, never both.
-  let description = shot.description;
-  // Match whole mentions, including locations and dangling world slugs. Never send
-  // a missing attachment token to the provider or replace a prefix of another identity.
-  for (const span of mentionSpans(description).reverse()) {
-    const name = sheets.find(sheet => sheet.id === span.slug)?.name ?? span.slug;
-    description = description.slice(0, span.start) + name + description.slice(span.end);
-  }
-  const body = sentence(description);
+  const body = sentence(describedByName(shot.description, sheets));
 
   // 4 — the camera's own block, when there is a room to place it in. Verbatim: whatever the shot
   // authored is what the anchor says, so a generic "MCU · slow push-in" stays generic rather than
@@ -586,9 +602,11 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
     }
   }
   if (input.capability !== "image" && shot.audio?.kind && shot.audio.kind !== "silence") {
-    directionParts.push(
-      sentence(shot.audio.line ? `${shot.audio.kind}: "${shot.audio.line}"` : shot.audio.kind),
-    );
+    const said = shot.audio.line ? `${shot.audio.kind}: "${shot.audio.line}"` : shot.audio.kind;
+    const speaker = input.nameSpeaker && shot.audio.line && shot.audio.speaker
+      ? sheets.find((sheet) => sheet.id === shot.audio!.speaker)?.name
+      : undefined;
+    directionParts.push(sentence(speaker === undefined ? said : `${speaker}, ${said}`));
   }
   /*
    * The rest of the soundtrack, beside the action it belongs to.
@@ -616,7 +634,19 @@ export function assembleBlocks(input: AssembleInput): PromptBlocks {
   return { summary, standing, spatial, cameraAnchor, body, direction, persistent };
 }
 
-/** One board prompt: shared scene context, then the ordered beats it must hold together. */
+/**
+ * One board prompt: shared scene context, then the ordered beats it must hold together.
+ *
+ * A board is made two ways and asked for in two sets of words. As a sheet of stills (the default)
+ * it is cells: no time, no movement, no sound. As one clip (`capability: "video"`) it is shots with
+ * their seconds, in the words a whole-scene pass uses (`passStructure`, `[shot N · Ns]`), and each
+ * shot keeps what a still drops: the camera's move and pace, its timed beats, its line with the
+ * speaker named, its ambience and effects. Until 2026-11-27 a clip was asked for in the still's
+ * words: a board's video brief was numbered cells "across every cell", with no seconds, no cut and
+ * no line, however many people spoke in it, and the card that asked for approval showed exactly
+ * that. Found when a film's owner asked whether a card could show the storyboard their own
+ * hand-made page did.
+ */
 export function assembleBoardPrompt(input: {
   world: WorldMeta;
   sheets: Sheet[];
@@ -624,7 +654,9 @@ export function assembleBoardPrompt(input: {
   shots: readonly Shot[];
   aspect: string;
   artDirection?: string;
+  capability?: "image" | "video";
 }): string {
+  const video = input.capability === "video";
   // Each panel's own place (issue 3152). One shared place heads the sheet as before; panels in
   // different places each say where they are, so no cell is drawn in another cell's room.
   const places = input.shots.map((shot) => {
@@ -640,12 +672,33 @@ export function assembleBoardPrompt(input: {
       scene: input.scene,
       shot,
       ...(input.artDirection !== undefined ? { artDirection: input.artDirection } : {}),
-      capability: "image",
+      ...(video ? { capability: "video", nameSpeaker: true } : { capability: "image" }),
     }),
   );
   // A board is still imagery. The look is writer context, not a repeated cell instruction.
   const unique = (parts: ReadonlyArray<string | undefined>) => parts.map((part) => part?.trim() ?? "")
     .filter((part, index, all) => part.length > 0 && all.indexOf(part) === index);
+  if (video) {
+    const seconds = input.shots.map((shot) => shot.durationSec ?? DEFAULT_SHOT_SEC);
+    // The clip's shape, said as a pass says it. One shot has no cut to place and says its frame below.
+    const structure = passStructure({ shotCount: input.shots.length, askedSec: seconds.reduce((sum, sec) => sum + sec, 0), aspect: input.aspect });
+    const setting = unique([location?.name, input.scene.inherits?.timeOfDay, input.scene.defaults?.lighting, structure === null ? input.aspect : undefined]);
+    const standing = unique(contexts.flatMap((blocks) => blocks.standing.split(/(?<=\.)\s+/)));
+    const head = [setting.length > 0 ? `${setting.join(", ")}.` : "", ...standing, input.shots.length > 1 ? "Continuous cast, light and grade across every shot." : ""]
+      .filter((part) => part.length > 0).join(" ").replace(/\.\.(?=\s|$)/g, ".");
+    // Each room once, in its own paragraph: a clip is told where the camera can stand.
+    const rooms = unique(contexts.map((blocks) => blocks.spatial));
+    const beats = input.shots.map((shot, index) => {
+      const label = `[shot ${shot.number} · ${seconds[index]}s]`;
+      // An override written for the clip, or for no medium in particular, owns the beat's words.
+      if (shot.promptOverride && shot.promptOverride.capability !== "image") return `${label} ${shot.promptOverride.text}`;
+      const blocks = contexts[index]!;
+      const where = shared || places[index] === undefined ? "" : `At ${places[index]!.name}. `;
+      const beat = [blocks.body, blocks.direction].filter((part) => part.length > 0).join(" ");
+      return `${label} ${blocks.cameraAnchor.length > 0 ? `${blocks.cameraAnchor}\n` : ""}${where}${beat}`;
+    });
+    return [structure ?? "", head, ...rooms, beats.join("\n")].filter((part) => part.length > 0).join("\n\n");
+  }
   const setting = unique([location?.name, input.scene.inherits?.timeOfDay, input.scene.defaults?.lighting, input.aspect]);
   /*
    * Who and what stands across the board, each sentence once, as a pass states it (assemblePassBlocks).
@@ -666,6 +719,59 @@ export function assembleBoardPrompt(input: {
     return `${index + 1}. ${where}${camera.length > 0 ? `${camera} — ` : ""}${blocks.body}${direction.length > 0 ? ` ${direction}` : ""}`;
   });
   return [head, ...beats].join("\n\n");
+}
+
+/**
+ * A clip's shots as its card reads them out before anything is made (SPEC-041 R-75a): a row a shot,
+ * in the order they play, each with its seconds on the clip's clock, the picture sent for it, the
+ * camera, what happens and the line.
+ *
+ * Every field comes from the shot the prompt was assembled from, read the way the prompt reads it:
+ * mentions as names, the camera resolved against the scene's defaults, the line only where the shot
+ * is not silent. Light, time of day and grade stay out of the camera line: they are conditions of
+ * the scene, said once in the prompt, and on a row they bury the lens and the move. A shot whose
+ * prompt was written by hand still shows its own fields here; the prompt beside the rows is what
+ * is sent, and the two are read together.
+ */
+export function clipStoryboard(input: {
+  scene: SceneRecord;
+  sheets: readonly Sheet[];
+  /** The clip's members in playing order, with the seconds the request files them at. */
+  plan: ReadonlyArray<{ shot: Shot; startSec: number; endSec: number }>;
+  /** The world-relative path of the picture sent for a shot; nothing when none is sent. */
+  pictureOf: (shotId: string) => string | undefined;
+}): ArkeGenerationShot[] {
+  const cut = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+  return input.plan.map(({ shot, startSec, endSec }) => {
+    const framing = effectiveFraming(input.scene, shot);
+    const camera = [
+      shot.camera?.trim() ?? "",
+      framingClause({ size: framing.size, angle: framing.angle, lens: framing.lens, focus: framing.focus, movement: framing.movement, pace: framing.pace }),
+    ].filter((part) => part.length > 0).join(" · ");
+    const action = describedByName(shot.description, input.sheets).trim();
+    const beats = (shot.beats ?? [])
+      .map((beat) => ({ span: beat.span.trim(), text: beat.text.trim() }))
+      .filter((beat) => beat.span.length > 0 && beat.text.length > 0)
+      .slice(0, 40)
+      .map((beat) => ({ span: cut(beat.span, 100), text: cut(beat.text, 2_000) }));
+    // Speech only: a sound effect's words are not a line anybody says.
+    const said = shot.audio !== undefined && ["dialogue", "vo"].includes(shot.audio.kind) ? (shot.audio.line?.trim() ?? "") : "";
+    const speaker = shot.audio?.speaker === undefined ? undefined : (input.sheets.find((sheet) => sheet.id === shot.audio!.speaker)?.name ?? shot.audio.speaker);
+    const picture = input.pictureOf(shot.id);
+    const title = shot.title.trim() === UNTITLED_SHOT ? "" : shot.title.trim();
+    return {
+      shotId: shot.id,
+      number: shot.number,
+      title: cut(title.length > 0 ? title : `Shot ${shot.number}`, 300),
+      startSec,
+      endSec,
+      ...(picture !== undefined ? { picture } : {}),
+      ...(camera.length > 0 ? { camera: cut(camera, 2_000) } : {}),
+      ...(action.length > 0 ? { action: cut(action, 8_000) } : {}),
+      ...(beats.length > 0 ? { beats } : {}),
+      ...(said.length > 0 ? { line: { ...(speaker !== undefined ? { speaker: cut(speaker, 200) } : {}), text: cut(said, 4_000) } } : {}),
+    };
+  });
 }
 
 /** The blocks joined, one paragraph each, empty ones omitted rather than emitted (R-7). */

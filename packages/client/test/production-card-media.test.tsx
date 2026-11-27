@@ -80,6 +80,45 @@ it("says what will be made, on what and for how much, and folds the rest (issue 
   assert.doesNotMatch(document.querySelector(".fy-actioncard__body")?.textContent?.replace(details?.textContent ?? "", "") ?? "", /Provider-selected|The prompt is sent/);
 });
 
+it("reads a clip's shots out before it is made: picture, seconds, camera, line and what happens (SPEC-041 R-75a)", () => {
+  const action = card(); action.status = "pending"; action.availableDecisions = ["approve", "deny"];
+  if (action.shown.body.family !== "generation") assert.fail("Expected generation");
+  const long = "She sets the cup down and looks at the door. ".repeat(12).trim();
+  Object.assign(action.shown.body, { prompt: "[shot 1 · 5s] She waits.", quantity: 1, durationSec: 8.5, storyboard: [
+    { shotId: "sh_1", number: 1, title: "At her table", startSec: 0, endSec: 5, picture: "artifacts/frame-one.png", camera: "medium two-shot, 85mm, slow push in",
+      action: long, line: { speaker: "Maren Kest", text: "You came back." } },
+    { shotId: "sh_2", number: 2, title: "His answer", startSec: 5, endSec: 8.5, action: "He answers.", beats: [{ span: "0–2s", text: "he looks away" }], line: { text: "I said I would." } },
+  ] });
+  __setStateForTest(state);
+  const render = () => parseHTML(renderToString(<MemoryRouter><ConversationPermissionCard action={action} conversationSeq={1} /></MemoryRouter>)).document;
+  const document = render();
+  const rows = [...document.querySelectorAll(".fy-storyboard > li")];
+  assert.equal(rows.length, 2);
+  assert.equal(document.querySelector(".fy-storyboard")?.getAttribute("aria-label"), "Shots");
+  assert.match(rows[0]!.textContent ?? "", /1 · At her table · 0–5s/);
+  assert.match(rows[0]!.textContent ?? "", /medium two-shot, 85mm, slow push in/);
+  assert.match(rows[0]!.textContent ?? "", /Maren Kest “You came back\.”/);
+  assert.match(rows[0]!.querySelector("img")?.getAttribute("src") ?? "", /\/media\/[^/]+\/artifacts\/frame-one\.png$/, "the picture comes through the media address every picture does");
+  assert.ok((rows[0]!.textContent ?? "").includes("…") && !(rows[0]!.textContent ?? "").includes(long), "a long shot is short until asked for");
+  assert.equal(rows[0]!.querySelector("button")?.textContent, "More");
+  assert.equal(rows[0]!.querySelector("button")?.getAttribute("aria-expanded"), "false");
+  assert.match(rows[1]!.textContent ?? "", /2 · His answer · 5–8\.5s/);
+  assert.match(rows[1]!.textContent ?? "", /“I said I would\.”/);
+  assert.match(rows[1]!.textContent ?? "", /0–2s · he looks away/);
+  assert.equal(rows[1]!.querySelector("img"), null, "a shot with no picture sent shows none");
+  assert.equal(rows[1]!.querySelector("button"), null);
+  const body = document.querySelector(".fy-actioncard__body")!.innerHTML;
+  assert.ok(body.indexOf("fy-storyboard") < body.indexOf("[shot 1 · 5s] She waits."), "the shots are read before the words that ask for them");
+  // Another world's card still reads its shots, without reaching into this world's files for them.
+  action.worldId = ulid();
+  const elsewhere = render();
+  assert.equal(elsewhere.querySelectorAll(".fy-storyboard > li").length, 2);
+  assert.equal(elsewhere.querySelectorAll(".fy-storyboard img").length, 0);
+  // A card that is not a clip of named shots has no list at all.
+  delete (action.shown.body as { storyboard?: unknown }).storyboard;
+  assert.equal(render().querySelector(".fy-storyboard"), null);
+});
+
 it("retains playable receipts after jobs disappear and compares the frozen current selection with the candidate", () => {
   const action = card(); action.status = "completed";
   action.receipt = { kind: "generation", id: action.actionId, summary: "Settled", generation: { authorized: 2, completed: 1, failed: 1, cancelled: 0, unattempted: 0, actualMicroUsd: 200,

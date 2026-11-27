@@ -351,6 +351,44 @@ export const ArkeTakeReviewBodySchema = z
   })
   .strict();
 
+const WorldMediaPathSchema = z.string().min(1).max(1_000)
+  .refine((value) => !value.startsWith("/") && !value.includes("\\") && !value.includes("://") && !/^[a-zA-Z]:/.test(value) && !value.split("/").includes(".."), "expected a world-relative media path");
+
+/**
+ * One shot of a clip, as its card shows it before anything is made (SPEC-041 R-75a).
+ *
+ * A card that showed only the prompt asked for a yes to several thousand words. The owner of a film
+ * approved eleven clips that way and found, in the cut, a man checking his watch as he walked up to
+ * a woman: the prompt had said so, and nobody reads a prompt for what each person does. Shot by shot
+ * with the picture it starts from, the same request is read in seconds.
+ *
+ * `picture` is there only when that picture is sent with the request; a shot whose frame the route
+ * does not carry shows none, because a storyboard of pictures the model never sees is a promise the
+ * clip will not keep. The seconds are the clip's own clock, which is where the cuts are asked for.
+ */
+export const ArkeGenerationShotSchema = z
+  .object({
+    shotId: ConversationActionSemanticIdSchema,
+    number: z.number().int().min(1),
+    title: z.string().min(1).max(300),
+    startSec: z.number().min(0),
+    endSec: z.number().positive(),
+    picture: WorldMediaPathSchema.optional(),
+    camera: z.string().min(1).max(2_000).optional(),
+    action: z.string().min(1).max(8_000).optional(),
+    beats: z.array(z.object({ span: z.string().min(1).max(100), text: z.string().min(1).max(2_000) }).strict()).max(40).optional(),
+    line: z.object({ speaker: z.string().min(1).max(200).optional(), text: z.string().min(1).max(4_000) }).strict().optional(),
+  })
+  .strict()
+  .refine((shot) => shot.endSec > shot.startSec, "a shot ends after it starts");
+export type ArkeGenerationShot = z.infer<typeof ArkeGenerationShotSchema>;
+/**
+ * A world is raised to this boundary before it holds a card with shot rows. The card's body is
+ * strict, so a build from before the rows would not draw the card without them: it would refuse
+ * the conversation the card is in.
+ */
+export const CLIP_STORYBOARD_SCHEMA_VERSION = 156;
+
 export const ArkeGenerationBodySchema = z
   .object({
     family: z.literal("generation"),
@@ -379,6 +417,8 @@ export const ArkeGenerationBodySchema = z
     estimateMayVary: z.boolean().optional(),
     deterministicInputs: z.array(z.string().min(1).max(1_000)).optional(),
     cancellationSupported: z.boolean().optional(),
+    /** The clip's shots in the order they play; absent on every card that is not a clip of named shots. */
+    storyboard: z.array(ArkeGenerationShotSchema).min(1).max(60).optional(),
   })
   .strict();
 export type ArkeGenerationBody = z.infer<typeof ArkeGenerationBodySchema>;

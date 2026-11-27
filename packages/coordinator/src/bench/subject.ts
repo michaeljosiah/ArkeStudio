@@ -677,6 +677,8 @@ export async function prepareBenchSubject(
   };
   const references = [...ordinary, ...frames, ...(animatic === null ? [] : [animatic])];
   const routing = subjectReferenceRouting(references, subject, model);
+  // A board opens here to be made as one clip, so its brief is the clip's: shots with their seconds,
+  // moves, beats and lines. The still's words stay with the sheet of frames (frame-run).
   const written = authoredPrompt ??
     assembleBoardPrompt({
       world: world.meta,
@@ -684,6 +686,7 @@ export async function prepareBenchSubject(
       scene: sceneUnderLook(scene, production.meta.look),
       shots: members,
       aspect,
+      capability: "video",
       ...(style !== undefined ? { artDirection: style } : {}),
     });
   // A staged board reads out as one timed cut list on the board's clock (issue 1824), with the

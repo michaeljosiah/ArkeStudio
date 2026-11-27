@@ -4,7 +4,7 @@ import { editorTimeline } from "../lib/editor-timeline.js";
 import { ProductionCardBody, type ProductionCardContext } from "./production-card-body.js";
 import { ProductionTimelineCard } from "./production-timeline-card.js";
 import { ConversationFrameRunCard } from "./conversation-frame-run-card.js";
-import { GenerationReferences, GenerationResults } from "./generation-card-body.js";
+import { GenerationReferences, GenerationResults, GenerationStoryboard } from "./generation-card-body.js";
 import { TakeMediaFigure } from "./take-comparison-card.js";
 
 function shotCount(scene: Parameters<typeof orderedShots>[0]): string {
@@ -20,7 +20,7 @@ export function ProductionStudioCanvas({ world, production, focus, actions, onFo
   if (pending && action.shown.productionPreview) return <section data-pending-preview aria-label="Pending canvas preview"><p>Pending preview · {action.shown.title}</p>
     <ProductionCardBody action={action} preview={action.shown.productionPreview} /></section>;
   if (action?.shown.body.family === "generation") return <section aria-label="Shot generation canvas">
-    <GenerationReferences action={action} /><GenerationResults action={action} /><ConversationFrameRunCard action={action} /></section>;
+    <GenerationStoryboard action={action} /><GenerationReferences action={action} /><GenerationResults action={action} /><ConversationFrameRunCard action={action} /></section>;
   if (!production) return <p>The production will appear here when it is created.</p>;
   const scene = production.scenes.find(s => s.id === focus.sceneId) ?? production.scenes.find(s => orderedShots(s).some(shot => shot.id === focus.shotId));
   // Display context cannot decide or prepare an action. Native preview components only read it.

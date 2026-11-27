@@ -379,8 +379,14 @@ describe("production subject preparation (SPEC-036 R-23, R-25)", () => {
     assert.equal(prepared.prefill.composer.params.kind, "video");
     assert.equal(prepared.prefill.composer.params.durationSec, subject.durationSec);
     assert.equal(subject.durationSec, subject.members.reduce((total, member) => total + member.durationSec, 0));
-    // Shot 15 cites only the Saltmarket, so the board's panels say where each is (issue 3152).
-    assert.match(prepared.prefill.composer.brief, /1\. (At The Vigil\. )?Maren Kest grips the rail/);
+    // A board opens here to be made as one clip, so its brief is the clip's: its shape, then a beat
+    // a shot with its seconds. Shot 15 cites only the Saltmarket, so each beat says where it is
+    // (issue 3152), and a line names who says it, because a clip of several shots has several faces.
+    const brief = prepared.prefill.composer.brief;
+    assert.match(brief, /^One continuous clip: [\d.]+s, 16:9, \d+ shots\. Cut between shots only at the boundaries given below, in that order\.\n\n/);
+    assert.match(brief, /\[shot 12 · 4s\] [^[]*?(At The Vigil\. )?Maren Kest grips the rail/);
+    assert.match(brief, /Maren Kest, vo: "the verse, under the water"/);
+    assert.ok(!brief.includes("every cell"), "the still's words stay with the sheet of frames");
     const voice = prepared.prefill.references.find((reference) => reference.kind === "audio");
     assert.equal(voice?.label, "voice sample · @maren-kest");
     assert.equal(voice?.durationSec, 9);
