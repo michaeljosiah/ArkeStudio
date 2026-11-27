@@ -475,10 +475,21 @@ function filmLines(store: WorldStore, productionId: string | null, shots: Readon
   if (script) {
     const scene = bundle.productions.find(row => row.meta.id === script.productionId)?.scenes.find(row => row.id === script.sceneId);
     if (!scene) throw new RetrievalError("bad-argument", "That scene is not in this world: name the production and the scene whose script the film is held to.");
-    const spoken = (scene.script?.blocks ?? []).filter(block => block.kind === "dialogue" && block.text.trim());
+    const written = (scene.script?.blocks ?? []).filter(block => block.kind === "dialogue" && block.text.trim()).map(block => block.text);
+    /*
+     * A script written as prose keeps speech inside its action blocks (`Ife: "Good evening." Her
+     * eyes go over him once.`), and the scene's shots are where each of those lines is held by
+     * itself. Where the shots say more lines than the script's dialogue does, they are the scene's
+     * lines. A film scene's script had 46 lines of dialogue and its shots 60; a cut of it was held
+     * to the 46, the fourteen it never listed were set against other lines' words, and four lines
+     * the reader had heard word for word, "Good evening." among them, read "not heard" (2026-11-27).
+     */
+    let planned: string[] = [];
+    try { planned = orderedShots(scene).flatMap(shot => { const line = lineOf(shot); return line?.trim() ? [line] : []; }); } catch { /* a scene whose flow will not order has its script alone */ }
+    const spoken = planned.length > written.length ? planned : written;
     // More lines than a review sets beside a film. Cut short at the limit, the lines past it were read as words nobody wrote (codex on PR 3333).
     if (spoken.length > most) return { from: "script", lines: [], over: spoken.length };
-    const lines = spoken.map((block, i) => ({ number: i + 1, shot: null, text: block.text }));
+    const lines = spoken.map((text, i) => ({ number: i + 1, shot: null, text }));
     return lines.length ? { from: "script", lines } : null;
   }
   const production = bundle.productions.find(row => row.meta.id === productionId);

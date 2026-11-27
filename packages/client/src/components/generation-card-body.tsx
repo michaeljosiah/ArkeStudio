@@ -59,7 +59,7 @@ export function GenerationStoryboard({ action }: { action: ConversationActionCar
       {shot.camera && <p data-camera>{shot.camera}</p>}
       {shot.line && <p data-line>{shot.line.speaker && <strong>{shot.line.speaker} </strong>}“{shot.line.text}”</p>}
       {shot.action && <ShotWords text={shot.action} />}
-      {shot.beats?.map(beat => <p key={`${beat.span}/${beat.text}`} data-beat>{beat.span} · {beat.text}</p>)}
+      {shot.beats?.map((beat, index) => <p key={index} data-beat>{beat.span} · {beat.text}</p>)}
     </div>
   </li>)}</ol>;
 }

@@ -122,7 +122,9 @@ export function productionGenerationSource(store: WorldStore, ports: {
             const rows = clipStoryboard({ scene: sceneUnderLook(scene, production.meta.look), sheets: world.sheets,
               plan: filing.members.flatMap(member => shots.filter(shot => shot.id === member.shotId).map(shot => ({ shot, startSec: member.startSec, endSec: member.endSec }))),
               pictureOf: shotId => { const path = frameOf(shotId); return path !== undefined && sent.has(path) ? path : undefined; } });
-            if (rows.length > 0) storyboard = rows;
+            // The card holds sixty rows. A clip of more shots than that keeps its prompt and goes without the
+            // list: half a storyboard would read as the whole clip.
+            if (rows.length > 0 && rows.length <= 60) storyboard = rows;
           }
           const coversShots = filing.kind === "shot" ? [filing.shotId] : filing.members.map(m => m.shotId);
           const shotPlan = filing.kind === "board" ? filing.members.map(({ shotId, number, startSec, endSec }) => ({ shotId, number, startSec, endSec })) : undefined;

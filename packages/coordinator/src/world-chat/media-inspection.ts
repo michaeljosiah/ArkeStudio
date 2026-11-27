@@ -96,6 +96,21 @@ function audioInspectionFailure(error: unknown, kind: "speech recognition" | "au
   return new RetrievalError("unavailable", reason ?? `Local ${kind} could not be completed or its response was invalid.`);
 }
 
+/**
+ * How far past a source's end an ask may run and still be read, to that end. A film's length is
+ * read off as 15.566667 s and asked for as "0 to 15.6": the asker meant the whole film. The ask was
+ * refused, and it was the one listen a finished cut was going to get before it went to its owner
+ * (2026-11-27). Half a second covers a length rounded to a tenth or to a whole second. Past that
+ * the asker has another film in mind, and the refusal says how long this one is.
+ */
+const OVERSHOOT_SEC = 0.5;
+/** The end to read to: the asked one, the source's own for a small overshoot, or null where the ask is refused. */
+function heldEnd(asked: { startSec: number; endSec: number }, length: number): number | null {
+  if (asked.endSec <= length + 0.000001) return asked.endSec;
+  return asked.endSec <= length + OVERSHOOT_SEC && asked.startSec < length - 0.000001 ? length : null;
+}
+const longAs = (length: number) => `${Math.round(length * 1000) / 1000} s`;
+
 export class ConversationMediaInspection {
   private readonly signals = new Map<string, AbortSignal>();
   private readonly counts = new Map<string, number>();
@@ -192,8 +207,9 @@ export class ConversationMediaInspection {
       if (reviewRead) {
         const reviewArgs = parsed.data as ReviewExportArgs;
         if (end === null) throw new RetrievalError("unavailable", "That film has no known length.");
-        const length = end - source.startSec, window = reviewArgs.window ?? { startSec: 0, endSec: length };
-        if (window.endSec > length + .000001) throw new RetrievalError("bad-argument", "The window runs past the end of the film.");
+        const length = end - source.startSec, askedWindow = reviewArgs.window ?? { startSec: 0, endSec: length }, heldTo = heldEnd(askedWindow, length);
+        if (heldTo === null) throw new RetrievalError("bad-argument", `The window runs past the end of the film, which is ${longAs(length)} long.`);
+        const window = { startSec: askedWindow.startSec, endSec: heldTo };
         if (window.endSec - window.startSec > AGENT_REVIEW_LIMITS.maxSeconds + .000001) throw new RetrievalError("bad-argument", "A review covers at most 15 minutes; name a window.");
         const pick = (kind: "video" | "audio", index: number | undefined) => {
           const candidates = inventory.streams.filter(stream => stream.kind === kind);
@@ -238,8 +254,9 @@ export class ConversationMediaInspection {
       }
       if (sheetArgs) {
         if (end === null) throw new RetrievalError("unavailable", "That film has no known length.");
-        const length = end - source.startSec, window = sheetArgs.window ?? { startSec: 0, endSec: length };
-        if (window.endSec > length + .000001) throw new RetrievalError("bad-argument", "The window runs past the end of the film.");
+        const length = end - source.startSec, askedWindow = sheetArgs.window ?? { startSec: 0, endSec: length }, heldTo = heldEnd(askedWindow, length);
+        if (heldTo === null) throw new RetrievalError("bad-argument", `The window runs past the end of the film, which is ${longAs(length)} long.`);
+        const window = { startSec: askedWindow.startSec, endSec: heldTo };
         if (window.endSec - window.startSec > AGENT_SHEET_LIMITS.maxSeconds + .000001) throw new RetrievalError("bad-argument", "A contact sheet covers at most 15 minutes; name a window.");
         const candidates = inventory.streams.filter(stream => stream.kind === "video");
         const selected = args.streamIndex === undefined ? candidates.length === 1 ? candidates[0] : undefined : candidates.find(stream => stream.index === args.streamIndex);
@@ -251,8 +268,9 @@ export class ConversationMediaInspection {
       }
       if (songArgs) {
         if (end === null) throw new RetrievalError("unavailable", "That source has no known length to map.");
-        const length = end - source.startSec, window = songArgs.window ?? { startSec: 0, endSec: length };
-        if (window.endSec > length + .000001) throw new RetrievalError("bad-argument", "The window runs past the end of the source.");
+        const length = end - source.startSec, askedWindow = songArgs.window ?? { startSec: 0, endSec: length }, heldTo = heldEnd(askedWindow, length);
+        if (heldTo === null) throw new RetrievalError("bad-argument", `The window runs past the end of the source, which is ${longAs(length)} long.`);
+        const window = { startSec: askedWindow.startSec, endSec: heldTo };
         if (window.endSec - window.startSec > AGENT_SONG_LIMITS.maxSeconds + .000001) throw new RetrievalError("bad-argument", "A song map covers at most 15 minutes; name a window.");
         const candidates = inventory.streams.filter(stream => stream.kind === "audio");
         const selected = args.streamIndex === undefined ? candidates.length === 1 ? candidates[0] : undefined : candidates.find(stream => stream.index === args.streamIndex);
@@ -262,7 +280,12 @@ export class ConversationMediaInspection {
         this.access(lease, name);
         return { observation: AgentMediaObservationSchema.parse({ ...base, song, coverage: "measured-song", limitations: SONG_LIMITATIONS }), frames: [] };
       }
-      if (!args.range || end === null || args.range.endSec > end - source.startSec + 0.000001) throw new RetrievalError("bad-argument", "The interval exceeds this immutable media source.");
+      if (!args.range || end === null) throw new RetrievalError("bad-argument", "The interval exceeds this immutable media source.");
+      // A measurement against a second source pairs its interval with that source's, second for second, so it is never moved: sync and quality stay exact.
+      const heldTo = syncRead || qualityRead ? (args.range.endSec <= end - source.startSec + 0.000001 ? args.range.endSec : null) : heldEnd(args.range, end - source.startSec);
+      if (heldTo === null) throw new RetrievalError("bad-argument", `The interval exceeds this immutable media source, which is ${longAs(end - source.startSec)} long.`);
+      // What was read is what is reported: the receipt's range is the held one.
+      args.range = { ...args.range, endSec: heldTo };
       const kind = name === "sample_video" || qualityRead || syncArgs?.method === "mouth" ? "video" : "audio", candidates = inventory.streams.filter(stream => stream.kind === kind);
       const selected = args.streamIndex === undefined ? candidates.length === 1 ? candidates[0] : undefined : candidates.find(stream => stream.index === args.streamIndex);
       if (!selected) throw new RetrievalError("bad-argument", `Select one explicit ${kind} stream from inspect_media; ambiguous tracks are never guessed.`);
