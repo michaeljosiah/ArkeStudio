@@ -4,8 +4,8 @@ import { AGENT_EXPORT_MEDIA_SCHEMA_VERSION, AGENT_PERFORMANCE_MEDIA_SCHEMA_VERSI
   CutContactSheetArgsSchema, AGENT_SHEET_SCHEMA_VERSION, AGENT_SEAM_SCHEMA_VERSION, AGENT_SHEET_LIMITS, ReviewExportArgsSchema, AGENT_REVIEW_SCHEMA_VERSION, AGENT_REVIEW_SPEECH_SCHEMA_VERSION, AGENT_REVIEW_SPEECH_LIMITS, AGENT_REVIEW_LIMITS, type ReviewExportArgs,
   type AgentListeningFocus, type AgentMediaObservation, type AgentMediaSource, type ClipQualityArgs, type CutContactSheetArgs, type MeasureSyncArgs, type AgentMediaRegion,
   type SongMapArgs, type WorldChatCheckReceipt } from "@arke-studio/contracts";
-import { contactSheetInSnapshot, measureSyncInSnapshot, qualityInSnapshot, reviewInSnapshot, songMapInSnapshot, type FilmHearing, QUALITY_LIMITATIONS, REVIEW_LIMITATIONS, SEAM_LIMITATIONS, SHEET_LIMITATIONS,
-  SONG_LIMITATIONS, SYNC_LIMITATIONS } from "./media-measure.js";
+import { contactSheetInSnapshot, measureSyncInSnapshot, qualityInSnapshot, reviewInSnapshot, songMapInSnapshot, soundStopsAt, type FilmHearing, QUALITY_LIMITATIONS, REVIEW_LIMITATIONS, SEAM_LIMITATIONS,
+  SHEET_LIMITATIONS, SONG_LIMITATIONS, SYNC_LIMITATIONS } from "./media-measure.js";
 import { readBenchSession } from "../bench/chat-reads.js";
 import { resolveTakeSource } from "../bench/service.js";
 import { hashContainedProductionMedia, withContainedProductionMedia } from "../world/reference-files.js";
@@ -230,8 +230,11 @@ export class ConversationMediaInspection {
         const hearing: FilmHearing | undefined = audio ? { script: reviewArgs.script, hear: async each => {
           if (!speech || !speechAudio || ready && !await ready(each).catch(() => false)) return null;
           const words: HeardWord[] = [], readSec = Math.min(window.endSec - window.startSec, AGENT_REVIEW_SPEECH_LIMITS.maxSeconds);
+          // Heard as far as the sound runs: past its end the film is silent, which hears as no words, so the read still covers its window.
+          const soundStop = soundStopsAt(audio, source.startSec + window.startSec, source.startSec + window.startSec + readSec);
           for (let at = 0; at < readSec - .05; at += 60) {
-            const startSec = source.startSec + window.startSec + at, endSec = Math.min(source.startSec + window.startSec + readSec, startSec + 60);
+            const startSec = source.startSec + window.startSec + at, endSec = Math.min(soundStop, startSec + 60);
+            if (endSec - startSec <= .05) break;
             const heard = await speechAudio(snapshot.path, audio, startSec, endSec, each)
               .then(derivative => readAgentSpeech({ ...derivative, streamIndex: audio.index, sourceStartSec: startSec, viewStartSec: window.startSec + at, read: speech, readText: speechText, signal: each }))
               .catch(error => { if (each.aborted) throw error; return null; });

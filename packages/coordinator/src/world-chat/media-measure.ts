@@ -26,6 +26,20 @@ import { castNames, lineOf, type HeardWord } from "../takes/checks.js";
 const MEASURE_RATE = 16000;
 type Stream = AgentMediaInventory["streams"][number];
 
+/**
+ * Where a sound stream stops inside a window: its own end, when the probe knows it, else the
+ * window's. A film's sound can stop before its picture: Seedance's 20.04 s boards carry 19.97 s
+ * of it, and a read of the mix to the picture's end was refused as not covering its window, which
+ * took the whole review with it (2026-11-27). Past this point the film is silent. The stream's
+ * own start counts, so a sound that starts late still reads short and is refused: it cannot be
+ * placed, and laying it from the window's start would misplace every lag.
+ */
+export function soundStopsAt(stream: Stream, startSec: number, endSec: number): number {
+  return stream.durationSec === null ? endSec : Math.max(startSec, Math.min(endSec, (stream.startTimeSec ?? 0) + stream.durationSec));
+}
+/** A silence this long or longer at a film's end, where its sound has stopped and its picture has not, is said. */
+const SILENT_TAIL_SEC = .5;
+
 export const SYNC_LIMITATIONS = {
   common: [
     "Signal measurement: correlation over lags between the take and the reference's loudness. A high correlation says they rise and fall together, not that the words are the same.",
@@ -344,13 +358,19 @@ export async function reviewInSnapshot(store: WorldStore, tools: AgentMediaTools
     steps.push(...read.steps); stepTimes.push(...read.times.slice(1));
   }
 
-  // The film's own mix, once, for the clips' sync and the room under each shot; each clip's source read from its own snapshot.
-  const mix = film.audio ? await decodeMono(monoAudio, film.path, film.audio, film.startSec, film.endSec, signal) : null;
+  /*
+   * The film's own mix, once, for the clips' sync and the room under each shot; each clip's source
+   * read from its own snapshot. It is read as far as its sound runs and laid out to the window's
+   * length with silence, which is what plays there, so every later sample keeps its time.
+   */
+  const sounding = film.audio ? soundStopsAt(film.audio, film.startSec, film.endSec) - film.startSec : 0;
+  const mix = film.audio ? withSilenceTo(sounding > .05 ? await decodeMono(monoAudio, film.path, film.audio, film.startSec, film.startSec + sounding, signal) : new Float32Array(0),
+    Math.round(length * MEASURE_RATE)) : null;
   // A window that opens inside a clip reads the clip's sound from that point in, not from its in-point.
   const syncs = await inParallel(shots, signal, async (shot, each) => mix && cut && shot.clip ? clipSync(store, tools, each, resolve, cut, shot.clip, mix,
     shot.startSec - from, shot.endSec - shot.startSec, Math.max(0, shot.startSec - shot.clip.startSec)) : null);
 
-  const loud = film.audio ? await loudness(film.path, film.audio, film.startSec, film.endSec, signal) : null;
+  const loud = film.audio && sounding > .05 ? await loudness(film.path, film.audio, film.startSec, film.startSec + sounding, signal) : null;
   const findings: string[] = [];
   // A finding is at most 300 characters and a label up to 160; the shot table keeps the whole label.
   const name = (shot: { label: string | null }, number: number) => `Shot ${number}${shot.label ? ` (${shot.label.length > 60 ? `${shot.label.slice(0, 59)}…` : shot.label})` : ""}`;
@@ -374,7 +394,8 @@ export async function reviewInSnapshot(store: WorldStore, tools: AgentMediaTools
    * room go. Held against the film's own middle, so a film mixed quiet throughout says nothing.
    */
   if (mix) {
-    const levels = stepLevels(mix, 16000, .1), floors = reviewed.map(shot => {
+    // Where there is sound only: past its end a shot has no room to measure, and the silence is said once, below.
+    const levels = stepLevels(mix.subarray(0, Math.round(sounding * MEASURE_RATE)), MEASURE_RATE, .1), floors = reviewed.map(shot => {
       if (shot.endSec - shot.startSec < ROOM_SHOT_SEC) return null;
       const own = Array.from(levels.slice(Math.round((shot.startSec - from) * 10), Math.round((shot.endSec - from) * 10))).sort((a, b) => a - b);
       return own.length ? own[Math.floor(own.length / 10)]! : null;
@@ -432,6 +453,8 @@ export async function reviewInSnapshot(store: WorldStore, tools: AgentMediaTools
   if (differenceSec !== null && rate && Math.abs(differenceSec) > 1 / rate) findings.unshift(`The film runs ${round(length, 2)} s and its cut ${expectedSec} s: ${Math.abs(differenceSec)} s ${differenceSec > 0 ? "longer" : "shorter"}.`);
   if (!film.audio) findings.unshift("The film has no sound.");
   else {
+    const silentSec = round(length - sounding, 2);
+    if (silentSec >= SILENT_TAIL_SEC) findings.unshift(`The sound stops at ${round(from + sounding, 2)} s, ${silentSec} s before the picture: the rest is silent.`);
     if (film.audio.sampleRate && film.audio.sampleRate < 44100) findings.unshift(`The sound is at ${film.audio.sampleRate} Hz, under the 44.1 kHz a release needs.`);
     if (film.audio.channels === 1) findings.unshift("The sound is mono.");
   }
@@ -512,6 +535,12 @@ function filmLines(store: WorldStore, productionId: string | null, shots: Readon
     lines.push(held); said.set(shot.id, held);
   }
   return lines.length ? { from: "cut", lines } : null;
+}
+
+/** Samples laid out to `length` with silence after them; as they are when they already reach it. */
+function withSilenceTo(samples: Float32Array, length: number) {
+  if (samples.length >= length) return samples;
+  const out = new Float32Array(length); out.set(samples); return out;
 }
 
 /** A long window of mono sound, read in 60 s pieces. */
