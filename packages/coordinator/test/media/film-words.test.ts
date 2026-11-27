@@ -81,6 +81,35 @@ describe("a film's words against its script", () => {
     assert.deepEqual(two.slice(1), ["Line 5 \"Good evening.\" is not heard.", "Line 6 \"Sit, if you are going to stand there.\" is not heard."]);
   });
 
+  it("gives a line said twice to the two lines that are it, not to an earlier line that holds its words", () => {
+    // A film of an arrival alone, held to its whole scene. The line before the arrival holds the greeting's words and is not in the film.
+    const scene: FilmLine[] = [
+      { number: 1, shot: null, text: "Don't say 'Good evening, madam'!" }, { number: 2, shot: null, text: "Good evening." }, { number: 3, shot: null, text: "Good evening." },
+      { number: 4, shot: null, text: "Your friend is going to fall off his chair." },
+    ];
+    const heard = film(say("Good evening", 3.4), say("Good evening", 5.4), say("Your friend is going to fall off his chair", 7.8, .2));
+    const words = filmWordsAgainstScript(scene, heard, NAMES)!;
+    // Read first-come, line 1 took the first greeting (two words of its five), line 2 the second at line 3's time, and line 3 was not heard.
+    assert.deepEqual(words.lines.map((line) => [line.said, line.heardWords, line.startSec]), [["not-heard", 0, null], ["as-written", 2, 3.4], ["as-written", 2, 5.4], ["as-written", 9, 7.8]]);
+    assert.deepEqual([words.unwritten, words.misplaced], [[], []]);
+    assert.deepEqual(filmWordFindings(scene, words), ["Line 1 \"Don't say 'Good evening, madam'!\" is not heard."]);
+    // One greeting heard is the first line that is the greeting, whole.
+    const once = filmWordsAgainstScript(scene, film(say("Good evening", 3.4), say("Your friend is going to fall off his chair", 7.8, .2)), NAMES)!;
+    assert.deepEqual(once.lines.map((line) => line.said), ["not-heard", "as-written", "not-heard", "as-written"]);
+  });
+
+  it("hears the most words first: a short line is not found whole at the cost of a longer line's words", () => {
+    const long = "Good evening, madam, how are you?", heard = say("Good evening madam how are you", 1);
+    // The long line said whole is six words in either order; the short line is two of them, and no line is left half said.
+    const after = filmWordsAgainstScript([{ number: 1, shot: null, text: long }, { number: 2, shot: null, text: "Good evening." }], heard, NAMES)!;
+    assert.deepEqual(after.lines.map((line) => [line.said, line.heardWords]), [["as-written", 6], ["not-heard", 0]]);
+    const before = filmWordsAgainstScript([{ number: 1, shot: null, text: "Good evening." }, { number: 2, shot: null, text: long }], heard, NAMES)!;
+    assert.deepEqual(before.lines.map((line) => [line.said, line.heardWords]), [["not-heard", 0], ["as-written", 6]]);
+    // A line the recogniser half caught keeps the words it caught: a short line after it that is two of them does not take them.
+    const caught = filmWordsAgainstScript([{ number: 1, shot: null, text: "I told you, come to the table." }, { number: 2, shot: null, text: "You come." }], say("I told you come", 1), NAMES)!;
+    assert.deepEqual(caught.lines.map((line) => [line.said, line.heardWords]), [["not-heard", 4], ["not-heard", 0]]);
+  });
+
   it("a line heard only where no word could be timed is said without a time", () => {
     // A stretch read as text alone: its words have no times, and are never sure enough to be words nobody wrote.
     const untimed = [{ text: "The goat was in the boat today la la la", startSec: null, probability: 0 }];

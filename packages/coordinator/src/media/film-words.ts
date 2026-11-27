@@ -1,4 +1,4 @@
-import { alike, heardBySound, matchedHeard, spokenWords, type HeardWord } from "../takes/checks.js";
+import { alike, heardBySound, spokenWords, type HeardWord } from "../takes/checks.js";
 
 /*
  * A finished film's words against the lines it was cut to say (2026-11-26).
@@ -11,7 +11,8 @@ import { alike, heardBySound, matchedHeard, spokenWords, type HeardWord } from "
  * heard, where, and nothing heard that nobody wrote.
  *
  * It is the take's own comparison (`judgeWords`) stretched over a film: the longest run of the
- * script's words in what was heard, then the words the recogniser spelled its own way found by
+ * script's words in what was heard (of the runs that long, the one that leaves the fewest lines
+ * half said: `matchedInLines`), then the words the recogniser spelled its own way found by
  * sound, each for itself. A line is then as written, heard by sound, partly heard or not heard,
  * with the time its words were heard at; a line not heard where the script has it but alike to
  * words heard elsewhere is out of place; and sure words that are no line's are a voice nobody
@@ -79,13 +80,79 @@ const MOST_CELLS = 24_000_000;
 
 const milli = (seconds: number) => Math.round(seconds * 1000) / 1000;
 
+/**
+ * The script's words in what was heard, as pairs of indices (script, heard): of the readings that
+ * hear the most of the script's words in order, the one that leaves the fewest lines half said.
+ *
+ * The take's `matchedHeard` gives each heard word to the first of its words that will have it.
+ * That is right for a take, which is one line, and wrong for a scene, where an earlier line can
+ * hold a later line's words. A cut of an arrival was held to its scene (2026-11-27): "Don't say
+ * 'Good evening, madam'!" comes before two lines that are each "Good evening.", the film said
+ * those two and not the first, and the first took one greeting, the second took the other's at
+ * the other's time, and the third read "not heard". Each such reading hears the same four words;
+ * the film is the one in which no line is left with two words of its five. Where readings are
+ * still level, a heard word goes to the first word that will have it, as in a take.
+ */
+function matchedInLines(script: ReadonlyArray<{ text: string; at: number }>, heard: readonly string[]): Array<{ line: number; heard: number }> {
+  const count = script.length, width = heard.length + 1;
+  if (count === 0) return [];
+  const first = Uint8Array.from(script, (word, i) => (i === 0 || script[i - 1]!.at !== word.at ? 1 : 0));
+  const last = Uint8Array.from(script, (word, i) => (i === count - 1 || script[i + 1]!.at !== word.at ? 1 : 0));
+  // One word heard outweighs every line there is to leave half said.
+  const worth = script[count - 1]!.at + 2;
+  /*
+   * How a line stands at one of its words: 0 with every word before it heard (and at its first
+   * word), 1 with none of them, 2 with some. For each standing, the most that can still be made
+   * of the script from word i and of what was heard from word j is kept a row at a time, from the
+   * end; the step that makes it is kept for every cell, two bits a standing: 2 the word is that
+   * heard word, 1 the word goes unheard, 0 the heard word is not this line's.
+   */
+  const unheardTo = (i: number, standing: number) => (first[i] ? 1 : standing === 0 ? 2 : standing);
+  const heardTo = (i: number, standing: number) => (first[i] ? 0 : standing === 1 ? 2 : standing);
+  // Words as numbers: a scene by a quarter hour of talk is twenty-four million comparisons, three times over.
+  const known = new Map<string, number>(), id = (text: string) => known.get(text) ?? (known.set(text, known.size), known.size - 1);
+  const wanted = Int32Array.from(script, (word) => id(word.text)), given = Int32Array.from(heard, id);
+  const steps = new Uint8Array(count * width);
+  let after = new Float64Array(width * 3), here = new Float64Array(width * 3);
+  for (let i = count - 1; i >= 0; i--) {
+    const ends = last[i] === 1, word = wanted[i]!, row = i * width;
+    for (let standing = 0; standing < (first[i] ? 1 : 3); standing++) {
+      // A line that ends half said costs one; the next line starts over.
+      const dropped = unheardTo(i, standing), kept = heardTo(i, standing), shift = standing * 2;
+      const droppedAt = ends ? 0 : dropped, droppedCost = ends && dropped === 2 ? 1 : 0, keptAt = ends ? 0 : kept, keptWorth = worth - (ends && kept === 2 ? 1 : 0);
+      for (let j = width - 1; j >= 0; j--) {
+        let best = after[j * 3 + droppedAt]! - droppedCost, step = 1;
+        if (j < heard.length) {
+          const passed = here[(j + 1) * 3 + standing]!;
+          if (passed > best) { best = passed; step = 0; }
+          if (given[j] === word) {
+            const taken = keptWorth + after[(j + 1) * 3 + keptAt]!;
+            if (taken >= best) { best = taken; step = 2; }
+          }
+        }
+        here[j * 3 + standing] = best; steps[row + j] = steps[row + j]! | step << shift;
+      }
+    }
+    [after, here] = [here, after];
+  }
+  const used: Array<{ line: number; heard: number }> = [];
+  for (let i = 0, j = 0, standing = 0; i < count && j < heard.length;) {
+    const step = (steps[i * width + j]! >> (standing * 2)) & 3;
+    if (step === 0) { j++; continue; }
+    if (step === 2) used.push({ line: i, heard: j++ });
+    standing = last[i] ? 0 : step === 2 ? heardTo(i, standing) : unheardTo(i, standing);
+    i++;
+  }
+  return used;
+}
+
 /** Null when the film and the script are together too long to set side by side in one read; name a shorter window. */
 export function filmWordsAgainstScript(lines: readonly FilmLine[], heard: readonly HeardWord[], names: ReadonlySet<string> = new Set()): FilmWords | null {
   const script = lines.flatMap((line, at) => spokenWords(line.text).map((text) => ({ text, at })));
   const spoken = heard.flatMap((word) => spokenWords(word.text).map((text) => ({ text, startSec: word.startSec, endSec: word.endSec ?? null, probability: word.probability })));
   if ((script.length + 1) * (spoken.length + 1) > MOST_CELLS) return null;
   const scriptTexts = script.map((word) => word.text), heardTexts = spoken.map((word) => word.text);
-  const used = matchedHeard(scriptTexts, heardTexts), sound = heardBySound(scriptTexts, heardTexts, used);
+  const used = matchedInLines(script, heardTexts), sound = heardBySound(scriptTexts, heardTexts, used);
   const exact = new Map(used.map((pair) => [pair.line, pair.heard])), said = new Set([...exact.keys(), ...sound.line]);
 
   const result: FilmLineHeard[] = lines.map((line, at) => {
