@@ -32,6 +32,25 @@ test("real PDF preserves Unicode, all emphasis, scene breaks, tags and navigatio
   assert.ok(Buffer.from(result.bytes).includes(Buffer.from("/StructTreeRoot")));
 });
 
+test("an emoji with a skin tone, or one joined to another, is drawn as the pictograph the font has, and the book still exports", async () => {
+  // A gossip-page headline in a novel (2026-11-27). The bundled emoji font is one colour: its shaping keeps the hand of a hand
+  // with a skin tone and the walking person of a walking woman, and the page's text says those. The check held the page to
+  // the characters the font had dropped, and a 383-page book refused to export for this one line, twice.
+  const document = manuscript("*LAGOS BIG MAN KNEELS ON VI ROOFTOP… BABE LAUGHS AND WALKS 🚶🏾‍♀️💍😭 Who is she?? 👀👇🏾*\n\nPray 🙏🏾 now. A candle 🕯️ burns.");
+  const result = await renderStoryPdf(document, input(document, { settings: { ...DEFAULT_STORY_PDF_SETTINGS, contents: false } }));
+  assert.equal(result.receipt.checks.text, true);
+  assert.equal(result.receipt.paragraphCount, 2);
+  const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const parsed = await getDocument({ data: new Uint8Array(result.bytes), disableFontFace: true, useSystemFonts: false }).promise;
+  try {
+    const content = await (await parsed.getPage(parsed.numPages)).getTextContent({ disableNormalization: true });
+    const text = content.items.map(item => "str" in item ? item.str : "").join("");
+    for (const drawn of ["🚶", "💍", "😭", "👀", "👇", "🙏", "🕯"]) assert.ok(text.includes(drawn), `${drawn} is on the page`);
+    assert.ok(!text.includes("\u{1F3FE}") && !text.includes("‍"), "the page says what is drawn: no skin tone and no joiner the font never drew");
+    assert.ok(text.includes("BABE") && text.includes("Who is she??"), "the words round them are whole");
+  } finally { await parsed.destroy(); }
+});
+
 test("all presets support contents off, long tokens and paragraphs across pages", async () => {
   const document = manuscript("Start " + "abcdefghijklmnopqrstuvwxyz".repeat(18) + ". " + "A paragraph continues through the page without losing its ending. ".repeat(170));
   for (const preset of ["book", "a4", "letter"] as const) {
